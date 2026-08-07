@@ -2022,24 +2022,44 @@ function toast(msg,type){
 function setSyncBadge(txt,cls){var b=qs('syncEl');b.textContent=txt;b.className='sync '+cls;}
 
 var _curLeagueId='';
-// KULLANICI TALEBİ: "Yönetici puan tablosu için bir düzenleme yaptığında bu korunacak ve
-// hem geçmiş sezonlara hem de yeni sezonlara uygulanacak." - Önceden bu ayarlar sadece
-// "Yeni Sezona Geç" anında İLERİYE kopyalanıyordu (bkz. buildCarriedLeagueSettings); admin
-// daha SONRA bir ayarı değiştirirse bu değişiklik sadece o an açık olan lige yazılıyor,
-// geçmiş sezonlara hiç yansımıyordu. Aşağıdaki mekanizma, bu alanlardan biri değiştiğinde
-// (hangi ekrandan/hangi butondan yapılırsa yapılsın - tek tek her fonksiyonu değiştirmeye
-// gerek kalmadan) değişikliği OTOMATİK olarak TÜM diğer ligler (geçmiş VE varsa başka
-// aktif ligler) için de uygular. Lig puan sistemi (lgConfig) BİLEREK bu listede DEĞİL -
-// o her sezon kendi başına sıfırlanan bir ayar (bkz. buildCarriedLeagueSettings).
-var STANDINGS_SETTINGS_SYNC_FIELDS=['logoUrl','theme','bgTheme','statColors','eventEmojis','cardStyle','standingsGap','standingsAlign','standingsWideLevel','standingsMinNameChars','cardOpacity','cardBlur','cardBorderOpacity','cardBrightness','pitchOrientation','legendStyle','statNumberSize','rankLineStyle','navOrder','sponsors','liveCardStyle','leagueRules','leagueRulesUpdatedAt','voiceAnnouncePrefs','loginScreenTheme','rankNotes'];
+// KULLANICI TALEBİ: "Yönetici bir düzenleme yaptığında bu korunacak ve hem geçmiş
+// sezonlara hem de yeni sezonlara uygulanacak; ileride eklenecek yeni bir özellik de aynı
+// şekilde davranacak." - Önceden bu mekanizma SADECE "Puan Tablosu" ile ilgili küçük, elle
+// tutulan bir alan listesiyle çalışıyordu (aşağıdaki LEAGUE_WIDE_SETTINGS_SYNC_EXCLUDE
+// altında). Bu, buildCarriedLeagueSettings() (sezon geçişinde İLERİYE taşınan ayarlar)
+// içine yeni bir alan eklendiğinde, birinin bunu BURAYA da elle eklemeyi unutması riskini
+// taşıyordu - "şerit ayarları" hatasının kök sebeplerinden biri tam olarak buydu.
+// ARTIK TEK BİR KAYNAK VAR: buildCarriedLeagueSettings() hangi alanları döndürüyorsa,
+// canlı geriye/ileriye yayılım listesi de OTOMATİK olarak AYNI alanlardan türetilir
+// (bkz. getLeagueWideSettingsSyncFields aşağıda). Yeni bir görsel/davranışsal ayar
+// eklenmek istendiğinde SADECE buildCarriedLeagueSettings()'e eklenmesi yeterlidir - hem
+// sezon geçişinde taşınır HEM DE değiştirildiği an otomatik olarak TÜM diğer liglere
+// (geçmiş sezonlar dahil) yayılır. TEK istisna BİLEREK bu otomatik canlı yayılımın DIŞINDA
+// tutulur (sadece sezon geçişi anında, admin'in kendi eyleme geçirdiği tek seferlik bir
+// kopyalamayla taşınır):
+//  - lgConfig: Lig puan sistemi (galibiyet/beraberlik puanı) her sezon kendi başına
+//    varsayılana sıfırlanan bir ayardır, geçmişe/diğer liglere zorla yayılmamalı.
+// KULLANICI TALEBİ: "Yönetici ek hesap şifresi oluşturunca taşıma olmuyorsa taşınsın." -
+// adminAccounts (alt yönetici hesapları/şifreleri) artık bu istisna listesinde DEĞİL;
+// diğer TÜM ayarlar gibi hem sezon geçişinde taşınıyor HEM DE bir hesap eklenip/silinip/
+// düzenlendiği an otomatik olarak diğer TÜM liglere (geçmiş sezonlar dahil) yayılıyor.
+var LEAGUE_WIDE_SETTINGS_SYNC_EXCLUDE=['lgConfig'];
+function getLeagueWideSettingsSyncFields(){
+  var sample=buildCarriedLeagueSettings({}); // sadece alan İSİMLERİNİ almak için boş kaynakla çağrılır
+  return Object.keys(sample).filter(function(k){return LEAGUE_WIDE_SETTINGS_SYNC_EXCLUDE.indexOf(k)===-1;});
+}
+// NOT: buildCarriedLeagueSettings bu dosyada daha aşağıda tanımlı olsa da, JavaScript'te
+// fonksiyon bildirimleri (function adı(){...}) dosyanın en tepesine "hoisted" edilir - bu
+// yüzden burada, tanımından önce çağrılması güvenlidir.
+var STANDINGS_SETTINGS_SYNC_FIELDS=getLeagueWideSettingsSyncFields();
 var _stgsSyncSnapshot=null; // null = bu lig için henüz temel (başlangıç) değer alınmadı
 function _snapshotStandingsSettings(){
   var o={};
   STANDINGS_SETTINGS_SYNC_FIELDS.forEach(function(f){o[f]=S[f]!==undefined?S[f]:null;});
   return JSON.stringify(o);
 }
-// Değişen puan tablosu ayarlarını, leaguesMeta'daki TÜM diğer liglere (geçmiş sezonlar dahil)
-// tek bir çoklu-yol (multi-path) Firebase güncellemesiyle uygular.
+// Değişen görsel/davranışsal lig ayarlarını, leaguesMeta'daki TÜM diğer liglere (geçmiş
+// sezonlar dahil) tek bir çoklu-yol (multi-path) Firebase güncellemesiyle uygular.
 function propagateStandingsSettingsToAllLeagues(){
   var payload={};
   STANDINGS_SETTINGS_SYNC_FIELDS.forEach(function(f){payload[f]=S[f]!==undefined?S[f]:null;});
@@ -2052,8 +2072,8 @@ function propagateStandingsSettingsToAllLeagues(){
       STANDINGS_SETTINGS_SYNC_FIELDS.forEach(function(f){updates['leagues/'+id+'/'+f]=payload[f];});
     });
     db.ref().update(sanitizeForFirebase(updates)).then(function(){
-      logAction('🎨 Puan tablosu ayarları '+otherIds.length+' diğer sezona da uygulandı');
-    }).catch(function(e){console.error('Puan tablosu ayarları diğer sezonlara uygulanamadı:',e);});
+      logAction('🎨 Lig ayarları '+otherIds.length+' diğer sezona da uygulandı');
+    }).catch(function(e){console.error('Lig ayarları diğer sezonlara uygulanamadı:',e);});
   });
 }
 function save(){
@@ -4810,7 +4830,33 @@ function buildCarriedLeagueSettings(src){
     deletedBuiltinFontIds:src.deletedBuiltinFontIds||[],
     reactionPacks:src.reactionPacks||{},
     reactionPacksSeeded:src.reactionPacksSeeded||false,
-    premiumPrices:src.premiumPrices||{}
+    premiumPrices:src.premiumPrices||{},
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "Yeni sezona geçiş yapıldığında canlı şerit
+    // ayarları taşınmıyor - mesela hız ayarı"): Canlı Şerit Yönetimi ekranındaki TÜM
+    // ayarlar (akış hızı, akış sırası, logo boyutu, özel şerit logosu, skor değişim
+    // animasyonu, kalıcı şerit duyuru yazıları) önceden bu listeye HİÇ eklenmemişti -
+    // diğer görsel/yapısal ayarlar (tema, kart stili vb.) taşınırken şerit ayarları
+    // sessizce varsayılana dönüyordu. Artık diğerleriyle AYNI şekilde taşınıyor.
+    tickerSpeed:src.tickerSpeed!=null?src.tickerSpeed:6,
+    tickerOrder:src.tickerOrder||'mixed',
+    tickerLogoSize:src.tickerLogoSize!=null?src.tickerLogoSize:20,
+    tickerCustomLogo:src.tickerCustomLogo||null,
+    tickerScoreAnim:src.tickerScoreAnim||'flash',
+    tickerAnnouncements:src.tickerAnnouncements?JSON.parse(JSON.stringify(src.tickerAnnouncements)):null,
+    // HATA DÜZELTMESİ: Aynı kapsamlı taramada bulunan, ŞERİT dışında ama AYNI sebeple
+    // (buildCarriedLeagueSettings listesine hiç eklenmemiş olması) yeni sezona/lige
+    // taşınmayan diğer görsel/davranışsal ayarlar:
+    standingsBgTemplate:src.standingsBgTemplate?JSON.parse(JSON.stringify(src.standingsBgTemplate)):null,
+    eventEmojiSizes:src.eventEmojiSizes||{},
+    statCardEmojiSizes:src.statCardEmojiSizes||{},
+    eventSoundSource:src.eventSoundSource||'builtin',
+    eventCustomSounds:src.eventCustomSounds||null,
+    pointsConfig:src.pointsConfig||{enabled:false,defaultPoints:10},
+    gifCatalog:src.gifCatalog||{},
+    // Alt hesaplar (kısıtlı yetkili yöneticiler) - taşınmazsa yeni sezona geçildiğinde
+    // admin'in oluşturduğu tüm ek hesaplar silinmiş gibi davranır, o hesaplarla giriş
+    // yapılamaz hale gelirdi.
+    adminAccounts:src.adminAccounts?JSON.parse(JSON.stringify(src.adminAccounts)):[]
   };
 }
 
@@ -4831,6 +4877,17 @@ function carryVisitorsAndChat(oldLeagueId,newLeagueId){
       var existingVisitors=vSnap.val();
       if(existingVisitors){
         return db.ref('leagues/'+newLeagueId+'/visitors').set(existingVisitors);
+      }
+    }).catch(function(){});
+  }).then(function(){
+    // HATA DÜZELTMESİ: Kayıtlı kullanıcılar (visitors) taşınıyor ama kullanıcıların
+    // biriktirdiği puanlar (userPoints - premium mağazada harcanan puan bakiyeleri)
+    // taşınmıyordu; bu da kullanıcının hesabı yeni sezonda görünse bile puanının
+    // sıfırlanmış gibi görünmesine yol açıyordu.
+    return db.ref('leagues/'+oldLeagueId+'/userPoints').once('value').then(function(pSnap){
+      var existingPoints=pSnap.val();
+      if(existingPoints){
+        return db.ref('leagues/'+newLeagueId+'/userPoints').set(existingPoints);
       }
     }).catch(function(){});
   });
@@ -14763,6 +14820,24 @@ function listenToLeague(leagueId){
       S.eventCustomSounds=d.eventCustomSounds||null;
       S.passwordResetRequests=d.passwordResetRequests||null;
       S.devReplyLog=d.devReplyLog||null;
+      // HATA DÜZELTMESİ (kullanıcı bildirdi: "Yeni sezona geçiş yapıldığında canlı şerit
+      // ayarları taşınmıyor, mesela hız ayarı"): Şerit ayarları (tickerSpeed, tickerOrder,
+      // tickerLogoSize, tickerCustomLogo, tickerScoreAnim, tickerAnnouncements) önceden S
+      // nesnesine HİÇ yüklenmiyordu - sadece doğrudan Firebase'den okunup admin ekranına
+      // basılıyordu. buildCarriedLeagueSettings ise S üzerinden çalıştığı için bu alanlar
+      // her zaman "undefined" kalıyor, dolayısıyla yeni sezona/lige hiçbir zaman
+      // kopyalanamıyordu. Artık diğer TÜM görsel/yapısal ayarlar gibi S'e yükleniyor.
+      S.tickerSpeed=d.tickerSpeed!=null?d.tickerSpeed:6;
+      S.tickerOrder=d.tickerOrder||'mixed';
+      S.tickerLogoSize=d.tickerLogoSize!=null?d.tickerLogoSize:20;
+      S.tickerCustomLogo=d.tickerCustomLogo||null;
+      S.tickerScoreAnim=d.tickerScoreAnim||'flash';
+      S.tickerAnnouncements=d.tickerAnnouncements||null;
+      // HATA DÜZELTMESİ: "📊 Sıralama Arka Planı" ayarı (standingsBgTemplate) da aynı
+      // sebeple S'e hiç yüklenmiyordu - ekran açılana kadar S.standingsBgTemplate undefined
+      // kalıyor, bu da hem sayfa yenilendiğinde ayarın sıfırlanmış GÖRÜNMESİNE hem de yeni
+      // sezona geçişte taşınamamasına yol açıyordu.
+      S.standingsBgTemplate=d.standingsBgTemplate||null;
       window._editSponsors=null; // taze veriyle yeniden tohumlanabilsin (bir sonraki renderSponsorAdmin çağrısında)
     }
     try{
