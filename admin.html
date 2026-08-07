@@ -1132,23 +1132,36 @@ var supabaseClient=null;
 // temizliyordu - Puan Tablosu'nun bağlı olduğu lig farklıysa (örn. yeni sezon/farklı lig)
 // oraya hiç dokunulmamış oluyordu. Artık Firebase bağlantısı kurulur kurulmaz, TÜM ligler
 // (hangisi admin panelinde açık olursa olsun) TEK SEFERDE taranıp bu bilinen eski paket
-// ID'leri SİLİNİR - admin'in kendi eklediği hiçbir pakete dokunulmaz. Global, kalıcı bir
-// bayrakla (globalAdminSettings/legacyReactionPacksPurgedGlobal) bu tarama HAYAT BOYU
-// SADECE BİR KEZ çalışır.
+// ID'leri SİLİNİR - admin'in kendi eklediği hiçbir pakete dokunulmaz.
+// HATA DÜZELTMESİ (kullanıcı bildirdi, ikinci kez: "Emoji paketleri hâlâ koda gömülü bir
+// şekilde aktif. Sil onları, yönetici zaten ekliyor."): Önceki temizlik yalnızca SABİT,
+// bilinen 60 eski ID'yi arıyordu (klasik_/futbol_/eglence_/duygu_/enerji_ önekleri) ve
+// SADECE BİR KEZ (ömür boyu) çalışıyordu - eğer bir kurulumda bu ID'lerden FARKLI (ör. daha
+// eski bir sürümden kalma, başka önekli) gömülü paketler varsa veya temizlik daha önce bu
+// eski listeyle zaten "tamamlandı" işaretlenmişse, o paketler asla temizlenmiyordu. KÖKTEN
+// ÇÖZÜM: Artık ID listesine güvenmek yerine DESEN (pattern) ile tespit ediliyor - admin
+// panelindeki TEK paket oluşturma yolu olan saveReactionPackDraft() HER ZAMAN 'pack_'+uid()
+// biçiminde bir ID üretir (bkz. o fonksiyon). Yani ID'si 'pack_' ile BAŞLAMAYAN her paket,
+// admin tarafından değil, geçmişteki gömülü tohumlama tarafından oluşturulmuş demektir -
+// hangi isim şemasını kullanmış olursa olsun. Bayrak da yeni bir anahtara (V2) taşındı ki
+// bu genişletilmiş, daha güvenilir tarama TÜM kurulumlarda bir kez daha (ve sadece bir kez)
+// çalışsın.
 (function purgeLegacyReactionPacksGlobally(){
-  db.ref('globalAdminSettings/legacyReactionPacksPurgedGlobal').once('value').then(function(flagSnap){
+  db.ref('globalAdminSettings/legacyReactionPacksPurgedGlobalV2').once('value').then(function(flagSnap){
     if(flagSnap.val())return;
-    var LEGACY_DEFAULT_PACK_IDS=['klasik_f1','klasik_f2','klasik_f3','klasik_f4','klasik_f5','klasik_f6','klasik_p1','klasik_p2','klasik_p3','klasik_p4','klasik_p5','klasik_p6','futbol_f1','futbol_f2','futbol_f3','futbol_f4','futbol_f5','futbol_f6','futbol_p1','futbol_p2','futbol_p3','futbol_p4','futbol_p5','futbol_p6','eglence_f1','eglence_f2','eglence_f3','eglence_f4','eglence_f5','eglence_f6','eglence_p1','eglence_p2','eglence_p3','eglence_p4','eglence_p5','eglence_p6','duygu_f1','duygu_f2','duygu_f3','duygu_f4','duygu_f5','duygu_f6','duygu_p1','duygu_p2','duygu_p3','duygu_p4','duygu_p5','duygu_p6','enerji_f1','enerji_f2','enerji_f3','enerji_f4','enerji_f5','enerji_f6','enerji_p1','enerji_p2','enerji_p3','enerji_p4','enerji_p5','enerji_p6'];
     return db.ref('leagues').once('value').then(function(allSnap){
       var allLeagues=allSnap.val()||{};
       var updates={};
       Object.keys(allLeagues).forEach(function(lid){
         var packs=(allLeagues[lid]&&allLeagues[lid].reactionPacks)||{};
-        LEGACY_DEFAULT_PACK_IDS.forEach(function(pid){
-          if(packs[pid])updates['leagues/'+lid+'/reactionPacks/'+pid]=null;
+        Object.keys(packs).forEach(function(pid){
+          // Admin'in oluşturduğu HER paket 'pack_' önekiyle başlar - bunun DIŞINDAKİ her ID
+          // (klasik_, futbol_, eglence_, duygu_, enerji_ veya başka herhangi bir önek) eski,
+          // koddan tohumlanmış bir pakettir ve güvenle silinebilir.
+          if(pid.indexOf('pack_')!==0)updates['leagues/'+lid+'/reactionPacks/'+pid]=null;
         });
       });
-      updates['globalAdminSettings/legacyReactionPacksPurgedGlobal']=true;
+      updates['globalAdminSettings/legacyReactionPacksPurgedGlobalV2']=true;
       return db.ref().update(updates);
     });
   }).catch(function(e){console.error('Eski tepki paketi temizliği başarısız:',e);});
