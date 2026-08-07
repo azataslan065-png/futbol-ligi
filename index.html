@@ -1336,33 +1336,15 @@ let _bgPaletteSyncEnabled=localStorage.getItem('pt_bgPaletteSync')!=='off'; // v
 // tipine kendisi erişemiyor olsa bile, o SPESİFİK mesajı gönderenin seçtiği yazı tipiyle
 // görür (tıpkı tepki emojileri gibi - sadece GÖNDERİRKEN erişim gerekir, GÖRÜNTÜLEMEK
 // herkese açıktır). Admin (yönetici) her zaman tüm yazı tiplerini serbestçe kullanabilir.
+// KULLANICI TALEBİ: Kodun içine gömülü tüm hazır yazı tipi seçenekleri kaldırıldı. Yapı
+// (free/premium diziler, findFontById, getAllFontsList, admin'in ekleme/silme/premium
+// işaretleme sistemi) AYNEN duruyor - admin artık İSTEDİĞİ yazı tiplerini S.customFonts
+// üzerinden sıfırdan ekliyor. 'outfit' yalnızca aşağıdaki applyFontFamily() içinde,
+// hiçbir font bulunamazsa devreye giren dahili bir GÜVENLİK VARSAYILANI olarak kalır -
+// kullanıcıya/admin'e bir "seçenek" olarak ASLA gösterilmez.
 const FONT_TIERS={
-  free:[
-    {id:'outfit',label:'Outfit',css:"'Outfit',sans-serif",googleName:null},
-    {id:'poppins',label:'Poppins',css:"'Poppins',sans-serif",googleName:'Poppins:wght@400;500;600;700;800;900'},
-    {id:'roboto',label:'Roboto',css:"'Roboto',sans-serif",googleName:'Roboto:wght@400;500;700;900'},
-    {id:'montserrat',label:'Montserrat',css:"'Montserrat',sans-serif",googleName:'Montserrat:wght@400;500;600;700;800;900'},
-    {id:'nunito',label:'Nunito',css:"'Nunito',sans-serif",googleName:'Nunito:wght@400;500;600;700;800;900'},
-    {id:'inter',label:'Inter',css:"'Inter',sans-serif",googleName:'Inter:wght@400;500;600;700;800;900'}
-  ],
-  premium:[
-    {id:'playfair',ref:701,label:'Playfair Display',css:"'Playfair Display',serif",googleName:'Playfair+Display:wght@400;500;600;700;800;900'},
-    {id:'bebas',ref:702,label:'Bebas Neue',css:"'Bebas Neue',sans-serif",googleName:'Bebas+Neue'},
-    {id:'pacifico',ref:703,label:'Pacifico',css:"'Pacifico',cursive",googleName:'Pacifico'},
-    {id:'comfortaa',ref:704,label:'Comfortaa',css:"'Comfortaa',sans-serif",googleName:'Comfortaa:wght@400;500;600;700'},
-    {id:'righteous',ref:705,label:'Righteous',css:"'Righteous',sans-serif",googleName:'Righteous'},
-    {id:'caveat',ref:706,label:'Caveat',css:"'Caveat',cursive",googleName:'Caveat:wght@400;500;600;700'},
-    // KULLANICI TALEBİ: 6 YENİ premium yazı tipi eklendi (707-712) - mevcut 6 tanenin
-    // (serif/display/script/rounded/display/el yazısı) tarzlarıyla ÇAKIŞMAYAN, farklı
-    // karakterde 6 yeni seçenek: keskin/dar başlık fontu, zarif imza yazısı, dramatik
-    // dergi başlığı, fütüristik/bilim-kurgu, retro kalın imza, klasik/Roma harfleri.
-    {id:'oswald',ref:707,label:'Oswald',css:"'Oswald',sans-serif",googleName:'Oswald:wght@400;500;600;700'},
-    {id:'dancingscript',ref:708,label:'Dancing Script',css:"'Dancing Script',cursive",googleName:'Dancing+Script:wght@400;500;600;700'},
-    {id:'abrilfatface',ref:709,label:'Abril Fatface',css:"'Abril Fatface',serif",googleName:'Abril+Fatface'},
-    {id:'orbitron',ref:710,label:'Orbitron',css:"'Orbitron',sans-serif",googleName:'Orbitron:wght@400;500;600;700;800;900'},
-    {id:'lobster',ref:711,label:'Lobster',css:"'Lobster',cursive",googleName:'Lobster'},
-    {id:'cinzel',ref:712,label:'Cinzel',css:"'Cinzel',serif",googleName:'Cinzel:wght@400;500;600;700;800;900'}
-  ]
+  free:[],
+  premium:[]
 };
 function findFontById(id){
   // KULLANICI TALEBİ: "Admin için ücretsiz ve premium yazı tipi ekleyebileceği bir sistem
@@ -1487,7 +1469,10 @@ window.setFontFamily=function(fid){
   openSettings(); // Ayarlar ekranındaki seçili buton vurgusu güncellensin.
 };
 function applyFontFamily(){
-  const f=findFontById(_fontFamily)||findFontById('outfit');
+  // Yerleşik yazı tipi listesi artık boş (admin kendi fontlarını ekliyor); hiçbir font
+  // bulunamazsa (ör. admin henüz hiç font eklemediyse) sistem çökmesin diye dahili,
+  // seçenek olarak gösterilmeyen bir güvenlik varsayılanı kullanılır.
+  const f=findFontById(_fontFamily)||{id:'outfit',label:'Outfit',css:"'Outfit',sans-serif"};
   loadGoogleFontIfNeeded(_fontFamily);
   document.documentElement.style.setProperty('--font-family',f.css);
 }
@@ -1544,9 +1529,20 @@ let _fontRevokeCheckPending=false;
 // SANİYE çalışıp (a) dolmuş premium seçimleri geri alır, (b) açık mağaza/ayarları tazeler,
 // (c) canlı geri sayımları günceller.
 function revalidateAllPremiumAccessNow(){
-  try{if(typeof revalidateFontFamilyAccess==='function')revalidateFontFamilyAccess();}catch(e){}
-  try{if(typeof revalidateReactionPackAccess==='function')revalidateReactionPackAccess();}catch(e){}
-  try{if(typeof checkRevokedPremiumPalette==='function')checkRevokedPremiumPalette();}catch(e){}
+  // TEŞHİS (kapsamlı taramada bulundu): Bu üç alt-çağrı ÖNCEDEN boş catch(e){} ile
+  // sarmalıydı - içeride bir hata olursa TAMAMEN YUTULUYORDU, DiagCore'un genel
+  // sarmalaması bile bunu göremezdi (çünkü hata bu fonksiyonun DIŞINA hiç çıkmıyordu).
+  // Davranış AYNI KALIR (uygulama yine asla bu yüzden çökmez) - fark, pt_premium teşhisi
+  // açıkken bu "görünmez" hataların artık rapora düşmesidir.
+  try{if(typeof revalidateFontFamilyAccess==='function')revalidateFontFamilyAccess();}catch(e){
+    if(window.DiagCore&&DiagCore.isOn('pt_premium'))DiagCore.kaydet('pt_premium','hata','revalidateFontFamilyAccess() içinde yutulan hata',{mesaj:e&&e.message},15000);
+  }
+  try{if(typeof revalidateReactionPackAccess==='function')revalidateReactionPackAccess();}catch(e){
+    if(window.DiagCore&&DiagCore.isOn('pt_premium'))DiagCore.kaydet('pt_premium','hata','revalidateReactionPackAccess() içinde yutulan hata',{mesaj:e&&e.message},15000);
+  }
+  try{if(typeof checkRevokedPremiumPalette==='function')checkRevokedPremiumPalette();}catch(e){
+    if(window.DiagCore&&DiagCore.isOn('pt_premium'))DiagCore.kaydet('pt_premium','hata','checkRevokedPremiumPalette() içinde yutulan hata',{mesaj:e&&e.message},15000);
+  }
 }
 // Saniyede bir çalışan hafif denetleyici. İşlemler yalnızca GEREKTİĞİNDE (bir şey değiştiyse)
 // pahalı işi yapar, bu yüzden her saniye çalışması güvenlidir.
@@ -1568,7 +1564,10 @@ setInterval(function(){
     }
     // Geri sayım rozetlerini (mağaza + ayarlar + bildirimler) her saniye tazele.
     if(typeof updateLivePremiumCountdowns==='function')updateLivePremiumCountdowns();
-  }catch(e){console.error('Premium tick hatası:',e);}
+  }catch(e){
+    console.error('Premium tick hatası:',e);
+    if(window.DiagCore&&DiagCore.isOn('pt_premium'))DiagCore.kaydet('pt_premium','hata','Premium saniyelik denetleyicide hata (mağaza/geri sayım güncellemesi durmuş olabilir)',{mesaj:e&&e.message,yigin:(e&&e.stack||'').split('\n').slice(0,3)},15000);
+  }
 },1000);
 // Mağazadaki hangi unsurların satışta göründüğünün imzası - değişince mağaza yeniden çizilir.
 function _computeShopVisibilitySignature(){
@@ -3049,6 +3048,9 @@ let _mySessionStart=null;
 function setVisitorOnline(){
   if(!_curLeagueId||!_curVisitorId)return;
   if(!_mySessionStart)_mySessionStart=Date.now();
+  // TEŞHİS İŞARETİ (bkz. checkPresenceHealth): bu çağrının en son NE ZAMAN yapıldığını
+  // kaydeder - uygulama davranışını etkilemez.
+  window._ptLastPresenceWriteAt=Date.now();
   firebase.database().ref('leagues/'+_curLeagueId+'/visitors/'+_curVisitorId).update({
     online:true,
     lastSeen:Date.now(),
@@ -3114,6 +3116,74 @@ function startPresenceTracking(){
     if(document.visibilityState==='visible')setVisitorOnline();
   },15000);
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   GİRİŞ & PROFİL TEŞHİS SENSÖRLERİ (pt_auth) - çevrimiçi/çevrimdışı durumunun tutarsız
+   görünmesi (sürüm geçmişinde daha önce düzeltilmiş bilinen bir hata sınıfı) hiçbir zaman
+   throw etmez; sadece heartbeat'in GERÇEKTEN çalışıp çalışmadığını izleyerek yakalanabilir.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+let _authDoctorState={heartbeatWarned:false};
+function checkPresenceHealth(){
+  try{
+    if(!(window.DiagCore&&window.DiagCore.isOn('pt_auth')))return;
+    if(!_curVisitorId||!_curLeagueId)return;
+    if(document.visibilityState!=='visible')return; // sekme görünür değilken heartbeat zaten beklenmiyor.
+    const last=window._ptLastPresenceWriteAt||0;
+    const idle=Date.now()-last;
+    // Heartbeat 15sn'de bir yazmalı - 60sn'den uzun sessizlik (sekme görünürken) sayacın
+    // durduğunu gösterir; kullanıcı gerçekte çevrimiçiyken admin panelinde "çevrimdışı"
+    // görünmesine yol açar.
+    if(idle>60000){
+      if(!_authDoctorState.heartbeatWarned){
+        _authDoctorState.heartbeatWarned=true;
+        DiagCore.kaydet('pt_auth','hata','Aktiflik (heartbeat) sinyali durmuş görünüyor',{
+          sonYazma:Math.round(idle/1000)+'sn önce',
+          sebep:'_heartbeatInterval sekme görünürken 15sn\'de bir setVisitorOnline() çağırmalı; bu süredir hiç çağrılmadı - interval durmuş ya da hiç kurulmamış olabilir.',
+          tavsiye:'startPresenceTracking() sayfa/giriş akışında bir kez çağrılıp çağrılmadığını kontrol edin; sayfa yenilenmeden uzun süre açık kalan sekmelerde tarayıcı interval\'i throttle etmiş olabilir.'
+        },90000);
+      }
+    }else{
+      _authDoctorState.heartbeatWarned=false;
+    }
+  }catch(e){}
+}
+setInterval(checkPresenceHealth,20000);
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   BİLDİRİMLER TEŞHİS SENSÖRLERİ (pt_notifications) - rozet DOM'u ile gerçek hesaplanan
+   sayının arasında (updateNotifUnreadBadge çağrılmadığı için) sapma oluşup oluşmadığını
+   kontrol eder - bu da throw etmeyen, sadece "rozet bayatladı" şeklinde görünen bir hatadır.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+let _notifDoctorState={mismatchWarned:false};
+function checkNotifBadgeHealth(){
+  try{
+    if(!(window.DiagCore&&window.DiagCore.isOn('pt_notifications')))return;
+    const badge=document.getElementById('notifUnreadBadge');
+    if(!badge||typeof getNotificationHistory!=='function')return;
+    let expected=getNotificationHistory().filter(function(n){return !n.read;}).length;
+    if(typeof D!=='undefined'&&D.poll&&_userName){
+      const mv=(D.poll.votes||{})[_userName];
+      const votedArr=Array.isArray(mv)?mv:(typeof mv==='number'?[mv]:(mv&&typeof mv==='object'?(mv.choices||[]):[]));
+      if(!votedArr.length)expected++;
+    }
+    const shown=badge.style.display==='none'?0:(badge.textContent==='9+'?10:(Number(badge.textContent)||0));
+    // "9+" gerçek sayıyı gizlediği için sadece 0-ile-pozitif ayrımına bakılır (10 = ">9" temsili).
+    const mismatch=(expected===0&&shown!==0)||(expected>0&&shown===0);
+    if(mismatch){
+      if(!_notifDoctorState.mismatchWarned){
+        _notifDoctorState.mismatchWarned=true;
+        DiagCore.kaydet('pt_notifications','uyari','Bildirim rozeti güncel değil',{
+          beklenenOkunmamis:expected,rozetGosterilenDurum:shown,
+          sebep:'updateNotifUnreadBadge() bildirim durumu değiştikten sonra çağrılmamış olabilir.',
+          tavsiye:'Bildirimi okundu işaretleyen/yeni bildirim ekleyen tüm yolların ardından updateNotifUnreadBadge() çağrıldığından emin olun.'
+        },60000);
+      }
+    }else{
+      _notifDoctorState.mismatchWarned=false;
+    }
+  }catch(e){}
+}
+setInterval(checkNotifBadgeHealth,20000);
 
 function logUserAction(actionText){
   if(!_curLeagueId||!_curVisitorId)return;
@@ -3367,6 +3437,10 @@ function listenToLeague(leagueId){
   if(_leagueDataListener)db.ref('leagues/'+leagueId).off('value',_leagueDataListener);
   _leagueDataListener=function(snap){
    try{
+    // TEŞHİS İŞARETİ (bkz. checkDataHealth): dinleyicinin en son NE ZAMAN tetiklendiğini
+    // kaydeder - uygulama davranışını etkilemez. 'visitors' alt yolu ~15sn'de bir güncellendiği
+    // için, bağlantı sağlıklıyken bu değer normalde hiç uzun süre bayatlamaz.
+    window._ptLastListenerFireAt=Date.now();
     const d=snap.val();
     // ÖNEMLİ PERFORMANS OPTİMİZASYONU: Firebase'deki 'visitors' alt yolu her ~15 saniyede
     // bir (presence heartbeat ile) güncellendiğinde, üst yoldaki bu dinleyici de tetiklenir
@@ -4741,6 +4815,12 @@ function renderLiveTicker(highlightId){
   // güvenli ve idempotent bir işlemdir.
   track.removeEventListener('animationiteration',_tickerOnIteration);
   track.addEventListener('animationiteration',_tickerOnIteration);
+  // TEŞHİS İŞARETİ (bkz. checkTickerHealth): bu node'un tur-sonu dinleyicisi az önce
+  // bağlandı. Eğer track elementi ileride DOM'dan kaldırılıp YENİDEN OLUŞTURULURSA (örn.
+  // üst konteynerin innerHTML'i ezildiyse), yeni node bu işareti TAŞIMAZ - checkTickerHealth
+  // bunu görüp "dinleyici kaybı" olarak raporlar. Uygulama davranışını hiçbir şekilde
+  // etkilemez, sadece teşhis için bir iz bırakır.
+  track._diagLtBound=true;
 
   const teams=(typeof D!=='undefined'&&D.teams)||{};
   const week=getTickerWeek();
@@ -5080,6 +5160,378 @@ window.toggleLiveTicker=function(){
   renderLiveTicker();
   if(typeof openSettings==='function' && window._premiumScreenOpen==='settings') openSettings();
 };
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   CANLI ŞERİT TEŞHİS SENSÖRLERİ (pt_live modülünün bir parçası - checkStaleLiveMatches ile
+   AYNI YÖNTEM: DiagCore.kaydet ile veri/davranış seviyesinde kontrol)
+
+   KULLANICI TALEBİ: "Admin hangi özelliğin hata yakalama kodunu açarsa, o kod ilgili
+   özelliği didik didik tarayacak, hatayı nokta atışı bulacak, sebebini söyleyecek,
+   tavsiyesini sunacak ve raporunu verecek."
+
+   NEDEN GENEL DiagCore SARMALAMASI YETMEZ: Dosya sonundaki DiagCore çekirdiği sadece
+   renderLiveTicker gibi fonksiyonların THROW ettiği hataları / yavaş çalışmasını yakalar.
+   Ama şeridin gerçek mimarisi - CSS animasyonuyla sürekli akan, kesintisiz görünüm için
+   İKİ KOPYA içerik barındıran, "yapısal imza" karşılaştırmasıyla tam yeniden çizim mi yoksa
+   yerinde güncelleme mi yapılacağına karar veren bir yapı - hiçbir zaman throw ETMEYEN ama
+   gözle görülür bozulmalar üretebilir: animasyon donar, iki kopya birbirinden ayrışır, DOM
+   yenilenince dinleyici kopar, veri değişir ama şerit eski haliyle takılı kalır. Bunların
+   hiçbiri bir "catch" bloğuna düşmez - bu yüzden aşağıdaki her kontrol, şeridin KENDİ
+   durumunu (DOM + D verisi) periyodik olarak "beklenenle" kıyaslayarak çalışır.
+
+   Her bulgu: NE olduğunu, NEDEN olduğunu (kök sebep) ve NE YAPILMASI gerektiğini
+   (tavsiye) birlikte kaydeder - "🩺 Hata Yakalama Kodları" ekranındaki rapor bunları
+   olduğu gibi gösterir.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+let _ltDoctorState={posHistory:[],frozenWarned:false,structMismatchSince:null,bindWarned:false,logoWarned:false};
+function checkTickerHealth(){
+  try{
+    if(!(window.DiagCore&&window.DiagCore.isOn('pt_live')))return;
+    const ticker=document.getElementById('liveTicker');
+    const track=document.getElementById('liveTickerTrack');
+    if(!ticker||!track){
+      _ltDoctorState.posHistory=[];_ltDoctorState.frozenWarned=false;_ltDoctorState.bindWarned=false;
+      return;
+    }
+    if(!_liveTickerEnabled||!ticker.classList.contains('on')){
+      _ltDoctorState.posHistory=[];_ltDoctorState.frozenWarned=false;
+      return;
+    }
+
+    const teams=(typeof D!=='undefined'&&D.teams)||{};
+    const week=getTickerWeek();
+    const weekMatches=(week!=null?Object.values((D.matches)||{}).filter(m=>Number(m.week)===week):[]).sort((a,b)=>(a.homeId>b.homeId?1:-1));
+    const anns=Object.values((D.tickerAnnouncements)||{}).sort((a,b)=>(a.ts||0)-(b.ts||0)).map(x=>x.text).filter(Boolean);
+    const order=(D.tickerOrder)||'mixed';
+    const tickerSpeed=(typeof D!=='undefined'&&D.tickerSpeed!=null)?Number(D.tickerSpeed):6;
+
+    // 1) DONMA: hız 0 (kasıtlı "dur" durumu) DEĞİLSE ve şerit "paused" class'ında değilse,
+    // izin bandının konumu birkaç ölçüm boyunca hiç değişmiyorsa CSS animasyonu fiilen
+    // çalışmıyor demektir - bu asla exception fırlatmaz, sadece görsel olarak donuk kalır.
+    if(tickerSpeed!==0 && !ticker.classList.contains('paused')){
+      const cs=getComputedStyle(track);
+      const durOk=parseFloat(cs.animationDuration)>0;
+      if(!durOk){
+        DiagCore.kaydet('pt_live','hata','Şerit animasyon süresi geçersiz (0 veya tanımsız)',{
+          animationDuration:cs.animationDuration,
+          sebep:'CSS animation-duration 0/NaN ise şerit görünür ama hiç akmaz. setTickerAnimForContent() içindeki dur hesaplaması (halfW/pxPerSec) beklenmedik biçimde 0/NaN üretmiş olabilir.',
+          tavsiye:'D.tickerSpeed değerinin sayısal ve 0 dışında olduğunu, track.scrollWidth\'in render anında 0 olmadığını kontrol edin.'
+        });
+      }else{
+        const rect=track.getBoundingClientRect();
+        _ltDoctorState.posHistory.push(Math.round(rect.left*10));
+        if(_ltDoctorState.posHistory.length>4)_ltDoctorState.posHistory.shift();
+        const allSame=_ltDoctorState.posHistory.length===4 && _ltDoctorState.posHistory.every(v=>v===_ltDoctorState.posHistory[0]);
+        if(allSame){
+          if(!_ltDoctorState.frozenWarned){
+            _ltDoctorState.frozenWarned=true;
+            DiagCore.kaydet('pt_live','hata','Şerit akışı donmuş görünüyor (konum ilerlemiyor)',{
+              sebep:'Animasyon süresi geçerli, şerit "duraklat"/"dur" durumunda değil, ama görsel konum ~16 saniyedir hiç değişmedi.',
+              tavsiye:'Sekme arka plandaysa tarayıcı kare hızını düşürebilir (yanlış alarm olabilir) - sekme ön plandayken tekrar oluşuyorsa DevTools\'ta track elementinin "animation-play-state" ve transform değerini inceleyin.'
+            },20000);
+          }
+        }else if(_ltDoctorState.posHistory.length>1){
+          _ltDoctorState.frozenWarned=false;
+        }
+      }
+    }else{
+      _ltDoctorState.posHistory=[];
+    }
+
+    // 2) KOPYALAR ARASI UYUMSUZLUK: track her zaman "oneCopy+oneCopy" (iki eşit yarı) olarak
+    // yazılır - kesintisiz akış bu simetriye dayanır. Yerinde güncelleme (skor değişimi vb.)
+    // yalnızca bir kopyayı değiştirmişse şerit bir tur sonunda görünür biçimde "sıçrar".
+    if(window._tickerCurrentHTML){
+      const half=window._tickerCurrentHTML.length;
+      const full=track.innerHTML;
+      if(half>0 && full.length===half*2){
+        if(full.slice(0,half)!==full.slice(half)){
+          DiagCore.kaydet('pt_live','uyari','Şerit kopyaları birbirinden ayrıştı',{
+            sebep:'Kesintisiz akış için track içeriği iki eşit kopya olarak tutulur; bir güncelleme sadece bir kopyayı değiştirmiş.',
+            tavsiye:'_tickerUpdateScoresInPlace() içindeki track.querySelectorAll(\'[data-lt-match="..."]\') seçicisinin HER İKİ kopyadaki node\'ları da bulduğundan emin olun.'
+          },15000);
+        }
+      }
+    }
+
+    // 3) DİNLEYİCİ KAYBI: track elementi DOM'dan kaldırılıp yeniden oluşturulduysa (örn. üst
+    // konteynerin innerHTML'i başka bir yerden ezildiyse) ama renderLiveTicker yeniden
+    // çalışmadıysa, yeni node üzerinde "tur sonu" dinleyicisi YOKTUR - yapısal değişiklikler
+    // (silinen duyuru/maç gibi) bir daha asla işlenmez, şerit sonsuza dek eski haliyle kalır.
+    if(!track._diagLtBound){
+      if(!_ltDoctorState.bindWarned){
+        _ltDoctorState.bindWarned=true;
+        DiagCore.kaydet('pt_live','hata','Şerit elemanı yenilenmiş ama tur-sonu dinleyicisi bağlı değil',{
+          sebep:'#liveTickerTrack DOM\'dan kaldırılıp yeniden oluşturulmuş olabilir (renderLiveTicker() dışında bir yerden innerHTML ile ezilmiş) - yeni node\'da animationiteration dinleyicisi yok.',
+          tavsiye:'#liveTicker/#liveTickerTrack\'i saran bir üst elementin innerHTML\'ini toptan yeniden yazan bir kod yolu olup olmadığını arayın; varsa sadece gerekli alt elemanı güncelleyecek şekilde değiştirin.'
+        });
+      }
+    }else{
+      _ltDoctorState.bindWarned=false;
+    }
+
+    // 4) YAPISAL İMZA UYUŞMAZLIĞI: güncel veriden hesaplanan imza son çizilen imzadan
+    // sürekli farklıysa VE bekleyen bir "yeniden inşa" bayrağı da yoksa, maç/duyuru
+    // değişikliği hiç işlenmemiş demektir - şerit veriyle senkron değildir.
+    const freshSig=_tickerStructureSignature(weekMatches,anns.length,order);
+    if(window._tickerStructSig!=null && freshSig!==window._tickerStructSig && !window._tickerPendingStructRebuild){
+      const now=Date.now();
+      if(!_ltDoctorState.structMismatchSince)_ltDoctorState.structMismatchSince=now;
+      if(now-_ltDoctorState.structMismatchSince>6000){
+        DiagCore.kaydet('pt_live','hata','Şerit yapısı güncel veriyle uyuşmuyor (yeniden çizim tetiklenmemiş)',{
+          sebep:'Maç/duyuru listesi değişti ama ne "beklemede" bayrağı ne gerçek bir yeniden çizim oluştu - şerit muhtemelen eski (silinmiş/eklenmiş öğe içeren) yapıyı göstermeye devam ediyor.',
+          tavsiye:'renderLiveTicker() çağrısını tetikleyen Firebase dinleyicisinin (listenToLeague) hâlâ çalıştığını, konsolda sessiz bir JS hatası olmadığını kontrol edin.'
+        },15000);
+        _ltDoctorState.structMismatchSince=null;
+      }
+    }else{
+      _ltDoctorState.structMismatchSince=null;
+    }
+
+    // 5) BİTMİŞ/CANLI-OLMAYAN MAÇ ŞERİTTE HÂLÂ "CANLI" GÖSTERİLİYOR - bu, puan tablosu
+    // kartlarındakinden TAMAMEN AYRI bir render yolu (tickerMatchHtml) olduğu için, oradaki
+    // düzeltme burayı otomatik kapsamaz; ayrı doğrulanması gerekir.
+    track.querySelectorAll('.lt-item.lt-live[data-lt-match]').forEach(function(itemEl){
+      const mid=itemEl.getAttribute('data-lt-match');
+      const m=(D.matches||{})[mid];
+      if(m && !m.isLive){
+        DiagCore.kaydet('pt_live','uyari','Şerit bir maçı hâlâ canlı gösteriyor ama veri artık canlı değil',{
+          macId:mid,
+          sebep:'.lt-live class\'ı sadece TAM yeniden çizimde eklenir/kaldırılır; yerinde güncelleme (_tickerUpdateScoresInPlace) sadece skor rakamını değiştirir, class\'a dokunmaz.',
+          tavsiye:'_tickerStructureSignature()\'ın maçın isLive durumunu da imzaya dahil edip etmediğini kontrol edin - şu an sadece id/sıra/duyuru sayısına bakıyor, isLive değişimi tek başına tam yeniden çizim tetiklemeyebilir.'
+        },10000);
+      }
+    });
+
+    // 6) SKOR DOM/VERİ UYUŞMAZLIĞI: görünen rakam, D.matches'teki güncel skordan farklıysa
+    // yerinde güncelleme sessizce başarısız olmuş demektir.
+    weekMatches.forEach(function(m){
+      const homeNodes=track.querySelectorAll('[data-lt-match="'+m.id+'"] [data-lt-goal="home"]');
+      const awayNodes=track.querySelectorAll('[data-lt-match="'+m.id+'"] [data-lt-goal="away"]');
+      if(!homeNodes.length)return;
+      const expHome=String((m.played||m.isLive)?(m.homeGoals||0):'-');
+      const expAway=String((m.played||m.isLive)?(m.awayGoals||0):'-');
+      let mismatch=false;
+      homeNodes.forEach(function(n){ if(n.textContent!==expHome)mismatch=true; });
+      awayNodes.forEach(function(n){ if(n.textContent!==expAway)mismatch=true; });
+      if(mismatch){
+        DiagCore.kaydet('pt_live','uyari','Şeritteki skor veriyle uyuşmuyor',{
+          macId:m.id,beklenenSkor:expHome+'-'+expAway,
+          sebep:'_tickerUpdateScoresInPlace() bu maça ait node\'u bulup güncelleyememiş olabilir (data-lt-match id uyuşmazlığı ya da tam yeniden çizim bekleniyor).',
+        },10000);
+      }
+    });
+
+    // 7) LOGO AYRACI EKSİK: admin özel şerit logosu ayarladıysa ama şeritte hiç .lt-sep-logo
+    // yoksa, ayraç sessizce kayboldu demektir.
+    if((typeof D!=='undefined')&&D.tickerCustomLogo){
+      if(!track.querySelector('.lt-sep-logo')){
+        if(!_ltDoctorState.logoWarned){
+          _ltDoctorState.logoWarned=true;
+          DiagCore.kaydet('pt_live','uyari','Şerit logosu ayarlanmış ama şeritte hiç görünmüyor',{
+            sebep:'ticker.classList "lt-logo-sep" eklenmiş olabilir ama oneCopy üretilirken D.tickerCustomLogo boş/erişilemez durumdaydı.',
+            tavsiye:'D.tickerCustomLogo\'nun renderLiveTicker çalıştığı anda dolu olduğunu (Firebase\'den yüklenmeyi beklemediğini) kontrol edin.'
+          });
+        }
+      }else{
+        _ltDoctorState.logoWarned=false;
+      }
+    }
+
+    // 8) DOM ŞİŞMESİ: beklenen düğüm sayısının çok üzerinde eleman varsa, yeniden çizimlerde
+    // eski öğeler temizlenmeden yenileri ekleniyor olabilir (bellek sızıntısı).
+    const expectedItems=Math.max(2,(weekMatches.length+anns.length)*2);
+    if(track.children.length>expectedItems*3){
+      DiagCore.kaydet('pt_live','uyari','Şerit DOM düğüm sayısı beklenenin çok üzerinde',{
+        gercekDugum:track.children.length,beklenenYaklasik:expectedItems,
+        sebep:'Yeniden çizimlerde track.innerHTML ile tam değiştirme yerine ekleme yapılıyor olabilir.'
+      },30000);
+    }
+  }catch(e){}
+}
+setInterval(checkTickerHealth,4000);
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   VERİ & BAĞLANTI TEŞHİS SENSÖRLERİ (pt_data)
+   NEDEN GEREKLİ: Firebase dinleyicisinin sessizce düşmesi ("abonelik koptu ama kimse
+   fark etmedi") hiçbir zaman throw etmez - sayfa donuk kalır, kullanıcı "veri gelmiyor"
+   der, ama konsolda hiçbir hata görünmez. Bu yüzden burada da checkStaleLiveMatches /
+   checkTickerHealth ile AYNI YÖNTEM kullanılıyor: beklenen davranış (bağlıyken düzenli
+   tetiklenme) ile gerçek durum kıyaslanıyor.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+let _ptDataDoctor={connected:null,disconnectedSince:null,connWarned:false,deadWarned:false};
+(function(){
+  try{
+    if(typeof db==='undefined'||!db||!db.ref)return;
+    // UI'daki bağlantı rozetinden (satır ~3226) BAĞIMSIZ, sadece teşhis için ayrı bir
+    // abonelik - birbirini etkilemez, ikisi de aynı '.info/connected' özel yoluna okur.
+    db.ref('.info/connected').on('value',function(snap){
+      const isConn=snap.val()===true;
+      _ptDataDoctor.connected=isConn;
+      if(!isConn){
+        if(!_ptDataDoctor.disconnectedSince)_ptDataDoctor.disconnectedSince=Date.now();
+      }else{
+        _ptDataDoctor.disconnectedSince=null;_ptDataDoctor.connWarned=false;
+      }
+    });
+  }catch(e){}
+})();
+function checkDataHealth(){
+  try{
+    if(!(window.DiagCore&&window.DiagCore.isOn('pt_data')))return;
+
+    // 1) UZUN SÜRELİ BAĞLANTI KOPUKLUĞU
+    if(_ptDataDoctor.disconnectedSince && (Date.now()-_ptDataDoctor.disconnectedSince)>30000 && !_ptDataDoctor.connWarned){
+      _ptDataDoctor.connWarned=true;
+      DiagCore.kaydet('pt_data','hata','Firebase bağlantısı 30 saniyeden uzun süredir kopuk',{
+        kopukSure:Math.round((Date.now()-_ptDataDoctor.disconnectedSince)/1000)+'sn',
+        sebep:'.info/connected sürekli false dönüyor - ağ sorunu, güvenlik duvarı/VPN engeli ya da Firebase tarafında geçici kesinti olabilir.',
+        tavsiye:'Cihazın ağ bağlantısını ve (tekrarlıyorsa) Firebase konsolundaki proje/veritabanı durumunu kontrol edin. connStatusBar kullanıcıya zaten görünür olmalı.'
+      },60000);
+    }
+
+    // 2) DİNLEYİCİ ÖLÜMÜ: bağlıyken (connected=true) ama leagues/{id} dinleyicisi uzun süredir
+    // hiç tetiklenmemişse (visitors heartbeat'i sayesinde normalde ~15sn'de bir tetiklenmesi
+    // beklenir), abonelik sessizce düşmüş olabilir - hiçbir JS hatası üretmeden.
+    if(_ptDataDoctor.connected===true && window._ptLastListenerFireAt){
+      const idle=Date.now()-window._ptLastListenerFireAt;
+      if(idle>120000){
+        if(!_ptDataDoctor.deadWarned){
+          _ptDataDoctor.deadWarned=true;
+          DiagCore.kaydet('pt_data','hata','Veri dinleyicisi bağlıyken bile tetiklenmiyor',{
+            sonTetiklenme:Math.round(idle/1000)+'sn önce',
+            sebep:'.info/connected true olduğu halde leagues/{id} dinleyicisi (visitors heartbeat sayesinde normalde ~15sn\'de bir tetiklenir) uzun süredir hiç çalışmadı - listenToLeague() aboneliği sessizce düşmüş olabilir.',
+            tavsiye:'Lig değiştirme/yeniden giriş akışlarında db.ref(...).off() çağrısının yanlış referansa uygulanıp asıl dinleyiciyi de kapatmadığından emin olun.'
+          },90000);
+        }
+      }else{
+        _ptDataDoctor.deadWarned=false;
+      }
+    }
+
+    // 3) D NESNESİ BOZUK/EKSİK: dinleyici çalışıyor ama D beklenmeyen bir şekle bürünmüşse,
+    // aşağı akıştaki render fonksiyonları sessizce boş/yanlış içerik gösterebilir.
+    if(typeof D!=='undefined'&&D){
+      if(typeof D.matches!=='object'||D.matches===null){
+        DiagCore.kaydet('pt_data','hata','D.matches beklenmeyen tipte (obje olmalı)',{tip:typeof D.matches},60000);
+      }
+      if(typeof D.teams!=='object'||D.teams===null){
+        DiagCore.kaydet('pt_data','hata','D.teams beklenmeyen tipte (obje olmalı)',{tip:typeof D.teams},60000);
+      }
+    }
+  }catch(e){}
+}
+setInterval(checkDataHealth,10000);
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   PUAN DURUMU TEŞHİS SENSÖRLERİ (pt_standings)
+   NEDEN GEREKLİ: calcS() (puan tablosu hesaplama çekirdeği) birkaç yerde SESSİZCE veri
+   atlar/birleştirir - hiçbir throw olmadan bir maçın sonucu tabloya hiç yansımayabilir ya da
+   iki takım tek satırda kaybolabilir. Bunlar "yanlış rakam" şikayetlerinin klasik, izi
+   sürülmesi zor kaynağıdır; aşağıdaki kontroller D verisini doğrudan tarayıp bu iki bilinen
+   sessiz-atlama senaryosunu nokta atışı yakalar.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+let _standingsDoctorState={orphanWarned:{},dupWarned:false};
+function checkStandingsHealth(){
+  try{
+    if(!(window.DiagCore&&window.DiagCore.isOn('pt_standings')))return;
+    if(typeof D==='undefined'||!D)return;
+    const teams=D.teams||{};
+    const matches=D.matches||{};
+
+    // 1) YETİM MAÇ: oynanmış bir maç var olmayan bir takıma referans veriyorsa calcS() bu
+    // maçı sessizce atlar (if(!h||!a)return;) - maçın sonucu puan tablosuna hiç yansımaz.
+    const tidSet=new Set(Object.entries(teams).map(function(e){return e[1].id||e[0];}));
+    Object.values(matches).forEach(function(m){
+      if(!m||!m.played)return;
+      const missing=[];
+      if(!tidSet.has(m.homeId))missing.push('ev sahibi ('+m.homeId+')');
+      if(!tidSet.has(m.awayId))missing.push('deplasman ('+m.awayId+')');
+      if(missing.length){
+        const key=m.id||(m.homeId+'-'+m.awayId);
+        if(!_standingsDoctorState.orphanWarned[key]){
+          _standingsDoctorState.orphanWarned[key]=true;
+          DiagCore.kaydet('pt_standings','hata','Oynanmış maç var olmayan bir takıma referans veriyor',{
+            macId:m.id,eksik:missing.join(', '),
+            sebep:'calcS() bu maçı sessizce atlıyor (if(!h||!a)return;) - maçın sonucu puan tablosuna hiç yansımıyor, hiçbir hata görünmüyor.',
+            tavsiye:'Takım silinirken ona ait maçların da silindiğinden/güncellendiğinden emin olun, ya da maçı doğru takıma yeniden bağlayın.'
+          });
+        }
+      }
+    });
+
+    // 2) KİMLİK ÇAKIŞMASI: iki farklı takım kaydı aynı id'ye çözülüyorsa (t.id||tkey), calcS()
+    // bunları TEK bir satırda birleştirir - takımlardan biri tabloda tamamen kaybolur.
+    const idCounts={};
+    Object.entries(teams).forEach(function(e){
+      const tid=e[1].id||e[0];
+      idCounts[tid]=(idCounts[tid]||0)+1;
+    });
+    const dupIds=Object.keys(idCounts).filter(function(id){return idCounts[id]>1;});
+    if(dupIds.length){
+      if(!_standingsDoctorState.dupWarned){
+        _standingsDoctorState.dupWarned=true;
+        DiagCore.kaydet('pt_standings','hata','Birden fazla takım aynı kimliğe (id) sahip',{
+          catisanIdler:dupIds.join(', '),
+          sebep:'calcS() takımları id\'ye göre bir nesneye yazıyor - aynı id\'ye sahip ikinci takım, birincinin istatistiklerini sessizce ezer, biri tabloda hiç görünmez.',
+          tavsiye:'Takım ekleme/kopyalama akışlarında id üretiminin (uid()) her zaman benzersiz kaldığını doğrulayın.'
+        });
+      }
+    }else{
+      _standingsDoctorState.dupWarned=false;
+    }
+  }catch(e){}
+}
+setInterval(checkStandingsHealth,15000);
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   FİKSTÜR & SONUÇLAR TEŞHİS SENSÖRLERİ (pt_fixture) - calcS'in sessizce atladığı senaryolara
+   ek olarak, Fikstür/Sonuçlar OYNANMAMIŞ maçları da gösterdiği için orphan referans daha da
+   sık görünür olabilir; ayrıca aynı id'ye sahip iki maç birbirinin üzerine yazılıp bir maç
+   FİKSTÜRDEN TAMAMEN KAYBOLABİLİR - hiçbiri throw etmez.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+let _fixtureDoctorState={orphanWarned:{},dupWarned:false};
+function checkFixtureHealth(){
+  try{
+    if(!(window.DiagCore&&window.DiagCore.isOn('pt_fixture')))return;
+    if(typeof D==='undefined'||!D)return;
+    const teams=D.teams||{},matches=D.matches||{};
+    const tidSet=new Set(Object.entries(teams).map(function(e){return e[1].id||e[0];}));
+    const seenIds={};
+    Object.entries(matches).forEach(function(entry){
+      const key=entry[0],m=entry[1];
+      if(!m)return;
+      const missing=[];
+      if(!tidSet.has(m.homeId))missing.push('ev sahibi ('+m.homeId+')');
+      if(!tidSet.has(m.awayId))missing.push('deplasman ('+m.awayId+')');
+      if(missing.length){
+        const wkey='fx:'+key;
+        if(!_fixtureDoctorState.orphanWarned[wkey]){
+          _fixtureDoctorState.orphanWarned[wkey]=true;
+          DiagCore.kaydet('pt_fixture','uyari','Fikstürde var olmayan bir takıma referans veren maç var',{
+            macId:m.id||key,eksik:missing.join(', '),
+            sebep:'Bu maç Fikstür/Sonuçlar listesinde takım adı olmadan/boş görünebilir ya da hiç görünmeyebilir.',
+            tavsiye:'Bu maçı Fikstür sekmesinden düzenleyip doğru takıma bağlayın ya da silin.'
+          });
+        }
+      }
+      // m.id, Firebase anahtarıyla (key) tutarlı olmalı - tutarsızsa bazı ekranlarda maç
+      // yanlış id ile bulunup güncellemeler başka bir maça uygulanabilir.
+      if(m.id&&m.id!==key){
+        const wkey2='idmis:'+key;
+        if(!_fixtureDoctorState.orphanWarned[wkey2]){
+          _fixtureDoctorState.orphanWarned[wkey2]=true;
+          DiagCore.kaydet('pt_fixture','uyari','Maçın Firebase anahtarı ile kendi id alanı uyuşmuyor',{
+            firebaseAnahtari:key,mIdAlani:m.id,
+            sebep:'Bazı kodlar maçı m.id ile arar, bazıları Firebase anahtarıyla - uyuşmazlık, güncellemelerin yanlış maça uygulanmasına yol açabilir.',
+            tavsiye:'Bu maçı admin panelinden silip yeniden oluşturmayı deneyin (id\'ler otomatik senkron olur).'
+          });
+        }
+      }
+    });
+  }catch(e){}
+}
+setInterval(checkFixtureHealth,20000);
 
 // KULLANICI TALEBİ: "Canlı maç kartını tamamen kaldır." - toggleCompactCard() fonksiyonu
 // TAMAMEN KALDIRILDI, artık gösterilecek bir kart olmadığı için gerek kalmadı.
@@ -6362,6 +6814,36 @@ function scheduleMaintenanceBoundaryCheck(){
   },Math.max(delay,0));
 }
 setInterval(checkMaintenanceScheduleTransition,1000);
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   BAKIM MODU TEŞHİS SENSÖRÜ (pt_maintenance)
+   NEDEN GEREKLİ: showMaintenanceScreen() #maintenanceScreen elementini bulamazsa SESSİZCE
+   hiçbir şey yapmaz (if(!scr)return;). checkMaintenanceScheduleTransition() de "isCurrentlyShown"
+   kontrolünü AYNI elementten yapıyor - yani element DOM'da yoksa bu iki fonksiyon birbirini
+   SONSUZA DEK "henüz gösterilmedi" sanıp tekrar tekrar dener ama kullanıcı ASLA engellenmez.
+   Bu, bakım modunun sessizce ATLANMASI anlamına gelir - hiçbir JS hatası üretmeden.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+let _maintDoctorWarned=false;
+function checkMaintenanceHealth(){
+  try{
+    if(!(window.DiagCore&&window.DiagCore.isOn('pt_maintenance')))return;
+    if(!D||!D.maintenance)return;
+    const mt=D.maintenance;
+    const shouldBeActive=_userName&&isMaintenanceCurrentlyActive(mt)&&!isUserAllowedDuringMaintenance(mt,_userName);
+    if(shouldBeActive&&!document.getElementById('maintenanceScreen')){
+      if(!_maintDoctorWarned){
+        _maintDoctorWarned=true;
+        DiagCore.kaydet('pt_maintenance','hata','Bakım ekranı devrede olmalı ama #maintenanceScreen elementi DOM\'da yok',{
+          sebep:'showMaintenanceScreen() bu elementi bulamazsa sessizce hiçbir şey yapmaz - kullanıcı bakım sırasında uygulamayı NORMAL şekilde kullanmaya devam edebilir.',
+          tavsiye:'#maintenanceScreen elementinin HTML\'den yanlışlıkla silinip silinmediğini kontrol edin - bu güvenlik açısından da önemli bir bypass.'
+        },300000);
+      }
+    }else if(!shouldBeActive){
+      _maintDoctorWarned=false;
+    }
+  }catch(e){}
+}
+setInterval(checkMaintenanceHealth,10000);
 // EK DÜZELTME: Mobil tarayıcılar, sekme/uygulama ARKA PLANDAYKEN setInterval'i askıya alır
 // (ya da dakikalarca geciktirir). Kullanıcı telefonu cebinde tutup bakım saati geldikten sonra
 // uygulamaya geri döndüğünde, periyodik kontrol henüz çalışmamış olabiliyordu - bakım aktif
@@ -6427,13 +6909,26 @@ function checkWeeklySummaryNotification(){
   _saveNotifiedIdSet('pt_notifiedWeeklySummaries',_notifiedWeeklySummaries);
 
   // 1) Haftanın gol kralı
+  // HATA DÜZELTMESİ (kullanıcı bildirdi: "hangi takımın oyuncusuna olduğu bilinmiyor"):
+  // Önceden goller SADECE oyuncu ADINA göre sayılıyordu (goalCounts[e.player]) - takım hiç
+  // tutulmuyordu, bu yüzden bildirimde "⚽ Haftanın Gol Kralı: Ahmet Y. (3 gol)" gibi bir
+  // metin çıkıyor ama hangi takımın oyuncusu olduğu hiçbir yerde belirtilmiyordu. Ayrıca bu,
+  // gizli bir VERİ hatasına da yol açıyordu: iki farklı takımda AYNI İSİMDE oyuncu varsa
+  // (ör. iki farklı takımda "Ahmet Yılmaz"), golleri yanlışlıkla TEK bir kişininmiş gibi
+  // birleştiriliyordu. Artık anahtar oyuncu adı + takım kimliği birlikte kullanılıyor, ve
+  // sonuçta takım adı da bildirime ekleniyor.
   const goalCounts={};
   weekMatches.forEach(m=>{
     (m.events||[]).forEach(e=>{
-      if((e.type==='goal'||e.type==='pen_goal')&&e.player)goalCounts[e.player]=(goalCounts[e.player]||0)+1;
+      if((e.type==='goal'||e.type==='pen_goal')&&e.player){
+        const teamId=e.team==='home'?m.homeId:m.awayId;
+        const key=e.player+'|'+teamId;
+        if(!goalCounts[key])goalCounts[key]={player:e.player,teamId:teamId,count:0};
+        goalCounts[key].count++;
+      }
     });
   });
-  const topScorerEntry=Object.entries(goalCounts).sort((a,b)=>b[1]-a[1])[0];
+  const topScorerEntry=Object.values(goalCounts).sort((a,b)=>b.count-a.count)[0];
 
   // 2) En sürpriz sonuç: güncel puan sıralamasına göre daha düşük sıradaki takımın, daha
   // yüksek sıradaki takımı en yüksek gol farkıyla yendiği maç.
@@ -6459,7 +6954,10 @@ function checkWeeklySummaryNotification(){
   if(currentLeader)localStorage.setItem('pt_lastKnownLeader',currentLeader);
 
   const parts=[];
-  if(topScorerEntry)parts.push(`⚽ Haftanın Gol Kralı: ${topScorerEntry[0]} (${topScorerEntry[1]} gol)`);
+  if(topScorerEntry){
+    const scorerTeamName=(D.teams[topScorerEntry.teamId]||{}).name||'?';
+    parts.push(`⚽ Haftanın Gol Kralı: ${topScorerEntry.player} (${scorerTeamName}) - ${topScorerEntry.count} gol`);
+  }
   if(biggestUpset)parts.push(`😱 Sürpriz Sonuç: ${biggestUpset.winner}, ${biggestUpset.loser}'i ${biggestUpset.score} yendi`);
   if(leaderChanged)parts.push(`👑 Yeni Lider: ${currentLeader}`);
   if(!parts.length)return;
@@ -6478,6 +6976,51 @@ function checkFavTeamMatchEnded(){
     addNotification('⚽ Maç Bitti',(h.name||'?')+' '+(m.homeGoals??0)+'-'+(m.awayGoals??0)+' '+(a.name||'?'),'⚽');
   });
 }
+// HATA DÜZELTMESİ (kullanıcı bildirdi: "bitmiş maç hâlâ oynanıyor gösteriyor" - teşhis kodu
+// bunu YAKALAMIYORDU): DiagCore sadece JS istisnalarını/performansı izler, VERİNİN kendisinin
+// yanlış olup olmadığını bilemez - Puan Tablosu Firebase'den ne gelirse onu sadâkatle gösterir.
+// KÖK SEBEP: canlı maç dakikası admin CİHAZINDA çalışan paylaşılan bir sayaç (bkz. admin.html
+// ensureLiveMinuteTimer) ile ilerliyor. Bu sayaç artık Canlı Panel'in açık/kapalı olmasından
+// bağımsız çalışır ve sekme arka plana alındığında bile gerçek geçen süreye göre telafi eder -
+// ama admin CİHAZI tamamen kapatılır/tarayıcı sekmesi tamamen kapatılır ya da bağlantısı uzun
+// süre koparsa, JS hiç çalışmayacağı için dakika yine de donuk kalabilir ve maç isLive:true
+// olarak TAKILI KALIR - bu hiçbir JS hatası üretmez. ÇÖZÜM: burada VERİ SEVİYESİNDE bir kontrol -
+// bir maç canlı görünüyor ama dakikası makul olmayan bir süredir hiç ilerlemiyorsa, muhtemelen
+// donmuş demektir; DiagCore'a "uyarı" olarak kaydedilir ki admin panelindeki 🩺 Hata Yakalama
+// ekranından görülebilsin.
+let _liveStaleTrack={};
+function checkStaleLiveMatches(){
+  try{
+    if(!(window.DiagCore&&window.DiagCore.isOn('pt_live')))return;
+    const liveIds=new Set();
+    Object.values(D.matches||{}).forEach(m=>{
+      if(!m||!m.isLive)return;
+      liveIds.add(m.id);
+      const t=_liveStaleTrack[m.id]||(_liveStaleTrack[m.id]={minute:m.minute||0,ts:Date.now(),warned:false});
+      if((m.minute||0)!==t.minute){
+        // Dakika ilerledi - her şey normal, izleme sıfırlanır.
+        t.minute=m.minute||0;t.ts=Date.now();t.warned=false;
+        return;
+      }
+      // Devre arası/penaltılarda dakika zaten ilerlemez - bunlar yanlış alarm sayılmamalı.
+      if(m.isHalftime||m.inPenalties)return;
+      const stuckMs=Date.now()-t.ts;
+      // Admin dakikayı normalde her 60sn'de bir ilerletir - 6 dakika (360sn) boyunca hiç
+      // değişmemesi tek bir gecikmeyle asla açıklanamaz; donmuş canlı yayın belirtisidir.
+      if(stuckMs>360000&&!t.warned){
+        t.warned=true;
+        window.DiagCore.kaydet('pt_live','uyari','Canlı maç donmuş olabilir (dakika ilerlemiyor)',{
+          macId:m.id,dakika:m.minute||0,
+          donukSure:Math.round(stuckMs/60000)+' dk',
+          not:'Admin tarafındaki sayaç artık Canlı Panel kapalıyken/sekme arka plandayken de çalışmaya devam eder - bu uyarı genelde admin cihazının tamamen kapatılmış/bağlantısının uzun süredir tamamen kopmuş olduğu anlamına gelir. "Yayını Kapat" ile elle sonlandırılmalı.'
+        });
+      }
+    });
+    // Artık canlı olmayan maçların izleme kaydı temizlenir (bellek sızıntısı olmasın).
+    Object.keys(_liveStaleTrack).forEach(id=>{if(!liveIds.has(id))delete _liveStaleTrack[id];});
+  }catch(e){}
+}
+setInterval(checkStaleLiveMatches,120000);
 
 // KULLANICI TALEBİ: 🎉 Gol Kutlama Animasyonu - favori takım gol attığında ekranda konfeti/
 // parlama efekti belirir. Sadece BU oturumda (sayfa açıkken) görülen goller için tetiklenir,
@@ -17110,7 +17653,7 @@ window.voteMvp=function(matchId,player){
 
   var APP='pt';                 // 'pt' (Puan Tablosu) | 'adm' (Admin Paneli)
   var APP_LABEL='Puan Tablosu';
-  var MODULES=[{"id": "pt_nav", "label": "🧭 Gezinme & Sekmeler", "desc": "Sekme geçişleri, alt menü, arama, sayfa açma/kapama", "fns": ["switchTab", "renderTab", "switchTabById", "openSheet", "closeSheet", "renderMainNav", "toggleSearch", "doSearch", "openSeasonMenu", "openPastSeasons", "openLeagueSwitcher", "selectLeagueFromSwitcher", "openSettings", "openMyProfile", "withHScrollPreserved"]}, {"id": "pt_standings", "label": "📊 Puan Durumu", "desc": "Puan tablosu çizimi, hafta/saha filtresi, simülatör, PDF", "fns": ["renderStandings", "setStandingsWeek", "setStandingsVenue", "adaptStandingsColumnScale", "applyStandingsAlign", "applyStandingsGap", "applyStandingsColumnScale", "printStandingsPdf", "openStandingsSimulator", "setSimScore", "exitStandingsSimulator", "viewPastSeasonStandings", "renderSimModeBar", "getSimMergedMatches", "renderGroupView", "openScenarioScreen", "renderScenarioSheet", "toggleScenarioTeam", "scenarioSelectAll", "isStandingsPanelVisible", "scheduleStandingsAdaptAndDiagnose"]}, {"id": "pt_fixture", "label": "📅 Fikstür & Sonuçlar", "desc": "Fikstür/sonuç listeleri, hafta seçici, tarih filtresi", "fns": ["renderFixture", "renderResults", "setResultsWeek", "setResultsQuickFilter", "openResultsWeekPicker", "openWeekPicker", "renderDateStrip", "setDateFilter", "openDatePickerSheet", "getWeekList", "setSearchFilter", "highlightMatch", "toggleMatchReminder", "isMatchReminderSet", "getMatchReminders", "shareMatch"]}, {"id": "pt_matchdetail", "label": "⚽ Maç Detayı", "desc": "Maç detay ekranı ve tüm sekmeleri (anlatım, kadro, istatistik)", "fns": ["showMatchDetail", "renderMatchDetailContent", "switchMdTab", "renderMdAnlatim", "renderMdDetay", "renderMdIstatistik", "renderMdKadro", "renderMdKarne", "renderMdKarsi", "toggleMdLiveTable", "showArchivedMatchDetailFull", "showPastLeagueMatchDetailFull", "renderMvpSection", "voteMvp", "voteBestMatch", "submitScorePrediction", "renderScorePredictionHtml", "setKarneFilter", "renderSquad", "selSqTeam"]}, {"id": "pt_teamdetail", "label": "🛡️ Takım Detayı", "desc": "Takım sayfası, kadro, taraftar duvarı, kupa vitrini", "fns": ["showTeamDetail", "renderTeamDetailContent", "switchTdTab", "renderTdFanWall", "renderTdInfo", "renderTdPlayers", "renderTdSquad", "postFanWallMessage", "deleteFanWallMessage", "saveFanWallEdit", "openTdChampViewer", "getClubTrophies", "clubTrophyCaseHtml", "startTeamDetailDirectListener", "stopTeamDetailDirectListener", "showPlayerDetail"]}, {"id": "pt_stats", "label": "📈 İstatistikler & Karşılaştırma", "desc": "İstatistik sekmesi, oyuncu/takım karşılaştırma, analiz, form", "fns": ["renderStats", "showStatTab", "openStatCategoryView", "renderCompare", "setCmp", "setCmpMode", "setCmpPlayer", "setCmpTeamFilter", "renderPlayerCompare", "getPlayerCompareStats", "renderAnalysis", "renderForm", "playerRadarSvg", "openCmpPickerPopup", "openCmpTeamFilterPicker", "selectCmpFromPopup", "filterCmpPopupRows", "getAllPlayersForCompare", "getAllPlayersFlat"]}, {"id": "pt_fantasy", "label": "🎽 Fantezi Takım", "desc": "Fantezi kadro kurma, oyuncu seçimi, puanlama", "fns": ["renderFantasy", "toggleFantasyPlayer", "saveFantasyTeam", "resetFantasyTeam", "calcFantasyPoints", "openFantasyPicker", "renderFantasyPickerContent", "setFormation"]}, {"id": "pt_live", "label": "🔴 Canlı Alt Şerit", "desc": "Canlı skor şeridi, gol kutlaması, sesli anlatım, olay sesleri", "fns": ["renderLiveTicker", "scrollToLive", "toggleLiveTicker", "toggleLiveTable", "checkFavTeamLiveStart", "showFavTeamLiveBanner", "showGoalCelebration", "announceEvent", "playEventSound", "checkLiveVoiceAnnouncements", "checkFavTeamGoalCelebration", "checkFavTeamMatchEnded", "getPrimaryLiveMatch",  "previewEventSound", "testVoiceAnnouncer", "toggleVoiceAnnouncer", "setTickerAnimForContent", "applyTickerSpeed"]}, {"id": "pt_chat", "label": "💬 Sohbet", "desc": "Sohbet ekranı, mesaj gönderme, tepkiler, yanıtlar, yazıyor göstergesi", "fns": ["openChatScreen", "renderChatScreen", "renderChatComments", "renderOne", "sendChatMessage", "sendGeneralChatMessage", "sendComment", "toggleReaction", "setReplyTarget", "clearReplyTarget", "jumpToChatMessage", "handleChatBubbleClick", "deleteComment", "togglePinComment", "saveEditedComment", "markMessagesSeenByMe", "loadOlderChatMessages", "loadPastSeasonComments", "openChatMatchPicker", "selectChatMatchTag", "broadcastTyping", "applyTypingIndicatorToDOM", "updateChatUnreadBadge", "markChatAsRead", "showReactorListPopup", "showSeenByPopup"]}, {"id": "pt_notifications", "label": "🔔 Bildirimler", "desc": "Bildirim merkezi, tercihler, hatırlatıcılar, kilometre taşları", "fns": ["addNotification", "openNotificationCenter", "renderNotifListItems", "updateNotifUnreadBadge", "checkMilestones", "checkUpcomingMatchReminder", "checkSubscribedMatchEvents", "toggleNotifyPref", "toggleNotifTypePref", "openNotifManage", "clearNotificationHistory", "checkWeeklySummaryNotification", "getNotifPrefs", "getNotificationHistory", "filterNotificationList", "showInAppNotifBanner", "checkTeamNotifyBroadcast", "checkDevReplyNotify", "checkPollResultBroadcast", "checkPremiumCodeNotifications", "checkFavTeamFanWallPosts", "isQuietHoursActive", "saveQuietHours", "toggleQuietHours"]}, {"id": "pt_premium", "label": "💎 Premium & Mağaza", "desc": "Premium erişim, kod kullanma, puan mağazası, deneme süreleri", "fns": ["hasPremiumAccess", "requestPremiumAccess", "sendPremiumAccessRequest", "requestGenericPremiumAccess", "redeemPremiumCode", "redeemGenericPremiumCode", "openPremiumCodeRedeem", "openGenericPremiumCodeRedeem", "buyPremiumWithPoints", "openPointsShop", "revalidateAllPremiumAccessNow", "revalidateFontFamilyAccess", "revalidateReactionPackAccess", "startFontTrial", "startReactionPackTrial", "startPaletteTrial", "endFontTrial", "endReactionPackTrial", "endPaletteTrial", "isEmojiLockedForViewer", "isFontPremium", "isReactionPackPremium", "getPremiumPointsPrice", "getActivePremiumCodes", "cleanupTrialChatArtifacts", "refreshPremiumScreensLive", "updateLivePremiumCountdowns", "getLoyaltyLevel"]}, {"id": "pt_theme", "label": "🎨 Tema & Görünüm", "desc": "Tema/palet/yazı tipi uygulama, kart stili, otomatik karanlık mod", "fns": ["applyTheme", "setTheme", "setPalette", "applyBgTheme", "applyFontFamily", "setFontFamily", "applyCardStyle", "applyNumberSize", "buildTheme", "setReactionPack", "applyAutoDarkModeIfNeeded", "toggleAutoDarkMode", "saveAutoDarkHours", "applySparkleLayer", "applyStatColors", "openFontGroupPopup", "openPaletteGroupPopup", "openReactionPackGroupPopup", "selectCustomThemeFromGroup", "selectPaletteFromGroup", "getFontCssAndEnsureLoaded", "loadGoogleFontIfNeeded", "toggleBgPaletteSync", "suggestPaletteForColor", "renderTeamColorThemeSuggestion", "applySuggestedTeamTheme"]}, {"id": "pt_login", "label": "🚪 Giriş Ekranı", "desc": "Giriş akışı, lig seçici, şifre alanı, mod seçimi, giriş ekranı teması ve düzeni", "fns": ["applyLoginScreenTheme", "applyLoginLayoutBlock", "populateLoginLeagueSel", "onLoginLeagueChange", "showLoginPasswordField", "renderModeOptions", "selectMode", "backToModeScreen", "backToLogin", "toggleLoginUpdates", "cancelRememberedAutoLogin", "openForgotPasswordForm", "renderTempPasswordHint", "doEnter", "doEnterAfterPasswordCheck", "loadProfileAndEnter", "getHashLeagueId", "handleHash"]}, {"id": "pt_auth", "label": "🔐 Giriş & Profil", "desc": "Giriş akışı, şifre işlemleri, profil kaydı, oturum takibi", "fns": ["doLogoutPt", "saveNewPassword", "openPasswordManager", "registerVisitor", "startPresenceTracking", "setVisitorOnline", "setVisitorOffline", "syncProfileToFirebase", "saveSettName", "saveSettFavTeam", "previewProfileAvatar", "handleAvatarUpload"]}, {"id": "pt_media", "label": "🖼️ Medya & Yükleme", "desc": "Fotoğraf/video/GIF yükleme, video kırpma, Supabase aktarımı", "fns": ["uploadImageToSupabase", "uploadVideoToSupabase", "processAndUploadCommentVideo", "trimVideoClientSide", "openVideoTrimmer", "confirmVideoTrim", "cancelVideoTrim", "searchGifs", "searchGifsDebounced", "openGifPicker", "selectGif", "handleCommentPhoto", "handleCommentVideo", "triggerCommentPhoto", "openVideoMenu", "promptVideoLink", "setVideoLink", "parseVideoUrl", "renderCommentMedia", "renderCommentVideo", "playPtLazyVideo", "openImagePreviewOv", "openImageViewerFullscreen", "updateUploadProgressUI", "_supabaseXhrUpload", "_processLogoImg"]}, {"id": "pt_cards", "label": "🖼️ Kart Oluşturma & Paylaşım", "desc": "Maç/profil/sezon kartı üretimi ve paylaşımı", "fns": ["generateMatchSummaryCard", "downloadMyProfileCard", "downloadSeasonSummaryCard", "downloadFavTeamSummaryCard", "downloadSeasonWrapCard", "shareCardImage", "renderStandingsPreviewCard", "confirmDownloadMatchCard", "confirmDownloadMyProfileCard", "confirmDownloadSeasonCard", "confirmDownloadFavTeamCard", "shareAppLink"]}, {"id": "pt_data", "label": "📡 Veri & Bağlantı", "desc": "Firebase dinleyicileri, lig yükleme, önbellek, senkronizasyon", "fns": ["listenToLeague", "startMatchesDirectListener", "stopMatchesDirectListener", "startChatDirectListener", "stopChatDirectListener", "clearLocalCache", "getEffectiveMatches", "getAllCommentsFlat", "getVersions", "init"]}, {"id": "pt_feedback", "label": "📮 Geri Bildirim & Şikayet", "desc": "Geri bildirim formu, içerik şikayeti", "fns": ["openFeedbackForm", "submitFeedback", "handleFeedbackPhoto", "handleFeedbackVideo", "renderFeedbackMediaPreview", "reportContent"]}, {"id": "pt_maintenance", "label": "🚧 Bakım Modu", "desc": "Bakım ekranı, zamanlanmış bakım geçişleri, izinli kullanıcılar", "fns": ["isMaintenanceCurrentlyActive", "showMaintenanceScreen", "hideMaintenanceScreen", "checkMaintenanceScheduleTransition", "isUserAllowedDuringMaintenance", "returnToLoginFromMaintenance", "scheduleMaintenanceBoundaryCheck"]}, {"id": "pt_polls", "label": "🗳️ Anketler & Tahminler", "desc": "Anket oylama, MVP/maç oylaması, skor tahmini", "fns": ["votePoll", "pollNotificationHtml", "savePersonalNote", "renderPersonalNoteSection", "categorizeNote"]}];
+  var MODULES=[{"id": "pt_nav", "label": "🧭 Gezinme & Sekmeler", "desc": "Sekme geçişleri, alt menü, arama, sayfa açma/kapama", "fns": ["switchTab", "renderTab", "switchTabById", "openSheet", "closeSheet", "renderMainNav", "toggleSearch", "doSearch", "openSeasonMenu", "openPastSeasons", "openLeagueSwitcher", "selectLeagueFromSwitcher", "openSettings", "openMyProfile", "withHScrollPreserved"]}, {"id": "pt_standings", "label": "📊 Puan Durumu", "desc": "Puan tablosu çizimi, hafta/saha filtresi, simülatör, PDF", "fns": ["renderStandings", "setStandingsWeek", "setStandingsVenue", "adaptStandingsColumnScale", "applyStandingsAlign", "applyStandingsGap", "applyStandingsColumnScale", "printStandingsPdf", "openStandingsSimulator", "setSimScore", "exitStandingsSimulator", "viewPastSeasonStandings", "renderSimModeBar", "getSimMergedMatches", "renderGroupView", "openScenarioScreen", "renderScenarioSheet", "toggleScenarioTeam", "scenarioSelectAll", "isStandingsPanelVisible", "scheduleStandingsAdaptAndDiagnose"]}, {"id": "pt_fixture", "label": "📅 Fikstür & Sonuçlar", "desc": "Fikstür/sonuç listeleri, hafta seçici, tarih filtresi", "fns": ["renderFixture", "renderResults", "setResultsWeek", "setResultsQuickFilter", "openResultsWeekPicker", "openWeekPicker", "renderDateStrip", "setDateFilter", "openDatePickerSheet", "getWeekList", "setSearchFilter", "highlightMatch", "toggleMatchReminder", "isMatchReminderSet", "getMatchReminders", "shareMatch"]}, {"id": "pt_matchdetail", "label": "⚽ Maç Detayı", "desc": "Maç detay ekranı ve tüm sekmeleri (anlatım, kadro, istatistik)", "fns": ["showMatchDetail", "renderMatchDetailContent", "switchMdTab", "renderMdAnlatim", "renderMdDetay", "renderMdIstatistik", "renderMdKadro", "renderMdKarne", "renderMdKarsi", "toggleMdLiveTable", "showArchivedMatchDetailFull", "showPastLeagueMatchDetailFull", "renderMvpSection", "voteMvp", "voteBestMatch", "submitScorePrediction", "renderScorePredictionHtml", "setKarneFilter", "renderSquad", "selSqTeam"]}, {"id": "pt_teamdetail", "label": "🛡️ Takım Detayı", "desc": "Takım sayfası, kadro, taraftar duvarı, kupa vitrini", "fns": ["showTeamDetail", "renderTeamDetailContent", "switchTdTab", "renderTdFanWall", "renderTdInfo", "renderTdPlayers", "renderTdSquad", "postFanWallMessage", "deleteFanWallMessage", "saveFanWallEdit", "openTdChampViewer", "getClubTrophies", "clubTrophyCaseHtml", "startTeamDetailDirectListener", "stopTeamDetailDirectListener", "showPlayerDetail"]}, {"id": "pt_stats", "label": "📈 İstatistikler & Karşılaştırma", "desc": "İstatistik sekmesi, oyuncu/takım karşılaştırma, analiz, form", "fns": ["renderStats", "showStatTab", "openStatCategoryView", "renderCompare", "setCmp", "setCmpMode", "setCmpPlayer", "setCmpTeamFilter", "renderPlayerCompare", "getPlayerCompareStats", "renderAnalysis", "renderForm", "playerRadarSvg", "openCmpPickerPopup", "openCmpTeamFilterPicker", "selectCmpFromPopup", "filterCmpPopupRows", "getAllPlayersForCompare", "getAllPlayersFlat"]}, {"id": "pt_fantasy", "label": "🎽 Fantezi Takım", "desc": "Fantezi kadro kurma, oyuncu seçimi, puanlama", "fns": ["renderFantasy", "toggleFantasyPlayer", "saveFantasyTeam", "resetFantasyTeam", "calcFantasyPoints", "openFantasyPicker", "renderFantasyPickerContent", "setFormation"]}, {"id": "pt_live", "label": "🔴 Canlı Alt Şerit", "desc": "Canlı skor şeridi, gol kutlaması, sesli anlatım, olay sesleri", "fns": ["renderLiveTicker", "scrollToLive", "toggleLiveTicker", "toggleLiveTable", "checkFavTeamLiveStart", "showFavTeamLiveBanner", "showGoalCelebration", "announceEvent", "playEventSound", "checkLiveVoiceAnnouncements", "checkFavTeamGoalCelebration", "checkFavTeamMatchEnded", "getPrimaryLiveMatch",  "previewEventSound", "testVoiceAnnouncer", "toggleVoiceAnnouncer", "setTickerAnimForContent", "applyTickerSpeed", "checkStaleLiveMatches"]}, {"id": "pt_chat", "label": "💬 Sohbet", "desc": "Sohbet ekranı, mesaj gönderme, tepkiler, yanıtlar, yazıyor göstergesi", "fns": ["openChatScreen", "renderChatScreen", "renderChatComments", "renderOne", "sendChatMessage", "sendGeneralChatMessage", "sendComment", "toggleReaction", "setReplyTarget", "clearReplyTarget", "jumpToChatMessage", "handleChatBubbleClick", "deleteComment", "togglePinComment", "saveEditedComment", "markMessagesSeenByMe", "loadOlderChatMessages", "loadPastSeasonComments", "openChatMatchPicker", "selectChatMatchTag", "broadcastTyping", "applyTypingIndicatorToDOM", "updateChatUnreadBadge", "markChatAsRead", "showReactorListPopup", "showSeenByPopup"]}, {"id": "pt_notifications", "label": "🔔 Bildirimler", "desc": "Bildirim merkezi, tercihler, hatırlatıcılar, kilometre taşları", "fns": ["addNotification", "openNotificationCenter", "renderNotifListItems", "updateNotifUnreadBadge", "checkMilestones", "checkUpcomingMatchReminder", "checkSubscribedMatchEvents", "toggleNotifyPref", "toggleNotifTypePref", "openNotifManage", "clearNotificationHistory", "checkWeeklySummaryNotification", "getNotifPrefs", "getNotificationHistory", "filterNotificationList", "showInAppNotifBanner", "checkTeamNotifyBroadcast", "checkDevReplyNotify", "checkPollResultBroadcast", "checkPremiumCodeNotifications", "checkFavTeamFanWallPosts", "isQuietHoursActive", "saveQuietHours", "toggleQuietHours"]}, {"id": "pt_premium", "label": "💎 Premium & Mağaza", "desc": "Premium erişim, kod kullanma, puan mağazası, deneme süreleri", "fns": ["hasPremiumAccess", "requestPremiumAccess", "sendPremiumAccessRequest", "requestGenericPremiumAccess", "redeemPremiumCode", "redeemGenericPremiumCode", "openPremiumCodeRedeem", "openGenericPremiumCodeRedeem", "buyPremiumWithPoints", "openPointsShop", "revalidateAllPremiumAccessNow", "revalidateFontFamilyAccess", "revalidateReactionPackAccess", "startFontTrial", "startReactionPackTrial", "startPaletteTrial", "endFontTrial", "endReactionPackTrial", "endPaletteTrial", "isEmojiLockedForViewer", "isFontPremium", "isReactionPackPremium", "getPremiumPointsPrice", "getActivePremiumCodes", "cleanupTrialChatArtifacts", "refreshPremiumScreensLive", "updateLivePremiumCountdowns", "getLoyaltyLevel"]}, {"id": "pt_theme", "label": "🎨 Tema & Görünüm", "desc": "Tema/palet/yazı tipi uygulama, kart stili, otomatik karanlık mod", "fns": ["applyTheme", "setTheme", "setPalette", "applyBgTheme", "applyFontFamily", "setFontFamily", "applyCardStyle", "applyNumberSize", "buildTheme", "setReactionPack", "applyAutoDarkModeIfNeeded", "toggleAutoDarkMode", "saveAutoDarkHours", "applySparkleLayer", "applyStatColors", "openFontGroupPopup", "openPaletteGroupPopup", "openReactionPackGroupPopup", "selectCustomThemeFromGroup", "selectPaletteFromGroup", "getFontCssAndEnsureLoaded", "loadGoogleFontIfNeeded", "toggleBgPaletteSync", "suggestPaletteForColor", "renderTeamColorThemeSuggestion", "applySuggestedTeamTheme"]}, {"id": "pt_login", "label": "🚪 Giriş Ekranı", "desc": "Giriş akışı, lig seçici, şifre alanı, mod seçimi, giriş ekranı teması ve düzeni", "fns": ["applyLoginScreenTheme", "applyLoginLayoutBlock", "populateLoginLeagueSel", "onLoginLeagueChange", "showLoginPasswordField", "renderModeOptions", "selectMode", "backToModeScreen", "backToLogin", "toggleLoginUpdates", "cancelRememberedAutoLogin", "openForgotPasswordForm", "renderTempPasswordHint", "doEnter", "doEnterAfterPasswordCheck", "loadProfileAndEnter", "getHashLeagueId", "handleHash"]}, {"id": "pt_auth", "label": "🔐 Giriş & Profil", "desc": "Giriş akışı, şifre işlemleri, profil kaydı, oturum takibi", "fns": ["doLogoutPt", "saveNewPassword", "openPasswordManager", "registerVisitor", "startPresenceTracking", "setVisitorOnline", "setVisitorOffline", "syncProfileToFirebase", "saveSettName", "saveSettFavTeam", "previewProfileAvatar", "handleAvatarUpload"]}, {"id": "pt_media", "label": "🖼️ Medya & Yükleme", "desc": "Fotoğraf/video/GIF yükleme, video kırpma, Supabase aktarımı", "fns": ["uploadImageToSupabase", "uploadVideoToSupabase", "processAndUploadCommentVideo", "trimVideoClientSide", "openVideoTrimmer", "confirmVideoTrim", "cancelVideoTrim", "searchGifs", "searchGifsDebounced", "openGifPicker", "selectGif", "handleCommentPhoto", "handleCommentVideo", "triggerCommentPhoto", "openVideoMenu", "promptVideoLink", "setVideoLink", "parseVideoUrl", "renderCommentMedia", "renderCommentVideo", "playPtLazyVideo", "openImagePreviewOv", "openImageViewerFullscreen", "updateUploadProgressUI", "_supabaseXhrUpload", "_processLogoImg"]}, {"id": "pt_cards", "label": "🖼️ Kart Oluşturma & Paylaşım", "desc": "Maç/profil/sezon kartı üretimi ve paylaşımı", "fns": ["generateMatchSummaryCard", "downloadMyProfileCard", "downloadSeasonSummaryCard", "downloadFavTeamSummaryCard", "downloadSeasonWrapCard", "shareCardImage", "renderStandingsPreviewCard", "confirmDownloadMatchCard", "confirmDownloadMyProfileCard", "confirmDownloadSeasonCard", "confirmDownloadFavTeamCard", "shareAppLink"]}, {"id": "pt_data", "label": "📡 Veri & Bağlantı", "desc": "Firebase dinleyicileri, lig yükleme, önbellek, senkronizasyon", "fns": ["listenToLeague", "startMatchesDirectListener", "stopMatchesDirectListener", "startChatDirectListener", "stopChatDirectListener", "clearLocalCache", "getEffectiveMatches", "getAllCommentsFlat", "getVersions", "init"]}, {"id": "pt_feedback", "label": "📮 Geri Bildirim & Şikayet", "desc": "Geri bildirim formu, içerik şikayeti", "fns": ["openFeedbackForm", "submitFeedback", "handleFeedbackPhoto", "handleFeedbackVideo", "renderFeedbackMediaPreview", "reportContent"]}, {"id": "pt_maintenance", "label": "🚧 Bakım Modu", "desc": "Bakım ekranı, zamanlanmış bakım geçişleri, izinli kullanıcılar", "fns": ["isMaintenanceCurrentlyActive", "showMaintenanceScreen", "hideMaintenanceScreen", "checkMaintenanceScheduleTransition", "isUserAllowedDuringMaintenance", "returnToLoginFromMaintenance", "scheduleMaintenanceBoundaryCheck"]}, {"id": "pt_polls", "label": "🗳️ Anketler & Tahminler", "desc": "Anket oylama, MVP/maç oylaması, skor tahmini", "fns": ["votePoll", "pollNotificationHtml", "savePersonalNote", "renderPersonalNoteSection", "categorizeNote"]}];
 
   var SLOW_MS=250;                   // bir fonksiyon bu süreyi aşarsa "yavaş" kaydı
   var MAX_LOCAL=200;                 // cihazda tutulan en fazla kayıt

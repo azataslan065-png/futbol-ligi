@@ -1994,6 +1994,40 @@ function toast(msg,type){
 function setSyncBadge(txt,cls){var b=qs('syncEl');b.textContent=txt;b.className='sync '+cls;}
 
 var _curLeagueId='';
+// KULLANICI TALEBİ: "Yönetici puan tablosu için bir düzenleme yaptığında bu korunacak ve
+// hem geçmiş sezonlara hem de yeni sezonlara uygulanacak." - Önceden bu ayarlar sadece
+// "Yeni Sezona Geç" anında İLERİYE kopyalanıyordu (bkz. buildCarriedLeagueSettings); admin
+// daha SONRA bir ayarı değiştirirse bu değişiklik sadece o an açık olan lige yazılıyor,
+// geçmiş sezonlara hiç yansımıyordu. Aşağıdaki mekanizma, bu alanlardan biri değiştiğinde
+// (hangi ekrandan/hangi butondan yapılırsa yapılsın - tek tek her fonksiyonu değiştirmeye
+// gerek kalmadan) değişikliği OTOMATİK olarak TÜM diğer ligler (geçmiş VE varsa başka
+// aktif ligler) için de uygular. Lig puan sistemi (lgConfig) BİLEREK bu listede DEĞİL -
+// o her sezon kendi başına sıfırlanan bir ayar (bkz. buildCarriedLeagueSettings).
+var STANDINGS_SETTINGS_SYNC_FIELDS=['logoUrl','theme','bgTheme','statColors','eventEmojis','cardStyle','standingsGap','standingsAlign','standingsWideLevel','standingsMinNameChars','cardOpacity','cardBlur','cardBorderOpacity','cardBrightness','pitchOrientation','legendStyle','statNumberSize','rankLineStyle','navOrder','sponsors','liveCardStyle','leagueRules','leagueRulesUpdatedAt','voiceAnnouncePrefs','loginScreenTheme','rankNotes'];
+var _stgsSyncSnapshot=null; // null = bu lig için henüz temel (başlangıç) değer alınmadı
+function _snapshotStandingsSettings(){
+  var o={};
+  STANDINGS_SETTINGS_SYNC_FIELDS.forEach(function(f){o[f]=S[f]!==undefined?S[f]:null;});
+  return JSON.stringify(o);
+}
+// Değişen puan tablosu ayarlarını, leaguesMeta'daki TÜM diğer liglere (geçmiş sezonlar dahil)
+// tek bir çoklu-yol (multi-path) Firebase güncellemesiyle uygular.
+function propagateStandingsSettingsToAllLeagues(){
+  var payload={};
+  STANDINGS_SETTINGS_SYNC_FIELDS.forEach(function(f){payload[f]=S[f]!==undefined?S[f]:null;});
+  db.ref('leaguesMeta').once('value').then(function(snap){
+    var meta=snap.val()||{};
+    var otherIds=Object.keys(meta).filter(function(id){return id&&id!==_curLeagueId;});
+    if(!otherIds.length)return;
+    var updates={};
+    otherIds.forEach(function(id){
+      STANDINGS_SETTINGS_SYNC_FIELDS.forEach(function(f){updates['leagues/'+id+'/'+f]=payload[f];});
+    });
+    db.ref().update(sanitizeForFirebase(updates)).then(function(){
+      logAction('🎨 Puan tablosu ayarları '+otherIds.length+' diğer sezona da uygulandı');
+    }).catch(function(e){console.error('Puan tablosu ayarları diğer sezonlara uygulanamadı:',e);});
+  });
+}
 function save(){
   if(!_curLeagueId)return Promise.resolve();
   setSyncBadge('⏳','s-wait');
@@ -4651,7 +4685,7 @@ function openNewSeasonFlow(){
     var templateIds=Object.keys(templates);
     var templateFieldHtml=templateIds.length?('<div class="field" style="margin-top:.5rem"><span class="lbl">Görsel Ayar Şablonu (opsiyonel)</span><select id="newSeasonTemplate"><option value="">Şablon uygulama (mevcut ayarlar aynen taşınır)</option>'+templateIds.map(function(id){return '<option value="'+id+'">🎨 '+(templates[id].name||'Şablon')+'</option>';}).join('')+'</select></div>'):'';
     openSheet('⏭️ Yeni Sezona Geç',
-      '<div style="font-size:.7rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Mevcut takımlar (oyuncu kadrosu, stadyum, logo dahil) yeni sezona kopyalanacak. Maçlar ve skorlar kopyalanmaz, sıfırdan başlar. Şu anki sezon silinmez, kayıtlı kalır.</div>'
+      '<div style="font-size:.7rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Mevcut takımlar (oyuncu kadrosu, stadyum, logo dahil) ve tüm görsel/yapısal lig ayarları yeni sezona kopyalanacak. Fikstür ve skorlar kopyalanmaz, sıfırdan başlar. Lig puan sistemi (galibiyet/beraberlik puanı) varsayılana sıfırlanır. Şu anki sezon silinmez, kayıtlı kalır.</div>'
       +'<div class="field"><span class="lbl">Yeni Sezon Adı</span><input id="newSeasonNameInp" placeholder="'+(getNextSeasonGuess())+'"/></div>'
       +templateFieldHtml
       +'<button class="btn bg" onclick="doNewSeasonTransition()" style="width:100%;margin-top:.5rem">⏭️ Sezonu Oluştur ve Geç</button>'
@@ -4670,7 +4704,7 @@ function doNewSeasonTransition(){
   var name=qs('newSeasonNameInp')?qs('newSeasonNameInp').value.trim():'';
   if(!name){toast('Sezon adı giriniz','er');return;}
   var templateId=qs('newSeasonTemplate')?qs('newSeasonTemplate').value:'';
-  dlg('⏭️','Yeni Sezona Geç','"'+name+'" sezonuna geçilecek. Mevcut takımlar ve lig ayarları taşınacak, puan tablosu sıfırlanacak. Onaylıyor musunuz?','✅ Onaylıyorum','dog','❌ Onaylamıyorum').then(function(ok){
+  dlg('⏭️','Yeni Sezona Geç','"'+name+'" sezonuna geçilecek. Mevcut takımlar ve lig ayarları taşınacak; fikstür/skorlar ve lig puan sistemi (galibiyet/beraberlik puanı) sıfırlanacak. Onaylıyor musunuz?','✅ Onaylıyorum','dog','❌ Onaylamıyorum').then(function(ok){
     if(!ok)return;
     doNewSeasonTransitionConfirmed(name,templateId);
   });
@@ -4692,7 +4726,10 @@ function buildCarriedLeagueSettings(src){
   return {
     logoUrl:src.logoUrl||'',
     theme:src.theme||'',
-    lgConfig:src.lgConfig||{},
+    // KULLANICI TALEBİ: Yeni sezona geçişte lig puan sistemi (galibiyet/beraberlik puanı)
+    // taşınmaz, varsayılana sıfırlanır (3/1). Format (lig/kupa/grup) bir "puan sistemi"
+    // değil yapısal bir tercih olduğu için diğer tüm ayarlar gibi olduğu gibi taşınır.
+    lgConfig:{format:(src.lgConfig&&src.lgConfig.format)||'league',winPts:3,drawPts:1},
     bgTheme:src.bgTheme||null,
     statColors:src.statColors||null,
     // KULLANICI TALEBİ: Maç Akışı emoji özelleştirmeleri de yeni sezona/şablona taşınır.
@@ -4812,7 +4849,7 @@ function doNewSeasonTransitionConfirmed(name,templateId){
     // paneli ANINDA yeni ligin (artık taşınmış) visitors verisiyle yenilenir.
     if(typeof renderVisitorList==='function')renderVisitorList();
     db.ref('leaguesMeta').once('value').then(function(snap){populateLeagueSel(snap.val()||{});});
-    toast('✅ '+name+' başladı, '+Object.keys(copiedTeams).length+' takım, tüm ayarlar ve sohbet geçmişi taşındı');
+    toast('✅ '+name+' başladı, '+Object.keys(copiedTeams).length+' takım, tüm ayarlar ve sohbet geçmişi taşındı (fikstür ve puan sistemi sıfırlandı)');
   }).catch(function(e){
     toast('❌ Yeni sezon oluşturulamadı: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');
   });
@@ -6613,7 +6650,7 @@ function renderBgModeContent(){
   html+='<div style="text-align:center;font-size:.6rem;color:var(--mu);margin-bottom:.45rem" id="cardBorderOpacityVal">'+curCardBorderOpacity+'%</div>';
 
   html+='<div style="font-size:.62rem;font-weight:700;color:var(--mu);margin-bottom:.2rem">☀️ Kart Parlaklığı</div>';
-  html+='<div class="field"><input id="cardBrightnessInp" type="range" min="50" max="150" value="'+curCardBrightness+'" oninput="qs(\'cardBrightnessVal\').textContent=this.value+\'%\';debouncedSaveCardOpacity()" style="width:100%"/></div>';
+  html+='<div class="field"><input id="cardBrightnessInp" type="range" min="30" max="200" value="'+curCardBrightness+'" oninput="qs(\'cardBrightnessVal\').textContent=this.value+\'%\';debouncedSaveCardOpacity()" style="width:100%"/></div>';
   html+='<div style="text-align:center;font-size:.6rem;color:var(--mu);margin-bottom:.6rem" id="cardBrightnessVal">'+curCardBrightness+'%</div>';
 
   html+='<div style="font-size:.64rem;font-weight:800;color:var(--mu);margin:.7rem 0 .4rem">🎛️ Filtreler</div>';
@@ -6626,7 +6663,7 @@ function renderBgModeContent(){
   html+='<div class="field"><span class="lbl">Doygunluk</span><input id="bgThemeSaturate" type="range" min="0" max="200" value="'+curSaturate+'" oninput="qs(\'bgSaturateVal\').textContent=this.value+\'%\';updateBgPreviewLive();debouncedSaveBgFilters()" style="width:100%"/></div>';
   html+='<div style="text-align:center;font-size:.62rem;color:var(--mu);margin-bottom:.45rem" id="bgSaturateVal">'+curSaturate+'%</div>';
 
-  html+='<div class="field"><span class="lbl">Parlaklık</span><input id="bgThemeBrightness" type="range" min="30" max="150" value="'+curBrightness+'" oninput="qs(\'bgBrightnessVal\').textContent=this.value+\'%\';updateBgPreviewLive();debouncedSaveBgFilters()" style="width:100%"/></div>';
+  html+='<div class="field"><span class="lbl">Parlaklık</span><input id="bgThemeBrightness" type="range" min="30" max="200" value="'+curBrightness+'" oninput="qs(\'bgBrightnessVal\').textContent=this.value+\'%\';updateBgPreviewLive();debouncedSaveBgFilters()" style="width:100%"/></div>';
   html+='<div style="text-align:center;font-size:.62rem;color:var(--mu);margin-bottom:.6rem" id="bgBrightnessVal">'+curBrightness+'%</div>';
 
   var curAnim=modeTheme&&modeTheme.animation?modeTheme.animation:'none';
@@ -6800,7 +6837,7 @@ function openLoginThemeSheet(){
       <div style="font-size:.64rem;font-weight:800;color:var(--mu);margin:.6rem 0 .3rem">Doygunluk</div>
       <input id="loginThemeSaturate" type="range" min="0" max="200" value="100" oninput="debouncedSaveLoginThemeFilters();renderLoginThemePreview()" style="width:100%"/>
       <div style="font-size:.64rem;font-weight:800;color:var(--mu);margin:.6rem 0 .3rem">Parlaklık</div>
-      <input id="loginThemeBrightness" type="range" min="30" max="170" value="100" oninput="debouncedSaveLoginThemeFilters();renderLoginThemePreview()" style="width:100%"/>
+      <input id="loginThemeBrightness" type="range" min="30" max="200" value="100" oninput="debouncedSaveLoginThemeFilters();renderLoginThemePreview()" style="width:100%"/>
       <button class="btn" style="width:100%;margin-top:.6rem;background:var(--s2);border:1px solid var(--br);color:var(--mu);font-size:.7rem" onclick="resetLoginThemeFilters()">↩️ Filtreleri Sıfırla</button>
     `, 'openLoginThemeSheet');
     setTimeout(function(){
@@ -9839,7 +9876,7 @@ var FEEDBACK_TYPE_LABEL={bug:'🐛 Hata Bildirimi',suggestion:'💡 Öneri',othe
 // zaman "Geliştirici" gösterir ve tam yetki (sabitleme, herhangi bir yorumu silme) tanır.
 // KULLANICI TALEBİ: Admin sohbet ekranına emoji gönderme, yanıt verme, ceza uygulama,
 // fotoğraf/video ekleme (max boyut sınırlarıyla).
-var DEV_REPLY_EMOJIS=['👍','❤️','😂','😮','😢','🔥','⚽','🎉','👏','💪','😡','🤔'];
+var DEV_REPLY_EMOJIS=[];
 function toggleDevReplyEmojiPicker(){
   var box=qs('devReplyEmojiPicker');if(!box)return;
   if(box.style.display==='flex'){box.style.display='none';return;}
@@ -10686,33 +10723,17 @@ function closeAdminChatScreen(){
 // AYNI sistem (tüm mesajlar TEK bir akışta, kaynak rozetiyle, balon stiliyle) buraya
 // taşındı. Admin'de sabitleme/silme/ceza HER ZAMAN aktiftir (tam kontrol) - PT'deki gibi
 // sahiplik/geliştirici kontrolüne bağlı değildir.
-var ADMIN_REACTION_EMOJIS=['👍','❤️','😂','😮','😢','🔥']; // Hızlı erişim (satırda hep görünür)
+var ADMIN_REACTION_EMOJIS=[]; // Hızlı erişim listesi - artık admin tarafından yönetilen tepki paketleri (S.reactionPacks) üzerinden geliyor, kodda sabit emoji yok
 // KULLANICI TALEBİ: "Yönetici için... premium yazı tipi seçici ekle; sadece yöneticinin
 // seçtiği unsurlar premium olacak." - S.premiumFontIds, admin'in HANGİ fontları premium
 // olarak işaretlediğini tutar (Firebase'de saklanır, Puan Tablosu bunu D.premiumFontIds
 // üzerinden okur). Hiç ayarlanmamışsa (admin hiç dokunmamışsa) PT'nin varsayılan (6
 // ücretsiz + 12 premium) ayrımı geçerli kalır.
-var ALL_FONT_IDS_BASE=[
-  {id:'outfit',label:'Outfit',css:"'Outfit',sans-serif"},
-  {id:'poppins',label:'Poppins',css:"'Poppins',sans-serif"},
-  {id:'roboto',label:'Roboto',css:"'Roboto',sans-serif"},
-  {id:'montserrat',label:'Montserrat',css:"'Montserrat',sans-serif"},
-  {id:'nunito',label:'Nunito',css:"'Nunito',sans-serif"},
-  {id:'inter',label:'Inter',css:"'Inter',sans-serif"},
-  {id:'playfair',label:'Playfair Display',css:"'Playfair Display',serif"},
-  {id:'bebas',label:'Bebas Neue',css:"'Bebas Neue',sans-serif"},
-  {id:'pacifico',label:'Pacifico',css:"'Pacifico',cursive"},
-  {id:'comfortaa',label:'Comfortaa',css:"'Comfortaa',sans-serif"},
-  {id:'righteous',label:'Righteous',css:"'Righteous',sans-serif"},
-  {id:'caveat',label:'Caveat',css:"'Caveat',cursive"},
-  {id:'oswald',label:'Oswald',css:"'Oswald',sans-serif"},
-  {id:'dancingscript',label:'Dancing Script',css:"'Dancing Script',cursive"},
-  {id:'abrilfatface',label:'Abril Fatface',css:"'Abril Fatface',serif"},
-  {id:'orbitron',label:'Orbitron',css:"'Orbitron',sans-serif"},
-  {id:'lobster',label:'Lobster',css:"'Lobster',cursive"},
-  {id:'cinzel',label:'Cinzel',css:"'Cinzel',serif"}
-];
-var DEFAULT_PREMIUM_FONT_IDS=['playfair','bebas','pacifico','comfortaa','righteous','caveat','oswald','dancingscript','abrilfatface','orbitron','lobster','cinzel'];
+// KULLANICI TALEBİ: Kodun içine gömülü tüm hazır yazı tipi seçenekleri kaldırıldı. Yapı
+// (yönetim ekranı, premium işaretleme, silme/gizleme, özel font ekleme) AYNEN duruyor -
+// admin artık sıfırdan başlayıp istediği yazı tiplerini kendisi ekliyor.
+var ALL_FONT_IDS_BASE=[];
+var DEFAULT_PREMIUM_FONT_IDS=[];
 function getCurrentPremiumFontIds(){
   return Array.isArray(S.premiumFontIds)?S.premiumFontIds:DEFAULT_PREMIUM_FONT_IDS;
 }
@@ -10893,18 +10914,14 @@ function toggleFontPremiumStatus(fid){
 // emoji, yazı tipi ve tema satın alabilecek. Fakat hangi premium unsurun ne kadar puan ile
 // satılacağı, ne kadar kullanılacağı ve skor tahmininde bir maçta kaç puan kazanılacağı,
 // hangi maçlar için geçerli olduğu gibi tüm detayları admin belirleyecek."
-var BUILTIN_PALETTE_REF=[
-  {id:'violet',label:'Mor'},{id:'ocean',label:'Mavi'},{id:'forest',label:'Yeşil'},
-  {id:'sunset',label:'Turuncu'},{id:'crimson',label:'Kırmızı'},{id:'gold',label:'Altın'},
-  {id:'teal',label:'Camgöbeği'},{id:'rose',label:'Pembe'},{id:'indigo',label:'İndigo'},
-  {id:'lime',label:'Limon Yeşili'},{id:'cyan',label:'Turkuaz'},{id:'magenta',label:'Fuşya'}
-];
-var PREMIUM_PALETTES_REF=[
-  {id:'amethyst',label:'💜 Ametist'},{id:'sapphire',label:'💠 Safir'},{id:'emerald',label:'💚 Zümrüt'},
-  {id:'bronze',label:'🏅 Bronz'},{id:'ruby',label:'❤️ Yakut'},{id:'champagne',label:'🥂 Şampanya'},
-  {id:'opal',label:'🔵 Opal'},{id:'rosegold',label:'🌹 Rose Gold'},{id:'obsidian',label:'🖤 Obsidyen'},
-  {id:'peridot',label:'🟢 Peridot'},{id:'platinum',label:'✨ Platin'},{id:'tourmaline',label:'💗 Turmalin'}
-];
+// KULLANICI TALEBİ: Kodun içine gömülü tüm hazır tema/palet seçenekleri kaldırıldı. Yapı
+// (yönetim ekranı, premium işaretleme, silme/gizleme, özel tema ekleme - S.customThemes)
+// AYNEN duruyor - admin artık sıfırdan başlayıp istediği temaları kendisi ekliyor.
+// NOT: Puan Tablosu tarafındaki çalışma zamanı PALETTES nesnesindeki 'violet' değeri, hiçbir
+// tema bulunamadığında devreye giren dahili bir güvenlik varsayılanı olarak kalır (ayrıca
+// bkz. puan-tablosu.html) - admin/kullanıcıya bir "seçenek" olarak gösterilmez.
+var BUILTIN_PALETTE_REF=[];
+var PREMIUM_PALETTES_REF=[];
 // KULLANICI TALEBİ: "Admin 'Koyu temalar - Normal temalar - Açık temalar - Premium temalar'
 // ekleyebileceği, düzenleyebileceği ve silebileceği bir sistem geliştirilmelidir." - Admin
 // artık 4 kategoride (Koyu/Normal/Açık/Premium) TAMAMEN YENİ temalar (isim + 3 renk: arka
@@ -13323,7 +13340,7 @@ function renderAdminChatBubble(c,isReply,repliesByParent){
     +(!isReply?'<button data-action="reply" data-user="'+escHtml(displayName)+'" data-text="'+escHtml((c.text||'').replace(/\n/g,' '))+'" style="background:transparent;border:1px solid var(--br);border-radius:12px;padding:.08rem .45rem;color:var(--mu);font-size:.6rem;cursor:pointer;font-weight:700">Yanıtla</button>':'')
     +(c.text!==undefined?'<button onclick="startAdminEditComment(\''+c.id+'\')" style="background:transparent;border:1px solid var(--br);border-radius:12px;padding:.08rem .45rem;color:var(--mu);font-size:.6rem;cursor:pointer;font-weight:700">✏️ Düzenle</button>':'')
     +(c.text?'<button data-action="copytext" data-cid="'+c.id+'" style="background:transparent;border:1px solid var(--br);border-radius:12px;padding:.08rem .45rem;color:var(--mu);font-size:.6rem;cursor:pointer;font-weight:700">📋 Kopyala</button>':'')
-    +'<button data-action="pin" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" style="background:transparent;border:1px solid var(--br);border-radius:12px;padding:.08rem .45rem;color:var(--mu);font-size:.6rem;cursor:pointer;font-weight:700">'+(c.pinned?'Kaldır':'Sabitle')+'</button>'
+    +'<button data-action="pin" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" data-archiveindex="'+(c.archiveIndex!=null?c.archiveIndex:'')+'" data-pastleagueid="'+escHtml(c.pastLeagueId||'')+'" style="background:transparent;border:1px solid var(--br);border-radius:12px;padding:.08rem .45rem;color:var(--mu);font-size:.6rem;cursor:pointer;font-weight:700">'+(c.pinned?'Kaldır':'Sabitle')+'</button>'
     +(c.text?'<button data-action="setfont" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" style="background:transparent;border:1px solid var(--br);border-radius:12px;padding:.08rem .45rem;color:var(--mu);font-size:.6rem;cursor:pointer;font-weight:700">🔠 Yazı Tipi</button>':'')
     +(!isDev?'<button data-action="penalty" data-user="'+escHtml(c.user||'')+'" style="background:transparent;border:1px solid rgba(245,158,11,.4);border-radius:12px;padding:.08rem .45rem;color:#fbbf24;font-size:.6rem;cursor:pointer;font-weight:700">⛔ Ceza</button>':'')
     +'<button data-action="delete" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" style="background:transparent;border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:.08rem .45rem;color:#f87171;font-size:.6rem;cursor:pointer;font-weight:700">Sil</button>'
@@ -13501,7 +13518,7 @@ document.addEventListener('click',function(ev){
   if(action==='jumpreply')jumpToAdminChatMessage(el.dataset.target);
   else if(action==='viewphoto')openImagePreviewOv(el.dataset.photo);
   else if(action==='reply')devReplyToMessage(el.dataset.user,el.dataset.text);
-  else if(action==='pin')adminToggleGenericPin(el.dataset.matchid?'match':'general',el.dataset.matchid,el.dataset.cid);
+  else if(action==='pin')adminToggleGenericPin(el.dataset.matchid?'match':'general',el.dataset.matchid,el.dataset.cid,el.dataset.archiveindex!==''?el.dataset.archiveindex:null,el.dataset.pastleagueid||null);
   else if(action==='setfont')adminOpenFontOverrideSheet(el.dataset.matchid,el.dataset.cid);
   else if(action==='penalty')devReplyApplyPenalty(el.dataset.user);
   else if(action==='delete')adminDeleteGenericComment(el.dataset.matchid?'match':'general',el.dataset.matchid,el.dataset.cid);
@@ -13658,15 +13675,36 @@ function getEffectiveFontCssForAdmin(c){
   var opt=getAdminFontOptions().find(function(f){return f.id===fid;});
   return opt?opt.css:'inherit';
 }
-function adminToggleGenericPin(target,matchId,cid){
+// KULLANICI TALEBİ: Geçmiş sezonların (hem AYNI ligin arşivi hem TAMAMEN AYRI bitmiş bir
+// lig) mesajları da sabitlenebilsin/kaldırılabilsin. Önceden bu fonksiyon HER ZAMAN sadece
+// _curLeagueId'ye yazıyordu - geçmiş sezon yorumunda "Sabitle"ye basmak ya hiçbir şey
+// yapmıyor ya da yanlış (mevcut sezondaki, alakasız) bir kayda yazıyordu. Artık üç kaynak
+// da (mevcut sezon / aynı ligin arşivi / ayrı bitmiş lig) doğru Firebase yoluna ve doğru
+// yerel önbelleğe yazılır.
+function adminToggleGenericPin(target,matchId,cid,archiveIndex,pastLeagueId){
   if(!_curLeagueId){toast('❌ Önce bir lig seçin','er');return;}
   if(!_adminGuardModeration(cid))return; // bkz. _adminGuardModeration - sessiz başarısızlık düzeltmesi
-  var refBase=target==='match'?('leagues/'+_curLeagueId+'/matches/'+matchId+'/comments/'+cid):('leagues/'+_curLeagueId+'/generalChat/'+cid);
-  var obj=target==='match'?(S.matches[matchId]&&S.matches[matchId].comments&&S.matches[matchId].comments[cid]):(S.generalChat&&S.generalChat[cid]);
+  var refBase,obj,applyLocal;
+  if(pastLeagueId){
+    // Tamamen ayrı, bitmiş bir ligin (leaguesMeta'da başka bir kayıt) mesajı.
+    refBase=matchId?('leagues/'+pastLeagueId+'/matches/'+matchId+'/comments/'+cid):('leagues/'+pastLeagueId+'/generalChat/'+cid);
+    obj=(_pastSeasonChatCacheAdmin||[]).find(function(c){return c.pastLeagueId===pastLeagueId&&(c.matchId||null)===(matchId||null)&&c.id===cid;});
+    applyLocal=function(v){if(obj)obj.pinned=v;};
+  }else if(archiveIndex!=null){
+    // Aynı ligin arşivlenmiş (bir önceki) sezonuna ait mesaj.
+    var arc=(S.archives||[])[archiveIndex];
+    refBase='leagues/'+_curLeagueId+'/archives/'+archiveIndex+'/matches/'+matchId+'/comments/'+cid;
+    obj=arc&&arc.matches&&arc.matches[matchId]&&arc.matches[matchId].comments&&arc.matches[matchId].comments[cid];
+    applyLocal=function(v){if(obj)obj.pinned=v;};
+  }else{
+    refBase=target==='match'?('leagues/'+_curLeagueId+'/matches/'+matchId+'/comments/'+cid):('leagues/'+_curLeagueId+'/generalChat/'+cid);
+    obj=target==='match'?(S.matches[matchId]&&S.matches[matchId].comments&&S.matches[matchId].comments[cid]):(S.generalChat&&S.generalChat[cid]);
+    applyLocal=function(v){if(obj)obj.pinned=v;};
+  }
   if(!obj)return;
   var newPinned=!obj.pinned;
   db.ref(refBase+'/pinned').set(newPinned).then(function(){
-    obj.pinned=newPinned;
+    applyLocal(newPinned);
     renderDevReplyMatchComments();
   }).catch(function(e){toast('❌ Güncellenemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
 }
@@ -14603,6 +14641,10 @@ var _leagueDataListener=null;
 function listenToLeague(leagueId){
   if(_leagueDataListener)db.ref('leagues/'+_curLeagueId).off('value',_leagueDataListener);
   window._leagueFirstSyncDone=false; // Yeni lig için yükleniyor durumu yeniden gösterilsin.
+  // KULLANICI TALEBİ: Farklı bir lige geçildiğinde (sırf görüntülemek için bile) o ligin
+  // KENDİ mevcut ayarlarıyla otomatik "değişiklik algılandı" sanılıp diğer liglerin üzerine
+  // yazılmasın - her lig için temel değer SIFIRDAN, o ligin ilk senkronunda alınır.
+  _stgsSyncSnapshot=null;
   setSyncBadge('⏳','s-wait');
   // Admin'in o anda görüntülediği lig, global bir alana yazılır - Puan Tablosu kullanıcıları
   // bu alanı gerçek zamanlı dinleyip admin hangi ligi seçerse (yeni sezona geçiş, manuel lig
@@ -14738,6 +14780,18 @@ function listenToLeague(leagueId){
         }
       });
     }catch(errP){console.error('penalty normalizasyon hatası:',errP);}
+    // KULLANICI TALEBİ: Puan tablosu ayarlarının değişip değişmediğini burada, veri Firebase'den
+    // her geldiğinde kontrol ederiz - böylece HANGİ ekrandan/HANGİ save() çağrısından geldiği
+    // önemli olmadan her değişiklik yakalanır. İlk senkronda (temel değer henüz yoksa) sadece
+    // temel alınır, YAYILMAZ - aksi halde ligler arasında geçiş yapmak bile diğer ligin
+    // ayarlarını üzerine yazardı.
+    try{
+      var _newStgsSnap=_snapshotStandingsSettings();
+      if(_stgsSyncSnapshot!=null&&_stgsSyncSnapshot!==_newStgsSnap){
+        propagateStandingsSettingsToAllLeagues();
+      }
+      _stgsSyncSnapshot=_newStgsSnap;
+    }catch(errStgs){console.error('Puan tablosu ayar senkron kontrolü hatası:',errStgs);}
     setSyncBadge('✅','s-ok');
     // KULLANICI TALEBİ: Gerçek lig verisi ilk kez geldiğinde giriş sonrası yükleniyor
     // göstergesini kapat.
@@ -15279,29 +15333,58 @@ function saveEditLeagueName(){
   });
 }
 
+// KULLANICI TALEBİ: "Lig sil" artık sadece o an açık olan ligi değil, TÜM kayıtlı ligleri
+// (aktif + bitmiş) bir liste halinde gösterir, admin listeden istediğini seçip siler -
+// önceden sadece o an seçili lig silinebiliyordu.
 function deleteLeague(){
   if(!hasSubperm('league_danger')){toast('🔒 Bu işlem için yetkiniz yok','er');return;}
-  if(!_curLeagueId){toast('Önce bir sezon seçin','er');return;}
+  db.ref('leaguesMeta').once('value').then(function(snap){
+    var meta=snap.val()||{};
+    var ids=Object.keys(meta);
+    if(!ids.length){toast('Kayıtlı lig bulunamadı','er');return;}
+    if(ids.length<=1){toast('Son sezon silinemez','er');return;}
+    var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.65rem;line-height:1.5">Silmek istediğiniz sezonu seçin. Bu işlem GERİ ALINAMAZ - takımlar, maçlar, kadrolar, sohbet mesajları ve fotoğraflar dahil TÜM veriler kalıcı olarak silinir.</div>'
+      +ids.map(function(id){
+        var m=meta[id]||{};
+        var isCur=id===_curLeagueId;
+        var isFinished=m.status==='finished';
+        return '<div style="display:flex;align-items:center;gap:.5rem;background:var(--s2);border:1.5px solid var(--br);border-radius:12px;padding:.55rem .7rem;margin-bottom:.5rem">'
+          +'<div style="flex:1;min-width:0">'
+          +'<div style="font-size:.78rem;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml(m.name||'Lig')+(isCur?' <span style="font-size:.6rem;color:var(--ac)">(Aktif)</span>':'')+'</div>'
+          +(isFinished?'<div style="font-size:.6rem;color:var(--mu)">🏁 Bitmiş</div>':'')
+          +'</div>'
+          +'<button onclick="confirmDeleteLeagueFromList(\''+id+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:.4rem .6rem;color:#f87171;font-size:.68rem;font-weight:800;cursor:pointer;flex-shrink:0">🗑️ Sil</button>'
+          +'</div>';
+      }).join('');
+    openSheet('🗑️ Kayıtlı Ligi Sil',html,'openEditLeagueName');
+  });
+}
+function confirmDeleteLeagueFromList(delId){
+  if(!hasSubperm('league_danger')){toast('🔒 Bu işlem için yetkiniz yok','er');return;}
   db.ref('leaguesMeta').once('value').then(function(snap){
     var meta=snap.val()||{};
     var ids=Object.keys(meta);
     if(ids.length<=1){toast('Son sezon silinemez','er');return;}
-    dlg('🗑️','Sezonu Sil',(S.leagueName||'Bu sezon')+' ve TÜM verileri (takımlar, maçlar, kadrolar, SOHBET MESAJLARI/yorumlar, fotoğraflar) KALICI OLARAK silinecek! Bu işlem GERİ ALINAMAZ - Firebase\'de çöp kutusu yoktur.','Sil','dor').then(function(ok){
+    var name=(meta[delId]&&meta[delId].name)||'Bu sezon';
+    dlg('🗑️','Sezonu Sil',name+' ve TÜM verileri (takımlar, maçlar, kadrolar, SOHBET MESAJLARI/yorumlar, fotoğraflar) KALICI OLARAK silinecek! Bu işlem GERİ ALINAMAZ - Firebase\'de çöp kutusu yoktur.','Sil','dor').then(function(ok){
       if(!ok)return;
-      var delId=_curLeagueId;
       db.ref('leagues/'+delId).remove().then(function(){
         return db.ref('leaguesMeta/'+delId).remove();
       }).then(function(){
-        var remainingIds=ids.filter(function(i){return i!==delId;});
-        var nextId=remainingIds[0];
-        _curLeagueId=nextId;
-        localStorage.setItem('adm_curLeague',nextId);
-        db.ref('leaguesMeta').once('value').then(function(snap2){populateLeagueSel(snap2.val()||{});});
-        listenToLeague(nextId);
+        logAction('🗑️ Lig silindi: '+name);
         toast('✅ Lig silindi');
+        db.ref('leaguesMeta').once('value').then(function(snap2){
+          var meta2=snap2.val()||{};
+          populateLeagueSel(meta2);
+          if(delId===_curLeagueId){
+            var nextId=Object.keys(meta2)[0];
+            if(nextId){_curLeagueId=nextId;localStorage.setItem('adm_curLeague',nextId);listenToLeague(nextId);}
+          }
+          deleteLeague(); // Güncel listeyi tekrar göster, admin ard arda silebilir.
+        });
       }).catch(function(e){var m=(e&&e.message)?e.message:'bilinmeyen hata';console.error(m,e);toast('❌ İşlem başarısız: '+m,'er');});
     });
-  }, 'openEditLeagueName');
+  });
 }
 
 if(sessionStorage.getItem('adm')==='1'){
