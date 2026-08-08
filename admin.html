@@ -9611,13 +9611,13 @@ db.ref('appVersionHistory').on('value',function(snap){
   var val=snap.val();
   if(val===null){
     // Gerçekten İLK KEZ açılıyor (hiçbir zaman kaydedilmemiş) - varsayılanlarla tohumla.
-    db.ref('appVersionHistory').set({versions:DEFAULT_VERSIONS,seeded:true}).catch(function(_e){DiagSil('revokePremiumCode',_e);});
+    db.ref('appVersionHistory').set({versions:DEFAULT_VERSIONS,seeded:true}).catch(function(_e){DiagSil('appVersionHistory/tohumlama',_e);});
     _globalVersionHistory=DEFAULT_VERSIONS;
   }else if(Array.isArray(val)){
     // ESKİ FORMATTAN GEÇİŞ: Daha önce çıplak dizi olarak kaydedilmiş veri varsa, yeni sarmalı
     // yapıya taşınır (bu geçiş sırasında admin henüz hiçbir şeyi silmemiş sayılır).
     _globalVersionHistory=val;
-    if(val.length)db.ref('appVersionHistory').set({versions:val,seeded:true}).catch(function(_e){DiagSil('revokePremiumCode',_e);});
+    if(val.length)db.ref('appVersionHistory').set({versions:val,seeded:true}).catch(function(_e){DiagSil('appVersionHistory/formatGecisi',_e);});
   }else{
     // Sarmalı yapı: admin bilerek boşaltmış olsa bile (versions:[]) bu ARTIK varsayılanlarla
     // DOLDURULMAZ - silme işlemi kalıcıdır.
@@ -16613,9 +16613,50 @@ window.saveBulkScores = async function(wrap) {
     }catch(e){}
   }
 
+  // Kullanıcı SONRADAN giriş yaparsa (önce anonim gezip sonra isim girme çok yaygın) cihaz
+  // kimlik kartındaki isim eskimesin diye isim değişimi izlenir ve değiştiği an yazılır.
+  var _sonKullanici=null;
+  setInterval(function(){
+    try{
+      var simdi=whoAmI();
+      if(_sonKullanici!==null&&simdi!==_sonKullanici)kaydetCihazKarti(true);
+      _sonKullanici=simdi;
+    }catch(e){}
+  },15000);
+
+
+
   // ── Kayıt deposu ─────────────────────────────────────────────────────────────────────
+  /* KULLANICI BİLDİRDİ (rapor incelemesi): Raporlarda saat başı gösteriliyor ama TARİH
+     gösterilmiyordu. Kayıtlar cihazda kalıcı saklandığı için GÜNLER ÖNCESİNE ait girdiler
+     (ör. "05:04 Şerit animasyon süresi geçersiz") en yeni kayıtlarla iç içe, sanki AZ ÖNCE
+     olmuş gibi görünüyordu - nitekim çoktan düzeltilmiş bir hata "hâlâ sürüyor" sanıldı.
+     ÜÇ DÜZELTME: (a) her kayıt artık TAM TARİH+SAAT ile yazılır, (b) kayıtlar bu oturuma ait
+     mi yoksa öncekilere mi ait açıkça işaretlenir, (c) 7 günden eski kayıtlar otomatik
+     budanır - hiçbir rapor artık aylık birikmiş çöple gelmez. */
+  var OTURUM_BASI=Date.now();       // bu sayfa açılışının başlangıcı
+  var SAKLAMA_GUN=7;                // bundan eski kayıtlar otomatik silinir
   var LOGS=[];
   try{LOGS=JSON.parse(localStorage.getItem('diag_logs_'+APP)||'[]');}catch(e){LOGS=[];}
+  (function budaEskiKayitlar(){
+    try{
+      var sinir=Date.now()-SAKLAMA_GUN*86400000;
+      var once=LOGS.length;
+      LOGS=LOGS.filter(function(r){return r&&r.ts&&r.ts>=sinir;});
+      if(LOGS.length!==once)localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS));
+    }catch(e){}
+  })();
+  function tamTarih(ts){
+    if(!ts)return '?';
+    try{return new Date(ts).toLocaleString('tr-TR');}catch(e){return String(ts);}
+  }
+  function oturumEtiketi(ts){
+    if(!ts)return '';
+    if(ts>=OTURUM_BASI)return ' [bu oturum]';
+    var gun=Math.floor((Date.now()-ts)/86400000);
+    if(gun>=1)return ' [önceki oturum · '+gun+' gün önce]';
+    return ' [önceki oturum]';
+  }
   var SEV={hata:3,yavas:2,uyari:2,bilgi:1};
   var _persistT=null;
   function persist(){
@@ -16624,24 +16665,131 @@ window.saveBulkScores = async function(wrap) {
       try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}
     },900);
   }
+  /* KULLANICI TALEBİ (kesin çözüm): "Kullanıcı ve yönetici bir raporu kopyaladığı zaman
+     ikinciye kopyalayamasın, UYGULAMADAN ÇIKIP TEKRAR GİRSE BİLE."
+     NEDEN GEREKLİ: Kayıtlar cihazda kalıcı saklandığı için aynı eski kayıtlar her raporda
+     tekrar tekrar kopyalanabiliyor, çoktan düzeltilmiş hatalar "hâlâ sürüyor" gibi
+     bildirilmeye devam ediyordu.
+     NASIL: Kopyalanan her kaydın üzerine `kop` damgası basılır ve damga KAYITLARLA BİRLİKTE
+     localStorage'a yazılır - sayfa kapatılıp açılsa, uygulama yeniden başlatılsa bile damga
+     kalıcıdır. Damgalı kayıtlar bir daha rapora GİRMEZ.
+     ÖNEMLİ: Damga KAYDA aittir, hataya değil. Aynı hata tekrar oluşursa yeni bir kayıt açılır
+     (bkz. record içindeki damgalı kayıt kontrolü) ve o yeni kayıt normal şekilde kopyalanır. */
+  /* KULLANICI BİLDİRDİ: "Buradaki bazı hatalar iki kere paylaşılmış olabilir, hem admin hem
+     de kullanıcı raporları bunlar."
+     KÖK SEBEP: Kopyalama damgası İKİ AYRI YERDE tutuluyordu. Kullanıcı tarafındaki damga
+     cihazın localStorage'ında, yönetici tarafındaki damga ise Firebase'deki kayıt düğümünde
+     duruyordu. Aynı hata her iki yere de gittiği için (ciddi kayıtlar Firebase'e de
+     gönderilir), kullanıcı kendi panelinden kopyalayıp yönetici de kendi ekranından
+     kopyaladığında AYNI hata iki kez raporlanıyordu - iki taraf birbirinin damgasını
+     görmüyordu.
+     ÇÖZÜM: Her kayda benzersiz bir kimlik (rid) verilir ve damgalar `diagnostics/copied`
+     altında ORTAK bir listede tutulur. Hangi taraf kopyalarsa kopyalasın damga oraya yazılır;
+     diğer taraf bunu canlı olarak görüp kaydı kendi tarafında da kilitler. Böylece bir kayıt
+     -kim kopyalarsa kopyalasın- yalnızca BİR KEZ raporlanabilir. */
+  /* KULLANICI BİLDİRDİ: "Admin veya kullanıcı önce kim kopyaladıysa uyarısı çıkıyor. Buna
+     rağmen kopyalanıyor. Eğer ilgili kişi kopyaladıysa, DİĞER KİŞİ KOPYALAMASIN."
+     KALAN AÇIK: Ortak damga listesi kayıt kimliğine (rid) göre eşleşiyordu. Ama rid bu
+     sürümle geldi - daha ÖNCE oluşmuş kayıtlarda rid YOK. Ayrıca uzak kayda rid hiç
+     ulaşmamış olabilir (eski istemci). Bu durumlarda iki taraf kaydı eşleştiremiyor,
+     biri kopyalasa bile diğeri "bu kayıt yeni" sanıp tekrar kopyalıyordu.
+     ÇÖZÜM: rid'in yanında bir de İÇERİK PARMAK İZİ üretilir. Parmak izi kaydın değişmeyen
+     alanlarından (uygulama + modül + tür + başlık + oluşma anı) hesaplanır; aynı kayıt iki
+     tarafta da AYNI parmak izini verir. Damga hem rid hem parmak izi altına yazılır, kontrol
+     de ikisine birden bakar - rid'i olmayan eski kayıtlar dahil hiçbir kayıt iki kez
+     kopyalanamaz. */
+  function fpAnahtar(app,mod,kind,title,ts){
+    var ham=[app||'',mod||'',kind||'',title||'',ts||''].join('|');
+    var h=5381;
+    for(var i=0;i<ham.length;i++)h=((h<<5)+h+ham.charCodeAt(i))>>>0;
+    return 'fp'+h.toString(36);
+  }
+  function kayitAnahtarlari(r){
+    var a=[];
+    if(r&&r.rid)a.push(r.rid);
+    if(r)a.push(fpAnahtar(APP,r.m,r.k,r.t,r.ts));
+    return a;
+  }
+  var _ridSayac=0;
+  function yeniRid(){return DEV_ID+'_'+Date.now().toString(36)+'_'+(++_ridSayac);}
+  // Ortak damga listesine abone ol: yönetici bir kaydı kopyaladığında bu cihazdaki kopyası
+  // da anında kilitlenir (ve tersi).
+  function abonelikOrtakDamga(){
+    try{
+      var db=(window.firebase&&firebase.database)?firebase.database():null;
+      if(!db)return;
+      db.ref('diagnostics/copied/'+DEV_ID).on('value',function(snap){
+        var v=snap.val()||{},n=0;
+        LOGS.forEach(function(r){
+          if(r.kop)return;
+          var anahtarlar=kayitAnahtarlari(r);
+          for(var i=0;i<anahtarlar.length;i++){
+            if(v[anahtarlar[i]]){r.kop=v[anahtarlar[i]];n++;return;}
+          }
+        });
+        if(n){try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}}
+      });
+    }catch(e){}
+  }
+  function yazOrtakDamga(kayitlar){
+    try{
+      var db=(window.firebase&&firebase.database)?firebase.database():null;
+      if(!db)return;
+      var upd={},t=Date.now(),v=false;
+      (kayitlar||[]).forEach(function(r){
+        kayitAnahtarlari(r).forEach(function(a){upd['diagnostics/copied/'+DEV_ID+'/'+a]=t;v=true;});
+      });
+      if(v)db.ref().update(upd).catch(function(){});
+    }catch(e){}
+  }
+  function kopyalanmamisKayitlar(modId){
+    return LOGS.filter(function(r){return (!modId||r.m===modId)&&!r.kop;});
+  }
+  function damgalaKopyalandi(kayitlar){
+    var t=Date.now(),n=0;
+    (kayitlar||[]).forEach(function(r){if(r&&!r.kop){r.kop=t;n++;}});
+    if(n){
+      // Anında (gecikmesiz) yazılır: kullanıcı kopyaladıktan hemen sonra uygulamayı
+      // kapatırsa damga kaybolmasın.
+      try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}
+      // Damga ayrıca ORTAK listeye yazılır - yönetici tarafı da aynı kaydı bir daha
+      // kopyalayamasın (çift raporlamanın önlenmesi).
+      yazOrtakDamga(kayitlar);
+    }
+    return n;
+  }
   var _throttle={};
+  /* Admin tarafında kayıt bırakan kişi, giriş yapan yöneticidir. Önceden herkes için sabit
+     "Yönetici" yazılıyordu; artık alt yönetici hesapları da isimleriyle ayırt edilir
+     (giriş anında sessionStorage'a yazılır - bkz. doLogin/admName). */
   function whoAmI(){
     try{
-      if(APP==='adm')return 'Yönetici';
-      return (window._userName||'(anonim)');
-    }catch(e){return '?';}
+      var ad='';
+      try{ad=sessionStorage.getItem('admName')||'';}catch(e){}
+      if(!ad){
+        var rol='';
+        try{rol=sessionStorage.getItem('admRole')||'';}catch(e){}
+        ad=(rol==='full')?'Ana Yönetici':'Yönetici';
+      }
+      return ad;
+    }catch(e){return 'Yönetici';}
   }
   function record(modId,kind,title,detail){
     if(!isOn(modId))return;
     var key=modId+'|'+kind+'|'+title, now=Date.now();
     if(_throttle[key]&&now-_throttle[key]<2500){
       for(var i=LOGS.length-1;i>=0;i--){
-        if(LOGS[i].m===modId&&LOGS[i].t===title){LOGS[i].n=(LOGS[i].n||1)+1;LOGS[i].ts=now;break;}
+        if(LOGS[i].m===modId&&LOGS[i].t===title){
+          // Kopyalanmış (damgalı) bir kaydın üzerine tekrar sayısı EKLENMEZ - aksi halde
+          // yeni oluşan hata, artık raporlanamayan eski kaydın içinde kaybolurdu.
+          // Bu durumda döngüden çıkılır ve aşağıda YENİ bir kayıt açılır.
+          if(LOGS[i].kop)break;
+          LOGS[i].n=(LOGS[i].n||1)+1;LOGS[i].ts=now;persist();return;
+        }
       }
-      persist();return;
     }
     _throttle[key]=now;
-    var rec={m:modId,k:kind,t:title,d:detail||null,ts:now,n:1};
+    var rec={m:modId,k:kind,t:title,d:detail||null,ts:now,n:1,rid:yeniRid()};
     LOGS.push(rec);
     if(LOGS.length>MAX_LOCAL)LOGS.splice(0,LOGS.length-MAX_LOCAL);
     persist();
@@ -16656,7 +16804,7 @@ window.saveBulkScores = async function(wrap) {
         app:APP,appLabel:APP_LABEL,mod:rec.m,modLabel:(modById(rec.m)||{}).label||rec.m,
         kind:rec.k,title:rec.t,detail:rec.d?JSON.stringify(rec.d).slice(0,900):null,
         user:whoAmI(),ts:rec.ts,ua:(navigator.userAgent||'').slice(0,140),
-        dev:DEV_ID
+        dev:DEV_ID,rid:rec.rid||null
       }).catch(function(){});
       // Kayıt gönderen her cihazın kimlik kartı da güncel tutulur (kullanıcı adı değişmiş
       // olabilir: anonim gezerken hata oluştu, sonra giriş yaptı).
@@ -16718,6 +16866,7 @@ window.saveBulkScores = async function(wrap) {
   function install(){
     MODULES.forEach(function(m){(m.fns||[]).forEach(function(fn){wrapFn(fn,m.id);});});
     subscribeFlags();
+    abonelikOrtakDamga();
     // Herhangi bir modül AÇIKSA cihaz kimlik kartı bir kez yazılır - böylece admin, o cihazdan
     // henüz hata gelmemiş olsa bile "kayıtlı cihazlar" listesinde onu görebilir.
     setTimeout(function(){
@@ -16783,15 +16932,22 @@ window.saveBulkScores = async function(wrap) {
     logs:function(){return LOGS;},stats:STATS,missing:MISSING,
     kaydet:record,
     sessiz:sessiz,
+    kopyalanmamis:kopyalanmamisKayitlar,
+    damgala:damgalaKopyalandi,
     temizle:function(){LOGS.length=0;try{localStorage.removeItem('diag_logs_'+APP);}catch(e){}},
     rapor:function(){
       var L=['=== '+APP_LABEL+' · NOKTA ATIŞI TEŞHİS RAPORU ==='];
-      L.push('Tarih: '+new Date().toLocaleString('tr-TR'));
+      L.push('Rapor tarihi: '+new Date().toLocaleString('tr-TR'));
       L.push('Açık modüller: '+MODULES.filter(function(m){return isOn(m.id);}).map(function(m){return m.label;}).join(', ')||'(yok)');
+      // ÖZET: raporu okuyan kişi kayıtların kaçının GÜNCEL olduğunu ilk satırda görsün.
+      var buOturum=LOGS.filter(function(r){return r.ts>=OTURUM_BASI;}).length;
+      var enEski=LOGS.reduce(function(a,r){return (!a||r.ts<a)?r.ts:a;},0);
+      L.push('Kayıt: '+LOGS.length+' (bu oturumdan '+buOturum+', önceki oturumlardan '+(LOGS.length-buOturum)+')');
+      if(enEski)L.push('En eski kayıt: '+tamTarih(enEski)+'  ·  '+SAKLAMA_GUN+' günden eski kayıtlar otomatik silinir');
       L.push('');
       LOGS.slice().reverse().forEach(function(r){
         var m=modById(r.m);
-        L.push('['+new Date(r.ts).toLocaleTimeString('tr-TR')+'] '+(m?m.label:r.m)+' · '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
+        L.push('['+tamTarih(r.ts)+']'+oturumEtiketi(r.ts)+' '+(m?m.label:r.m)+' · '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
         if(r.d)Object.keys(r.d).forEach(function(k){
           var v=r.d[k];if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' | '):JSON.stringify(v);
           L.push('    '+k+': '+v);
@@ -17055,6 +17211,7 @@ function openDiagnosticsManager(){
   renderDiagModuleList();
   subscribeDiagLogs();
   subscribeDiagDevices();
+  subscribeDiagCopied();
   subscribeDiagMissing();
   // Admin ekranı açıp kayıtları gördüğü an, bekleyen "yeni hata" rozeti sıfırlanır.
   if(_diagUnseenErrorCount>0){_diagUnseenErrorCount=0;renderAdminMenuButtons();}
@@ -17225,6 +17382,54 @@ var _diagOpenDevice=null;     // o an açık olan cihaz detayının kimliği (ca
 // henüz hiç hata göndermemiş cihazlar da listede görünür ve isimleri gerçek modeldir.
 var _diagDevices={};
 var _diagDevicesRef=null;
+/* KULLANICI BİLDİRDİ: "Bazı hatalar iki kere paylaşılmış olabilir, hem admin hem kullanıcı
+   raporları bunlar." - Kullanıcı kendi cihazından kopyaladığı kayıtların damgasını
+   `diagnostics/copied/{cihaz}/{rid}` altına yazar. Yönetici tarafı bu listeyi okur ve aynı
+   kaydı ikinci kez kopyalanamaz hale getirir; tersi de geçerlidir (yönetici kopyalarsa
+   kullanıcının cihazı da anında kilitlenir). Böylece bir hata KİM kopyalarsa kopyalasın
+   yalnızca bir kez raporlanır. */
+var _diagCopied={};
+var _diagCopiedRef=null;
+function subscribeDiagCopied(){
+  try{
+    if(_diagCopiedRef)_diagCopiedRef.off();
+    _diagCopiedRef=db.ref('diagnostics/copied');
+    _diagCopiedRef.on('value',function(snap){
+      _diagCopied=snap.val()||{};
+      renderDiagLogList();
+      if(_diagOpenDevice)renderDiagDeviceLogList();
+    },function(){});
+  }catch(e){}
+}
+// Kayıt daha önce kopyalanmış mı? İki kaynak birlikte değerlendirilir: kaydın kendi damgası
+// (yönetici kopyaladıysa) ve ortak liste (kullanıcı kendi cihazından kopyaladıysa).
+// Uzak kaydın ortak damga listesindeki anahtarları. DiagCore'daki fpAnahtar() ile BİREBİR
+// aynı formülü kullanır - aksi halde iki taraf aynı kaydı farklı anahtarla arar ve eşleşme
+// hiç olmazdı. (rid'i olmayan eski kayıtlar da parmak izi sayesinde eşleşir.)
+function diagFpAnahtar(app,mod,kind,title,ts){
+  var ham=[app||'',mod||'',kind||'',title||'',ts||''].join('|');
+  var h=5381;
+  for(var i=0;i<ham.length;i++)h=((h<<5)+h+ham.charCodeAt(i))>>>0;
+  return 'fp'+h.toString(36);
+}
+function diagKayitAnahtarlari(r){
+  var a=[];
+  if(r&&r.rid)a.push(r.rid);
+  if(r)a.push(diagFpAnahtar(r.app,r.mod,r.kind,r.title,r.ts));
+  return a;
+}
+function diagKopyalandiMi(r){
+  if(!r)return false;
+  if(r.kopyalandi)return r.kopyalandi;
+  var kutu=r.dev&&_diagCopied[r.dev];
+  if(kutu){
+    var anahtarlar=diagKayitAnahtarlari(r);
+    for(var i=0;i<anahtarlar.length;i++){
+      if(kutu[anahtarlar[i]])return {ts:kutu[anahtarlar[i]],by:'kullanıcının kendi cihazından'};
+    }
+  }
+  return false;
+}
 function subscribeDiagDevices(){
   try{
     if(_diagDevicesRef)_diagDevicesRef.off();
@@ -17284,8 +17489,11 @@ function diagDeviceUser(devKey,g){
   var adlar={};
   if(d&&d.kullanici)adlar[d.kullanici]=true;
   if(g)Object.keys(g.users||{}).forEach(function(u){adlar[u]=true;});
-  var liste=Object.keys(adlar).filter(function(u){return u&&u!=='?';});
-  return liste.length?liste.join(', '):'(anonim / giriş yapmamış)';
+  // Eski kayıtlarda kalan yer tutucular gerçek isim sayılmaz - aksi halde kullanıcı adı
+  // olarak "(anonim)" gibi bir metin gösterilir ve gerçek isim varsa onun önüne geçerdi.
+  var yerTutucu=/^\(?(anonim|giriş yapılmamış|giris yapilmamis|\?)\)?$/i;
+  var liste=Object.keys(adlar).filter(function(u){return u&&!yerTutucu.test(u.trim());});
+  return liste.length?liste.join(', '):'(henüz giriş yapılmamış)';
 }
 // Tarayıcı imzasından okunabilir bir cihaz adı üretir. Kişisel bilgi içermez.
 function diagDeviceLabel(ua){
@@ -17317,7 +17525,7 @@ function diagDeviceGroups(){
     if(r.user)g.users[r.user]=true;
     if(r.appLabel||r.app)g.apps[r.appLabel||r.app]=true;
     if(r.kind==='hata')g.errs++;
-    if(r.kopyalandi)g.kopyalanan++;
+    if(diagKopyalandiMi(r))g.kopyalanan++;
     if((r.ts||0)>g.son)g.son=r.ts||0;
     if(!g.ua&&r.ua)g.ua=r.ua;
   });
@@ -17358,7 +17566,13 @@ function diagMarkCopied(keys){
   var kim='Yönetici';
   try{kim=sessionStorage.getItem('admName')||(sessionStorage.getItem('admRole')==='full'?'Ana Yönetici':'Yönetici');}catch(e){}
   var upd={},damga={ts:Date.now(),by:kim};
-  keys.forEach(function(k){upd['diagnostics/logs/'+k+'/kopyalandi']=damga;});
+  keys.forEach(function(k){
+    upd['diagnostics/logs/'+k+'/kopyalandi']=damga;
+    // Ortak listeye de yazılır ki kaydı gönderen CİHAZ da aynı kaydı bir daha kopyalayamasın.
+    // Hem kayıt kimliği hem içerik parmak izi yazılır (eski kayıtlarda rid yoktur).
+    var r=_diagRemoteLogs.filter(function(x){return x._key===k;})[0];
+    if(r&&r.dev)diagKayitAnahtarlari(r).forEach(function(a){upd['diagnostics/copied/'+r.dev+'/'+a]=damga.ts;});
+  });
   return db.ref().update(upd).catch(function(e){
     toast('⚠️ Kopyalama damgası yazılamadı: '+((e&&e.message)||'bilinmeyen hata'),'er');
   });
@@ -17405,7 +17619,7 @@ function openDiagDeviceLogs(devKey){
   _diagOpenDevice=devKey;
   var g=diagDeviceGroups().filter(function(x){return x.key===devKey;})[0];
   if(!g){toast('Bu cihaza ait kayıt kalmadı','er');_diagOpenDevice=null;return;}
-  var kalan=g.logs.filter(function(r){return !r.kopyalandi;}).length;
+  var kalan=g.logs.filter(function(r){return !diagKopyalandiMi(r);}).length;
   var esc=function(x){return escHtml(x).replace(/'/g,"\\'");};
   var kart=_diagDevices[devKey]||{};
   var html='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.55rem .65rem;margin-bottom:.7rem">'
@@ -17434,7 +17648,7 @@ function renderDiagDeviceLogList(){
   var g=diagDeviceGroups().filter(function(x){return x.key===_diagOpenDevice;})[0];
   if(!g){box.innerHTML='<div style="font-size:.68rem;color:var(--mu);padding:.8rem;text-align:center">Bu cihaza ait kayıt kalmadı.</div>';return;}
   box.innerHTML=g.logs.map(function(r){
-    var pasif=!!r.kopyalandi;
+    var pasif=diagKopyalandiMi(r);
     var color=r.kind==='hata'?'#f87171':(r.kind==='yavas'?'#fbbf24':'var(--mu)');
     var icon=r.kind==='hata'?'🛑':(r.kind==='yavas'?'🐌':'ℹ️');
     var det='';
@@ -17457,7 +17671,7 @@ function renderDiagDeviceLogList(){
       +'<span style="font-size:.55rem;color:var(--mu);white-space:nowrap">'+(r.ts?new Date(r.ts).toLocaleString('tr-TR'):'')+'</span></div>'
       +'<div style="font-size:.58rem;color:var(--ac3);margin-top:.1rem">'+escHtml(r.appLabel||r.app||'')+' · '+escHtml(r.modLabel||r.mod||'')+'</div>'
       +det
-      +(pasif?'<div style="font-size:.55rem;color:#fbbf24;margin-top:.3rem;font-weight:700">🔒 Bu kayıt '+escHtml(diagZaman(r.kopyalandi.ts))+' kopyalandı'+(r.kopyalandi.by?' ('+escHtml(r.kopyalandi.by)+')':'')+' - yeniden kopyalanamaz. Aynı hata tekrar oluşursa yeni bir kayıt açılır.</div>':'')
+      +(pasif?'<div style="font-size:.55rem;color:#fbbf24;margin-top:.3rem;font-weight:700">🔒 Bu kayıt '+escHtml(diagZaman(pasif.ts))+' kopyalandı'+(pasif.by?' ('+escHtml(pasif.by)+')':'')+' - yeniden kopyalanamaz. Aynı hata tekrar oluşursa yeni bir kayıt açılır.</div>':'')
       +'<div style="display:flex;gap:.3rem;justify-content:flex-end;margin-top:.3rem">'
       +kopyaBtn
       +'<button onclick="diagDeleteLog(\''+escHtml(r._key)+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:7px;padding:.25rem .5rem;min-height:28px;color:#f87171;font-size:.56rem;font-weight:800;cursor:pointer">🗑️ Sil</button>'
@@ -17468,7 +17682,7 @@ function renderDiagDeviceLogList(){
 function diagCopyLog(key){
   var r=_diagRemoteLogs.filter(function(x){return x._key===key;})[0];
   if(!r)return;
-  if(r.kopyalandi){
+  if(diagKopyalandiMi(r)){
     toast('🔒 Bu kayıt daha önce kopyalandı, yeniden kopyalanamaz. Aynı hata tekrar oluşursa yeni kayıt açılır.','er');
     return;
   }
@@ -17478,7 +17692,7 @@ function diagCopyLog(key){
 function diagCopyDeviceLogs(devKey){
   var g=diagDeviceGroups().filter(function(x){return x.key===devKey;})[0];
   if(!g){toast('Bu cihaza ait kayıt kalmadı','er');return;}
-  var yeni=g.logs.filter(function(r){return !r.kopyalandi;});
+  var yeni=g.logs.filter(function(r){return !diagKopyalandiMi(r);});
   if(!yeni.length){
     toast('🔒 Bu cihazdaki tüm kayıtlar daha önce kopyalandı. Aynı hatalar tekrar oluşursa yeni kayıtlar açılır.','er');
     return;
@@ -17540,7 +17754,7 @@ function diagLogToText(r){
 function diagCopyAllLogs(){
   // Toplu kopyalama da tek tek kopyalamayla AYNI kuralı uygular: daha önce kopyalanmış
   // kayıtlar atlanır ve kopyalananlar damgalanır (bkz. diagMarkCopied).
-  var rows=_diagRemoteLogs.filter(function(r){return (_diagFilterApp==='all'||r.app===_diagFilterApp)&&!r.kopyalandi;});
+  var rows=_diagRemoteLogs.filter(function(r){return (_diagFilterApp==='all'||r.app===_diagFilterApp)&&!diagKopyalandiMi(r);});
   var toplam=_diagRemoteLogs.filter(function(r){return _diagFilterApp==='all'||r.app===_diagFilterApp;}).length;
   if(!toplam){if(typeof toast==='function')toast('Kopyalanacak kayıt yok');return;}
   if(!rows.length){
@@ -17716,7 +17930,10 @@ function diagClearRemoteLogs(){
      rozet her saniye kendini yeniden çizdiği için "titreme" ve "DOM fırtınası" sayaçlarını
      da şişiriyor, gerçek bulguları gürültüye boğuyordu. Artık teşhis arayüzüne ait hiçbir
      öğe ne taranır ne de DOM değişiklik sayacına girer. */
-  var DIAG_SELF_SEL='.diagHudBadge,#diagHudPanel,#diagRefPhotoOv,#ptDoctorBtn,#admDoctorBtn,#ptDoctorPanel,#admDoctorPanel,.diagMiniBg';
+  // KULLANICI RAPORUNDAN: "#ptDoctorBadge" hâlâ bulgu üretiyordu - sohbet teşhis butonunun
+  // sayaç rozeti de teşhis arayüzünün parçasıdır, ölçüme girmemeli.
+  var DIAG_SELF_SEL='.diagHudBadge,#diagHudPanel,#diagRefPhotoOv,#ptDoctorBtn,#admDoctorBtn,'
+    +'#ptDoctorBadge,#admDoctorBadge,#ptDoctorPanel,#admDoctorPanel,#ptDoctorCopyWarn,#diagCopyWarn,.diagMiniBg';
   function kendiMi(el){
     if(!el||el.nodeType!==1)return false;
     try{return !!(el.closest&&el.closest(DIAG_SELF_SEL));}catch(e){return false;}
@@ -18360,7 +18577,21 @@ function diagClearRemoteLogs(){
 
 
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-  function fmt(ts){var d=new Date(ts);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);}
+  /* KULLANICI BİLDİRDİ: Panel ve raporlarda yalnızca SAAT gösteriliyordu; günler önceki
+     kayıtlar en yenilerle iç içe, "az önce olmuş" gibi okunuyordu. Artık tam tarih ve
+     kaydın bu oturuma mı önceki bir oturuma mı ait olduğu birlikte yazılır. */
+  var HUD_OTURUM_BASI=Date.now();
+  function fmt(ts){
+    if(!ts)return '?';
+    try{return new Date(ts).toLocaleString('tr-TR');}catch(e){return String(ts);}
+  }
+  function oturumNotu(ts){
+    if(!ts)return '';
+    if(ts>=HUD_OTURUM_BASI)return ' · bu oturum';
+    var gun=Math.floor((Date.now()-ts)/86400000);
+    return gun>=1?(' · '+gun+' gün önce'):' · önceki oturum';
+  }
+  function eskiMi(ts){return !!ts&&ts<HUD_OTURUM_BASI;}
 
   // ── Detay paneli ─────────────────────────────────────────────────────────────────────
   function openPanel(id){
@@ -18389,10 +18620,13 @@ function diagClearRemoteLogs(){
         var v=r.d[k2];if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' ⏎ '):JSON.stringify(v);
         return '<b>'+esc(k2)+':</b> '+esc(String(v));
       }).join('<br/>')+'</div>':'';
-      return '<div style="background:rgba(128,128,128,.12);border-left:3px solid '+c+';border-radius:8px;padding:.4rem .5rem;margin-bottom:.35rem">'
+      // Geçmiş oturumlardan kalan kayıtlar SOLUK gösterilir ve ne zaman oluştukları
+      // açıkça yazar - böylece çoktan düzeltilmiş eski bir hata "hâlâ sürüyor" sanılmaz.
+      var eski=eskiMi(r.ts);
+      return '<div style="background:rgba(128,128,128,'+(eski?'.07':'.12')+');border-left:3px solid '+c+';border-radius:8px;padding:.4rem .5rem;margin-bottom:.35rem;opacity:'+(eski?'.62':'1')+'">'
         +'<div style="display:flex;justify-content:space-between;gap:.4rem">'
         +'<b style="font-size:.64rem;color:'+c+'">'+ico+' '+esc(r.t)+(r.n>1?' ×'+r.n:'')+'</b>'
-        +'<span style="font-size:.54rem;opacity:.7;white-space:nowrap">'+fmt(r.ts)+'</span></div>'+det+'</div>';
+        +'<span style="font-size:.5rem;opacity:.75;white-space:nowrap;text-align:right">'+fmt(r.ts)+'<br/>'+esc(oturumNotu(r.ts).replace(/^ · /,''))+'</span></div>'+det+'</div>';
     }).join(''):'<div style="text-align:center;font-size:.66rem;opacity:.7;padding:1rem 0">✅ Bu bölümde henüz hata yakalanmadı.<br><span style="font-size:.58rem">Sorunu yeniden deneyin - oluştuğu an burada görünecek.</span></div>';
 
     var ov=document.createElement('div');
@@ -18408,6 +18642,7 @@ function diagClearRemoteLogs(){
       +'<button data-x="copy" style="flex:1;background:#7c3aed;border:none;border-radius:9px;padding:.42rem;color:#fff;font-size:.64rem;font-weight:800;cursor:pointer">📋 Kopyala</button>'
       +'<button data-x="clear" style="flex:1;background:#23262d;border:1px solid #3f434c;border-radius:9px;padding:.42rem;color:#9ca3af;font-size:.64rem;font-weight:800;cursor:pointer">🗑️ Temizle</button>'
       +'</div>'
+      +'<div id="diagCopyWarn" style="display:none;margin-top:.5rem;background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.4);border-radius:9px;padding:.45rem .55rem;font-size:.58rem;color:#fbbf24;line-height:1.5">🔒 <b>Bu kayıtlar daha önce kopyalandı.</b> Aynı rapor ikinci kez kopyalanamaz - uygulamayı kapatıp açsanız bile. Bu kural, çoktan düzeltilmiş eski hataların tekrar tekrar bildirilmesini önler. <b>Aynı hata tekrar oluşursa yeni bir kayıt açılır</b> ve o kopyalanabilir.</div>'
       +'<div style="background:rgba(128,128,128,.1);border-radius:9px;padding:.5rem .6rem;margin-bottom:.7rem">'
       +'<div style="display:flex;justify-content:space-between;font-size:.62rem;margin-bottom:.3rem"><span style="opacity:.7">İzlenen fonksiyon</span><b>'+st.fn+' / '+((core().modules.filter(function(m){return m.id===id;})[0]||{fns:[]}).fns.length)+'</b></div>'
       +'<div style="display:flex;justify-content:space-between;font-size:.62rem;margin-bottom:.3rem"><span style="opacity:.7">Toplam çağrı</span><b>'+st.cagri+'</b></div>'
@@ -18425,7 +18660,19 @@ function diagClearRemoteLogs(){
         // clipboard yazımı başarısız olsa bile buton HER ZAMAN "✅ Kopyalandı" yazıyordu.
         // Artık mevcut KESİN çözüme (admGlobalCopyText → gerekirse admManualCopyModal)
         // bağlanıyor, buton metni gerçek sonuca göre güncelleniyor.
+        // KULLANICI TALEBİ: Aynı kayıt ikinci kez kopyalanamaz (uygulama kapanıp açılsa bile).
+        var C3=core(),btnEl0=e.target;
+        var kopyalanacak=(C3.kopyalanmamis?C3.kopyalanmamis(id):(C3.logs()||[]).filter(function(r){return r.m===id&&!r.kop;}));
+        if(!kopyalanacak.length){
+          btnEl0.textContent='🔒 Zaten kopyalandı';
+          var uyari=document.getElementById('diagCopyWarn');
+          if(uyari)uyari.style.display='block';
+          return;
+        }
         var txt=buildReport(id),btnEl=e.target;
+        // Damga kopyalama denemesinden HEMEN SONRA basılır ve kalıcı olarak saklanır.
+        if(C3.damgala)C3.damgala(kopyalanacak);
+        setTimeout(function(){_lastCounts='';tick();},0);
         if(typeof admGlobalCopyText==='function'){
           admGlobalCopyText(txt,'📋 Kopyalandı');
           btnEl.textContent='✅ Kopyalandı';
@@ -18447,13 +18694,20 @@ function diagClearRemoteLogs(){
   function buildReport(id){
     var C=core();
     var L=['=== '+C.appLabel+' · '+modLabel(id)+' · TEŞHİS ==='];
-    L.push('Tarih: '+new Date().toLocaleString('tr-TR'));
+    L.push('Rapor tarihi: '+new Date().toLocaleString('tr-TR'));
     L.push('Cihaz: '+navigator.userAgent);
     var st=modStats(id);
     L.push('Çağrı: '+st.cagri+' · Hata: '+st.hata+' · En uzun: '+Math.round(st.enUzun)+'ms');
+    // KULLANICI TALEBİ: Rapora YALNIZCA daha önce kopyalanmamış kayıtlar girer. Damga
+    // kalıcı olduğu için uygulama kapatılıp açılsa bile aynı kayıt ikinci kez kopyalanamaz.
+    var kL=modLogs(id).filter(function(r){return !r.kop;});
+    var yeni=kL.filter(function(r){return !eskiMi(r.ts);}).length;
+    var damgali=modLogs(id).length-kL.length;
+    L.push('Kayıt: '+kL.length+' yeni (bu oturumdan '+yeni+', önceki oturumlardan '+(kL.length-yeni)+')');
+    if(damgali)L.push('Not: '+damgali+' kayıt daha önce kopyalandığı için bu rapora dahil edilmedi.');
     L.push('');
-    modLogs(id).slice().reverse().forEach(function(r){
-      L.push('['+fmt(r.ts)+'] '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
+    kL.slice().reverse().forEach(function(r){
+      L.push('['+fmt(r.ts)+oturumNotu(r.ts)+'] '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
       if(r.d)Object.keys(r.d).forEach(function(k){
         var v=r.d[k];if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' | '):JSON.stringify(v);
         L.push('    '+k+': '+v);

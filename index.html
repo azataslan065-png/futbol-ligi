@@ -5345,7 +5345,18 @@ setInterval(checkTickerHealth,4000);
    checkTickerHealth ile AYNI YÖNTEM kullanılıyor: beklenen davranış (bağlıyken düzenli
    tetiklenme) ile gerçek durum kıyaslanıyor.
    ═══════════════════════════════════════════════════════════════════════════════════════ */
-let _ptDataDoctor={connected:null,disconnectedSince:null,connWarned:false,deadWarned:false};
+/* KULLANICI RAPORUNDAN: "Firebase bağlantısı 30 saniyeden uzun süredir kopuk · kopukSure:36sn"
+   İKİ SORUN VARDI:
+   1) YANLIŞ ALARM: Telefon ekranı kapandığında veya sekme arka plana alındığında tarayıcı
+      soketi kapatır; Firebase "kopuk" görünür. Kullanıcı hiçbir kesinti yaşamamıştır ama
+      uygulamaya geri dönüldüğünde "36 saniye kopuktu" diye hata kaydı düşüyordu. Artık
+      kopukluk yalnızca sayfa ÖN PLANDAYKEN sayılır - ekran kapalıyken geçen süre sayılmaz.
+   2) KAPANMAYAN KAYIT: Yalnızca kopma kaydediliyor, geri gelme kaydedilmiyordu. Rapora
+      bakan kişi bağlantının hâlâ kopuk olduğunu sanıyordu. Artık bağlantı döndüğünde
+      toplam kesinti süresiyle birlikte bir "geri geldi" kaydı düşer - kayıt kendi kendini
+      kapatır. */
+let _ptDataDoctor={connected:null,disconnectedSince:null,connWarned:false,deadWarned:false,
+                   onPlanKopukMs:0,sonTur:0};
 (function(){
   try{
     if(typeof db==='undefined'||!db||!db.ref)return;
@@ -5357,22 +5368,45 @@ let _ptDataDoctor={connected:null,disconnectedSince:null,connWarned:false,deadWa
       if(!isConn){
         if(!_ptDataDoctor.disconnectedSince)_ptDataDoctor.disconnectedSince=Date.now();
       }else{
-        _ptDataDoctor.disconnectedSince=null;_ptDataDoctor.connWarned=false;
+        // Gerçekten bir kesinti kaydedilmişse, çözüldüğünü de kaydet - böylece raporu okuyan
+        // kişi sorunun sürüp sürmediğini bilir.
+        if(_ptDataDoctor.connWarned&&window.DiagCore&&DiagCore.kaydet){
+          DiagCore.kaydet('pt_data','bilgi','Firebase bağlantısı geri geldi',{
+            toplamKesinti:Math.round(_ptDataDoctor.onPlanKopukMs/1000)+'sn (yalnızca ekran açıkken geçen süre)',
+            not:'Yukarıdaki "bağlantı kopuk" kaydı bu anda ÇÖZÜLDÜ - sorun sürmüyor.'
+          });
+        }
+        _ptDataDoctor.disconnectedSince=null;_ptDataDoctor.connWarned=false;_ptDataDoctor.onPlanKopukMs=0;
       }
     });
-  }catch(e){DiagSil('checkTickerHealth',e);}
+  }catch(e){DiagSil('baglantiDurumuAbonesi',e);}
 })();
 function checkDataHealth(){
   try{
     if(!(window.DiagCore&&window.DiagCore.isOn('pt_data')))return;
 
-    // 1) UZUN SÜRELİ BAĞLANTI KOPUKLUĞU
-    if(_ptDataDoctor.disconnectedSince && (Date.now()-_ptDataDoctor.disconnectedSince)>30000 && !_ptDataDoctor.connWarned){
+    // 1) UZUN SÜRELİ BAĞLANTI KOPUKLUĞU (yalnızca EKRAN AÇIKKEN geçen süre sayılır)
+    const _simdi=Date.now();
+    // Sekme uykudayken zamanlayıcı hiç çalışmaz; uyanınca devasa bir fark oluşur. Bu yüzden
+    // her turda eklenen süre, tur aralığının biraz üstüyle sınırlanır.
+    const _delta=_ptDataDoctor.sonTur?Math.min(_simdi-_ptDataDoctor.sonTur,15000):0;
+    _ptDataDoctor.sonTur=_simdi;
+    if(_ptDataDoctor.connected===false&&!document.hidden)_ptDataDoctor.onPlanKopukMs+=_delta;
+
+    if(_ptDataDoctor.onPlanKopukMs>30000 && !_ptDataDoctor.connWarned){
       _ptDataDoctor.connWarned=true;
+      // Cihazın kendi ağı mı kapalı, yoksa ağ var da Firebase'e mi ulaşılamıyor? İkisi
+      // tamamen farklı sorunlardır ve farklı çözüm gerektirir.
+      const _cihazCevrimdisi=(navigator.onLine===false);
       DiagCore.kaydet('pt_data','hata','Firebase bağlantısı 30 saniyeden uzun süredir kopuk',{
-        kopukSure:Math.round((Date.now()-_ptDataDoctor.disconnectedSince)/1000)+'sn',
-        sebep:'.info/connected sürekli false dönüyor - ağ sorunu, güvenlik duvarı/VPN engeli ya da Firebase tarafında geçici kesinti olabilir.',
-        tavsiye:'Cihazın ağ bağlantısını ve (tekrarlıyorsa) Firebase konsolundaki proje/veritabanı durumunu kontrol edin. connStatusBar kullanıcıya zaten görünür olmalı.'
+        kopukSure:Math.round(_ptDataDoctor.onPlanKopukMs/1000)+'sn (yalnızca ekran açıkken geçen süre)',
+        cihazAgi:_cihazCevrimdisi?'KAPALI - cihazın kendi internet bağlantısı yok':'açık',
+        sebep:_cihazCevrimdisi
+          ? 'Cihazın interneti kesik olduğu için Firebase\'e ulaşılamıyor. Bu uygulama kaynaklı bir sorun değildir.'
+          : 'Cihazın interneti açık olduğu halde .info/connected sürekli false dönüyor - güvenlik duvarı/VPN engeli ya da Firebase tarafında kesinti olabilir.',
+        tavsiye:_cihazCevrimdisi
+          ? 'Kullanıcının ağ bağlantısı geri geldiğinde uygulama kendiliğinden senkronize olur; ek işlem gerekmez.'
+          : 'Tekrarlıyorsa Firebase konsolundaki proje/veritabanı durumunu ve varsa ağ kısıtlamalarını kontrol edin.'
       },60000);
     }
 
@@ -8348,7 +8382,7 @@ html+=`<div id="st_homeaway" style="display:${_statTab==='homeaway'?'':'none'}">
   try{
     const scenBtn='<button onclick="openScenarioScreen()" style="width:100%;background:linear-gradient(135deg,var(--ac),var(--ac3));border:none;border-radius:12px;padding:.7rem;color:#fff;font-size:.82rem;font-weight:800;cursor:pointer;margin-bottom:.75rem;box-shadow:0 4px 14px rgba(0,0,0,.3)">🎯 Averaj Senaryoları</button>';
     el.insertAdjacentHTML('afterbegin',scenBtn);
-  }catch(e){DiagSil('findPlayerTeamName',e);}
+  }catch(e){DiagSil('renderStandings/senaryoButonu',e);}
 }
 window.showStatTab=function(tab){_statTab=tab;['seasonsummary','goals','assists','yellow','red','yellow2red','streak','minutes','best11','homeaway','teamtotals','referees','mvp','career','motm'].forEach(t=>{const d=document.getElementById('st_'+t);const b=document.getElementById('stab_'+t);if(d)d.style.display=t===tab?'':'none';if(b){b.classList.toggle('active',t===tab);}});};
 
@@ -13752,9 +13786,9 @@ function renderPlayerCompare(el,modeToggleHtml){
     const better=vA>vB?'a':vA<vB?'b':'';
     return `<div style="margin-bottom:.72rem">
       <div style="display:flex;justify-content:space-between;font-size:.7rem;font-weight:700;margin-bottom:.28rem">
-        <span style="color:${better==='a'?'var(--ac3)':'var(--tx)'}">${vA}</span>
-        <span style="font-size:.62rem;color:var(--mu);font-weight:600">${label}</span>
-        <span style="color:${better==='b'?'var(--ac3)':'var(--tx)'}">${vB}</span>
+        <span style="color:${better==='a'?'var(--ac3)':'var(--tx)'};min-width:2.2rem;text-align:left">${vA}</span>
+        <span style="font-size:.62rem;color:var(--mu);font-weight:600;flex:0 0 auto;white-space:nowrap;padding:0 .4rem">${label}</span>
+        <span style="color:${better==='b'?'var(--ac3)':'var(--tx)'};min-width:2.2rem;text-align:right">${vB}</span>
       </div>
       <div style="display:flex;gap:2px;height:6px;border-radius:4px;overflow:hidden;background:var(--s3)">
         <div style="flex:${vA||0.01};background:${better==='a'?'var(--ac)':'var(--br2)'}"></div>
@@ -13899,9 +13933,9 @@ function renderCompare(){
     const better=vA>vB?'a':vA<vB?'b':'';
     return `<div style="margin-bottom:.72rem">
       <div style="display:flex;justify-content:space-between;font-size:.7rem;font-weight:700;margin-bottom:.28rem">
-        <span style="color:${better==='a'?'var(--ac3)':'var(--tx)'}">${vA}</span>
-        <span style="font-size:.62rem;color:var(--mu);font-weight:600">${label}</span>
-        <span style="color:${better==='b'?'var(--ac3)':'var(--tx)'}">${vB}</span>
+        <span style="color:${better==='a'?'var(--ac3)':'var(--tx)'};min-width:2.2rem;text-align:left">${vA}</span>
+        <span style="font-size:.62rem;color:var(--mu);font-weight:600;flex:0 0 auto;white-space:nowrap;padding:0 .4rem">${label}</span>
+        <span style="color:${better==='b'?'var(--ac3)':'var(--tx)'};min-width:2.2rem;text-align:right">${vB}</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
         <div style="height:5px;border-radius:3px;background:var(--br);overflow:hidden;direction:rtl"><div style="height:100%;width:${pA}%;background:${better==='a'?'var(--ac)':'var(--br2)'};border-radius:3px"></div></div>
@@ -13934,7 +13968,7 @@ function renderCompare(){
     <div class="st-card" style="padding:.85rem">
       <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:.5rem;margin-bottom:.85rem">
         ${teamHead(tA,sA,'a')}
-        <div style="text-align:center"><div style="font-size:.62rem;color:var(--mu);font-weight:700">H2H</div><div style="font-size:1.1rem;font-weight:900">${h2h.length?`${aWins}-${draws}-${bWins}`:'—'}</div><div style="font-size:.55rem;color:var(--mu)">G-B-M</div></div>
+        <div style="text-align:center"><div style="font-size:.62rem;color:var(--mu);font-weight:700">H2H</div><div style="font-size:1.1rem;font-weight:900">${h2h.length?`${aWins}-${draws}-${bWins}`:'—'}</div><div style="font-size:.62rem;color:var(--mu);white-space:nowrap">G-B-M</div></div>
         ${teamHead(tB,sB,'b')}
       </div>
       ${statBar(sA.P,sB.P,'Puan')}
@@ -14452,7 +14486,7 @@ function trimVideoClientSide(file,startSec,endSec,onProgress,callback){
       };
       recorder.onerror=function(){fail('Video kırpma sırasında hata oluştu');};
       recorder.start(250);
-      video.play().catch(function(_e){DiagSil('seekTo',_e);});
+      video.play().catch(function(_e){DiagSil('trimVideoClientSide/play',_e);});
       const durationMs=Math.max(200,(endSec-startSec)*1000);
       progressTimer=setInterval(function(){
         if(onProgress)onProgress(Math.min(1,Math.max(0,(video.currentTime-startSec)/(endSec-startSec))));
@@ -16070,9 +16104,9 @@ window.openSettings=function(){
         <button class="toggle-sw ${localStorage.getItem('pt_autoDarkMode')==='1'?'on':''}" onclick="toggleAutoDarkMode()"></button>
       </div>
       ${localStorage.getItem('pt_autoDarkMode')==='1'?`<div style="display:flex;align-items:center;gap:.4rem;margin-top:.5rem">
-        <span style="font-size:.66rem;color:var(--mu)">Başlangıç</span>
+        <span style="font-size:.66rem;color:var(--mu);flex:0 0 auto;white-space:nowrap">Başlangıç</span>
         <input type="time" id="autoDarkStartInp" value="${localStorage.getItem('pt_autoDarkStart')||'20:00'}" onchange="saveAutoDarkHours()" style="flex:1;font-size:.72rem;padding:.3rem .4rem"/>
-        <span style="font-size:.66rem;color:var(--mu)">Bitiş</span>
+        <span style="font-size:.66rem;color:var(--mu);flex:0 0 auto;white-space:nowrap">Bitiş</span>
         <input type="time" id="autoDarkEndInp" value="${localStorage.getItem('pt_autoDarkEnd')||'07:00'}" onchange="saveAutoDarkHours()" style="flex:1;font-size:.72rem;padding:.3rem .4rem"/>
       </div>`:''}
     </div>
@@ -16085,9 +16119,9 @@ window.openSettings=function(){
         <button class="toggle-sw ${localStorage.getItem('pt_quietHoursOn')==='1'?'on':''}" onclick="toggleQuietHours()"></button>
       </div>
       ${localStorage.getItem('pt_quietHoursOn')==='1'?`<div style="display:flex;align-items:center;gap:.4rem;margin-top:.5rem">
-        <span style="font-size:.66rem;color:var(--mu)">Başlangıç</span>
+        <span style="font-size:.66rem;color:var(--mu);flex:0 0 auto;white-space:nowrap">Başlangıç</span>
         <input type="time" id="quietHoursStartInp" value="${localStorage.getItem('pt_quietHoursStart')||'22:00'}" onchange="saveQuietHours()" style="flex:1;font-size:.72rem;padding:.3rem .4rem"/>
-        <span style="font-size:.66rem;color:var(--mu)">Bitiş</span>
+        <span style="font-size:.66rem;color:var(--mu);flex:0 0 auto;white-space:nowrap">Bitiş</span>
         <input type="time" id="quietHoursEndInp" value="${localStorage.getItem('pt_quietHoursEnd')||'08:00'}" onchange="saveQuietHours()" style="flex:1;font-size:.72rem;padding:.3rem .4rem"/>
       </div>`:''}
     </div>
@@ -16835,8 +16869,15 @@ window.voteMvp=function(matchId,player){
     var now=Date.now();
     if(throttleMs&&_lastByKey[key]&&now-_lastByKey[key]<throttleMs){
       // Bastırılan tekrarları saymayı sürdür - "kaç kez oldu" bilgisi sorunun ciddiyetini gösterir.
-      for(var i=LOGS.length-1;i>=0;i--){ if(LOGS[i].k===kind&&LOGS[i].t===title){LOGS[i].n=(LOGS[i].n||1)+1;LOGS[i].last=now;break;} }
-      persist();return;
+      for(var i=LOGS.length-1;i>=0;i--){
+        if(LOGS[i].k===kind&&LOGS[i].t===title){
+          // Kopyalanmış (damgalı) bir kaydın üzerine tekrar sayısı EKLENMEZ - yoksa yeni
+          // oluşan olay, artık raporlanamayan eski kaydın içinde kaybolurdu. Bu durumda
+          // aşağıda YENİ bir kayıt açılır.
+          if(LOGS[i].kop)break;
+          LOGS[i].n=(LOGS[i].n||1)+1;LOGS[i].last=now;persist();return;
+        }
+      }
     }
     _lastByKey[key]=now;
     LOGS.push({k:kind,t:title,d:detail||null,ts:now,n:1,last:now,chatOpen:!!window._chatOpen});
@@ -17258,13 +17299,35 @@ window.voteMvp=function(matchId,player){
   window.addEventListener('online',function(){log('ag','İnternet bağlantısı geri geldi',{});});
   try{
     if(window.firebase&&firebase.database){
+      /* KULLANICI BİLDİRDİ (rapor incelemesi): Raporda saniyeler arayla "koptu / kuruldu"
+         çiftleri birikiyordu (01:17:33→34, 01:17:40→42, 01:18:29→32). Bunlar GERÇEK bir
+         sorun değil: mobil tarayıcı sekme arka plana alındığında, ekran kapandığında veya
+         hücresel ağ hücre değiştirdiğinde Firebase soketi bir-iki saniyeliğine düşüp hemen
+         geri gelir. Her birini kaydetmek raporu doldurup gerçek kesintileri görünmez
+         yapıyordu. Artık kopma, ancak KESİNTİ SÜRERSE (5 saniyeden uzun) kaydedilir; kısa
+         sıçramalar sessizce geçilir ve yalnızca gerçek bir kesintiden sonra "geri geldi"
+         satırı yazılır. */
+      var _agKopmaT=null,_agKopmaKayitli=false;
       firebase.database().ref('.info/connected').on('value',function(s){
         var c=!!s.val();
         if(window._ptFbConnected===c)return;
         window._ptFbConnected=c;
-        log('ag',c?'Firebase bağlantısı kuruldu':'Firebase bağlantısı koptu',{
-          not:c?'Canlı mesaj akışı çalışıyor':'Sohbet güncellenmez, gönderilen mesajlar kuyrukta bekler'
-        });
+        if(!c){
+          clearTimeout(_agKopmaT);
+          _agKopmaT=setTimeout(function(){
+            if(window._ptFbConnected)return;      // bu arada geri geldiyse kayıt açma
+            _agKopmaKayitli=true;
+            log('ag','Firebase bağlantısı koptu',{
+              not:'Kesinti 5 saniyeden uzun sürdü - sohbet güncellenmez, gönderilen mesajlar kuyrukta bekler'
+            });
+          },5000);
+        }else{
+          clearTimeout(_agKopmaT);
+          if(_agKopmaKayitli){
+            _agKopmaKayitli=false;
+            log('ag','Firebase bağlantısı geri geldi',{not:'Canlı mesaj akışı yeniden çalışıyor'});
+          }
+        }
       });
     }
   }catch(e){}
@@ -17353,7 +17416,12 @@ window.voteMvp=function(matchId,player){
         not:'Bu fonksiyonlara bağlı butonlar tıklandığında hiçbir şey yapmaz'
       });
     }
-    log('bilgi','Sohbet teşhis sistemi başlatıldı',{
+    // Bu satır bir SORUN kaydı değil, yalnızca "sistem ayakta" notudur. Her sayfa açılışında
+    // yenisi eklenince rapor bu satırlarla doluyordu (kullanıcı raporunda 7 adet vardı).
+    // Artık aynı gün içinde yalnızca bir kez yazılır.
+    var _bugun=new Date().toDateString();
+    var _zatenVar=LOGS.some(function(l){return l.t==='Sohbet teşhis sistemi başlatıldı'&&new Date(l.ts).toDateString()===_bugun;});
+    if(!_zatenVar)log('bilgi','Sohbet teşhis sistemi başlatıldı',{
       surum:'1.0',
       izlenen:(31-_missingFns.length)+'/31 fonksiyon',
       izlenenSenaryolar:'hata, kasma, kayma, emoji, render, ağ, veri, DOM, medya, yazıyor'
@@ -17418,9 +17486,20 @@ window.voteMvp=function(matchId,player){
     updateDoctorBadge();
   }
 
+  /* KULLANICI BİLDİRDİ (rapor incelemesi): Olay listesinde yalnızca SAAT yazıyordu. Kayıtlar
+     cihazda kalıcı olduğu için farklı GÜNLERE ait satırlar alt alta sıralanıyor ve saatler
+     ("01:18", "06:54", "10:34") sanki aynı günmüş gibi okunuyordu - üstelik sıralama da
+     karışık görünüyordu. Artık tam tarih yazılır ve kaydın hangi oturuma ait olduğu belirtilir. */
+  var CD_OTURUM_BASI=Date.now();
   function fmtTime(ts){
-    var d=new Date(ts);
-    return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
+    if(!ts)return '?';
+    try{return new Date(ts).toLocaleString('tr-TR');}catch(e){return String(ts);}
+  }
+  function cdOturumNotu(ts){
+    if(!ts)return '';
+    if(ts>=CD_OTURUM_BASI)return ' [bu oturum]';
+    var gun=Math.floor((Date.now()-ts)/86400000);
+    return gun>=1?(' ['+gun+' gün önce]'):' [önceki oturum]';
   }
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 
@@ -17456,7 +17535,7 @@ window.voteMvp=function(matchId,player){
       }).join('<br/>')+'</div>':'';
       return '<div style="background:var(--s2);border-left:3px solid '+color+';border-radius:8px;padding:.4rem .5rem;margin-bottom:.35rem">'
         +'<div style="display:flex;justify-content:space-between;gap:.4rem"><b style="font-size:.68rem;color:'+color+'">'+ICON[l.k]+' '+esc(l.t)+(l.n>1?' ×'+l.n:'')+'</b>'
-        +'<span style="font-size:.56rem;color:var(--mu);white-space:nowrap">'+fmtTime(l.ts)+'</span></div>'+det+'</div>';
+        +'<span style="font-size:.52rem;color:var(--mu);white-space:nowrap;text-align:right">'+fmtTime(l.ts)+'<br/>'+esc(cdOturumNotu(l.ts).replace(/[\[\]]/g,'').trim())+'</span></div>'+det+'</div>';
     }).join(''):'<div style="text-align:center;color:var(--mu);font-size:.7rem;padding:1.2rem 0">✅ Bu kategoride kayıt yok</div>';
 
     var envRows=[
@@ -17484,6 +17563,7 @@ window.voteMvp=function(matchId,player){
       +'<div style="margin-bottom:.5rem">'+chips+'</div>'
       +'<div style="display:flex;gap:.35rem;margin-bottom:.6rem">'
       +'<button id="ptDoctorCopy" style="flex:1;background:var(--ac);border:none;border-radius:9px;padding:.4rem;color:#fff;font-size:.65rem;font-weight:800;cursor:pointer">📋 Raporu Kopyala</button>'
+      +'<div id="ptDoctorCopyWarn" style="display:none;flex-basis:100%;margin-top:.45rem;background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.4);border-radius:9px;padding:.45rem .55rem;font-size:.58rem;color:#fbbf24;line-height:1.5">🔒 <b>Bu kayıtlar daha önce kopyalandı.</b> Aynı rapor ikinci kez kopyalanamaz - uygulamayı kapatıp açsanız bile. <b>Aynı sorun tekrar oluşursa yeni bir kayıt açılır</b> ve o kopyalanabilir.</div>'
       +'<button id="ptDoctorClear" style="flex:1;background:var(--s2);border:1px solid var(--br);border-radius:9px;padding:.4rem;color:var(--mu);font-size:.65rem;font-weight:800;cursor:pointer">🗑️ Temizle</button>'
       +'<div style="flex:1;background:var(--s2);border:1px solid var(--br);border-radius:9px;padding:.4rem;color:var(--mu);font-size:.58rem;font-weight:700;text-align:center;line-height:1.3">Açık/kapalı kontrolü:<br>Yönetim → 🩺 Hata Yakalama Kodları</div>'
       +'</div>'
@@ -17512,8 +17592,28 @@ window.voteMvp=function(matchId,player){
     // OLMUYORDU. Klasik "çalışıyormuş gibi davranan" kod; yerine kontrolün nerede
     // olduğunu söyleyen bilgi etiketi konuldu.
     document.getElementById('ptDoctorCopy').addEventListener('click',function(){
+      /* KULLANICI TALEBİ (kesin çözüm): "Bir raporu kopyaladığı zaman ikinciye
+         kopyalayamasın, uygulamadan çıkıp tekrar girse bile."
+         Damga kayıtların içine yazılır ve kayıtlarla birlikte localStorage'da saklanır -
+         sayfa kapatılıp açılsa bile kalıcıdır. Rapora yalnızca damgasız kayıtlar girer. */
+      var yeni=LOGS.filter(function(l){return !l.kop;});
+      if(!yeni.length){
+        this.textContent='🔒 Zaten kopyalandı';
+        var kutu=document.getElementById('ptDoctorCopyWarn');
+        if(kutu)kutu.style.display='block';
+        return;
+      }
       var txt=buildReport();
-      var done=function(){if(typeof showToast==='function')showToast('📋 Teşhis raporu kopyalandı');};
+      var btn=this;
+      var done=function(){
+        if(typeof showToast==='function')showToast('📋 '+yeni.length+' yeni kayıt kopyalandı');
+        btn.textContent='✅ Kopyalandı';
+      };
+      // Damga kopyalama denemesinden HEMEN SONRA basılır: kullanıcı hemen uygulamayı
+      // kapatsa bile kayıt "kopyalanmış" olarak kalır.
+      var t=Date.now();
+      yeni.forEach(function(l){l.kop=t;});
+      try{localStorage.setItem('pt_chatDoctorLogs',JSON.stringify(LOGS.slice(-CFG.maxLogs)));}catch(e){}
       if(navigator.clipboard&&navigator.clipboard.writeText){
         navigator.clipboard.writeText(txt).then(done).catch(function(){fallbackCopy(txt,done);});
       }else fallbackCopy(txt,done);
@@ -17528,7 +17628,7 @@ window.voteMvp=function(matchId,player){
   }
   function buildReport(){
     var lines=['=== PUAN TABLOSU SOHBET TEŞHİS RAPORU ==='];
-    lines.push('Tarih: '+new Date().toLocaleString('tr-TR'));
+    lines.push('Rapor tarihi: '+new Date().toLocaleString('tr-TR'));
     lines.push('Cihaz: '+navigator.userAgent);
     lines.push('Toplam mesaj: '+safeMsgCount()+' · DOM düğüm: '+chatDomNodeCount());
     lines.push('Firebase bağlı: '+(window._ptFbConnected?'evet':'hayır')+' · Çevrimiçi: '+navigator.onLine);
@@ -17539,9 +17639,16 @@ window.voteMvp=function(matchId,player){
       lines.push(n+': '+s.cagri+' çağrı, ortalama '+Math.round(s.toplamMs/Math.max(1,s.cagri))+'ms, en uzun '+Math.round(s.enUzunMs)+'ms, hata '+s.hata);
     });
     lines.push('');
-    lines.push('--- OLAYLAR ('+LOGS.length+') ---');
-    LOGS.slice().reverse().forEach(function(l){
-      lines.push('['+fmtTime(l.ts)+'] '+l.k.toUpperCase()+' · '+l.t+(l.n>1?' (×'+l.n+')':''));
+    lines.push('--- OLAYLAR ---');
+    // Rapora YALNIZCA daha önce kopyalanmamış kayıtlar girer (kalıcı damga - bkz. kopyala butonu).
+    var raporLogs=LOGS.filter(function(l){return !l.kop;});
+    var cdYeni=raporLogs.filter(function(l){return l.ts>=CD_OTURUM_BASI;}).length;
+    var damgali=LOGS.length-raporLogs.length;
+    lines.push('Kayıt: '+raporLogs.length+' yeni (bu oturumdan '+cdYeni+', önceki oturumlardan '+(raporLogs.length-cdYeni)+')');
+    if(damgali)lines.push('Not: '+damgali+' kayıt daha önce kopyalandığı için bu rapora dahil edilmedi.');
+    lines.push('');
+    raporLogs.slice().reverse().forEach(function(l){
+      lines.push('['+fmtTime(l.ts)+']'+cdOturumNotu(l.ts)+' '+l.k.toUpperCase()+' · '+l.t+(l.n>1?' (×'+l.n+')':''));
       if(l.d)Object.keys(l.d).forEach(function(k){
         var v=l.d[k];
         if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' | '):JSON.stringify(v);
@@ -17728,9 +17835,50 @@ window.voteMvp=function(matchId,player){
     }catch(e){}
   }
 
+  // Kullanıcı SONRADAN giriş yaparsa (önce anonim gezip sonra isim girme çok yaygın) cihaz
+  // kimlik kartındaki isim eskimesin diye isim değişimi izlenir ve değiştiği an yazılır.
+  var _sonKullanici=null;
+  setInterval(function(){
+    try{
+      var simdi=whoAmI();
+      if(_sonKullanici!==null&&simdi!==_sonKullanici)kaydetCihazKarti(true);
+      _sonKullanici=simdi;
+    }catch(e){}
+  },15000);
+
+
+
   // ── Kayıt deposu ─────────────────────────────────────────────────────────────────────
+  /* KULLANICI BİLDİRDİ (rapor incelemesi): Raporlarda saat başı gösteriliyor ama TARİH
+     gösterilmiyordu. Kayıtlar cihazda kalıcı saklandığı için GÜNLER ÖNCESİNE ait girdiler
+     (ör. "05:04 Şerit animasyon süresi geçersiz") en yeni kayıtlarla iç içe, sanki AZ ÖNCE
+     olmuş gibi görünüyordu - nitekim çoktan düzeltilmiş bir hata "hâlâ sürüyor" sanıldı.
+     ÜÇ DÜZELTME: (a) her kayıt artık TAM TARİH+SAAT ile yazılır, (b) kayıtlar bu oturuma ait
+     mi yoksa öncekilere mi ait açıkça işaretlenir, (c) 7 günden eski kayıtlar otomatik
+     budanır - hiçbir rapor artık aylık birikmiş çöple gelmez. */
+  var OTURUM_BASI=Date.now();       // bu sayfa açılışının başlangıcı
+  var SAKLAMA_GUN=7;                // bundan eski kayıtlar otomatik silinir
   var LOGS=[];
   try{LOGS=JSON.parse(localStorage.getItem('diag_logs_'+APP)||'[]');}catch(e){LOGS=[];}
+  (function budaEskiKayitlar(){
+    try{
+      var sinir=Date.now()-SAKLAMA_GUN*86400000;
+      var once=LOGS.length;
+      LOGS=LOGS.filter(function(r){return r&&r.ts&&r.ts>=sinir;});
+      if(LOGS.length!==once)localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS));
+    }catch(e){}
+  })();
+  function tamTarih(ts){
+    if(!ts)return '?';
+    try{return new Date(ts).toLocaleString('tr-TR');}catch(e){return String(ts);}
+  }
+  function oturumEtiketi(ts){
+    if(!ts)return '';
+    if(ts>=OTURUM_BASI)return ' [bu oturum]';
+    var gun=Math.floor((Date.now()-ts)/86400000);
+    if(gun>=1)return ' [önceki oturum · '+gun+' gün önce]';
+    return ' [önceki oturum]';
+  }
   var SEV={hata:3,yavas:2,uyari:2,bilgi:1};
   var _persistT=null;
   function persist(){
@@ -17739,11 +17887,120 @@ window.voteMvp=function(matchId,player){
       try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}
     },900);
   }
+  /* KULLANICI TALEBİ (kesin çözüm): "Kullanıcı ve yönetici bir raporu kopyaladığı zaman
+     ikinciye kopyalayamasın, UYGULAMADAN ÇIKIP TEKRAR GİRSE BİLE."
+     NEDEN GEREKLİ: Kayıtlar cihazda kalıcı saklandığı için aynı eski kayıtlar her raporda
+     tekrar tekrar kopyalanabiliyor, çoktan düzeltilmiş hatalar "hâlâ sürüyor" gibi
+     bildirilmeye devam ediyordu.
+     NASIL: Kopyalanan her kaydın üzerine `kop` damgası basılır ve damga KAYITLARLA BİRLİKTE
+     localStorage'a yazılır - sayfa kapatılıp açılsa, uygulama yeniden başlatılsa bile damga
+     kalıcıdır. Damgalı kayıtlar bir daha rapora GİRMEZ.
+     ÖNEMLİ: Damga KAYDA aittir, hataya değil. Aynı hata tekrar oluşursa yeni bir kayıt açılır
+     (bkz. record içindeki damgalı kayıt kontrolü) ve o yeni kayıt normal şekilde kopyalanır. */
+  /* KULLANICI BİLDİRDİ: "Buradaki bazı hatalar iki kere paylaşılmış olabilir, hem admin hem
+     de kullanıcı raporları bunlar."
+     KÖK SEBEP: Kopyalama damgası İKİ AYRI YERDE tutuluyordu. Kullanıcı tarafındaki damga
+     cihazın localStorage'ında, yönetici tarafındaki damga ise Firebase'deki kayıt düğümünde
+     duruyordu. Aynı hata her iki yere de gittiği için (ciddi kayıtlar Firebase'e de
+     gönderilir), kullanıcı kendi panelinden kopyalayıp yönetici de kendi ekranından
+     kopyaladığında AYNI hata iki kez raporlanıyordu - iki taraf birbirinin damgasını
+     görmüyordu.
+     ÇÖZÜM: Her kayda benzersiz bir kimlik (rid) verilir ve damgalar `diagnostics/copied`
+     altında ORTAK bir listede tutulur. Hangi taraf kopyalarsa kopyalasın damga oraya yazılır;
+     diğer taraf bunu canlı olarak görüp kaydı kendi tarafında da kilitler. Böylece bir kayıt
+     -kim kopyalarsa kopyalasın- yalnızca BİR KEZ raporlanabilir. */
+  /* KULLANICI BİLDİRDİ: "Admin veya kullanıcı önce kim kopyaladıysa uyarısı çıkıyor. Buna
+     rağmen kopyalanıyor. Eğer ilgili kişi kopyaladıysa, DİĞER KİŞİ KOPYALAMASIN."
+     KALAN AÇIK: Ortak damga listesi kayıt kimliğine (rid) göre eşleşiyordu. Ama rid bu
+     sürümle geldi - daha ÖNCE oluşmuş kayıtlarda rid YOK. Ayrıca uzak kayda rid hiç
+     ulaşmamış olabilir (eski istemci). Bu durumlarda iki taraf kaydı eşleştiremiyor,
+     biri kopyalasa bile diğeri "bu kayıt yeni" sanıp tekrar kopyalıyordu.
+     ÇÖZÜM: rid'in yanında bir de İÇERİK PARMAK İZİ üretilir. Parmak izi kaydın değişmeyen
+     alanlarından (uygulama + modül + tür + başlık + oluşma anı) hesaplanır; aynı kayıt iki
+     tarafta da AYNI parmak izini verir. Damga hem rid hem parmak izi altına yazılır, kontrol
+     de ikisine birden bakar - rid'i olmayan eski kayıtlar dahil hiçbir kayıt iki kez
+     kopyalanamaz. */
+  function fpAnahtar(app,mod,kind,title,ts){
+    var ham=[app||'',mod||'',kind||'',title||'',ts||''].join('|');
+    var h=5381;
+    for(var i=0;i<ham.length;i++)h=((h<<5)+h+ham.charCodeAt(i))>>>0;
+    return 'fp'+h.toString(36);
+  }
+  function kayitAnahtarlari(r){
+    var a=[];
+    if(r&&r.rid)a.push(r.rid);
+    if(r)a.push(fpAnahtar(APP,r.m,r.k,r.t,r.ts));
+    return a;
+  }
+  var _ridSayac=0;
+  function yeniRid(){return DEV_ID+'_'+Date.now().toString(36)+'_'+(++_ridSayac);}
+  // Ortak damga listesine abone ol: yönetici bir kaydı kopyaladığında bu cihazdaki kopyası
+  // da anında kilitlenir (ve tersi).
+  function abonelikOrtakDamga(){
+    try{
+      var db=(window.firebase&&firebase.database)?firebase.database():null;
+      if(!db)return;
+      db.ref('diagnostics/copied/'+DEV_ID).on('value',function(snap){
+        var v=snap.val()||{},n=0;
+        LOGS.forEach(function(r){
+          if(r.kop)return;
+          var anahtarlar=kayitAnahtarlari(r);
+          for(var i=0;i<anahtarlar.length;i++){
+            if(v[anahtarlar[i]]){r.kop=v[anahtarlar[i]];n++;return;}
+          }
+        });
+        if(n){try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}}
+      });
+    }catch(e){}
+  }
+  function yazOrtakDamga(kayitlar){
+    try{
+      var db=(window.firebase&&firebase.database)?firebase.database():null;
+      if(!db)return;
+      var upd={},t=Date.now(),v=false;
+      (kayitlar||[]).forEach(function(r){
+        kayitAnahtarlari(r).forEach(function(a){upd['diagnostics/copied/'+DEV_ID+'/'+a]=t;v=true;});
+      });
+      if(v)db.ref().update(upd).catch(function(){});
+    }catch(e){}
+  }
+  function kopyalanmamisKayitlar(modId){
+    return LOGS.filter(function(r){return (!modId||r.m===modId)&&!r.kop;});
+  }
+  function damgalaKopyalandi(kayitlar){
+    var t=Date.now(),n=0;
+    (kayitlar||[]).forEach(function(r){if(r&&!r.kop){r.kop=t;n++;}});
+    if(n){
+      // Anında (gecikmesiz) yazılır: kullanıcı kopyaladıktan hemen sonra uygulamayı
+      // kapatırsa damga kaybolmasın.
+      try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}
+      // Damga ayrıca ORTAK listeye yazılır - yönetici tarafı da aynı kaydı bir daha
+      // kopyalayamasın (çift raporlamanın önlenmesi).
+      yazOrtakDamga(kayitlar);
+    }
+    return n;
+  }
   var _throttle={};
+  /* KULLANICI BİLDİRDİ: "Kullanıcı ismi '(anonim)' olarak görünüyor, kullanıcı ismi neyse o
+     olsun."
+     KÖK SEBEP: Burada `window._userName` okunuyordu. Ama Puan Tablosu'nda bu değişken
+     `let _userName=''` biçiminde tanımlıdır - ve `let` ile tanımlanan değişkenler `var`ın
+     aksine window nesnesine EKLENMEZ. Yani `window._userName` HER ZAMAN undefined dönüyor,
+     kullanıcı giriş yapmış olsa bile kayıtlara "(anonim)" yazılıyordu.
+     ÇÖZÜM: Değişkene doğrudan (window üzerinden değil) erişilir - script blokları ortak bir
+     genel sözcüksel kapsamı paylaştığı için bu çalışır. Yine de tek bir kaynağa güvenilmez:
+     isim bulunamazsa "Beni Hatırla" ile saklanan isim ve ziyaretçi profili de denenir. */
   function whoAmI(){
     try{
-      if(APP==='adm')return 'Yönetici';
-      return (window._userName||'(anonim)');
+      var ad='';
+      // 1) Uygulamanın canlı değişkeni (giriş yapılmışsa doludur)
+      try{ if(typeof _userName!=='undefined'&&_userName)ad=_userName; }catch(e){}
+      // 2) window üzerinde ayrıca tutuluyorsa
+      if(!ad&&window._userName)ad=window._userName;
+      // 3) "Beni Hatırla" ile saklanan isim (oturum yenilenirken kısa süre boş kalabilir)
+      if(!ad){try{ad=localStorage.getItem('pt_rememberedName')||'';}catch(e){}}
+      ad=(ad||'').trim();
+      return ad||'(giriş yapılmamış)';
     }catch(e){return '?';}
   }
   function record(modId,kind,title,detail){
@@ -17751,12 +18008,17 @@ window.voteMvp=function(matchId,player){
     var key=modId+'|'+kind+'|'+title, now=Date.now();
     if(_throttle[key]&&now-_throttle[key]<2500){
       for(var i=LOGS.length-1;i>=0;i--){
-        if(LOGS[i].m===modId&&LOGS[i].t===title){LOGS[i].n=(LOGS[i].n||1)+1;LOGS[i].ts=now;break;}
+        if(LOGS[i].m===modId&&LOGS[i].t===title){
+          // Kopyalanmış (damgalı) bir kaydın üzerine tekrar sayısı EKLENMEZ - aksi halde
+          // yeni oluşan hata, artık raporlanamayan eski kaydın içinde kaybolurdu.
+          // Bu durumda döngüden çıkılır ve aşağıda YENİ bir kayıt açılır.
+          if(LOGS[i].kop)break;
+          LOGS[i].n=(LOGS[i].n||1)+1;LOGS[i].ts=now;persist();return;
+        }
       }
-      persist();return;
     }
     _throttle[key]=now;
-    var rec={m:modId,k:kind,t:title,d:detail||null,ts:now,n:1};
+    var rec={m:modId,k:kind,t:title,d:detail||null,ts:now,n:1,rid:yeniRid()};
     LOGS.push(rec);
     if(LOGS.length>MAX_LOCAL)LOGS.splice(0,LOGS.length-MAX_LOCAL);
     persist();
@@ -17771,7 +18033,7 @@ window.voteMvp=function(matchId,player){
         app:APP,appLabel:APP_LABEL,mod:rec.m,modLabel:(modById(rec.m)||{}).label||rec.m,
         kind:rec.k,title:rec.t,detail:rec.d?JSON.stringify(rec.d).slice(0,900):null,
         user:whoAmI(),ts:rec.ts,ua:(navigator.userAgent||'').slice(0,140),
-        dev:DEV_ID
+        dev:DEV_ID,rid:rec.rid||null
       }).catch(function(){});
       // Kayıt gönderen her cihazın kimlik kartı da güncel tutulur (kullanıcı adı değişmiş
       // olabilir: anonim gezerken hata oluştu, sonra giriş yaptı).
@@ -17833,6 +18095,7 @@ window.voteMvp=function(matchId,player){
   function install(){
     MODULES.forEach(function(m){(m.fns||[]).forEach(function(fn){wrapFn(fn,m.id);});});
     subscribeFlags();
+    abonelikOrtakDamga();
     // Herhangi bir modül AÇIKSA cihaz kimlik kartı bir kez yazılır - böylece admin, o cihazdan
     // henüz hata gelmemiş olsa bile "kayıtlı cihazlar" listesinde onu görebilir.
     setTimeout(function(){
@@ -17899,15 +18162,22 @@ window.voteMvp=function(matchId,player){
     logs:function(){return LOGS;},stats:STATS,missing:MISSING,
     kaydet:record,
     sessiz:sessiz,
+    kopyalanmamis:kopyalanmamisKayitlar,
+    damgala:damgalaKopyalandi,
     temizle:function(){LOGS.length=0;try{localStorage.removeItem('diag_logs_'+APP);}catch(e){}},
     rapor:function(){
       var L=['=== '+APP_LABEL+' · NOKTA ATIŞI TEŞHİS RAPORU ==='];
-      L.push('Tarih: '+new Date().toLocaleString('tr-TR'));
+      L.push('Rapor tarihi: '+new Date().toLocaleString('tr-TR'));
       L.push('Açık modüller: '+MODULES.filter(function(m){return isOn(m.id);}).map(function(m){return m.label;}).join(', ')||'(yok)');
+      // ÖZET: raporu okuyan kişi kayıtların kaçının GÜNCEL olduğunu ilk satırda görsün.
+      var buOturum=LOGS.filter(function(r){return r.ts>=OTURUM_BASI;}).length;
+      var enEski=LOGS.reduce(function(a,r){return (!a||r.ts<a)?r.ts:a;},0);
+      L.push('Kayıt: '+LOGS.length+' (bu oturumdan '+buOturum+', önceki oturumlardan '+(LOGS.length-buOturum)+')');
+      if(enEski)L.push('En eski kayıt: '+tamTarih(enEski)+'  ·  '+SAKLAMA_GUN+' günden eski kayıtlar otomatik silinir');
       L.push('');
       LOGS.slice().reverse().forEach(function(r){
         var m=modById(r.m);
-        L.push('['+new Date(r.ts).toLocaleTimeString('tr-TR')+'] '+(m?m.label:r.m)+' · '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
+        L.push('['+tamTarih(r.ts)+']'+oturumEtiketi(r.ts)+' '+(m?m.label:r.m)+' · '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
         if(r.d)Object.keys(r.d).forEach(function(k){
           var v=r.d[k];if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' | '):JSON.stringify(v);
           L.push('    '+k+': '+v);
@@ -18012,7 +18282,10 @@ window.voteMvp=function(matchId,player){
      rozet her saniye kendini yeniden çizdiği için "titreme" ve "DOM fırtınası" sayaçlarını
      da şişiriyor, gerçek bulguları gürültüye boğuyordu. Artık teşhis arayüzüne ait hiçbir
      öğe ne taranır ne de DOM değişiklik sayacına girer. */
-  var DIAG_SELF_SEL='.diagHudBadge,#diagHudPanel,#diagRefPhotoOv,#ptDoctorBtn,#admDoctorBtn,#ptDoctorPanel,#admDoctorPanel,.diagMiniBg';
+  // KULLANICI RAPORUNDAN: "#ptDoctorBadge" hâlâ bulgu üretiyordu - sohbet teşhis butonunun
+  // sayaç rozeti de teşhis arayüzünün parçasıdır, ölçüme girmemeli.
+  var DIAG_SELF_SEL='.diagHudBadge,#diagHudPanel,#diagRefPhotoOv,#ptDoctorBtn,#admDoctorBtn,'
+    +'#ptDoctorBadge,#admDoctorBadge,#ptDoctorPanel,#admDoctorPanel,#ptDoctorCopyWarn,#diagCopyWarn,.diagMiniBg';
   function kendiMi(el){
     if(!el||el.nodeType!==1)return false;
     try{return !!(el.closest&&el.closest(DIAG_SELF_SEL));}catch(e){return false;}
@@ -18674,7 +18947,21 @@ window.voteMvp=function(matchId,player){
 
 
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-  function fmt(ts){var d=new Date(ts);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);}
+  /* KULLANICI BİLDİRDİ: Panel ve raporlarda yalnızca SAAT gösteriliyordu; günler önceki
+     kayıtlar en yenilerle iç içe, "az önce olmuş" gibi okunuyordu. Artık tam tarih ve
+     kaydın bu oturuma mı önceki bir oturuma mı ait olduğu birlikte yazılır. */
+  var HUD_OTURUM_BASI=Date.now();
+  function fmt(ts){
+    if(!ts)return '?';
+    try{return new Date(ts).toLocaleString('tr-TR');}catch(e){return String(ts);}
+  }
+  function oturumNotu(ts){
+    if(!ts)return '';
+    if(ts>=HUD_OTURUM_BASI)return ' · bu oturum';
+    var gun=Math.floor((Date.now()-ts)/86400000);
+    return gun>=1?(' · '+gun+' gün önce'):' · önceki oturum';
+  }
+  function eskiMi(ts){return !!ts&&ts<HUD_OTURUM_BASI;}
 
   // ── Detay paneli ─────────────────────────────────────────────────────────────────────
   function openPanel(id){
@@ -18707,10 +18994,13 @@ window.voteMvp=function(matchId,player){
         var v=r.d[k2];if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' ⏎ '):JSON.stringify(v);
         return '<b>'+esc(k2)+':</b> '+esc(String(v));
       }).join('<br/>')+'</div>':'';
-      return '<div style="background:rgba(128,128,128,.12);border-left:3px solid '+c+';border-radius:8px;padding:.4rem .5rem;margin-bottom:.35rem">'
+      // Geçmiş oturumlardan kalan kayıtlar SOLUK gösterilir ve ne zaman oluştukları
+      // açıkça yazar - böylece çoktan düzeltilmiş eski bir hata "hâlâ sürüyor" sanılmaz.
+      var eski=eskiMi(r.ts);
+      return '<div style="background:rgba(128,128,128,'+(eski?'.07':'.12')+');border-left:3px solid '+c+';border-radius:8px;padding:.4rem .5rem;margin-bottom:.35rem;opacity:'+(eski?'.62':'1')+'">'
         +'<div style="display:flex;justify-content:space-between;gap:.4rem">'
         +'<b style="font-size:.64rem;color:'+c+'">'+ico+' '+esc(r.t)+(r.n>1?' ×'+r.n:'')+'</b>'
-        +'<span style="font-size:.54rem;opacity:.7;white-space:nowrap">'+fmt(r.ts)+'</span></div>'+det+'</div>';
+        +'<span style="font-size:.5rem;opacity:.75;white-space:nowrap;text-align:right">'+fmt(r.ts)+'<br/>'+esc(oturumNotu(r.ts).replace(/^ · /,''))+'</span></div>'+det+'</div>';
     }).join(''):'<div style="text-align:center;font-size:.66rem;opacity:.7;padding:1rem 0">✅ Bu bölümde henüz hata yakalanmadı.<br><span style="font-size:.58rem">Sorunu yeniden deneyin - oluştuğu an burada görünecek.</span></div>';
 
     var ov=document.createElement('div');
@@ -18727,6 +19017,7 @@ window.voteMvp=function(matchId,player){
       +'<button data-x="copy" style="flex:1;background:#7c3aed;border:none;border-radius:9px;padding:.42rem;color:#fff;font-size:.64rem;font-weight:800;cursor:pointer">📋 Kopyala</button>'
       +'<button data-x="clear" style="flex:1;background:#23262d;border:1px solid #3f434c;border-radius:9px;padding:.42rem;color:#9ca3af;font-size:.64rem;font-weight:800;cursor:pointer">🗑️ Temizle</button>'
       +'</div>'
+      +'<div id="diagCopyWarn" style="display:none;margin-top:.5rem;background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.4);border-radius:9px;padding:.45rem .55rem;font-size:.58rem;color:#fbbf24;line-height:1.5">🔒 <b>Bu kayıtlar daha önce kopyalandı.</b> Aynı rapor ikinci kez kopyalanamaz - uygulamayı kapatıp açsanız bile. Bu kural, çoktan düzeltilmiş eski hataların tekrar tekrar bildirilmesini önler. <b>Aynı hata tekrar oluşursa yeni bir kayıt açılır</b> ve o kopyalanabilir.</div>'
       +'<div style="background:rgba(128,128,128,.1);border-radius:9px;padding:.5rem .6rem;margin-bottom:.7rem">'
       +'<div style="display:flex;justify-content:space-between;font-size:.62rem;margin-bottom:.3rem"><span style="opacity:.7">İzlenen fonksiyon</span><b>'+st.fn+' / '+((core().modules.filter(function(m){return m.id===id;})[0]||{fns:[]}).fns.length)+'</b></div>'
       +'<div style="display:flex;justify-content:space-between;font-size:.62rem;margin-bottom:.3rem"><span style="opacity:.7">Toplam çağrı</span><b>'+st.cagri+'</b></div>'
@@ -18746,7 +19037,22 @@ window.voteMvp=function(matchId,player){
         // aslında çalışmasa da çalışmış GİBİ görünüyordu. Artık gerçek sonuca göre metin
         // değişiyor VE hiçbir yöntem çalışmazsa metni önceden seçili gösteren bir pencere
         // açılıyor - kopyalama HER KOŞULDA mümkün olur.
+        // KULLANICI TALEBİ: Aynı kayıt ikinci kez kopyalanamaz (uygulama kapanıp açılsa bile).
+        var C3=core();
+        // Damgalar Firebase'den geldiğinde kayıtlara zaten işlenir; burada ek olarak
+        // DiagCore'un kendi süzgeci kullanılır ki iki taraf da AYNI kuralı uygulasın.
+        var kopyalanacak=(C3.kopyalanmamis?C3.kopyalanmamis(id):(C3.logs()||[]).filter(function(r){return r.m===id&&!r.kop;}));
+        if(!kopyalanacak.length){
+          e.target.textContent='🔒 Zaten kopyalandı';
+          var uyari=document.getElementById('diagCopyWarn');
+          if(uyari)uyari.style.display='block';
+          return;
+        }
         ptDiagRobustCopy(buildReport(id),e.target);
+        // Damga, metin panoya yazılmaya çalışıldıktan HEMEN SONRA basılır ve kalıcı olarak
+        // saklanır; manuel kopyalama penceresi açılsa bile kayıt tekrar kopyalanamaz.
+        if(C3.damgala)C3.damgala(kopyalanacak);
+        _lastCounts='';tick();
       }
       if(x==='clear'){
         var C2=core();
@@ -18801,13 +19107,20 @@ window.voteMvp=function(matchId,player){
   function buildReport(id){
     var C=core();
     var L=['=== '+C.appLabel+' · '+modLabel(id)+' · TEŞHİS ==='];
-    L.push('Tarih: '+new Date().toLocaleString('tr-TR'));
+    L.push('Rapor tarihi: '+new Date().toLocaleString('tr-TR'));
     L.push('Cihaz: '+navigator.userAgent);
     var st=modStats(id);
     L.push('Çağrı: '+st.cagri+' · Hata: '+st.hata+' · En uzun: '+Math.round(st.enUzun)+'ms');
+    // KULLANICI TALEBİ: Rapora YALNIZCA daha önce kopyalanmamış kayıtlar girer. Damga
+    // kalıcı olduğu için uygulama kapatılıp açılsa bile aynı kayıt ikinci kez kopyalanamaz.
+    var kL=modLogs(id).filter(function(r){return !r.kop;});
+    var yeni=kL.filter(function(r){return !eskiMi(r.ts);}).length;
+    var damgali=modLogs(id).length-kL.length;
+    L.push('Kayıt: '+kL.length+' yeni (bu oturumdan '+yeni+', önceki oturumlardan '+(kL.length-yeni)+')');
+    if(damgali)L.push('Not: '+damgali+' kayıt daha önce kopyalandığı için bu rapora dahil edilmedi.');
     L.push('');
-    modLogs(id).slice().reverse().forEach(function(r){
-      L.push('['+fmt(r.ts)+'] '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
+    kL.slice().reverse().forEach(function(r){
+      L.push('['+fmt(r.ts)+oturumNotu(r.ts)+'] '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
       if(r.d)Object.keys(r.d).forEach(function(k){
         var v=r.d[k];if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' | '):JSON.stringify(v);
         L.push('    '+k+': '+v);
