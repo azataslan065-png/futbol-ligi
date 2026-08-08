@@ -17626,13 +17626,17 @@ window.voteMvp=function(matchId,player){
     }catch(e){}
   }
 
-  /* ── CİHAZ KİMLİĞİ ────────────────────────────────────────────────────────────────────
-     KULLANICI TALEBİ: "Yönetici, hata yakalama kodlarını açarken KAYITLI CİHAZLARI görebilir;
-     tıklayınca ilgili cihazdaki hataları görebilir, kopyalayabilir ve silebilir."
-     Bunun için her kaydın HANGİ CİHAZDAN geldiği bilinmelidir. Kullanıcı adı yeterli değildir:
-     aynı kişi telefon + tablet kullanabilir, ya da hiç giriş yapmamış (anonim) olabilir.
-     Bu yüzden cihaza özel, kalıcı ve anonim bir kimlik üretilir - kişisel hiçbir bilgi
-     içermez, yalnızca "aynı cihaz mı?" sorusunu cevaplar ve cihazın tarayıcısında saklanır. */
+  /* ── CİHAZ KİMLİĞİ VE KİMLİK KARTI ────────────────────────────────────────────────────
+     KULLANICI TALEBİ: "Admin, hata yakalama kodları sayfasında CİHAZ İSMİNİ (marka, model
+     vb.) ve HANGİ KULLANICIYA AİT olduğunu görebilir."
+     SORUN: Modern tarayıcılar gizlilik için User-Agent metnini "kısaltır" - Android Chrome
+     artık gerçek model yerine sabit "Android 10; K" gönderir. Yani sadece UA metnine bakarak
+     marka/model ÇIKARILAMAZ (raporda "💻 Linux · Chrome 125" görünmesinin sebebi de budur).
+     ÇÖZÜM: Tarayıcının izin verdiği durumda gerçek marka/model bilgisini veren
+     navigator.userAgentData.getHighEntropyValues() kullanılır; desteklenmiyorsa (iOS Safari,
+     Firefox) UA metninden çıkarılabilen en iyi bilgiye düşülür. Elde edilen kimlik kartı
+     `diagnostics/devices/{cihazId}` altında tutulur ve kullanıcı adıyla birlikte güncellenir;
+     böylece admin, kaydı gönderen cihazı ve sahibini isimle görür. */
   var DEV_ID=(function(){
     try{
       var k='diag_deviceId',v=localStorage.getItem(k);
@@ -17640,6 +17644,62 @@ window.voteMvp=function(matchId,player){
       return v;
     }catch(e){return 'dev_gecici';}   // depolama kapalıysa oturumluk kimlik
   })();
+  var DEV_INFO={id:DEV_ID,marka:'',model:'',platform:'',platformSurum:'',tarayici:'',ua:(navigator.userAgent||'').slice(0,180)};
+  (function cozCihazBilgisi(){
+    // 1) UA metninden çıkarılabilen temel bilgiler (her tarayıcıda çalışır)
+    var ua=DEV_INFO.ua;
+    if(/iPhone/i.test(ua))       {DEV_INFO.marka='Apple';DEV_INFO.model='iPhone';DEV_INFO.platform='iOS';}
+    else if(/iPad/i.test(ua))    {DEV_INFO.marka='Apple';DEV_INFO.model='iPad';DEV_INFO.platform='iPadOS';}
+    else if(/Android/i.test(ua)) {DEV_INFO.platform='Android';
+      // Kısaltılmamış UA gönderen tarayıcılarda model burada yer alır: "...; SM-A536B) AppleWebKit"
+      var m=ua.match(/Android[^;)]*;\s*([^;)]+?)\s*(?:Build\/[^;)]*)?\)/);
+      if(m&&m[1]&&!/^K$/i.test(m[1].trim())&&!/^wv$/i.test(m[1].trim()))DEV_INFO.model=m[1].trim();
+      var mv=ua.match(/Android\s+([\d.]+)/); if(mv)DEV_INFO.platformSurum=mv[1];
+    }
+    else if(/Windows/i.test(ua)) {DEV_INFO.platform='Windows';}
+    else if(/Mac OS X/i.test(ua)){DEV_INFO.marka='Apple';DEV_INFO.platform='macOS';}
+    else if(/Linux/i.test(ua))   {DEV_INFO.platform='Linux';}
+    if(/Edg\//.test(ua))DEV_INFO.tarayici='Edge';
+    else if(/OPR\//.test(ua))DEV_INFO.tarayici='Opera';
+    else if(/SamsungBrowser\/([\d.]+)/.test(ua)){DEV_INFO.tarayici='Samsung Internet '+RegExp.$1;DEV_INFO.marka=DEV_INFO.marka||'Samsung';}
+    else if(/Firefox\/(\d+)/.test(ua))DEV_INFO.tarayici='Firefox '+RegExp.$1;
+    else if(/Chrome\/(\d+)/.test(ua))DEV_INFO.tarayici='Chrome '+RegExp.$1;
+    else if(/Safari/.test(ua))DEV_INFO.tarayici='Safari';
+    // 2) Gerçek marka/model - yalnızca tarayıcı verirse (Chromium tabanlı, güvenli bağlam)
+    try{
+      var uad=navigator.userAgentData;
+      if(uad&&uad.getHighEntropyValues){
+        uad.getHighEntropyValues(['model','platform','platformVersion','fullVersionList']).then(function(h){
+          if(h.model)DEV_INFO.model=h.model;
+          if(h.platform)DEV_INFO.platform=h.platform;
+          if(h.platformVersion)DEV_INFO.platformSurum=h.platformVersion;
+          if(!DEV_INFO.marka&&Array.isArray(uad.brands)){
+            var b=uad.brands.filter(function(x){return !/Not.*Brand|Chromium/i.test(x.brand);})[0];
+            if(b)DEV_INFO.tarayici=b.brand+' '+b.version;
+          }
+          kaydetCihazKarti();
+        }).catch(function(){});
+      }
+    }catch(e){}
+  })();
+  // Cihaz kimlik kartını (marka/model + o an giriş yapmış kullanıcı) merkezi listeye yazar.
+  // Oturum başına en fazla 5 dakikada bir yazılır - gereksiz trafik oluşmaz.
+  var _cihazYazimT=0;
+  function kaydetCihazKarti(zorla){
+    try{
+      var now=Date.now();
+      if(!zorla&&now-_cihazYazimT<300000)return;
+      var db=(window.firebase&&firebase.database)?firebase.database():null;
+      if(!db)return;
+      _cihazYazimT=now;
+      db.ref('diagnostics/devices/'+DEV_ID).update({
+        marka:DEV_INFO.marka||null,model:DEV_INFO.model||null,
+        platform:DEV_INFO.platform||null,platformSurum:DEV_INFO.platformSurum||null,
+        tarayici:DEV_INFO.tarayici||null,ua:DEV_INFO.ua||null,
+        kullanici:whoAmI(),app:APP,appLabel:APP_LABEL,sonGorulme:now
+      }).catch(function(){});
+    }catch(e){}
+  }
 
   // ── Kayıt deposu ─────────────────────────────────────────────────────────────────────
   var LOGS=[];
@@ -17686,6 +17746,9 @@ window.voteMvp=function(matchId,player){
         user:whoAmI(),ts:rec.ts,ua:(navigator.userAgent||'').slice(0,140),
         dev:DEV_ID
       }).catch(function(){});
+      // Kayıt gönderen her cihazın kimlik kartı da güncel tutulur (kullanıcı adı değişmiş
+      // olabilir: anonim gezerken hata oluştu, sonra giriş yaptı).
+      kaydetCihazKarti();
     }catch(e){}
   }
   function modById(id){for(var i=0;i<MODULES.length;i++)if(MODULES[i].id===id)return MODULES[i];return null;}
@@ -17743,6 +17806,14 @@ window.voteMvp=function(matchId,player){
   function install(){
     MODULES.forEach(function(m){(m.fns||[]).forEach(function(fn){wrapFn(fn,m.id);});});
     subscribeFlags();
+    // Herhangi bir modül AÇIKSA cihaz kimlik kartı bir kez yazılır - böylece admin, o cihazdan
+    // henüz hata gelmemiş olsa bile "kayıtlı cihazlar" listesinde onu görebilir.
+    setTimeout(function(){
+      try{
+        var acikVar=MODULES.some(function(m){return isOn(m.id);});
+        if(acikVar)kaydetCihazKarti(true);
+      }catch(e){}
+    },4000);
     // KAPSAMLI TARAMA: sarmalanamayan (fonksiyon bulunamayan) girişler varsa admin panelinin
     // "🩺 Hata Yakalama Kodları" ekranından da görülebilsin diye Firebase'e bir kez raporlanır.
     // Bu, "hata kodu eklenmemiş yerler" için gerçek zamanlı bir denetim listesi sağlar.
@@ -18467,19 +18538,42 @@ window.voteMvp=function(matchId,player){
     });
     return out;
   }
+  /* ── ROZET LOGOSU: yeşil = sorun yok, kırmızı = hata var (+ sayı baloncuğu) ───────────
+     KULLANICI TALEBİ: "Hata yakalama kodu aktifleştirildiğinde, hata OLMAYAN bölümlerde
+     ilgili özelliğin hata yakalama logosu YEŞİL, hata yakalayanınki KIRMIZI ve baloncuk
+     içinde sayısı görünecektir."
+     ÖNCEDEN: durum bilgisi rozetin ARKA PLAN rengiyle veriliyordu; logo her zaman aynı
+     nötr 🩺 idi. Arka plan kırmızıysa üstündeki her şey de kırmızı zeminde kalıyor, "hangi
+     özellik sorunlu?" bilgisi bir bakışta okunmuyordu.
+     ŞİMDİ: Rozetin gövdesi nötr koyu bir zemin; DURUMU LOGO taşır. Logo dairesi hatasızken
+     yeşil, hata varken kırmızıdır ve sağ üst köşesinde hata sayısını gösteren bir baloncuk
+     belirir. Yavaşlık (hata değil) turuncu ile ayrı bir uyarı seviyesidir. */
+  function logoHtml(s,buyuk){
+    var renk=s.errs?'#ef4444':(s.slow?'#f59e0b':'#22c55e');
+    var cap=buyuk?20:17;
+    var rozet=s.errs?s.errs:(s.slow?s.slow:0);
+    var baloncuk=rozet?('<span style="position:absolute;top:-5px;right:-6px;min-width:14px;height:14px;padding:0 3px;'
+      +'background:'+(s.errs?'#ef4444':'#f59e0b')+';color:#fff;border:1.5px solid #11131a;border-radius:9px;'
+      +'font-size:.48rem;font-weight:900;line-height:11px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.5)">'
+      +(rozet>99?'99+':rozet)+'</span>'):'';
+    return '<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;'
+      +'width:'+cap+'px;height:'+cap+'px;border-radius:50%;background:'+renk+';'
+      +'box-shadow:0 0 0 2px rgba(255,255,255,.14),0 0 9px '+renk+'88">'
+      +'<span style="font-size:'+(buyuk?'.66rem':'.56rem')+';line-height:1">🩺</span>'
+      +baloncuk+'</span>';
+  }
   function rozetHtml(id,s,genis){
-    var durum=s.errs?('🛑 '+s.errs+' hata'):(s.slow?('🐌 '+s.slow+' yavaş'):'✅ sorun yok');
+    var durum=s.errs?(s.errs+' hata yakalandı'):(s.slow?(s.slow+' yavaş işlem'):'sorun yok');
     if(!genis){
-      // Kompakt rozet: modül etiketinin başındaki simge + varsa hata/yavaşlık sayısı.
+      // Kompakt rozet: renkli logo + sayı baloncuğu + modülün kendi simgesi.
       var simge=(modLabel(id).match(/^\S+/)||['🩺'])[0];
-      var rakam=s.errs?s.errs:(s.slow?s.slow:'');
-      return '<div style="display:flex;align-items:center;gap:.2rem;position:relative;z-index:1;text-shadow:0 1px 3px rgba(0,0,0,.75)">'
-        +'<span style="font-size:.72rem">'+esc(simge)+'</span>'
-        +(rakam?'<span style="font-size:.5rem;font-weight:900">'+rakam+'</span>':'')
+      return '<div style="display:flex;align-items:center;gap:.25rem;position:relative;z-index:1">'
+        +logoHtml(s,false)
+        +'<span style="font-size:.66rem;text-shadow:0 1px 3px rgba(0,0,0,.75)">'+esc(simge)+'</span>'
         +'</div>';
     }
-    return '<div style="display:flex;align-items:center;gap:.4rem;position:relative;z-index:1;text-shadow:0 1px 3px rgba(0,0,0,.75)">'
-      +'<span style="font-size:.8rem">🩺</span>'
+    return '<div style="display:flex;align-items:center;gap:.45rem;position:relative;z-index:1;text-shadow:0 1px 3px rgba(0,0,0,.75)">'
+      +logoHtml(s,true)
       +'<div style="display:flex;flex-direction:column;line-height:1.15;text-align:left">'
       +'<span style="font-size:.58rem;font-weight:900;white-space:nowrap;max-width:118px;overflow:hidden;text-overflow:ellipsis">'+esc(modLabel(id))+'</span>'
       +'<span style="font-size:.53rem;opacity:.85;white-space:nowrap">'+durum+' · '+s.cagri+' çağrı</span>'
@@ -18514,12 +18608,17 @@ window.voteMvp=function(matchId,player){
           el.setAttribute('data-mod',id);
           el.setAttribute('aria-label','Teşhis göstergesi: '+modLabel(id));
           el.title=modLabel(id);
-          el.style.cssText='position:fixed;z-index:5000;border:none;border-radius:12px;padding:.4rem .6rem;color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);font-family:inherit;opacity:.94;overflow:hidden;isolation:isolate;'+slotCss(id);
+          el.style.cssText='position:fixed;z-index:5000;border:1.5px solid #22c55e;border-radius:12px;padding:.4rem .6rem;color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);font-family:inherit;opacity:.94;overflow:hidden;isolation:isolate;'+slotCss(id);
           el.addEventListener('click',function(e){e.stopPropagation();openPanel(el.getAttribute('data-mod'));});
           document.body.appendChild(el);
         }
         el.style.padding=genis?'.4rem .6rem':'.25rem .35rem';
-        el.style.background=s.errs?'#ef4444':(s.slow?'#f59e0b':'#22c55e');
+        // Gövde nötr koyu zemin: durumu artık LOGO taşıyor (bkz. logoHtml). Kenarlık ise
+        // uzaktan bakışta da fark edilsin diye durum rengini yansıtır.
+        var durumRengi=s.errs?'#ef4444':(s.slow?'#f59e0b':'#22c55e');
+        el.style.background='rgba(17,19,26,.90)';
+        el.style.border='1.5px solid '+durumRengi;
+        el.style.boxShadow='0 4px 14px rgba(0,0,0,.4),0 0 10px '+durumRengi+'55';
         // Aynı içerik tekrar yazılmaz: innerHTML'i her turda yeniden atamak, rozetin altındaki
         // tüm düğümleri söküp yeniden kurar - bu hem gereksiz maliyet hem de (kullanıcı
         // raporunda görüldüğü gibi) titreme/DOM fırtınası sayaçlarını şişiren gürültüydü.
