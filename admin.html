@@ -15289,6 +15289,66 @@ function saveEditLeagueName(){
 //      (silme akışı + leaguesMeta dinleyicisi) FARKLI kurallarla, yarış hâlinde karar
 //      veriyordu. Artık ikisi de TEK ortak kuralı (pickDefaultLeagueId) kullanır.
 var _leagueDeleteBusy=false;
+// KULLANICI TALEBİ / HATA DÜZELTMESİ (kullanıcı bildirdi, ikinci kez: "Çözülmemiş, yönetici
+// sezonu silince oluyor - bazı özellikler taşınmıyor, eski hâline dönüyor"): KÖK SEBEP
+// nihayet net. Bir sezon SİLİNDİĞİNDE hiçbir şey "taşınmıyordu" - çünkü silme akışı yalnızca
+// "hangi sezona düşülecek" sorusunu çözüyor, o sezonun AYARLARINI hiç güncellemiyordu.
+// Düşülen sezon ise genelde DAHA ESKİ bir sezondur ve kendi ESKİ ayarlarını taşır (tema,
+// yazı tipleri, tepki paketleri, şerit ayarları, kart stili, hizalama, sponsorlar, alt
+// yönetici hesapları, premium fiyatları... hepsi). Sonuç: admin bir sezonu siler silmez
+// uygulama görünüşte "eski hâline dönüyordu". Canlı yayılım mekanizması (propagate...) bunu
+// kurtarmıyordu, çünkü o yalnızca bir AYAR DEĞİŞTİĞİNDE tetikleniyor - silme bir ayar
+// değişikliği değil.
+// ÇÖZÜM: Silinen sezon o an AÇIK olan sezonsa, silme İSTEĞİ GÖNDERİLMEDEN ÖNCE onun tüm
+// görsel/yapısal ayarları KALAN TÜM sezonlara yazılır (yeni sezona geçişteki
+// buildCarriedLeagueSettings ile AYNI merkezi liste kullanılır - bir alan oraya eklendiği an
+// burada da otomatik taşınır). Böylece hangi sezona düşülürse düşülsün görünüm ve ayarlar
+// birebir aynı kalır. Ayrıca kullanıcıya ait durum (kayıtlı kullanıcılar, biriktirdikleri
+// puanlar ve premium erişim kodları) hedef sezonda EKSİK olanlar için tamamlanır - hedefte
+// zaten var olan kayıtların ÜZERİNE YAZILMAZ, sadece boşluklar doldurulur.
+function carryStateBeforeSeasonDelete(delId,remainingIds,targetId){
+  if(!remainingIds.length)return Promise.resolve();
+  // GÜVENLİK: S henüz Firebase'den ilk kez dolmadıysa (panel yeni açıldı, veri gelmedi)
+  // içinde VARSAYILAN değerler vardır - bunları diğer sezonlara yazmak gerçek ayarları
+  // silmek olurdu. Böyle bir durumda taşıma yapılmaz.
+  if(!window._leagueFirstSyncDone)return Promise.resolve();
+  var carried=buildCarriedLeagueSettings(S);
+  var fields=getLeagueWideSettingsSyncFields();
+  var updates={};
+  remainingIds.forEach(function(lid){
+    fields.forEach(function(f){
+      if(carried[f]!==undefined)updates['leagues/'+lid+'/'+f]=carried[f];
+    });
+  });
+  if(!targetId){
+    return db.ref().update(sanitizeForFirebase(updates));
+  }
+  var userDataKeys=['visitors','userPoints','premiumAccessCodes'];
+  return Promise.all(userDataKeys.map(function(k){
+    return Promise.all([
+      db.ref('leagues/'+delId+'/'+k).once('value').then(function(sn){return sn.val();},function(){return null;}),
+      db.ref('leagues/'+targetId+'/'+k).once('value').then(function(sn){return sn.val();},function(){return null;})
+    ]);
+  })).then(function(pairs){
+    pairs.forEach(function(pair,idx){
+      var fromData=pair[0],toData=pair[1]||{};
+      if(!fromData||typeof fromData!=='object')return;
+      Object.keys(fromData).forEach(function(recId){
+        // Hedef sezonda AYNI kayıt zaten varsa dokunulmaz - oradaki (muhtemelen daha güncel)
+        // veri korunur. Sadece hedefte HİÇ olmayan kayıtlar eklenir.
+        if(toData&&Object.prototype.hasOwnProperty.call(toData,recId))return;
+        updates['leagues/'+targetId+'/'+userDataKeys[idx]+'/'+recId]=fromData[recId];
+      });
+    });
+    return db.ref().update(sanitizeForFirebase(updates));
+  });
+}
+// KULLANICI TALEBİ: "Yönetici bir sezon silmek istediği zaman mevcut sezon listeleri çıkacak,
+// oradan istediğini silebilir." + "Tek bir sezon kalsa bile sezon listesi görünsün ve yönetici
+// son sezonu silmeye çalışmadığı sürece ilgili uyarı çıkmasın."
+// Bu yüzden liste ARTIK HER ZAMAN açılır (tek sezon kalmış olsa bile) ve "son sezon silinemez"
+// uyarısı SADECE admin gerçekten o tek sezonun 🗑️ düğmesine bastığında gösterilir - ekranı
+// açar açmaz değil.
 function deleteLeague(){
   if(!hasSubperm('league_danger')){toast('🔒 Bu işlem için yetkiniz yok','er');return;}
   db.ref('leaguesMeta').once('value').then(function(snap){
@@ -15296,16 +15356,11 @@ function deleteLeague(){
     var ids=Object.keys(meta);
     var listOpen=_sheetCurrent&&_sheetCurrent.openerKey==='deleteLeague';
     if(!ids.length){toast('Kayıtlı sezon bulunamadı','er');if(listOpen)closeSheet();return;}
-    if(ids.length<=1){
-      // Tek sezon kaldıysa silinemez. Bu ekran az önce bir silme yapıldıktan SONRA kendini
-      // tazelemek için de çağrıldığından, o durumda açık listeyi kapatıp net bir mesaj bırakır.
-      toast('Son sezon silinemez','er');
-      if(listOpen)closeSheet();
-      return;
-    }
+    var isLastOne=ids.length<=1;
     // En yeni sezon en üstte: admin genelde en son oluşturduğu/yanlışlıkla açtığı sezonu siler.
     var sorted=ids.slice().sort().reverse();
-    var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.65rem;line-height:1.5">Silmek istediğiniz sezonu seçin. Bu işlem GERİ ALINAMAZ - takımlar, maçlar, kadrolar, sohbet mesajları ve fotoğraflar dahil TÜM veriler kalıcı olarak silinir.</div>'
+    var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.65rem;line-height:1.5">Silmek istediğiniz sezonu seçin. Bu işlem GERİ ALINAMAZ - takımlar, maçlar, kadrolar, sohbet mesajları ve fotoğraflar dahil TÜM veriler kalıcı olarak silinir.<br/>Açık sezonu silerseniz görsel/yapısal ayarlarınız (tema, yazı tipleri, tepki paketleri, şerit, kart stili, sponsorlar, yönetici hesapları vb.) geçilecek sezona taşınır.</div>'
+      +(isLastOne?'<div style="font-size:.66rem;color:var(--mu);background:var(--s2);border:1.5px dashed var(--br);border-radius:11px;padding:.5rem .6rem;margin-bottom:.6rem;line-height:1.5">ℹ️ Şu anda tek bir sezon kayıtlı. En az bir sezon her zaman kalmalıdır; silmeden önce yeni bir sezon oluşturun.</div>':'')
       +sorted.map(function(id){
         var m=meta[id]||{};
         var isCur=id===_curLeagueId;
@@ -15331,9 +15386,24 @@ function confirmDeleteLeagueFromList(delId){
     // Liste ekranda eskimiş olabilir (başka bir cihazdan silinmiş olabilir) - HER ZAMAN taze
     // veriyle doğrulanır, aksi halde var olmayan bir ID ile işlem denenirdi.
     if(ids.indexOf(delId)===-1){toast('Bu sezon zaten silinmiş','er');deleteLeague();return;}
-    if(ids.length<=1){toast('Son sezon silinemez','er');deleteLeague();return;}
+    // Uyarı SADECE burada, yani admin gerçekten silmeye çalıştığında gösterilir.
+    if(ids.length<=1){
+      toast('ℹ️ Son sezon silinemez - önce yeni bir sezon oluşturun','er');
+      deleteLeague();
+      return;
+    }
     var name=(meta[delId]&&meta[delId].name)||'Bu sezon';
-    dlg('🗑️','Sezonu Sil',name+' ve TÜM verileri (takımlar, maçlar, kadrolar, SOHBET MESAJLARI/yorumlar, fotoğraflar) KALICI OLARAK silinecek! Bu işlem GERİ ALINAMAZ - Firebase\'de çöp kutusu yoktur.','Sil','dor').then(function(ok){
+    var wasCurrent=(delId===_curLeagueId);
+    var remainingMeta={};
+    ids.forEach(function(id){if(id!==delId)remainingMeta[id]=meta[id];});
+    var remainingIds=Object.keys(remainingMeta);
+    // Geçilecek sezon, SİLME İSTEĞİ GÖNDERİLMEDEN ÖNCE, taze meta üzerinden belirlenir -
+    // böylece leaguesMeta dinleyicisiyle yarışmaz, sonuç her seferinde AYNI olur.
+    var nextId=wasCurrent?pickDefaultLeagueId(remainingMeta):_curLeagueId;
+    var nextName=(remainingMeta[nextId]&&remainingMeta[nextId].name)||'başka bir sezon';
+    var confirmMsg=name+' ve TÜM verileri (takımlar, maçlar, kadrolar, SOHBET MESAJLARI/yorumlar, fotoğraflar) KALICI OLARAK silinecek! Bu işlem GERİ ALINAMAZ - Firebase\'de çöp kutusu yoktur.'
+      +(wasCurrent?' Bu, şu anda AÇIK olan sezon: ayarlarınız (tema, yazı tipleri, tepki paketleri, şerit, kart stili, sponsorlar, yönetici hesapları, premium fiyatları) ve kayıtlı kullanıcı/puan/erişim kayıtları "'+nextName+'" sezonuna taşınacak.':'');
+    dlg('🗑️','Sezonu Sil',confirmMsg,'Sil','dor').then(function(ok){
       if(!ok)return;
       _leagueDeleteBusy=true;
       // Silinen sezon o an DİNLENİYORSA, dinleyici ÖNCE kaldırılır. Aksi halde silme anında
@@ -15343,24 +15413,27 @@ function confirmDeleteLeagueFromList(delId){
         db.ref('leagues/'+_leagueDataListenerId).off('value',_leagueDataListener);
         _leagueDataListenerId=null;
       }
-      // Geçilecek sezon, SİLME İSTEĞİ GÖNDERİLMEDEN ÖNCE, taze meta üzerinden belirlenir -
-      // böylece leaguesMeta dinleyicisiyle yarışmaz, sonuç her seferinde AYNI olur.
-      var remainingMeta={};
-      ids.forEach(function(id){if(id!==delId)remainingMeta[id]=meta[id];});
-      var wasCurrent=(delId===_curLeagueId);
-      var nextId=wasCurrent?pickDefaultLeagueId(remainingMeta):_curLeagueId;
-      db.ref('leagues/'+delId).remove().then(function(){
+      toast('⏳ Ayarlar taşınıyor...');
+      // ÖNEMLİ SIRA: Ayarlar/kullanıcı verisi ÖNCE taşınır, sezon SONRA silinir. Ters sırada
+      // olsaydı taşınacak kaynak veri (S dışında Firebase'de duran visitors/puanlar/kodlar)
+      // çoktan yok olmuş olurdu.
+      // Görsel/yapısal ayarlar HER silmede kalan TÜM sezonlara yazılır (kaynak: o an açık
+      // olan sezonun ayarları). Böylece silinen sezon açık olsun olmasın, admin veya bir
+      // kullanıcı hangi sezona düşerse düşsün görünüm/ayarlar aynı kalır. Kullanıcıya ait
+      // kayıtlar (kayıtlı kullanıcılar/puanlar/erişim kodları) ise yalnızca AÇIK sezon
+      // siliniyorsa, geçilecek sezona tamamlanır.
+      carryStateBeforeSeasonDelete(delId,remainingIds,wasCurrent?nextId:null)
+      .then(function(){
+        return db.ref('leagues/'+delId).remove();
+      }).then(function(){
         return db.ref('leaguesMeta/'+delId).remove();
       }).then(function(){
-        logAction('🗑️ Sezon silindi: '+name);
+        logAction('🗑️ Sezon silindi: '+name+(wasCurrent?' (ayarlar ve kullanıcı kayıtları '+nextName+' sezonuna taşındı)':''));
         if(wasCurrent&&nextId){
           _curLeagueId=nextId;
           localStorage.setItem('adm_curLeague',nextId);
           listenToLeague(nextId);
-          // Puan Tablosu kullanıcıları da silinen sezonda asılı kalmasın diye admin'in yeni
-          // görüntülediği sezon anında yayınlanır (listenToLeague zaten yazar; burada sadece
-          // sıralama garantisi için tekrar edilmez).
-          toast('✅ Sezon silindi, '+((remainingMeta[nextId]&&remainingMeta[nextId].name)||'başka bir sezona')+' geçildi');
+          toast('✅ Sezon silindi, ayarlar taşındı ve '+nextName+' sezonuna geçildi');
         }else{
           toast('✅ Sezon silindi');
         }
