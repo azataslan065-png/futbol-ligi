@@ -18125,7 +18125,9 @@ window.voteMvp=function(matchId,player){
   'use strict';
   if(window.DiagHUD)return;
 
-  var HUD_ID='diagHudBadge', PANEL_ID='diagHudPanel';
+  // NOT: Rozet artık TEK bir öğe değil - her açık modülün kendi rozeti vardır, bu yüzden
+  // tekil HUD_ID yerine ortak HUD_CLASS + data-mod niteliği kullanılır (bkz. çoklu rozet).
+  var PANEL_ID='diagHudPanel';
   var _lastModId=null, _lastCounts='';
 
   function core(){return window.DiagCore;}
@@ -18312,7 +18314,7 @@ window.voteMvp=function(matchId,player){
      ızgarada bir sonraki boş hücreye kayar. Hepsi doluysa kendi hücresinde kalır (rozet
      asla kaybolmaz). Ölçüm yalnızca modül değiştiğinde veya ekran boyutu değiştiğinde
      yapılır, her saniye değil - maliyeti ihmal edilebilir. */
-  var HUD_BLOCKERS=['#ptDoctorBtn','#liveTicker','.bottomnav','.nav','#sheetWrap.open .sheet-actions',
+  var HUD_BLOCKERS=['.diagHudBadge','#ptDoctorBtn','#liveTicker','.bottomnav','.nav','#sheetWrap.open .sheet-actions',
     '#chatInputBar','#ptFabWrap','.fab','#uploadProgressBar','#inAppNotifBanner'];
   function _kesisiyor(a,b){
     return !(a.right<b.left||a.left>b.right||a.bottom<b.top||a.top>b.bottom);
@@ -18350,57 +18352,130 @@ window.voteMvp=function(matchId,player){
     _konumUygula(el,s.sutun,s.satir);   // hiçbir yer boş değilse kendi hücresinde kalır
   }
 
+  /* ── ÇOKLU ROZET ──────────────────────────────────────────────────────────────────────
+     KULLANICI BİLDİRDİ: "Aynı ekranda birden fazla hata yakalama kodu açıldığında sadece bir
+     tanesi görünüyor."
+     KÖK SEBEP: Bu gösterge baştan TEK rozet olarak tasarlanmıştı - currentModule() o an
+     bulunulan ekrana karşılık gelen TEK bir modül döndürüyor, rozet de sadece onu
+     gösteriyordu. Oysa bir ekranda aynı anda birçok modül çalışır: örneğin Puan Durumu
+     ekranında "Puan Durumu", "Yerleşim/Sıkışma & Titreme", "Sessizce Yutulan Hatalar",
+     "Veri & Bağlantı", "Tema & Görünüm" modüllerinin hepsi ölçüm yapar. Admin bunları
+     açtığında yalnızca bir tanesini görüyor, diğerlerinin kayıt topladığından haberi
+     olmuyordu.
+     ÇÖZÜM: Artık O EKRANDA GERÇEKTEN ÇALIŞAN her açık modül KENDİ rozetini alır. Rozetler
+     ızgaradaki kendi hücrelerine yerleşir (bkz. slotOf) ve birbirleriyle de çakışma
+     kontrolünden geçer. Bulunulan ekranın modülü GENİŞ rozetle (ad + sayaç + bölüm
+     görüntüsü), diğerleri yer kaplamasın diye KOMPAKT rozetle (simge + hata sayısı)
+     gösterilir; hepsine dokunulabilir ve kendi paneli açılır. */
+  var HUD_CLASS='diagHudBadge';
+
   function removeHud(){
-    var el=document.getElementById(HUD_ID);
-    if(el)el.remove();
-    _lastModId=null;
+    var list=document.querySelectorAll('.'+HUD_CLASS);
+    for(var i=0;i<list.length;i++)list[i].remove();
+    _lastModId=null;_lastCounts='';
+  }
+  function modSayac(id){
+    var logs=modLogs(id);
+    var st=modStats(id);
+    var errs=0,slow=0;
+    logs.forEach(function(r){
+      if(r.k==='hata')errs+=(r.n||1);
+      else if(r.k==='yavas')slow+=(r.n||1);
+    });
+    return {errs:errs,slow:slow,cagri:st.cagri,kayit:logs.length};
+  }
+  // O an ekranda GÖSTERİLMESİ gereken modüller: bulunulan ekranın modülü + açık olup bu
+  // oturumda gerçekten iş yapmış (kayıt üretmiş veya çağrı almış) tüm modüller.
+  // Hiç çalışmamış modüller gösterilmez - aksi halde ekran, o ekranla ilgisi olmayan
+  // boş rozetlerle dolardı.
+  function aktifModuller(){
+    var C=core();if(!C)return [];
+    var cur=currentModule();
+    var out=[];
+    C.modules.forEach(function(m){
+      if(!C.isOn(m.id))return;
+      if(m.id==='pt_chat'&&window._chatOpen)return;
+      var s=modSayac(m.id);
+      if(m.id===cur||s.kayit>0||s.cagri>0)out.push({id:m.id,s:s,cur:m.id===cur});
+    });
+    // Sıralama: önce bulunulan ekranın modülü, sonra hata sayısı, sonra sabit modül sırası.
+    out.sort(function(a,b){
+      if(a.cur!==b.cur)return a.cur?-1:1;
+      if(b.s.errs!==a.s.errs)return b.s.errs-a.s.errs;
+      return slotIndex(a.id)-slotIndex(b.id);
+    });
+    return out;
+  }
+  function rozetHtml(id,s,genis){
+    var durum=s.errs?('🛑 '+s.errs+' hata'):(s.slow?('🐌 '+s.slow+' yavaş'):'✅ sorun yok');
+    if(!genis){
+      // Kompakt rozet: modül etiketinin başındaki simge + varsa hata/yavaşlık sayısı.
+      var simge=(modLabel(id).match(/^\S+/)||['🩺'])[0];
+      var rakam=s.errs?s.errs:(s.slow?s.slow:'');
+      return '<div style="display:flex;align-items:center;gap:.2rem;position:relative;z-index:1;text-shadow:0 1px 3px rgba(0,0,0,.75)">'
+        +'<span style="font-size:.72rem">'+esc(simge)+'</span>'
+        +(rakam?'<span style="font-size:.5rem;font-weight:900">'+rakam+'</span>':'')
+        +'</div>';
+    }
+    return '<div style="display:flex;align-items:center;gap:.4rem;position:relative;z-index:1;text-shadow:0 1px 3px rgba(0,0,0,.75)">'
+      +'<span style="font-size:.8rem">🩺</span>'
+      +'<div style="display:flex;flex-direction:column;line-height:1.15;text-align:left">'
+      +'<span style="font-size:.58rem;font-weight:900;white-space:nowrap;max-width:118px;overflow:hidden;text-overflow:ellipsis">'+esc(modLabel(id))+'</span>'
+      +'<span style="font-size:.53rem;opacity:.85;white-space:nowrap">'+durum+' · '+s.cagri+' çağrı</span>'
+      +'</div></div>';
   }
   function tick(){
     try{
       var C=core();
       if(!C){removeHud();return;}
-      var id=currentModule();
-      // KAPALI ya da ilgisiz ekran → rozet TAMAMEN kaldırılır (kullanıcı hiçbir şey görmez).
-      if(!id||!C.isOn(id)){removeHud();return;}
-      // ÇİFT GÖSTERGE ÖNLEME: Sohbet modülünün KENDİ derin teşhis katmanı (ChatDoctor) vardır
-      // ve göstergesini sohbet başlığına 🩺 butonu olarak koyar. Bu HUD rozeti de aynı anda
-      // çıkarsa kullanıcı ekranda iki ayrı teşhis göstergesi görür - kafa karıştırıcı ve
-      // kararsız bir görünüm oluşur. Sohbet ekranında gösterim ChatDoctor'a bırakılır.
-      if(id==='pt_chat'){removeHud();return;}
-      var logs=modLogs(id);
-      var st=modStats(id);
-      var errs=logs.filter(function(r){return r.k==='hata';}).reduce(function(a,r){return a+(r.n||1);},0);
-      var slow=logs.filter(function(r){return r.k==='yavas';}).reduce(function(a,r){return a+(r.n||1);},0);
-      var sig=id+'|'+errs+'|'+slow+'|'+st.cagri;
-      var el=document.getElementById(HUD_ID);
-      if(el&&sig===_lastCounts)return; // gereksiz DOM yazımı yok
-      _lastCounts=sig;_lastModId=id;
-      var color=errs?'#ef4444':(slow?'#f59e0b':'#22c55e');
-      var html='<div style="display:flex;align-items:center;gap:.4rem;position:relative;z-index:1;text-shadow:0 1px 3px rgba(0,0,0,.75)">'
-        +'<span style="font-size:.8rem">🩺</span>'
-        +'<div style="display:flex;flex-direction:column;line-height:1.15;text-align:left">'
-        +'<span style="font-size:.58rem;font-weight:900;white-space:nowrap;max-width:118px;overflow:hidden;text-overflow:ellipsis">'+esc(modLabel(id))+'</span>'
-        +'<span style="font-size:.53rem;opacity:.85;white-space:nowrap">'
-        +(errs?('🛑 '+errs+' hata'):(slow?('🐌 '+slow+' yavaş'):'✅ sorun yok'))
-        +' · '+st.cagri+' çağrı</span>'
-        +'</div></div>';
-      if(!el){
-        el=document.createElement('button');
-        el.id=HUD_ID;
-        el.setAttribute('aria-label','Teşhis göstergesi');
-        el.style.cssText='position:fixed;z-index:5000;border:none;border-radius:12px;padding:.4rem .6rem;color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);font-family:inherit;opacity:.94;overflow:hidden;isolation:isolate;'+slotCss(id);
-        el.addEventListener('click',function(e){e.stopPropagation();openPanel(_lastModId);});
-        document.body.appendChild(el);
+      var liste=aktifModuller();
+      if(!liste.length){removeHud();return;}
+      // Gereksiz DOM yazımını önleyen imza: modül kümesi VE sayaçlar birlikte.
+      var sig=liste.map(function(x){return x.id+':'+x.s.errs+':'+x.s.slow+':'+x.s.cagri+(x.cur?'*':'');}).join('|');
+      if(sig===_lastCounts&&document.querySelectorAll('.'+HUD_CLASS).length===liste.length)return;
+      _lastCounts=sig;
+      _lastModId=liste[0].id;
+
+      // Artık gösterilmeyecek rozetleri sök.
+      var kalacak={};liste.forEach(function(x){kalacak[x.id]=true;});
+      var mevcut=document.querySelectorAll('.'+HUD_CLASS);
+      for(var i=0;i<mevcut.length;i++){
+        var mid=mevcut[i].getAttribute('data-mod');
+        if(!kalacak[mid])mevcut[i].remove();
       }
-      // Modül değiştiyse rozet YENİ hücresine taşınır (sıra sabit olduğu için bir modülün
-      // yeri hiç değişmez, ama iki modül asla aynı yeri paylaşmaz) ve hücre doluysa
-      // çakışmayan ilk boş hücreye kaydırılır.
-      yerlestir(el,id);
-      el.style.background=color;
-      el.innerHTML=html;
-      buildMini(el,id);
+
+      liste.forEach(function(x){
+        var id=x.id,s=x.s,genis=x.cur;
+        var el=document.querySelector('.'+HUD_CLASS+'[data-mod="'+id+'"]');
+        if(!el){
+          el=document.createElement('button');
+          el.className=HUD_CLASS;
+          el.setAttribute('data-mod',id);
+          el.setAttribute('aria-label','Teşhis göstergesi: '+modLabel(id));
+          el.title=modLabel(id);
+          el.style.cssText='position:fixed;z-index:5000;border:none;border-radius:12px;padding:.4rem .6rem;color:#fff;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.35);font-family:inherit;opacity:.94;overflow:hidden;isolation:isolate;'+slotCss(id);
+          el.addEventListener('click',function(e){e.stopPropagation();openPanel(el.getAttribute('data-mod'));});
+          document.body.appendChild(el);
+        }
+        el.style.padding=genis?'.4rem .6rem':'.25rem .35rem';
+        el.style.background=s.errs?'#ef4444':(s.slow?'#f59e0b':'#22c55e');
+        el.innerHTML=rozetHtml(id,s,genis);
+        // Bölüm görüntüsü yalnızca GENİŞ rozette - kompakt rozetlerde hem okunmaz hem de
+        // her biri için ayrı DOM klonu almak gereksiz maliyet olurdu.
+        if(genis)buildMini(el,id);
+        else{var bg=el.querySelector('.diagMiniBg');if(bg)bg.remove();}
+      });
+
+      // Yerleştirme, tüm rozetler oluşturulup ölçülebilir hale geldikten SONRA ve sabit
+      // sırayla yapılır: böylece rozetler birbirinin üstüne binmez ve yerleşim her
+      // turda aynı çıkar (rozetlerin oynayıp durması engellenir).
+      liste.forEach(function(x){
+        var el=document.querySelector('.'+HUD_CLASS+'[data-mod="'+x.id+'"]');
+        if(el)yerlestir(el,x.id);
+      });
     }catch(e){ /* Teşhis göstergesi hiçbir koşulda uygulamayı bozmamalı */ }
   }
+
 
   function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
   function fmt(ts){var d=new Date(ts);return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);}
