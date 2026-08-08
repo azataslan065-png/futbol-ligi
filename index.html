@@ -18300,6 +18300,56 @@ window.voteMvp=function(matchId,player){
     _miniT=now;
   }
 
+
+  /* ── ÇAKIŞMA ÖNLEME: rozet hiçbir şeyin üstüne binmez ────────────────────────────────
+     KULLANICI BİLDİRDİ (ikinci kez): "Neredeyse hepsinin teşhis butonu aynı yerde, bu
+     yüzden üst üste biniyor."
+     Sabit ızgara, iki MODÜLÜN birbiriyle çakışmasını çözer (her modülün kendi hücresi
+     vardır). Ama tek başına yetmez: rozetin denk geldiği hücrede uygulamanın KENDİ sabit
+     öğeleri (sohbet teşhis butonu, alt menü, canlı şerit, yüzen aksiyon butonları, açık
+     menünün alt çubuğu) durabilir - kullanıcının gördüğü "üst üste binme" çoğunlukla budur.
+     Bu yüzden rozet yerleştirilmeden ÖNCE hedef hücre gerçek ölçümle sınanır; doluysa
+     ızgarada bir sonraki boş hücreye kayar. Hepsi doluysa kendi hücresinde kalır (rozet
+     asla kaybolmaz). Ölçüm yalnızca modül değiştiğinde veya ekran boyutu değiştiğinde
+     yapılır, her saniye değil - maliyeti ihmal edilebilir. */
+  var HUD_BLOCKERS=['#ptDoctorBtn','#liveTicker','.bottomnav','.nav','#sheetWrap.open .sheet-actions',
+    '#chatInputBar','#ptFabWrap','.fab','#uploadProgressBar','#inAppNotifBanner'];
+  function _kesisiyor(a,b){
+    return !(a.right<b.left||a.left>b.right||a.bottom<b.top||a.top>b.bottom);
+  }
+  function _huceDolu(r,self){
+    if(r.top<0||r.bottom>window.innerHeight)return true;   // ekran dışına taşan hücre
+    for(var i=0;i<HUD_BLOCKERS.length;i++){
+      var list;
+      try{list=document.querySelectorAll(HUD_BLOCKERS[i]);}catch(e){continue;}
+      for(var j=0;j<list.length;j++){
+        var e2=list[j];
+        if(!e2||e2===self||!e2.getClientRects().length)continue;
+        var b=e2.getBoundingClientRect();
+        if(b.width&&b.height&&_kesisiyor(r,b))return true;
+      }
+    }
+    return false;
+  }
+  function _konumUygula(el,sutun,satir){
+    el.style.cssText=el.style.cssText.replace(/(^|;)\s*(left|right|bottom|transform)\s*:[^;]*/g,'$1')
+      +';'+HUD_COLS[sutun].css+';bottom:'+HUD_ROWS[satir]+'px';
+  }
+  function yerlestir(el,id){
+    var s=slotOf(id);
+    _konumUygula(el,s.sutun,s.satir);
+    // Kendi hücresi boşsa iş biter - modülün rozeti HER ZAMAN aynı yerde çıksın diye
+    // kaydırma yalnızca gerçekten gerektiğinde yapılır.
+    if(!_huceDolu(el.getBoundingClientRect(),el))return;
+    for(var d=1;d<HUD_ROWS.length*HUD_COLS.length;d++){
+      var t=slotIndex(id)+d;
+      var sutun=t%HUD_COLS.length, satir=Math.floor(t/HUD_COLS.length)%HUD_ROWS.length;
+      _konumUygula(el,sutun,satir);
+      if(!_huceDolu(el.getBoundingClientRect(),el))return;
+    }
+    _konumUygula(el,s.sutun,s.satir);   // hiçbir yer boş değilse kendi hücresinde kalır
+  }
+
   function removeHud(){
     var el=document.getElementById(HUD_ID);
     if(el)el.remove();
@@ -18343,8 +18393,9 @@ window.voteMvp=function(matchId,player){
         document.body.appendChild(el);
       }
       // Modül değiştiyse rozet YENİ hücresine taşınır (sıra sabit olduğu için bir modülün
-      // yeri hiç değişmez, ama iki modül asla aynı yeri paylaşmaz).
-      el.style.cssText=el.style.cssText.replace(/(^|;)\s*(left|right|bottom|transform)\s*:[^;]*/g,'$1')+';'+slotCss(id);
+      // yeri hiç değişmez, ama iki modül asla aynı yeri paylaşmaz) ve hücre doluysa
+      // çakışmayan ilk boş hücreye kaydırılır.
+      yerlestir(el,id);
       el.style.background=color;
       el.innerHTML=html;
       buildMini(el,id);

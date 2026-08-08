@@ -16780,6 +16780,9 @@ var DIAG_REF_PHOTO='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAASwAAAJsCAIAAA
    önizlemesindeki nokta, kullanıcının ekranda göreceği gerçek noktayla birebir örtüşür -
    iki yerde ayrı ayrı elle tutulan (ve zamanla birbirinden kopan) bir liste yoktur. */
 var DIAG_HUD_COLS=[{ad:'SOL kenarda',x:9},{ad:'ORTADA',x:50},{ad:'SAĞ kenarda',x:91}];
+// NOT: Bu satır değerleri Puan Tablosu tarafındaki DiagHUD ızgarasıyla aynıdır. Admin
+// panelinin kendi rozeti 4px daha aşağıdan başlar (alt menü yüksekliği farklı); harita
+// ve önizleme için bu fark görsel olarak anlamsız olduğundan tek liste kullanılır.
 var DIAG_HUD_ROWS=[74,132,190,248,306,364,422,480];
 var DIAG_HUD_VH=820;   // önizlemede kullanılan varsayımsal ekran yüksekliği (yaklaşık telefon)
 function diagSlotOf(id){
@@ -16857,6 +16860,53 @@ function subscribeDiagMissing(){
   }catch(e){}
 }
 
+
+/* ── ROZET YERLEŞİM HARİTASI ─────────────────────────────────────────────────────────────
+   KULLANICI TALEBİ: "Her hata yakalama kodu teşhis butonu farklı yerde olsun ve bunu rozet
+   ekranında da güncelle."
+   Modül listesindeki tek tek önizlemeler "bu modülün rozeti nerede?" sorusunu cevaplar ama
+   "hepsi gerçekten farklı yerde mi, biri diğerinin üstüne biniyor mu?" sorusunu cevaplamaz -
+   bunun için hepsini AYNI ANDA, tek bir ekran şeması üzerinde görmek gerekir. Bu harita tam
+   olarak onu yapar ve konumları DiagHUD ile AYNI ızgaradan (diagSlotOf) hesaplar, yani
+   haritada gördüğünüz yerleşim ekrandaki gerçek yerleşimin birebir aynısıdır.
+   Açık modüller renkli ve tam opak, kapalılar soluk gösterilir; böylece admin "şu an açık
+   olanların rozetleri nerede çıkacak" sorusunu bir bakışta görür. */
+function openDiagBadgeMap(){
+  var flags=(window.DiagCore&&DiagCore.flags())||{};
+  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.55;margin-bottom:.8rem">'
+    +'Her hata yakalama modülünün rozeti ekranda <b>kendine ait sabit bir hücrede</b> çıkar - '
+    +'ikisi asla aynı yere denk gelmez. Aşağıdaki şema, o hücrelerin gerçek yerleşimini gösterir '
+    +'(3 sütun × 8 satırlık ızgara, alt kenardan yukarı doğru).<br><br>'
+    +'<span style="color:var(--tx);font-weight:800">Renkli</span> = modül açık (rozet çıkacak) · '
+    +'<span style="opacity:.45">soluk</span> = modül kapalı.<br><br>'
+    +'ℹ️ Rozet, denk geldiği hücrede uygulamanın kendi sabit öğesi (alt menü, canlı şerit, sohbet '
+    +'teşhis butonu vb.) varsa otomatik olarak bir sonraki boş hücreye kayar - hiçbir şeyin üstüne binmez.'
+    +'</div>';
+  diagAllModules().forEach(function(grp){
+    var acik=grp.mods.filter(function(m){return flags[m.id]===true;}).length;
+    html+='<div style="font-size:.75rem;font-weight:900;margin:.9rem 0 .5rem">'+grp.appLabel
+      +' <span style="font-weight:600;color:var(--mu);font-size:.62rem">('+acik+'/'+grp.mods.length+' açık)</span></div>';
+    html+='<div style="position:relative;width:100%;max-width:320px;margin:0 auto;aspect-ratio:9/19;'
+      +'border:2px solid var(--br2);border-radius:18px;background:var(--s2);overflow:hidden">';
+    // Üst bar ve alt şerit şeması - rozetlerin neden bu aralıkta durduğunu görselleştirir.
+    html+='<div style="position:absolute;left:0;right:0;top:0;height:8%;background:var(--s3);border-bottom:1px solid var(--br)"></div>';
+    html+='<div style="position:absolute;left:0;right:0;bottom:0;height:6%;background:var(--s3);border-top:1px solid var(--br)"></div>';
+    grp.mods.forEach(function(m){
+      var sl=diagSlotOf(m.id);
+      var on=flags[m.id]===true;
+      var kisa=(m.label||m.id).replace(/^[^\w\wçğıöşüÇĞİÖŞÜ]+\s*/,'');
+      html+='<div title="'+escHtml(m.label)+'" style="position:absolute;left:'+sl.xPct+'%;bottom:'+sl.yPct+'%;'
+        +'transform:translate(-50%,50%);max-width:33%;'
+        +'background:'+(on?'#7c3aed':'var(--s3)')+';color:'+(on?'#fff':'var(--mu)')+';'
+        +'opacity:'+(on?'1':'.45')+';border:1px solid '+(on?'#a78bfa':'var(--br)')+';border-radius:7px;'
+        +'padding:2px 4px;font-size:.44rem;font-weight:800;line-height:1.2;text-align:center;'
+        +'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(kisa)+'</div>';
+    });
+    html+='</div>';
+  });
+  openSheet('🗺️ Rozet Yerleşim Haritası',html,'openDiagBadgeMap');
+}
+
 function openDiagnosticsManager(){
   var html=''
     +'<div style="font-size:.7rem;color:var(--mu);line-height:1.55;margin-bottom:.8rem">'
@@ -16871,6 +16921,7 @@ function openDiagnosticsManager(){
     +'<button class="btn bg" onclick="diagSetAll(true)" style="flex:1">✅ Tümünü Aç</button>'
     +'<button class="btn bgh" onclick="diagSetAll(false)" style="flex:1">⛔ Tümünü Kapat</button>'
     +'</div>'
+    +'<button class="btn bp" onclick="openDiagBadgeMap()" style="width:100%;margin-bottom:.8rem">🗺️ Rozet Yerleşim Haritası - hangi rozet ekranın neresinde?</button>'
     +'<div id="diagModuleList"></div>'
     +'<div style="height:1px;background:var(--br);margin:1rem 0"></div>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">'
@@ -17641,6 +17692,56 @@ function diagClearRemoteLogs(){
     _miniT=now;
   }
 
+
+  /* ── ÇAKIŞMA ÖNLEME: rozet hiçbir şeyin üstüne binmez ────────────────────────────────
+     KULLANICI BİLDİRDİ (ikinci kez): "Neredeyse hepsinin teşhis butonu aynı yerde, bu
+     yüzden üst üste biniyor."
+     Sabit ızgara, iki MODÜLÜN birbiriyle çakışmasını çözer (her modülün kendi hücresi
+     vardır). Ama tek başına yetmez: rozetin denk geldiği hücrede uygulamanın KENDİ sabit
+     öğeleri (sohbet teşhis butonu, alt menü, canlı şerit, yüzen aksiyon butonları, açık
+     menünün alt çubuğu) durabilir - kullanıcının gördüğü "üst üste binme" çoğunlukla budur.
+     Bu yüzden rozet yerleştirilmeden ÖNCE hedef hücre gerçek ölçümle sınanır; doluysa
+     ızgarada bir sonraki boş hücreye kayar. Hepsi doluysa kendi hücresinde kalır (rozet
+     asla kaybolmaz). Ölçüm yalnızca modül değiştiğinde veya ekran boyutu değiştiğinde
+     yapılır, her saniye değil - maliyeti ihmal edilebilir. */
+  var HUD_BLOCKERS=['#admDoctorBtn','.bottomnav','.nav','#livePanel .live-actions','#sheetWrap.open .sheet-actions',
+    '#adminChatInputBar','.fab','#uploadProgressBar'];
+  function _kesisiyor(a,b){
+    return !(a.right<b.left||a.left>b.right||a.bottom<b.top||a.top>b.bottom);
+  }
+  function _huceDolu(r,self){
+    if(r.top<0||r.bottom>window.innerHeight)return true;   // ekran dışına taşan hücre
+    for(var i=0;i<HUD_BLOCKERS.length;i++){
+      var list;
+      try{list=document.querySelectorAll(HUD_BLOCKERS[i]);}catch(e){continue;}
+      for(var j=0;j<list.length;j++){
+        var e2=list[j];
+        if(!e2||e2===self||!e2.getClientRects().length)continue;
+        var b=e2.getBoundingClientRect();
+        if(b.width&&b.height&&_kesisiyor(r,b))return true;
+      }
+    }
+    return false;
+  }
+  function _konumUygula(el,sutun,satir){
+    el.style.cssText=el.style.cssText.replace(/(^|;)\s*(left|right|bottom|transform)\s*:[^;]*/g,'$1')
+      +';'+HUD_COLS[sutun].css+';bottom:'+HUD_ROWS[satir]+'px';
+  }
+  function yerlestir(el,id){
+    var s=slotOf(id);
+    _konumUygula(el,s.sutun,s.satir);
+    // Kendi hücresi boşsa iş biter - modülün rozeti HER ZAMAN aynı yerde çıksın diye
+    // kaydırma yalnızca gerçekten gerektiğinde yapılır.
+    if(!_huceDolu(el.getBoundingClientRect(),el))return;
+    for(var d=1;d<HUD_ROWS.length*HUD_COLS.length;d++){
+      var t=slotIndex(id)+d;
+      var sutun=t%HUD_COLS.length, satir=Math.floor(t/HUD_COLS.length)%HUD_ROWS.length;
+      _konumUygula(el,sutun,satir);
+      if(!_huceDolu(el.getBoundingClientRect(),el))return;
+    }
+    _konumUygula(el,s.sutun,s.satir);   // hiçbir yer boş değilse kendi hücresinde kalır
+  }
+
   function removeHud(){
     var el=document.getElementById(HUD_ID);
     if(el)el.remove();
@@ -17684,8 +17785,9 @@ function diagClearRemoteLogs(){
         document.body.appendChild(el);
       }
       // Modül değiştiyse rozet YENİ hücresine taşınır (sıra sabit olduğu için bir modülün
-      // yeri hiç değişmez, ama iki modül asla aynı yeri paylaşmaz).
-      el.style.cssText=el.style.cssText.replace(/(^|;)\s*(left|right|bottom|transform)\s*:[^;]*/g,'$1')+';'+slotCss(id);
+      // yeri hiç değişmez, ama iki modül asla aynı yeri paylaşmaz) ve hücre doluysa
+      // çakışmayan ilk boş hücreye kaydırılır.
+      yerlestir(el,id);
       el.style.background=color;
       el.innerHTML=html;
       buildMini(el,id);
