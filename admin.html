@@ -16572,6 +16572,28 @@ window.saveBulkScores = async function(wrap) {
       }
     }catch(e){}
   })();
+  /* Giriş yöntemi: kullanıcı uygulamaya NEREDEN girdi? Destek açısından tarayıcı adı kadar
+     önemlidir - "ana ekrana eklenmiş uygulama modu" ile "Instagram içi tarayıcı" bambaşka
+     davranır (depolama kısıtları, ses/otomatik oynatma engelleri, geri tuşu davranışı,
+     dosya yükleme kısıtları). Bu bilgi olmadan bazı hatalar tekrar üretilemez. */
+  function girisYontemiCoz(){
+    var ua=DEV_INFO.ua,tarayici=DEV_INFO.tarayici||'Bilinmeyen tarayıcı',icUyg='';
+    if(/FBAN|FBAV|FB_IAB/i.test(ua))icUyg='Facebook uygulaması içinden';
+    else if(/Instagram/i.test(ua))icUyg='Instagram uygulaması içinden';
+    else if(/Twitter/i.test(ua))icUyg='X/Twitter uygulaması içinden';
+    else if(/WhatsApp/i.test(ua))icUyg='WhatsApp içinden';
+    else if(/TikTok|musical_ly/i.test(ua))icUyg='TikTok uygulaması içinden';
+    else if(/;\s*wv\)/i.test(ua))icUyg='uygulama içi tarayıcı (WebView)';
+    var uygulamaModu=false;
+    try{
+      uygulamaModu=(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)
+        ||navigator.standalone===true;
+    }catch(e){}
+    if(icUyg)return tarayici+' · '+icUyg;
+    if(uygulamaModu)return tarayici+' · ana ekrana eklenmiş (uygulama modu)';
+    return tarayici+' · tarayıcı sekmesi';
+  }
+
   // Cihaz kimlik kartını (marka/model + o an giriş yapmış kullanıcı) merkezi listeye yazar.
   // Oturum başına en fazla 5 dakikada bir yazılır - gereksiz trafik oluşmaz.
   var _cihazYazimT=0;
@@ -16585,7 +16607,7 @@ window.saveBulkScores = async function(wrap) {
       db.ref('diagnostics/devices/'+DEV_ID).update({
         marka:DEV_INFO.marka||null,model:DEV_INFO.model||null,
         platform:DEV_INFO.platform||null,platformSurum:DEV_INFO.platformSurum||null,
-        tarayici:DEV_INFO.tarayici||null,ua:DEV_INFO.ua||null,
+        tarayici:DEV_INFO.tarayici||null,giris:girisYontemiCoz(),ua:DEV_INFO.ua||null,
         kullanici:whoAmI(),app:APP,appLabel:APP_LABEL,sonGorulme:now
       }).catch(function(){});
     }catch(e){}
@@ -17233,6 +17255,30 @@ function diagDeviceName(devKey,ua){
   }
   return diagDeviceLabel(ua);
 }
+/* KULLANICI TALEBİ: "Cihaz markası - modeli - giriş yöntemi ('hangi tarayıcı kullanıldı' vb.)
+   - kullanıcı ismi" rapor başlığı böyle olmalı ki çözüm daha iyi olsun.
+   ÖNCEDEN: bilgi üç ayrı satıra dağılmıştı ("Cihaz:", "Kullanıcı:", "Cihaz sahibi:") ve
+   kullanıcı adı iki kez tekrar ediyordu; marka/model ayrımı yoktu, giriş yöntemi ise hiç
+   yoktu. Artık TEK satırda, sabit sırayla ve tekrarsız verilir - raporu okuyan kişi ilk
+   satırda "kim, hangi cihazda, nasıl girmiş" sorusunun tamamını görür. */
+function diagDeviceHeader(devKey,ua,g){
+  var d=_diagDevices[devKey]||{};
+  // Marka: kimlik kartından; yoksa platformdan makul bir karşılık üretilir.
+  var marka=d.marka;
+  if(!marka){
+    var pf=(d.platform||'')+' '+(ua||'');
+    if(/iPhone|iPad|Mac/i.test(pf))marka='Apple';
+    else if(/Android/i.test(pf))marka='Android cihaz';
+    else if(/Windows/i.test(pf))marka='Windows bilgisayar';
+    else if(/Linux/i.test(pf))marka='Linux bilgisayar';
+    else marka='Bilinmeyen marka';
+  }
+  // Model: gerçek model; yoksa platform+sürüm; o da yoksa açıkça "bilinmiyor" denir
+  // (tarayıcı gizlilik nedeniyle paylaşmıyorsa uydurma yapılmaz).
+  var model=d.model||[d.platform,d.platformSurum].filter(Boolean).join(' ')||'model bilinmiyor';
+  var giris=d.giris||d.tarayici||'giriş yöntemi bilinmiyor';
+  return marka+' - '+model+' - '+giris+' - '+diagDeviceUser(devKey,g);
+}
 function diagDeviceUser(devKey,g){
   var d=_diagDevices[devKey];
   var adlar={};
@@ -17344,6 +17390,7 @@ function renderDiagLogList(){
         +'<span style="font-size:.55rem;color:var(--mu);white-space:nowrap">'+escHtml(diagZaman(g.son))+'</span>'
         +'</div>'
         +'<div style="font-size:.58rem;color:var(--ac3);margin-top:.2rem">👤 '+escHtml(diagDeviceUser(g.key,g))+(uygulamalar.length?' · '+escHtml(uygulamalar.join(' + ')):'')+'</div>'
+        +'<div style="font-size:.55rem;color:var(--mu);margin-top:.15rem">🌐 '+escHtml((_diagDevices[g.key]&&_diagDevices[g.key].giris)||diagDeviceLabel(g.ua))+'</div>'
         +'<div style="font-size:.58rem;color:var(--mu);margin-top:.2rem">'
         +(g.logs.length?('📋 '+g.logs.length+' kayıt'):'✅ kayıt yok')
         +(g.errs?' · <span style="color:#f87171;font-weight:800">🛑 '+g.errs+' hata</span>':'')
@@ -17363,8 +17410,14 @@ function openDiagDeviceLogs(devKey){
   var kart=_diagDevices[devKey]||{};
   var html='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.55rem .65rem;margin-bottom:.7rem">'
     +'<b style="font-size:.74rem">'+escHtml(diagDeviceName(devKey,g.ua))+'</b>'
-    +'<div style="font-size:.58rem;color:var(--ac3);margin-top:.2rem">👤 '+escHtml(diagDeviceUser(devKey,g))+'</div>'
-    +(kart.model||kart.marka?('<div style="font-size:.56rem;color:var(--mu);margin-top:.2rem">Model: <b style="color:var(--tx)">'+escHtml([kart.marka,kart.model].filter(Boolean).join(' '))+'</b>'+(kart.platform?' · '+escHtml(kart.platform+(kart.platformSurum?' '+kart.platformSurum:'')):'')+'</div>'):'<div style="font-size:.56rem;color:var(--mu);margin-top:.2rem">Model bilgisi yok - tarayıcı gizlilik nedeniyle paylaşmıyor (iOS Safari/Firefox) veya cihaz bu sürümden önce kayıt göndermiş.</div>')
+    +'<div style="font-size:.6rem;color:var(--tx);margin-top:.35rem;line-height:1.6;background:var(--s3);border-radius:8px;padding:.4rem .5rem">'
+    +'<div><span style="color:var(--mu)">Marka:</span> <b>'+escHtml(kart.marka||'—')+'</b></div>'
+    +'<div><span style="color:var(--mu)">Model:</span> <b>'+escHtml(kart.model||'—')+'</b></div>'
+    +'<div><span style="color:var(--mu)">Sistem:</span> <b>'+escHtml([kart.platform,kart.platformSurum].filter(Boolean).join(' ')||'—')+'</b></div>'
+    +'<div><span style="color:var(--mu)">Giriş yöntemi:</span> <b>'+escHtml(kart.giris||kart.tarayici||'—')+'</b></div>'
+    +'<div><span style="color:var(--mu)">Kullanıcı:</span> <b style="color:var(--ac3)">'+escHtml(diagDeviceUser(devKey,g))+'</b></div>'
+    +'</div>'
+    +(kart.model?'':'<div style="font-size:.55rem;color:var(--mu);margin-top:.25rem">ℹ️ Model boşsa tarayıcı bunu gizlilik nedeniyle paylaşmıyordur (iOS Safari, Firefox) ya da cihaz bu sürümden önce kayıt göndermiştir.</div>')
     +'<div style="font-size:.56rem;color:var(--mu);margin-top:.2rem;word-break:break-all">'+escHtml(g.ua||kart.ua||'(tarayıcı bilgisi yok)')+'</div>'
     +'<div style="font-size:.52rem;color:var(--mu);margin-top:.2rem;opacity:.8">Cihaz kimliği: '+escHtml(devKey)+'</div>'
     +'</div>'
@@ -17431,8 +17484,8 @@ function diagCopyDeviceLogs(devKey){
     return;
   }
   var L=['=== CİHAZ HATA KAYITLARI ==='];
-  L.push('Cihaz: '+diagDeviceName(devKey,g.ua));
-  L.push('Kullanıcı: '+diagDeviceUser(devKey,g));
+  L.push(diagDeviceHeader(devKey,g.ua,g));
+  L.push('Cihaz kimliği: '+devKey);
   L.push('Tarih: '+new Date().toLocaleString('tr-TR')+' · Kayıt sayısı: '+yeni.length);
   L.push('');
   yeni.forEach(function(r){L.push(diagLogToText(r));L.push('');});
@@ -17470,9 +17523,9 @@ function diagCopyText(txt,okMsg){admGlobalCopyText(txt,okMsg);}
 function diagLogToText(r){
   var L=[];
   L.push('['+(r.ts?new Date(r.ts).toLocaleString('tr-TR'):'?')+'] '+(r.kind?String(r.kind).toUpperCase():'')+' · '+(r.title||''));
-  L.push('Uygulama: '+(r.appLabel||r.app||'')+' · Modül: '+(r.modLabel||r.mod||'')+' · Kullanıcı: '+(r.user||'?'));
-  L.push('Cihaz: '+diagDeviceName(diagDeviceKey(r),r.ua)+(r.dev?' ('+r.dev+')':''));
-  L.push('Cihaz sahibi: '+diagDeviceUser(diagDeviceKey(r),null));
+  L.push('Uygulama: '+(r.appLabel||r.app||'')+' · Modül: '+(r.modLabel||r.mod||''));
+  // Marka - Model - Giriş yöntemi - Kullanıcı (tek satır, tekrarsız)
+  L.push('Cihaz: '+diagDeviceHeader(diagDeviceKey(r),r.ua,null)+(r.dev?'  ['+r.dev+']':''));
   if(r.detail){
     try{
       var d=JSON.parse(r.detail);
