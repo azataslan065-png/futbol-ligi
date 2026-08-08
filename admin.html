@@ -10870,9 +10870,13 @@ function openPremiumFontManager(){
   if(customFonts.length){
     html+='<div style="font-size:.62rem;font-weight:800;color:var(--ac);text-transform:uppercase;margin-bottom:.35rem">Eklediğiniz Yazı Tipleri</div>';
     html+=customFonts.map(function(f){
-      return '<div style="display:flex;align-items:center;gap:.5rem;background:var(--s2);border-radius:10px;padding:.5rem .65rem;margin-bottom:.35rem">'
-        +'<span style="flex:1;font-size:.82rem;font-weight:700;color:var(--tx);font-family:\''+escHtml(f.googleName)+'\',sans-serif">'+escHtml(f.label)+'</span>'
+      // KULLANICI TALEBİ: "Havuz" sistemi - admin bir unsuru yayınlayana kadar Puan
+      // Tablosu'nda görünmez. Buradaki rozet/düğme bu durumu gösterir ve değiştirir.
+      var pub=!!f.published;
+      return '<div style="display:flex;align-items:center;gap:.5rem;background:var(--s2);border-radius:10px;padding:.5rem .65rem;margin-bottom:.35rem;'+(pub?'':'opacity:.75')+'">'
+        +'<span style="flex:1;font-size:.82rem;font-weight:700;color:var(--tx);font-family:\''+escHtml(f.googleName)+'\',sans-serif">'+escHtml(f.label)+(pub?'':' <span style="font-size:.58rem;font-weight:800;color:var(--mu)">(havuzda)</span>')+'</span>'
         +'<button onclick="toggleCustomFontPremiumStatus(\''+f.id+'\')" style="padding:.3rem .6rem;border-radius:8px;font-size:.62rem;font-weight:800;cursor:pointer;border:1.5px solid '+(f.premium?'rgba(212,175,55,.4)':'rgba(74,222,128,.35)')+';background:'+(f.premium?'rgba(212,175,55,.12)':'rgba(74,222,128,.12)')+';color:'+(f.premium?'#d4af37':'#4ade80')+'">'+(f.premium?'✨ Premium':'Ücretsiz')+'</button>'
+        +'<button onclick="toggleCustomFontPublished(\''+f.id+'\')" title="'+(pub?'Havuza al (Puan Tablosu\'ndan gizle)':'Yayınla (Puan Tablosu\'nda görünür yap)')+'" style="padding:.3rem .6rem;border-radius:8px;font-size:.62rem;font-weight:800;cursor:pointer;border:1.5px solid '+(pub?'var(--ac)':'rgba(148,163,184,.4)')+';background:'+(pub?'var(--ac)':'rgba(148,163,184,.12)')+';color:'+(pub?'#fff':'var(--mu)')+'">'+(pub?'🚀 Yayında':'📥 Havuzda')+'</button>'
         +'<button onclick="openAddCustomFontEditor(\''+f.id+'\')" style="background:var(--s3);border:1px solid var(--br);border-radius:8px;padding:.3rem .5rem;font-size:.65rem;cursor:pointer;color:var(--tx)">✏️</button>'
         +'<button onclick="deleteCustomFont(\''+f.id+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:.3rem .5rem;font-size:.65rem;cursor:pointer;color:#f87171">🗑️</button>'
         +'</div>';
@@ -10948,24 +10952,40 @@ function saveCustomFont(){
   var source=window._curFontSource||(qs('urlFontFields')&&qs('urlFontFields').style.display!=='none'?'url':'google');
   var premium=qs('cfPremiumSel')?qs('cfPremiumSel').value==='1':false;
   S.customFonts=S.customFonts||{};
+  // KULLANICI TALEBİ: "Admin yeni bir... yazı tipi paketi eklediği zaman bunu hemen
+  // kullanıcı görmeyecek... havuzda... İsteğe bağlı yayınlayabilir/erişimi kapatabilir." -
+  // YENİ bir yazı tipi published:false ile havuza düşer; admin yayınlayana kadar Puan
+  // Tablosu'nda hiç görünmez/seçilemez, o sırada da düzenlenip silinebilir. Düzenlemede
+  // yayın durumu korunur.
+  var editFid=window._editingFontId;
+  var existingPublished=editFid&&S.customFonts[editFid]?!!S.customFonts[editFid].published:false;
   if(source==='url'){
     var fontUrl=qs('cfFontUrlInp')?qs('cfFontUrlInp').value.trim():'';
     if(!fontUrl){toast('Font dosyası URL\'i gereklidir','er');return;}
     if(!/^https:\/\/.+\.(woff2?|ttf|otf)(\?.*)?$/i.test(fontUrl)){toast('Geçerli bir font URL\'i girin (.woff2/.woff/.ttf/.otf)','er');return;}
     // URL fontları için benzersiz bir aile adı üretilir (@font-face ile PT'de yüklenir).
-    var fid=window._editingFontId||('custom_'+('url'+Date.now()).replace(/[^a-z0-9]+/gi,'_').toLowerCase());
+    var fid=editFid||('custom_'+('url'+Date.now()).replace(/[^a-z0-9]+/gi,'_').toLowerCase());
     var famName='cf_'+fid;
-    S.customFonts[fid]={id:fid,label:label,googleName:famName,fontUrl:fontUrl,premium:premium};
+    S.customFonts[fid]={id:fid,label:label,googleName:famName,fontUrl:fontUrl,premium:premium,published:existingPublished};
   }else{
     var googleName=qs('cfGoogleNameInp')?qs('cfGoogleNameInp').value.trim():'';
     if(!googleName){toast('Google Fonts adı gereklidir','er');return;}
-    var fid2=window._editingFontId||('custom_'+googleName.toLowerCase().replace(/[^a-z0-9]+/g,'_'));
-    S.customFonts[fid2]={id:fid2,label:label,googleName:googleName,premium:premium};
+    var fid2=editFid||('custom_'+googleName.toLowerCase().replace(/[^a-z0-9]+/g,'_'));
+    S.customFonts[fid2]={id:fid2,label:label,googleName:googleName,premium:premium,published:existingPublished};
   }
   save().then(function(){
-    toast('✅ Yazı tipi kaydedildi: '+label);
+    toast('✅ Yazı tipi kaydedildi: '+label+(existingPublished?'':' (havuzda - henüz yayında değil)'));
     openPremiumFontManager();
   }).catch(function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
+}
+function toggleCustomFontPublished(fid){
+  if(!S.customFonts||!S.customFonts[fid])return;
+  S.customFonts[fid].published=!S.customFonts[fid].published;
+  var nowPub=S.customFonts[fid].published;
+  save().then(function(){
+    toast(nowPub?'🚀 Yazı tipi yayınlandı - artık Puan Tablosu\'nda görünür':'📥 Yazı tipi havuza alındı - Puan Tablosu\'nda artık görünmez');
+    openPremiumFontManager();
+  }).catch(function(e){toast('❌ İşlem başarısız: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
 }
 function toggleCustomFontPremiumStatus(fid){
   if(!S.customFonts||!S.customFonts[fid])return;
@@ -11068,11 +11088,15 @@ function openReactionPacksManager(){
     html+=Object.keys(byCategory).sort().map(function(cat){
       return '<div style="font-size:.66rem;font-weight:800;color:var(--ac);text-transform:uppercase;margin:.6rem 0 .35rem">'+escHtml(cat)+'</div>'
         +byCategory[cat].map(function(p){
-          return '<div style="display:flex;align-items:center;gap:.5rem;background:var(--s2);border-radius:10px;padding:.5rem .6rem;margin-bottom:.4rem">'
+          // KULLANICI TALEBİ: "Havuz" sistemi - admin yayınlayana kadar Puan Tablosu'nda
+          // görünmez. Rozet + düğme bu durumu gösterir/değiştirir.
+          var pub=!!p.published;
+          return '<div style="display:flex;align-items:center;gap:.5rem;background:var(--s2);border-radius:10px;padding:.5rem .6rem;margin-bottom:.4rem;'+(pub?'':'opacity:.75')+'">'
             +'<div style="flex:1;min-width:0">'
-            +'<div style="font-size:.72rem;font-weight:700;color:var(--tx)">'+escHtml(p.name)+(p.premium?' <span style="color:#d4af37;font-size:.6rem;font-weight:800">✨ PREMIUM</span>':' <span style="color:#4ade80;font-size:.6rem;font-weight:800">ÜCRETSİZ</span>')+'</div>'
+            +'<div style="font-size:.72rem;font-weight:700;color:var(--tx)">'+escHtml(p.name)+(p.premium?' <span style="color:#d4af37;font-size:.6rem;font-weight:800">✨ PREMIUM</span>':' <span style="color:#4ade80;font-size:.6rem;font-weight:800">ÜCRETSİZ</span>')+(pub?'':' <span style="font-size:.6rem;font-weight:800;color:var(--mu)">(havuzda)</span>')+'</div>'
             +'<div style="font-size:.9rem;margin-top:.15rem">'+(p.emojis||[]).map(renderReactionEmojiAdminHtml).join(' ')+' <span style="font-size:.6rem;color:var(--mu)">('+(p.emojis||[]).length+' emoji)</span></div>'
             +'</div>'
+            +'<button onclick="toggleReactionPackPublished(\''+p.id+'\')" title="'+(pub?'Havuza al (Puan Tablosu\'ndan gizle)':'Yayınla (Puan Tablosu\'nda görünür yap)')+'" style="padding:.3rem .55rem;border-radius:8px;font-size:.62rem;font-weight:800;cursor:pointer;border:1.5px solid '+(pub?'var(--ac)':'rgba(148,163,184,.4)')+';background:'+(pub?'var(--ac)':'rgba(148,163,184,.12)')+';color:'+(pub?'#fff':'var(--mu)')+';flex-shrink:0">'+(pub?'🚀':'📥')+'</button>'
             +'<button onclick="openReactionPackEditor(\''+p.id+'\')" style="background:var(--s3);border:1px solid var(--br);border-radius:8px;padding:.3rem .5rem;font-size:.65rem;cursor:pointer;color:var(--tx)">✏️</button>'
             +'<button onclick="deleteReactionPack(\''+p.id+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:.3rem .5rem;font-size:.65rem;cursor:pointer;color:#f87171">🗑️</button>'
             +'</div>';
@@ -11179,7 +11203,12 @@ function saveReactionPackDraft(){
   var category=qs('rpCategoryInp')?qs('rpCategoryInp').value.trim():'';
   var pid=window._editingReactionPackId||('pack_'+uid());
   S.reactionPacks=S.reactionPacks||{};
-  S.reactionPacks[pid]={id:pid,name:name,emojis:emojis,premium:premium,category:category||'Genel'};
+  // KULLANICI TALEBİ: "Admin yeni bir... emoji paketi eklediği zaman bunu hemen kullanıcı
+  // görmeyecek... havuzda... İsteğe bağlı yayınlayabilir/erişimi kapatabilir." - YENİ bir
+  // paket published:false ile havuza düşer; admin yayınlayana kadar Puan Tablosu'nda hiç
+  // görünmez/seçilemez, o sırada da düzenlenip silinebilir. Düzenlemede yayın durumu korunur.
+  var existingPublished=window._editingReactionPackId&&S.reactionPacks[pid]?!!S.reactionPacks[pid].published:false;
+  S.reactionPacks[pid]={id:pid,name:name,emojis:emojis,premium:premium,category:category||'Genel',published:existingPublished};
   // HATA DÜZELTMESİ (kullanıcı talebi: "düzenlendiği zaman Puan Sistemi ve Fiyatlar en
   // güncel haliyle görünür olacak"): Bir paket PREMIUM'dan ÜCRETSİZE çevrildiğinde eski
   // fiyat kaydı veride kalıyordu. Fiyat ekranı yalnızca premium paketleri listelediği için
@@ -11187,9 +11216,18 @@ function saveReactionPackDraft(){
   // unsur SATILMAYA DEVAM EDİYORDU. Artık ücretsize çevrilen paketin fiyatı da silinir.
   if(!premium&&S.premiumPrices)delete S.premiumPrices[pid];
   save().then(function(){
-    toast('✅ Paket kaydedildi: '+name);
+    toast('✅ Paket kaydedildi: '+name+(existingPublished?'':' (havuzda - henüz yayında değil)'));
     openReactionPacksManager();
   }).catch(function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
+}
+function toggleReactionPackPublished(pid){
+  if(!S.reactionPacks||!S.reactionPacks[pid])return;
+  S.reactionPacks[pid].published=!S.reactionPacks[pid].published;
+  var nowPub=S.reactionPacks[pid].published;
+  save().then(function(){
+    toast(nowPub?'🚀 Paket yayınlandı - artık Puan Tablosu\'nda görünür':'📥 Paket havuza alındı - Puan Tablosu\'nda artık görünmez');
+    openReactionPacksManager();
+  }).catch(function(e){toast('❌ İşlem başarısız: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
 }
 function deleteReactionPack(pid){
   dlg('🗑️','Paketi Sil','Bu tepki paketi kalıcı olarak silinecek. Emin misiniz?','Sil','dor').then(function(ok){
@@ -11484,13 +11522,17 @@ function openThemeManager(){
   if(customThemes.length){
     html+='<div style="font-size:.62rem;font-weight:800;color:var(--ac);text-transform:uppercase;margin-bottom:.35rem">Eklediğiniz Temalar</div>';
     html+=customThemes.map(function(t){
-      return '<div style="display:flex;align-items:center;gap:.5rem;background:var(--s2);border-radius:10px;padding:.5rem .65rem;margin-bottom:.35rem">'
+      // KULLANICI TALEBİ: "Havuz" sistemi - admin yayınlayana kadar Puan Tablosu'nda
+      // görünmez. Rozet + düğme bu durumu gösterir/değiştirir.
+      var pub=!!t.published;
+      return '<div style="display:flex;align-items:center;gap:.5rem;background:var(--s2);border-radius:10px;padding:.5rem .65rem;margin-bottom:.35rem;'+(pub?'':'opacity:.75')+'">'
         +'<div style="display:flex;gap:.15rem;flex-shrink:0">'
         +'<span style="width:16px;height:16px;border-radius:50%;background:'+t.bg+';border:1px solid rgba(255,255,255,.2)"></span>'
         +'<span style="width:16px;height:16px;border-radius:50%;background:'+t.accent+';border:1px solid rgba(255,255,255,.2)"></span>'
         +'<span style="width:16px;height:16px;border-radius:50%;background:'+(t.accent2||t.accent)+';border:1px solid rgba(255,255,255,.2)"></span>'
         +'</div>'
-        +'<span style="flex:1;font-size:.78rem;font-weight:700;color:var(--tx)">'+escHtml(t.name)+'</span>'
+        +'<span style="flex:1;font-size:.78rem;font-weight:700;color:var(--tx)">'+escHtml(t.name)+(pub?'':' <span style="font-size:.58rem;font-weight:800;color:var(--mu)">(havuzda)</span>')+'</span>'
+        +'<button onclick="toggleThemePublished(\''+t.id+'\')" title="'+(pub?'Havuza al (Puan Tablosu\'ndan gizle)':'Yayınla (Puan Tablosu\'nda görünür yap)')+'" style="padding:.3rem .55rem;border-radius:8px;font-size:.62rem;font-weight:800;cursor:pointer;border:1.5px solid '+(pub?'var(--ac)':'rgba(148,163,184,.4)')+';background:'+(pub?'var(--ac)':'rgba(148,163,184,.12)')+';color:'+(pub?'#fff':'var(--mu)')+';flex-shrink:0">'+(pub?'🚀':'📥')+'</button>'
         +'<button onclick="openThemeEditor(\''+t.id+'\',\''+cat.id+'\')" style="background:var(--s3);border:1px solid var(--br);border-radius:8px;padding:.3rem .5rem;font-size:.65rem;cursor:pointer;color:var(--tx)">✏️</button>'
         +'<button onclick="deleteCustomTheme(\''+t.id+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:.3rem .5rem;font-size:.65rem;cursor:pointer;color:#f87171">🗑️</button>'
         +'</div>';
@@ -11855,11 +11897,13 @@ function autoGenerateThemes(){
     accent=_ensureContrastHsl(hue,accS,accL,bg,3.0,isLightBg);
     var tid='theme_auto_'+Date.now()+'_'+Math.floor(Math.random()*1000);
     var themeName=catNames[cat]+' Otomatik #'+(Object.values(S.customThemes).filter(function(t){return t.category===cat;}).length+1);
-    S.customThemes[tid]={id:tid,name:themeName,category:cat,bg:bg,surface:surface,accent:accent,accent2:accent2,text:text,muted:muted,autoGenerated:true,autoHue:hue};
+    // KULLANICI TALEBİ: Otomatik üretilenler de YENİ eklenen temalardır - onlar da önce
+    // havuza düşer, admin isterse tek tek "🚀 Yayınla" der.
+    S.customThemes[tid]={id:tid,name:themeName,category:cat,bg:bg,surface:surface,accent:accent,accent2:accent2,text:text,muted:muted,autoGenerated:true,autoHue:hue,published:false};
     created.push(themeName);
   });
   save().then(function(){
-    toast('✅ Aynı renk ailesinden 4 tema oluşturuldu: '+created.join(', '));
+    toast('✅ Aynı renk ailesinden 4 tema oluşturuldu (havuzda - yayınlamayı unutmayın): '+created.join(', '));
     openThemeManager();
   }).catch(function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
 }
@@ -12041,11 +12085,13 @@ function autoGenerateThemesFromColors(){
 
     var tid='theme_auto_'+Date.now()+'_'+Math.floor(Math.random()*1000);
     var themeName=catNames[cat]+' Özel #'+(Object.values(S.customThemes).filter(function(t){return t.category===cat;}).length+1);
-    S.customThemes[tid]={id:tid,name:themeName,category:cat,bg:bg,surface:surface,accent:accent,accent2:accent2,text:text,muted:muted,autoGenerated:true,autoFromColors:true};
+    // KULLANICI TALEBİ: Otomatik üretilenler de YENİ eklenen temalardır - onlar da önce
+    // havuza düşer, admin isterse tek tek "🚀 Yayınla" der.
+    S.customThemes[tid]={id:tid,name:themeName,category:cat,bg:bg,surface:surface,accent:accent,accent2:accent2,text:text,muted:muted,autoGenerated:true,autoFromColors:true,published:false};
     created.push(themeName);
   });
   save().then(function(){
-    toast('✅ Girdiğiniz renklerden 4 tema oluşturuldu: '+created.join(', '));
+    toast('✅ Girdiğiniz renklerden 4 tema oluşturuldu (havuzda - yayınlamayı unutmayın): '+created.join(', '));
     openThemeManager();
   }).catch(function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
 }
@@ -12055,11 +12101,27 @@ function saveThemeDraft(){
   var bg=qs('thBgInp').value,surface=qs('thSurfaceInp').value,accent=qs('thAccentInp').value,accent2=qs('thAccent2Inp').value,text=qs('thTextInp').value,muted=qs('thMutedInp').value;
   var tid=window._editingThemeId||('theme_'+uid());
   S.customThemes=S.customThemes||{};
-  S.customThemes[tid]={id:tid,name:name,category:window._editingThemeCategory,bg:bg,surface:surface,accent:accent,accent2:accent2,text:text,muted:muted};
+  // KULLANICI TALEBİ: "Admin yeni bir tema... eklediği zaman bunu hemen kullanıcı
+  // görmeyecek... havuzda... İsteğe bağlı yayınlayabilir/erişimi kapatabilir." - YENİ bir
+  // tema oluşturulurken published:false ile "havuza" düşer (Puan Tablosu'nda görünmez/
+  // seçilemez); admin "🚀 Yayınla" düğmesine basana kadar orada bekler, o sırada da
+  // düzenlenip silinebilir. MEVCUT bir temayı düzenlerken ise yayın durumuna DOKUNULMAZ -
+  // zaten yayındaysa yayında kalır, havuzdaysa havuzda kalır.
+  var existingPublished=window._editingThemeId&&S.customThemes[tid]?!!S.customThemes[tid].published:false;
+  S.customThemes[tid]={id:tid,name:name,category:window._editingThemeCategory,bg:bg,surface:surface,accent:accent,accent2:accent2,text:text,muted:muted,published:existingPublished};
   save().then(function(){
-    toast('✅ Tema kaydedildi: '+name);
+    toast('✅ Tema kaydedildi: '+name+(existingPublished?'':' (havuzda - henüz yayında değil)'));
     openThemeManager();
   }).catch(function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
+}
+function toggleThemePublished(tid){
+  if(!S.customThemes||!S.customThemes[tid])return;
+  S.customThemes[tid].published=!S.customThemes[tid].published;
+  var nowPub=S.customThemes[tid].published;
+  save().then(function(){
+    toast(nowPub?'🚀 Tema yayınlandı - artık Puan Tablosu\'nda görünür':'📥 Tema havuza alındı - Puan Tablosu\'nda artık görünmez');
+    openThemeManager();
+  }).catch(function(e){toast('❌ İşlem başarısız: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
 }
 function deleteCustomTheme(tid){
   dlg('🗑️','Temayı Sil','Bu tema kalıcı olarak silinecek. Emin misiniz?','Sil','dor').then(function(ok){
