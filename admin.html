@@ -2372,6 +2372,9 @@ function doLogin(){
     // KULLANICI TALEBİ: Esnek izin sistemi - hesabın izin haritası (varsa) veya eski role
     // string'i (geriye dönük uyumluluk) sessionStorage'a kaydedilir, applyRoleRestrictions bunu
     // okuyup uygular.
+    // Kopyalama damgası / işlem izleri için giriş yapan alt yöneticinin adı saklanır
+    // (önceden hiçbir yerde tutulmuyordu, bu yüzden "kim yaptı" bilgisi üretilemiyordu).
+    try{sessionStorage.setItem('admName',match.name||match.user||'Alt Yönetici');}catch(e){}
     if(match.permissions){
       sessionStorage.setItem('admRole','custom');
       sessionStorage.setItem('admPerms',JSON.stringify(match.permissions));
@@ -16513,6 +16516,21 @@ window.saveBulkScores = async function(wrap) {
     }catch(e){}
   }
 
+  /* ── CİHAZ KİMLİĞİ ────────────────────────────────────────────────────────────────────
+     KULLANICI TALEBİ: "Yönetici, hata yakalama kodlarını açarken KAYITLI CİHAZLARI görebilir;
+     tıklayınca ilgili cihazdaki hataları görebilir, kopyalayabilir ve silebilir."
+     Bunun için her kaydın HANGİ CİHAZDAN geldiği bilinmelidir. Kullanıcı adı yeterli değildir:
+     aynı kişi telefon + tablet kullanabilir, ya da hiç giriş yapmamış (anonim) olabilir.
+     Bu yüzden cihaza özel, kalıcı ve anonim bir kimlik üretilir - kişisel hiçbir bilgi
+     içermez, yalnızca "aynı cihaz mı?" sorusunu cevaplar ve cihazın tarayıcısında saklanır. */
+  var DEV_ID=(function(){
+    try{
+      var k='diag_deviceId',v=localStorage.getItem(k);
+      if(!v){v='dev_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);localStorage.setItem(k,v);}
+      return v;
+    }catch(e){return 'dev_gecici';}   // depolama kapalıysa oturumluk kimlik
+  })();
+
   // ── Kayıt deposu ─────────────────────────────────────────────────────────────────────
   var LOGS=[];
   try{LOGS=JSON.parse(localStorage.getItem('diag_logs_'+APP)||'[]');}catch(e){LOGS=[];}
@@ -16555,7 +16573,8 @@ window.saveBulkScores = async function(wrap) {
       db.ref('diagnostics/logs').push({
         app:APP,appLabel:APP_LABEL,mod:rec.m,modLabel:(modById(rec.m)||{}).label||rec.m,
         kind:rec.k,title:rec.t,detail:rec.d?JSON.stringify(rec.d).slice(0,900):null,
-        user:whoAmI(),ts:rec.ts,ua:(navigator.userAgent||'').slice(0,140)
+        user:whoAmI(),ts:rec.ts,ua:(navigator.userAgent||'').slice(0,140),
+        dev:DEV_ID
       }).catch(function(){});
     }catch(e){}
   }
@@ -16666,7 +16685,7 @@ window.saveBulkScores = async function(wrap) {
   }
 
   window.DiagCore={
-    app:APP,appLabel:APP_LABEL,modules:MODULES,
+    app:APP,appLabel:APP_LABEL,modules:MODULES,cihazId:DEV_ID,
     isOn:isOn,flags:function(){return FLAGS;},applyFlags:applyFlags,
     logs:function(){return LOGS;},stats:STATS,missing:MISSING,
     kaydet:record,
@@ -16915,6 +16934,8 @@ function openDiagnosticsManager(){
     +'o bölümdeki hatalar, yavaş çalışan işlemler ve beklenmedik durumlar kaydedilmeye başlar; '
     +'<b>kapattığınızda</b> hiçbir ölçüm yapılmaz ve performans etkisi sıfıra iner.<br><br>'
     +'⚠️ Sürekli açık bırakmayın: ihtiyaç duyduğunuzda açın, sorunu bulun, kapatın.<br><br>'
+    +'📱 Toplanan kayıtlar aşağıda <b>geldikleri cihaza göre</b> gruplanır. Bir cihaza dokunarak yalnızca o cihazın hatalarını görebilir, kopyalayabilir veya silebilirsiniz.<br><br>'
+    +'🔒 Bir kaydı kopyaladığınızda o kayıt <b>pasifleşir</b> ve yeniden kopyalanamaz - böylece aynı kaydı iki kez alıp karıştırmazsınız. Bu damga kayda aittir, hataya değil: <b>aynı hata tekrar oluşursa yeni bir kayıt açılır</b> ve o kopyalanabilir.<br><br>'
     +'📍 Her modülün altında, o modülün rozetinin hangi ekranda ve nerede çıkacağını anlatan bir not ve küçük bir referans fotoğrafı bulunur - fotoğrafa dokunarak büyütebilirsiniz.<br><br>'
     +'🔢 <b>Aynı anda birden fazla rozet çıkabilir.</b> Bir ekranda birkaç modül birlikte çalışır; açtığınız modüllerden o ekranda gerçekten iş yapan HEPSİ kendi rozetini alır. Bulunduğunuz ekranın modülü geniş rozetle (ad + sayaç + bölüm görüntüsü), diğerleri yer kaplamasın diye kompakt rozetle (simge + hata sayısı) görünür; hepsine dokunup kendi kayıtlarını açabilirsiniz.<br><br>'
     +'⏳ Açtığınız bir modülün rozeti hemen çıkmayabilir: o modül henüz hiç çalışmadıysa (kayıt üretmediyse ve fonksiyonları çağrılmadıysa) rozet gösterilmez - aksi halde ekran, o ekranla ilgisi olmayan boş rozetlerle dolardı. İlgili özelliği kullandığınız anda rozeti belirir.<br><br>'
@@ -17055,6 +17076,8 @@ function subscribeDiagLogs(){
       _diagRemoteLogs=Object.keys(v).map(function(k){var o=v[k]||{};o._key=k;return o;})
         .sort(function(a,b){return (b.ts||0)-(a.ts||0);});
       renderDiagLogList();
+      // Cihaz detayı açıkken yeni kayıt gelirse/kayıt silinirse liste anında tazelenir.
+      if(_diagOpenDevice)renderDiagDeviceLogList();
     },function(err){
       var box=qs('diagLogList');
       if(box)box.innerHTML='<div style="font-size:.68rem;color:#f87171;padding:.6rem">Kayıtlar okunamadı: '+escHtml(err&&err.message||'yetki hatası')+'</div>';
@@ -17063,6 +17086,94 @@ function subscribeDiagLogs(){
 }
 
 function diagSetLogFilter(app){_diagFilterApp=app;renderDiagLogList();}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   KAYITLI CİHAZLAR  ·  KULLANICI TALEBİ: "Yönetici, hata yakalama kodlarını açarken kayıtlı
+   cihazları görebilir; tıklayınca ilgili cihazdaki hataları görebilir, kopyalayabilir ve
+   silebilir."
+
+   NEDEN CİHAZ BAZLI: Önceden tüm kayıtlar tek bir uzun listede, kronolojik olarak
+   karışıktı. Beş farklı kullanıcının cihazından gelen kayıtlar iç içe geçtiği için
+   "şu kullanıcıda ne oluyor?" sorusunu cevaplamak neredeyse imkânsızdı. Artık kayıtlar önce
+   CİHAZA göre gruplanır: her cihaz tek bir kart olur, karta dokununca yalnızca o cihazın
+   kayıtları açılır.
+
+   CİHAZ KİMLİĞİ: Kayıtla birlikte gelen anonim `dev` alanıdır (bkz. DiagCore/DEV_ID).
+   Bu alan eklenmeden ÖNCE oluşmuş eski kayıtlar da kaybolmasın diye, `dev` yoksa cihaz
+   tarayıcı imzası + kullanıcı adından türetilir.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+var _diagOpenDevice=null;     // o an açık olan cihaz detayının kimliği (canlı tazeleme için)
+
+function diagDeviceKey(r){
+  if(r&&r.dev)return r.dev;
+  return 'eski|'+((r&&r.ua)||'?')+'|'+((r&&r.user)||'?');
+}
+// Tarayıcı imzasından okunabilir bir cihaz adı üretir. Kişisel bilgi içermez.
+function diagDeviceLabel(ua){
+  ua=String(ua||'');
+  var os='Bilinmeyen cihaz';
+  if(/iPhone/i.test(ua))os='📱 iPhone';
+  else if(/iPad/i.test(ua))os='📱 iPad';
+  else if(/Android/i.test(ua)){var m=ua.match(/Android\s+([\d.]+)/);os='📱 Android'+(m?' '+m[1]:'');}
+  else if(/Windows/i.test(ua))os='💻 Windows';
+  else if(/Mac OS X/i.test(ua))os='💻 Mac';
+  else if(/Linux/i.test(ua))os='💻 Linux';
+  var br='';
+  if(/Edg\//.test(ua))br='Edge';
+  else if(/OPR\//.test(ua))br='Opera';
+  else if(/SamsungBrowser/.test(ua))br='Samsung Internet';
+  else if(/Firefox\/(\d+)/.test(ua))br='Firefox '+RegExp.$1;
+  else if(/Chrome\/(\d+)/.test(ua))br='Chrome '+RegExp.$1;
+  else if(/Safari/.test(ua))br='Safari';
+  return os+(br?' · '+br:'');
+}
+// Kayıtları cihaza göre gruplar; en son kayıt veren cihaz en üstte gelir.
+function diagDeviceGroups(){
+  var rows=_diagRemoteLogs.filter(function(r){return _diagFilterApp==='all'||r.app===_diagFilterApp;});
+  var map={};
+  rows.forEach(function(r){
+    var k=diagDeviceKey(r);
+    var g=map[k]||(map[k]={key:k,ua:r.ua||'',users:{},apps:{},logs:[],errs:0,kopyalanan:0,son:0});
+    g.logs.push(r);
+    if(r.user)g.users[r.user]=true;
+    if(r.appLabel||r.app)g.apps[r.appLabel||r.app]=true;
+    if(r.kind==='hata')g.errs++;
+    if(r.kopyalandi)g.kopyalanan++;
+    if((r.ts||0)>g.son)g.son=r.ts||0;
+    if(!g.ua&&r.ua)g.ua=r.ua;
+  });
+  return Object.keys(map).map(function(k){return map[k];})
+    .sort(function(a,b){return b.son-a.son;});
+}
+function diagZaman(ts){
+  if(!ts)return '?';
+  var fark=Date.now()-ts;
+  if(fark<60000)return 'az önce';
+  if(fark<3600000)return Math.floor(fark/60000)+' dk önce';
+  if(fark<86400000)return Math.floor(fark/3600000)+' saat önce';
+  return new Date(ts).toLocaleString('tr-TR');
+}
+
+/* ── Kopyalanan kayıt bir daha kopyalanamaz ────────────────────────────────────────────
+   KULLANICI TALEBİ: "Daha önce kopyalanan bir hata yakalama kodu PASİF olacak ve bir daha
+   kopyalanamayacak; ilgili uyarıyı gösterecek fakat AYNI HATA TEKRAR TESPİT EDİLDİĞİNDE
+   yeniden kayıt oluşturulacak."
+   NASIL ÇALIŞIR: Kopyalama anında kaydın Firebase'deki düğümüne `kopyalandi` damgası
+   (zaman + kopyalayan) yazılır. Damgalı kayıt listede soluk görünür, kopyala düğmesi
+   pasifleşir ve ne zaman kopyalandığı yazar. Damga KAYDA aittir, hataya değil: aynı hata
+   tekrar oluştuğunda DiagCore Firebase'e YENİ bir kayıt gönderir (her gönderim yeni bir
+   anahtar üretir), o yeni kayıt damgasızdır ve normal şekilde kopyalanabilir. Böylece
+   "bu kaydı zaten aldım" bilgisi korunurken sorunun tekrarı asla gözden kaçmaz. */
+function diagMarkCopied(keys){
+  if(!keys||!keys.length)return Promise.resolve();
+  var kim='Yönetici';
+  try{kim=sessionStorage.getItem('admName')||(sessionStorage.getItem('admRole')==='full'?'Ana Yönetici':'Yönetici');}catch(e){}
+  var upd={},damga={ts:Date.now(),by:kim};
+  keys.forEach(function(k){upd['diagnostics/logs/'+k+'/kopyalandi']=damga;});
+  return db.ref().update(upd).catch(function(e){
+    toast('⚠️ Kopyalama damgası yazılamadı: '+((e&&e.message)||'bilinmeyen hata'),'er');
+  });
+}
 
 function renderDiagLogList(){
   var fb=qs('diagLogFilters');
@@ -17074,12 +17185,57 @@ function renderDiagLogList(){
     }).join('');
   }
   var box=qs('diagLogList');if(!box)return;
-  var rows=_diagRemoteLogs.filter(function(r){return _diagFilterApp==='all'||r.app===_diagFilterApp;});
-  if(!rows.length){
-    box.innerHTML='<div style="font-size:.68rem;color:var(--mu);padding:.8rem;text-align:center">✅ Kayıt yok.<br><span style="font-size:.6rem">Kayıt toplanması için yukarıdan en az bir modülün açık olması gerekir.</span></div>';
+  var gruplar=diagDeviceGroups();
+  if(!gruplar.length){
+    box.innerHTML='<div style="font-size:.68rem;color:var(--mu);padding:.8rem;text-align:center">✅ Kayıtlı cihaz yok.<br><span style="font-size:.6rem">Kayıt toplanması için yukarıdan en az bir modülün açık olması gerekir.</span></div>';
     return;
   }
-  box.innerHTML=rows.map(function(r){
+  box.innerHTML='<div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem;line-height:1.5">Kayıtlar geldikleri <b>cihaza göre</b> gruplandı. Bir cihaza dokunarak yalnızca o cihazın kayıtlarını görebilir, kopyalayabilir veya silebilirsiniz.</div>'
+    +gruplar.map(function(g){
+      var kullanicilar=Object.keys(g.users);
+      var uygulamalar=Object.keys(g.apps);
+      var renk=g.errs?'#f87171':'var(--br2)';
+      return '<div onclick="openDiagDeviceLogs(\''+escHtml(g.key).replace(/'/g,"\\'")+'\')" style="background:var(--s3);border:1.5px solid '+renk+';border-radius:11px;padding:.55rem .65rem;margin-bottom:.45rem;cursor:pointer">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:.4rem">'
+        +'<b style="font-size:.72rem;color:var(--tx)">'+escHtml(diagDeviceLabel(g.ua))+'</b>'
+        +'<span style="font-size:.55rem;color:var(--mu);white-space:nowrap">'+escHtml(diagZaman(g.son))+'</span>'
+        +'</div>'
+        +'<div style="font-size:.58rem;color:var(--ac3);margin-top:.2rem">👤 '+escHtml(kullanicilar.length?kullanicilar.join(', '):'(anonim)')+(uygulamalar.length?' · '+escHtml(uygulamalar.join(' + ')):'')+'</div>'
+        +'<div style="font-size:.58rem;color:var(--mu);margin-top:.2rem">'
+        +'📋 '+g.logs.length+' kayıt'
+        +(g.errs?' · <span style="color:#f87171;font-weight:800">🛑 '+g.errs+' hata</span>':'')
+        +(g.kopyalanan?' · <span style="opacity:.7">✅ '+g.kopyalanan+' kopyalanmış</span>':'')
+        +' · <span style="color:var(--ac)">dokunup aç ›</span></div>'
+        +'</div>';
+    }).join('');
+}
+
+// Tek bir cihazın kayıtları: görüntüle · kopyala · sil
+function openDiagDeviceLogs(devKey){
+  _diagOpenDevice=devKey;
+  var g=diagDeviceGroups().filter(function(x){return x.key===devKey;})[0];
+  if(!g){toast('Bu cihaza ait kayıt kalmadı','er');_diagOpenDevice=null;return;}
+  var kalan=g.logs.filter(function(r){return !r.kopyalandi;}).length;
+  var esc=function(x){return escHtml(x).replace(/'/g,"\\'");};
+  var html='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.55rem .65rem;margin-bottom:.7rem">'
+    +'<b style="font-size:.74rem">'+escHtml(diagDeviceLabel(g.ua))+'</b>'
+    +'<div style="font-size:.58rem;color:var(--ac3);margin-top:.2rem">👤 '+escHtml(Object.keys(g.users).join(', ')||'(anonim)')+'</div>'
+    +'<div style="font-size:.56rem;color:var(--mu);margin-top:.2rem;word-break:break-all">'+escHtml(g.ua||'(tarayıcı bilgisi yok)')+'</div>'
+    +'</div>'
+    +'<div style="display:flex;gap:.35rem;margin-bottom:.7rem">'
+    +'<button class="btn bp" onclick="diagCopyDeviceLogs(\''+esc(devKey)+'\')" style="flex:1;padding:.35rem;font-size:.63rem">📋 Kopyalanmamışları Kopyala ('+kalan+')</button>'
+    +'<button class="btn bgh" onclick="diagDeleteDeviceLogs(\''+esc(devKey)+'\')" style="flex:1;padding:.35rem;font-size:.63rem">🗑️ Bu Cihazın Kayıtlarını Sil</button>'
+    +'</div>'
+    +'<div id="diagDeviceLogList"></div>';
+  openSheet('📱 Cihaz Kayıtları',html,'openDiagDeviceLogs');
+  renderDiagDeviceLogList();
+}
+function renderDiagDeviceLogList(){
+  var box=qs('diagDeviceLogList');if(!box||!_diagOpenDevice)return;
+  var g=diagDeviceGroups().filter(function(x){return x.key===_diagOpenDevice;})[0];
+  if(!g){box.innerHTML='<div style="font-size:.68rem;color:var(--mu);padding:.8rem;text-align:center">Bu cihaza ait kayıt kalmadı.</div>';return;}
+  box.innerHTML=g.logs.map(function(r){
+    var pasif=!!r.kopyalandi;
     var color=r.kind==='hata'?'#f87171':(r.kind==='yavas'?'#fbbf24':'var(--mu)');
     var icon=r.kind==='hata'?'🛑':(r.kind==='yavas'?'🐌':'ℹ️');
     var det='';
@@ -17093,15 +17249,71 @@ function renderDiagLogList(){
           }).join('<br/>')+'</div>';
       }catch(e){det='<div style="font-size:.58rem;color:var(--mu)">'+escHtml(String(r.detail).slice(0,300))+'</div>';}
     }
-    return '<div style="background:var(--s3);border-left:3px solid '+color+';border-radius:8px;padding:.45rem .55rem;margin-bottom:.35rem">'
+    var kopyaBtn=pasif
+      ? '<button onclick="diagCopyLog(\''+escHtml(r._key)+'\')" style="background:var(--s2);border:1px dashed var(--br);border-radius:7px;padding:.25rem .5rem;min-height:28px;color:var(--mu);font-size:.56rem;font-weight:800;cursor:not-allowed;opacity:.6">🔒 Kopyalandı</button>'
+      : '<button onclick="diagCopyLog(\''+escHtml(r._key)+'\')" style="background:var(--s2);border:1px solid var(--br);border-radius:7px;padding:.25rem .5rem;min-height:28px;color:var(--tx);font-size:.56rem;font-weight:800;cursor:pointer">📋 Kopyala</button>';
+    return '<div style="background:var(--s3);border-left:3px solid '+color+';border-radius:8px;padding:.45rem .55rem;margin-bottom:.35rem;opacity:'+(pasif?'.55':'1')+'">'
       +'<div style="display:flex;justify-content:space-between;gap:.4rem">'
       +'<b style="font-size:.66rem;color:'+color+'">'+icon+' '+escHtml(r.title||'')+'</b>'
       +'<span style="font-size:.55rem;color:var(--mu);white-space:nowrap">'+(r.ts?new Date(r.ts).toLocaleString('tr-TR'):'')+'</span></div>'
-      +'<div style="font-size:.58rem;color:var(--ac3);margin-top:.1rem">'+escHtml(r.appLabel||r.app||'')+' · '+escHtml(r.modLabel||r.mod||'')+' · 👤 '+escHtml(r.user||'?')+'</div>'
+      +'<div style="font-size:.58rem;color:var(--ac3);margin-top:.1rem">'+escHtml(r.appLabel||r.app||'')+' · '+escHtml(r.modLabel||r.mod||'')+'</div>'
       +det
-      +'<div style="text-align:right;margin-top:.3rem"><button onclick="diagCopyLog(\''+escHtml(r._key)+'\')" style="background:var(--s2);border:1px solid var(--br);border-radius:7px;padding:.2rem .5rem;color:var(--mu);font-size:.56rem;font-weight:800;cursor:pointer">📋 Kopyala</button></div>'
-      +'</div>';
+      +(pasif?'<div style="font-size:.55rem;color:#fbbf24;margin-top:.3rem;font-weight:700">🔒 Bu kayıt '+escHtml(diagZaman(r.kopyalandi.ts))+' kopyalandı'+(r.kopyalandi.by?' ('+escHtml(r.kopyalandi.by)+')':'')+' - yeniden kopyalanamaz. Aynı hata tekrar oluşursa yeni bir kayıt açılır.</div>':'')
+      +'<div style="display:flex;gap:.3rem;justify-content:flex-end;margin-top:.3rem">'
+      +kopyaBtn
+      +'<button onclick="diagDeleteLog(\''+escHtml(r._key)+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:7px;padding:.25rem .5rem;min-height:28px;color:#f87171;font-size:.56rem;font-weight:800;cursor:pointer">🗑️ Sil</button>'
+      +'</div></div>';
   }).join('');
+}
+
+function diagCopyLog(key){
+  var r=_diagRemoteLogs.filter(function(x){return x._key===key;})[0];
+  if(!r)return;
+  if(r.kopyalandi){
+    toast('🔒 Bu kayıt daha önce kopyalandı, yeniden kopyalanamaz. Aynı hata tekrar oluşursa yeni kayıt açılır.','er');
+    return;
+  }
+  diagCopyText(diagLogToText(r),'📋 Kayıt kopyalandı');
+  diagMarkCopied([key]);
+}
+function diagCopyDeviceLogs(devKey){
+  var g=diagDeviceGroups().filter(function(x){return x.key===devKey;})[0];
+  if(!g){toast('Bu cihaza ait kayıt kalmadı','er');return;}
+  var yeni=g.logs.filter(function(r){return !r.kopyalandi;});
+  if(!yeni.length){
+    toast('🔒 Bu cihazdaki tüm kayıtlar daha önce kopyalandı. Aynı hatalar tekrar oluşursa yeni kayıtlar açılır.','er');
+    return;
+  }
+  var L=['=== CİHAZ HATA KAYITLARI ==='];
+  L.push('Cihaz: '+diagDeviceLabel(g.ua));
+  L.push('Kullanıcı: '+(Object.keys(g.users).join(', ')||'(anonim)'));
+  L.push('Tarih: '+new Date().toLocaleString('tr-TR')+' · Kayıt sayısı: '+yeni.length);
+  L.push('');
+  yeni.forEach(function(r){L.push(diagLogToText(r));L.push('');});
+  diagCopyText(L.join('\n'),'📋 '+yeni.length+' kayıt kopyalandı');
+  diagMarkCopied(yeni.map(function(r){return r._key;}));
+}
+function diagDeleteLog(key){
+  dlg('🗑️','Kaydı Sil','Bu hata kaydı kalıcı olarak silinecek. Aynı hata tekrar oluşursa yeni bir kayıt açılır.','Sil','dor').then(function(ok){
+    if(!ok)return;
+    db.ref('diagnostics/logs/'+key).remove().then(function(){
+      toast('🗑️ Kayıt silindi');
+    }).catch(function(e){toast('❌ Silinemedi: '+((e&&e.message)||'bilinmeyen hata'),'er');});
+  });
+}
+function diagDeleteDeviceLogs(devKey){
+  var g=diagDeviceGroups().filter(function(x){return x.key===devKey;})[0];
+  if(!g){toast('Bu cihaza ait kayıt kalmadı','er');return;}
+  dlg('🗑️','Cihazın Kayıtlarını Sil',diagDeviceLabel(g.ua)+' cihazına ait '+g.logs.length+' kayıt kalıcı olarak silinecek. Bu işlem geri alınamaz.','Sil','dor').then(function(ok){
+    if(!ok)return;
+    var upd={};
+    g.logs.forEach(function(r){upd['diagnostics/logs/'+r._key]=null;});
+    db.ref().update(upd).then(function(){
+      toast('🗑️ '+g.logs.length+' kayıt silindi');
+      _diagOpenDevice=null;
+      closeSheet();
+    }).catch(function(e){toast('❌ Silinemedi: '+((e&&e.message)||'bilinmeyen hata'),'er');});
+  });
 }
 
 // KULLANICI TALEBİ: kayıtlar tek tek veya toplu olarak panodan kopyalanabilir.
@@ -17113,6 +17325,7 @@ function diagLogToText(r){
   var L=[];
   L.push('['+(r.ts?new Date(r.ts).toLocaleString('tr-TR'):'?')+'] '+(r.kind?String(r.kind).toUpperCase():'')+' · '+(r.title||''));
   L.push('Uygulama: '+(r.appLabel||r.app||'')+' · Modül: '+(r.modLabel||r.mod||'')+' · Kullanıcı: '+(r.user||'?'));
+  L.push('Cihaz: '+diagDeviceLabel(r.ua)+(r.dev?' ('+r.dev+')':''));
   if(r.detail){
     try{
       var d=JSON.parse(r.detail);
@@ -17124,20 +17337,23 @@ function diagLogToText(r){
   }
   return L.join('\n');
 }
-function diagCopyLog(key){
-  var r=_diagRemoteLogs.filter(function(x){return x._key===key;})[0];
-  if(!r)return;
-  diagCopyText(diagLogToText(r),'📋 Kayıt kopyalandı');
-}
 function diagCopyAllLogs(){
-  var rows=_diagRemoteLogs.filter(function(r){return _diagFilterApp==='all'||r.app===_diagFilterApp;});
-  if(!rows.length){if(typeof toast==='function')toast('Kopyalanacak kayıt yok');return;}
+  // Toplu kopyalama da tek tek kopyalamayla AYNI kuralı uygular: daha önce kopyalanmış
+  // kayıtlar atlanır ve kopyalananlar damgalanır (bkz. diagMarkCopied).
+  var rows=_diagRemoteLogs.filter(function(r){return (_diagFilterApp==='all'||r.app===_diagFilterApp)&&!r.kopyalandi;});
+  var toplam=_diagRemoteLogs.filter(function(r){return _diagFilterApp==='all'||r.app===_diagFilterApp;}).length;
+  if(!toplam){if(typeof toast==='function')toast('Kopyalanacak kayıt yok');return;}
+  if(!rows.length){
+    toast('🔒 Bu filtredeki tüm kayıtlar daha önce kopyalandı. Aynı hatalar tekrar oluşursa yeni kayıtlar açılır.','er');
+    return;
+  }
   var L=['=== TOPLANAN HATA YAKALAMA KAYITLARI ==='];
   L.push('Tarih: '+new Date().toLocaleString('tr-TR'));
-  L.push('Filtre: '+(_diagFilterApp==='all'?'Tümü':_diagFilterApp)+' · Kayıt sayısı: '+rows.length);
+  L.push('Filtre: '+(_diagFilterApp==='all'?'Tümü':_diagFilterApp)+' · Yeni kayıt: '+rows.length+' / '+toplam);
   L.push('');
   rows.forEach(function(r){L.push(diagLogToText(r));L.push('');});
-  diagCopyText(L.join('\n'),'📋 '+rows.length+' kayıt kopyalandı');
+  diagCopyText(L.join('\n'),'📋 '+rows.length+' yeni kayıt kopyalandı');
+  diagMarkCopied(rows.map(function(r){return r._key;}));
 }
 
 // KULLANICI TALEBİ: "Hata yakalama kodu kullanıcı tarafında çıkabilir fakat ilgili alanda
@@ -17255,7 +17471,8 @@ function diagClearRemoteLogs(){
   var REDRAW_MS=400;         // aynı kapsayıcı bu süre içinde tekrar yazılırsa "aşırı çizim"
   var REDRAW_HITS=3;         // üst üste bu kadar olursa kayıt açılır
   var CLS_LIMIT=0.12;        // bu eşiği aşan layout-shift birikimi "içerik zıplaması"
-  var STYLE_PER_SEC=25;      // kök stil yazımı saniyede bu sayıyı aşarsa "stil çırpınması"
+  var STYLE_PER_SEC=10;      // saniyedeki TEMA UYGULAMA TURU bu sayıyı aşarsa "stil çırpınması"
+                             // (özellik başına değil, tur başına - bkz. _sonStilTur notu)
   var ST_SCALE_MIN=0.78;     // puan tablosu ölçeği bunun altına inerse "sütun sıkışması"
 
   function core(){return window.DiagCore;}
@@ -17291,6 +17508,19 @@ function diagClearRemoteLogs(){
     var t=(el.textContent||'').replace(/\s+/g,' ').trim();
     return t.length>44?t.slice(0,44)+'…':t;
   }
+  /* KULLANICI RAPORUNDAN ÇIKAN HATA: Toplanan kayıtlarda teşhis katmanının KENDİ arayüzü
+     bulgu olarak görünüyordu - "Dokunma hedefi çok küçük · button.diagHudBadge 25×22px",
+     "Yazı okunamayacak kadar küçüldü · button.diagHudBadge > div > span · 8.5px",
+     "Titreme: aynı alan ard arda yeniden çiziliyor · alan: button.diagHudBadge".
+     Bunların hiçbiri UYGULAMANIN hatası değil; ölçüm aracının kendini ölçmesiydi. Üstelik
+     rozet her saniye kendini yeniden çizdiği için "titreme" ve "DOM fırtınası" sayaçlarını
+     da şişiriyor, gerçek bulguları gürültüye boğuyordu. Artık teşhis arayüzüne ait hiçbir
+     öğe ne taranır ne de DOM değişiklik sayacına girer. */
+  var DIAG_SELF_SEL='.diagHudBadge,#diagHudPanel,#diagRefPhotoOv,#ptDoctorBtn,#admDoctorBtn,#ptDoctorPanel,#admDoctorPanel,.diagMiniBg';
+  function kendiMi(el){
+    if(!el||el.nodeType!==1)return false;
+    try{return !!(el.closest&&el.closest(DIAG_SELF_SEL));}catch(e){return false;}
+  }
   function ekranAdi(){
     try{
       if(window._diagScreen)return String(window._diagScreen);
@@ -17324,12 +17554,19 @@ function diagClearRemoteLogs(){
     if(document.hidden)return;
     var yatayKirpik=[],dikeyKirpik=[],kucukYazi=[],darKutu=[],kucukHedef=[];
     var sayac=0;
+    // KULLANICI RAPORUNDAN ÇIKAN HATA: Aynı öğe iki kez listeleniyordu ("div#pg-standings >
+    // ... > button.st-filter-btn" ve "div.page.active > ... > button.st-filter-btn" aslında
+    // AYNI butondu). Sebep: tarama kökleri iç içe geçiyor (#pg-standings zaten .page.active).
+    // Artık her öğe, kaç kökten görünürse görünsün BİR KEZ değerlendirilir.
+    var gorulen=(typeof Set==='function')?new Set():null;
     taramaKokleri().forEach(function(kok){
       var list;
       try{list=kok.querySelectorAll('*');}catch(e){return;}
       for(var i=0;i<list.length;i++){
         if(sayac++>MAX_NODES)break;
         var el=list[i];
+        if(gorulen){if(gorulen.has(el))continue;gorulen.add(el);}
+        if(kendiMi(el))continue;                    // teşhis arayüzü ölçülmez
         // Görünmeyen/ölçülemeyen öğeler taranmaz (bkz. yukarıdaki offsetParent notu).
         if(!el.getClientRects().length)continue;
         var w=el.clientWidth,h=el.clientHeight;
@@ -17388,6 +17625,7 @@ function diagClearRemoteLogs(){
         var hepsi=document.body?document.body.querySelectorAll('*'):[];
         for(var k=0;k<hepsi.length&&suclular.length<MAX_REPORT;k++){
           var e2=hepsi[k];
+          if(kendiMi(e2))continue;
           if(!e2.getClientRects().length)continue;
           var r=e2.getBoundingClientRect();
           if(r.width>0&&r.right>window.innerWidth+2)suclular.push(yol(e2)+' · sağ kenar '+Math.round(r.right)+'px');
@@ -17411,18 +17649,30 @@ function diagClearRemoteLogs(){
 
   /* ── B) TİTREME & GÖRSEL KARARSIZLIK ─────────────────────────────────────────────── */
   var _mo=null,_po=null,_scanT=null,_secT=null;
-  var _mutSayac=0,_cls=0,_stilSayac=0;
+  var _mutSayac=0,_cls=0,_stilSayac=0,_sonStilTur=0;
   var _sonYazim={},_ardArda={};
 
   function moKur(){
     if(_mo||!window.MutationObserver||!document.body)return;
     _mo=new MutationObserver(function(muts){
-      _mutSayac+=muts.length;
       for(var i=0;i<muts.length;i++){
         var m=muts[i];
+        // Teşhis arayüzünün kendi güncellemeleri sayılmaz (bkz. kendiMi notu).
+        if(m.target&&m.target.nodeType===1&&kendiMi(m.target))continue;
+        _mutSayac++;
         // 11) Kök stil çırpınması: <html style="--ac:..."> gibi tema değişkenlerinin
         //     saniyede defalarca yeniden yazılması ekranda renk titremesi olarak görünür.
-        if(m.type==='attributes'&&m.attributeName==='style'&&m.target===document.documentElement){_stilSayac++;continue;}
+        if(m.type==='attributes'&&m.attributeName==='style'&&m.target===document.documentElement){
+          // KULLANICI RAPORUNDAN ÇIKAN YANLIŞ ALARM: "60 kök stil yazımı / saniye" uyarısı
+          // gerçek bir çırpınma DEĞİLDİ. applyTheme() tek seferde ~20 CSS değişkenini
+          // setProperty ile yazar ve tarayıcı bunların HER BİRİ için ayrı bir mutation
+          // kaydı üretir; yani saniyede 3 tema uygulaması 60 "yazım" gibi görünüyordu.
+          // Artık aynı kare içindeki (16ms) ardışık yazımlar TEK TUR sayılır - ölçülen şey
+          // "kaç kez tema uygulandı" olur, ki titremeyi belirleyen gerçek büyüklük budur.
+          var tNow=Date.now();
+          if(tNow-_sonStilTur>=16){_stilSayac++;_sonStilTur=tNow;}
+          continue;
+        }
         // 8) Aynı kapsayıcının ard arda yeniden yazılması (render döngüsü) - kullanıcı
         //    bunu "ekran titriyor / yanıp sönüyor" olarak görür.
         if(m.type==='childList'&&m.target&&m.target.nodeType===1&&m.removedNodes.length&&m.addedNodes.length){
@@ -17854,11 +18104,20 @@ function diagClearRemoteLogs(){
         }
         el.style.padding=genis?'.4rem .6rem':'.25rem .35rem';
         el.style.background=s.errs?'#ef4444':(s.slow?'#f59e0b':'#22c55e');
-        el.innerHTML=rozetHtml(id,s,genis);
+        // Aynı içerik tekrar yazılmaz: innerHTML'i her turda yeniden atamak, rozetin altındaki
+        // tüm düğümleri söküp yeniden kurar - bu hem gereksiz maliyet hem de (kullanıcı
+        // raporunda görüldüğü gibi) titreme/DOM fırtınası sayaçlarını şişiren gürültüydü.
+        var yeniHtml=rozetHtml(id,s,genis);
+        if(el.getAttribute('data-html')!==yeniHtml){
+          el.innerHTML=yeniHtml;
+          el.setAttribute('data-html',yeniHtml);
+        }
         // Bölüm görüntüsü yalnızca GENİŞ rozette - kompakt rozetlerde hem okunmaz hem de
         // her biri için ayrı DOM klonu almak gereksiz maliyet olurdu.
         if(genis)buildMini(el,id);
         else{var bg=el.querySelector('.diagMiniBg');if(bg)bg.remove();}
+        // innerHTML yazımı arka plan klonunu da sildiyse geri konur (klon her zaman ilk çocuktur).
+        if(genis&&!el.querySelector('.diagMiniBg')){el.removeAttribute('data-minimod');buildMini(el,id);}
       });
 
       // Yerleştirme, tüm rozetler oluşturulup ölçülebilir hale geldikten SONRA ve sabit
