@@ -1125,46 +1125,42 @@ var SUPABASE_URL='https://oasyhelzshbehnpyrssw.supabase.co';
 var SUPABASE_ANON_KEY='sb_publishable_DxSYVhhxvfVw_yAA7xkS6A_s1Usv41C';
 var SUPABASE_VIDEO_BUCKET='videos';
 var supabaseClient=null;
-// KULLANICI TALEBİ: "Emoji paketleri admin tarafında kalkmış ama puan tablosu tarafı bunu
-// işlemiyor." - KÖK SEBEP: Koddan boşaltılan buildDefaultReactionPacks() geçmişte ÇALIŞMIŞ
-// olan tek-seferlik tohumlama yüzünden bazı liglerin Firebase verisinde o eski 48 paket
-// HÂLÂ duruyordu; bir önceki düzeltme SADECE o an admin panelinde AÇIK olan ligi
-// temizliyordu - Puan Tablosu'nun bağlı olduğu lig farklıysa (örn. yeni sezon/farklı lig)
-// oraya hiç dokunulmamış oluyordu. Artık Firebase bağlantısı kurulur kurulmaz, TÜM ligler
-// (hangisi admin panelinde açık olursa olsun) TEK SEFERDE taranıp bu bilinen eski paket
-// ID'leri SİLİNİR - admin'in kendi eklediği hiçbir pakete dokunulmaz.
-// HATA DÜZELTMESİ (kullanıcı bildirdi, ikinci kez: "Emoji paketleri hâlâ koda gömülü bir
-// şekilde aktif. Sil onları, yönetici zaten ekliyor."): Önceki temizlik yalnızca SABİT,
-// bilinen 60 eski ID'yi arıyordu (klasik_/futbol_/eglence_/duygu_/enerji_ önekleri) ve
-// SADECE BİR KEZ (ömür boyu) çalışıyordu - eğer bir kurulumda bu ID'lerden FARKLI (ör. daha
-// eski bir sürümden kalma, başka önekli) gömülü paketler varsa veya temizlik daha önce bu
-// eski listeyle zaten "tamamlandı" işaretlenmişse, o paketler asla temizlenmiyordu. KÖKTEN
-// ÇÖZÜM: Artık ID listesine güvenmek yerine DESEN (pattern) ile tespit ediliyor - admin
-// panelindeki TEK paket oluşturma yolu olan saveReactionPackDraft() HER ZAMAN 'pack_'+uid()
-// biçiminde bir ID üretir (bkz. o fonksiyon). Yani ID'si 'pack_' ile BAŞLAMAYAN her paket,
-// admin tarafından değil, geçmişteki gömülü tohumlama tarafından oluşturulmuş demektir -
-// hangi isim şemasını kullanmış olursa olsun. Bayrak da yeni bir anahtara (V2) taşındı ki
-// bu genişletilmiş, daha güvenilir tarama TÜM kurulumlarda bir kez daha (ve sadece bir kez)
-// çalışsın.
-(function purgeLegacyReactionPacksGlobally(){
-  db.ref('globalAdminSettings/legacyReactionPacksPurgedGlobalV2').once('value').then(function(flagSnap){
+(function purgeBuiltinSystemResiduesGlobally(){
+  // KULLANICI TALEBİ: "Yerleşik tema, yazı tipi veya emoji sistemini tamamen kaldır."
+  // Sistem koddan kaldırıldı, ama GEÇMİŞTE bu sistem tarafından veritabanına yazılmış
+  // kalıntılar bazı liglerde hâlâ duruyor olabilir:
+  //   - koddan tohumlanmış eski tepki (emoji) paketleri,
+  //   - yerleşik tema/yazı tipi için tutulan "gizlenen / kalıcı silinen ID" listeleri,
+  //   - yerleşik temaların renk düzenlemeleri (themeOverrides),
+  //   - yerleşik fontların premium işaret listesi (premiumFontIds),
+  //   - emoji tohumlama bayrağı (reactionPacksSeeded).
+  // Bunlar artık HİÇBİR yerde okunmuyor; sadece veriyi gereksiz büyütüyorlar. Bu tek
+  // seferlik temizlik, Firebase bağlantısı kurulur kurulmaz TÜM ligleri (hangisi admin
+  // panelinde açık olursa olsun) tarayıp bu kalıntıları siler.
+  // Admin'in KENDİ eklediği hiçbir tema/font/pakete DOKUNULMAZ: admin panelindeki tek paket
+  // oluşturma yolu olan saveReactionPackDraft() HER ZAMAN 'pack_'+uid() biçiminde bir ID
+  // üretir, yani ID'si 'pack_' ile başlamayan her paket geçmişteki gömülü tohumlamadan
+  // kalmadır.
+  db.ref('globalAdminSettings/builtinSystemResiduesPurgedV3').once('value').then(function(flagSnap){
     if(flagSnap.val())return;
     return db.ref('leagues').once('value').then(function(allSnap){
       var allLeagues=allSnap.val()||{};
+      var residueKeys=['hiddenThemeIds','deletedBuiltinThemeIds','hiddenFontIds','deletedBuiltinFontIds','themeOverrides','premiumFontIds','reactionPacksSeeded'];
       var updates={};
       Object.keys(allLeagues).forEach(function(lid){
-        var packs=(allLeagues[lid]&&allLeagues[lid].reactionPacks)||{};
+        var lg=allLeagues[lid]||{};
+        var packs=lg.reactionPacks||{};
         Object.keys(packs).forEach(function(pid){
-          // Admin'in oluşturduğu HER paket 'pack_' önekiyle başlar - bunun DIŞINDAKİ her ID
-          // (klasik_, futbol_, eglence_, duygu_, enerji_ veya başka herhangi bir önek) eski,
-          // koddan tohumlanmış bir pakettir ve güvenle silinebilir.
           if(pid.indexOf('pack_')!==0)updates['leagues/'+lid+'/reactionPacks/'+pid]=null;
         });
+        residueKeys.forEach(function(k){
+          if(lg[k]!==undefined)updates['leagues/'+lid+'/'+k]=null;
+        });
       });
-      updates['globalAdminSettings/legacyReactionPacksPurgedGlobalV2']=true;
+      updates['globalAdminSettings/builtinSystemResiduesPurgedV3']=true;
       return db.ref().update(updates);
     });
-  }).catch(function(e){console.error('Eski tepki paketi temizliği başarısız:',e);});
+  }).catch(function(e){console.error('Yerleşik sistem kalıntısı temizliği başarısız:',e);});
 })();
 // KULLANICI TALEBİ: "Admin, 'Admin Panelindeki' menüleri tamamen kendi düzenine göre
 // değiştirebileceği bir sistem geliştir." - Ana yönetim araçları menüsü artık SABİT bir HTML
@@ -1969,18 +1965,9 @@ function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2
 // bağlı bir alan) mümkündür - "bazı durumlarda" ifadesi tam olarak bunu işaret ediyor.
 // Bu fonksiyon, Firebase'e gönderilmeden ÖNCE nesneyi recursive olarak tarar ve TÜM
 // "undefined" değerleri "null" ile değiştirir (Firebase null'ı sorunsuz kabul eder).
-// KULLANICI TALEBİ (hata): "Yerleşik yazı tipi ve temayı kalıcı olarak silemiyor" - KÖK SEBEP:
-// Firebase Realtime Database, bir DİZİYİ (['ruby']) geri okurken bazı durumlarda OBJEYE
-// ({0:'ruby'}) çevirir (özellikle seyrek/silinmiş indeksler olduğunda). Bu durumda .indexOf()
-// ve .push() ARTIK ÇALIŞMAZ - silme kaydı sessizce kaybolur veya kontrol edilemez. ÇÖZÜM:
-// bu yardımcı, hem gerçek diziyi hem de Firebase'in obje-halini HER ZAMAN düz bir string
-// dizisine çevirir. Silme/görünürlük kontrolleri artık bu güvenli liste üzerinden yapılır.
-function _asIdList(v){
-  if(!v)return [];
-  if(Array.isArray(v))return v.filter(function(x){return x!=null;});
-  if(typeof v==='object')return Object.keys(v).map(function(k){return v[k];}).filter(function(x){return x!=null;});
-  return [];
-}
+// NOT: Buradaki _asIdList() yardımcısı YALNIZCA yerleşik tema/yazı tipi için tutulan
+// "gizlenen / kalıcı silinen ID" listelerini okumak içindi. Yerleşik sistem tamamen
+// kaldırıldığı için o listeler de artık yok; yardımcı da kaldırıldı.
 function sanitizeForFirebase(obj){
   if(obj===undefined)return null;
   if(obj===null||typeof obj!=='object')return obj;
@@ -4827,22 +4814,19 @@ function buildCarriedLeagueSettings(src){
     loginScreenTheme:src.loginScreenTheme||null,
     rankNotes:src.rankNotes||[],
     // KULLANICI TALEBİ: "Yönetici bir tema, yazı tipi veya emoji eklediğinde... yeni sezona
-    // geçse bile görecek ve eklenecektir." - Bu alanlar önceden buraya HİÇ eklenmemişti,
-    // bu yüzden admin'in kendi eklediği özel temalar/yazı tipleri/tepki paketleri yeni
-    // sezona geçildiğinde SESSİZCE sıfırlanıyordu (sadece o anki lig ayarları - logo, kart
-    // stili vb. - taşınıyordu). Artık aynen diğer görsel/yapısal ayarlar gibi olduğu gibi
-    // taşınır: özel eklenen tema/font/paketler + bunların gizli/kalıcı-silinmiş yerleşik
-    // ID listeleri + premium fiyatlandırmaları.
+    // geçse bile görecek ve eklenecektir." - Admin'in kendi eklediği temalar/yazı tipleri/
+    // tepki paketleri diğer tüm görsel ayarlar gibi olduğu gibi taşınır.
+    // NOT: Yerleşik (koda gömülü) tema/yazı tipi/emoji sistemi TAMAMEN KALDIRILDI - bu yüzden
+    // ona ait "gizlenen/kalıcı silinen yerleşik ID" listeleri (hiddenThemeIds,
+    // deletedBuiltinThemeIds, hiddenFontIds, deletedBuiltinFontIds), yerleşik temaların renk
+    // düzenlemeleri (themeOverrides), yerleşik fontların premium işaretleri (premiumFontIds)
+    // ve yerleşik emoji tohumlama bayrağı (reactionPacksSeeded) artık taşınmaz; hiçbiri
+    // kullanılmıyor. Admin'in kendi eklediği her unsur zaten KENDİ premium/yayın bayrağını
+    // taşır (customThemes[x].category, customFonts[x].premium, reactionPacks[x].premium).
     customThemes:src.customThemes||{},
     autoThemeSignatures:src.autoThemeSignatures||{},
-    hiddenThemeIds:src.hiddenThemeIds||[],
-    deletedBuiltinThemeIds:src.deletedBuiltinThemeIds||[],
-    premiumFontIds:src.premiumFontIds||null,
     customFonts:src.customFonts||{},
-    hiddenFontIds:src.hiddenFontIds||[],
-    deletedBuiltinFontIds:src.deletedBuiltinFontIds||[],
     reactionPacks:src.reactionPacks||{},
-    reactionPacksSeeded:src.reactionPacksSeeded||false,
     premiumPrices:src.premiumPrices||{},
     // HATA DÜZELTMESİ (kullanıcı bildirdi: "Yeni sezona geçiş yapıldığında canlı şerit
     // ayarları taşınmıyor - mesela hız ayarı"): Canlı Şerit Yönetimi ekranındaki TÜM
@@ -4869,16 +4853,7 @@ function buildCarriedLeagueSettings(src){
     // Alt hesaplar (kısıtlı yetkili yöneticiler) - taşınmazsa yeni sezona geçildiğinde
     // admin'in oluşturduğu tüm ek hesaplar silinmiş gibi davranır, o hesaplarla giriş
     // yapılamaz hale gelirdi.
-    adminAccounts:src.adminAccounts?JSON.parse(JSON.stringify(src.adminAccounts)):[],
-    // HATA DÜZELTMESİ (kullanıcı bildirdi: "sezon değiştirince bazı özellikler taşınmıyor,
-    // eski haline dönüyor"): Yerleşik temaların admin tarafından düzenlenen vurgu renkleri
-    // (S.themeOverrides - bkz. editBuiltinTheme/saveBuiltinThemeEdit) bu listeye HİÇ
-    // eklenmemişti. Bu yüzden hem yeni sezona geçişte hem de canlı yayılımda (bkz.
-    // getLeagueWideSettingsSyncFields - bu fonksiyonun alan listesini BURADAN türetir)
-    // sessizce göz ardı ediliyordu: admin bir yerleşik temanın rengini özelleştirse bile,
-    // yeni sezona geçildiğinde o tema varsayılan rengine "dönüyordu". Artık diğer tüm
-    // görsel ayarlar gibi olduğu gibi taşınır/yayılır.
-    themeOverrides:src.themeOverrides?JSON.parse(JSON.stringify(src.themeOverrides)):{}
+    adminAccounts:src.adminAccounts?JSON.parse(JSON.stringify(src.adminAccounts)):[]
   };
 }
 
@@ -4910,6 +4885,20 @@ function carryVisitorsAndChat(oldLeagueId,newLeagueId){
       var existingPoints=pSnap.val();
       if(existingPoints){
         return db.ref('leagues/'+newLeagueId+'/userPoints').set(existingPoints);
+      }
+    }).catch(function(){});
+  }).then(function(){
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "sezon değişince bazı özellikler eski hâline
+    // dönüyor"): Premium erişim kodları (premiumAccessCodes - kullanıcının satın aldığı ya da
+    // admin'in verdiği tema/yazı tipi/emoji erişimleri) yeni sezona TAŞINMIYORDU. Tema ve
+    // yazı tiplerinin kendisi taşınıyor, ama kullanıcının O TEMAYA ERİŞİM HAKKI taşınmadığı
+    // için kullanıcı sezon değişir değişmez varsayılan temaya düşüyordu - tam olarak
+    // "özellik eski hâline döndü" şikayeti. Artık kayıtlı kullanıcılar/sohbet/puanlarla
+    // AYNI şekilde taşınır.
+    return db.ref('leagues/'+oldLeagueId+'/premiumAccessCodes').once('value').then(function(cSnap){
+      var existingCodes=cSnap.val();
+      if(existingCodes){
+        return db.ref('leagues/'+newLeagueId+'/premiumAccessCodes').set(existingCodes);
       }
     }).catch(function(){});
   });
@@ -10181,17 +10170,12 @@ function resolvePremiumItemLabelAdmin(codeOrId){
   var itemId=cd?(cd.paletteId||''):(codeOrId||'');
   if(cd&&cd.paletteLabel&&cd.paletteLabel!==itemId)return cd.paletteLabel;
   if(!itemId)return '?';
-  // Yerleşik premium paletler
-  if(typeof PREMIUM_PALETTES_REF!=='undefined'){
-    for(var i=0;i<PREMIUM_PALETTES_REF.length;i++){if(PREMIUM_PALETTES_REF[i].id===itemId)return PREMIUM_PALETTES_REF[i].label;}
-  }
-  // Admin'in eklediği özel temalar
+  // Admin'in eklediği temalar (yerleşik palet listesi tamamen kaldırıldı)
   if(S.customThemes&&S.customThemes[itemId])return S.customThemes[itemId].name;
   // Fontlar
   if(itemId.indexOf('font_')===0){
     var fid=itemId.slice(5);
     if(S.customFonts&&S.customFonts[fid])return S.customFonts[fid].label;
-    if(typeof ALL_FONT_IDS_BASE!=='undefined'){for(var j=0;j<ALL_FONT_IDS_BASE.length;j++){if(ALL_FONT_IDS_BASE[j].id===fid)return ALL_FONT_IDS_BASE[j].label;}}
     return fid;
   }
   // Emoji/tepki paketleri
@@ -10849,19 +10833,12 @@ function closeAdminChatScreen(){
 // taşındı. Admin'de sabitleme/silme/ceza HER ZAMAN aktiftir (tam kontrol) - PT'deki gibi
 // sahiplik/geliştirici kontrolüne bağlı değildir.
 var ADMIN_REACTION_EMOJIS=[]; // Hızlı erişim listesi - artık admin tarafından yönetilen tepki paketleri (S.reactionPacks) üzerinden geliyor, kodda sabit emoji yok
-// KULLANICI TALEBİ: "Yönetici için... premium yazı tipi seçici ekle; sadece yöneticinin
-// seçtiği unsurlar premium olacak." - S.premiumFontIds, admin'in HANGİ fontları premium
-// olarak işaretlediğini tutar (Firebase'de saklanır, Puan Tablosu bunu D.premiumFontIds
-// üzerinden okur). Hiç ayarlanmamışsa (admin hiç dokunmamışsa) PT'nin varsayılan (6
-// ücretsiz + 12 premium) ayrımı geçerli kalır.
-// KULLANICI TALEBİ: Kodun içine gömülü tüm hazır yazı tipi seçenekleri kaldırıldı. Yapı
-// (yönetim ekranı, premium işaretleme, silme/gizleme, özel font ekleme) AYNEN duruyor -
-// admin artık sıfırdan başlayıp istediği yazı tiplerini kendisi ekliyor.
-var ALL_FONT_IDS_BASE=[];
-var DEFAULT_PREMIUM_FONT_IDS=[];
-function getCurrentPremiumFontIds(){
-  return Array.isArray(S.premiumFontIds)?S.premiumFontIds:DEFAULT_PREMIUM_FONT_IDS;
-}
+// KULLANICI TALEBİ: "Yerleşik tema, yazı tipi veya emoji sistemini tamamen kaldır, admin
+// zaten ekleyebiliyor." - Koda gömülü yazı tipi listesi (ALL_FONT_IDS_BASE), yerleşik
+// fontların varsayılan premium ayrımı (DEFAULT_PREMIUM_FONT_IDS) ve admin'in yerleşik
+// fontlar için tuttuğu premium işaret listesi (premiumFontIds) TAMAMEN KALDIRILDI. Artık
+// TEK kaynak admin'in kendi eklediği yazı tipleridir (S.customFonts) ve her fontun premium
+// olup olmadığı KENDİ kaydındaki `premium` bayrağıdır.
 function openPremiumFontManager(){
   var customFonts=Object.values(S.customFonts||{});
   var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.7rem;line-height:1.5">Eklediğiniz yazı tiplerini ücretsiz/premium olarak işaretleyebilir, yayınlayıp gizleyebilir veya silebilirsiniz.</div>'
@@ -11005,13 +10982,13 @@ function deleteCustomFont(fid){
 // NOT: Puan Tablosu tarafındaki çalışma zamanı PALETTES nesnesindeki 'violet' değeri, hiçbir
 // tema bulunamadığında devreye giren dahili bir güvenlik varsayılanı olarak kalır (ayrıca
 // bkz. puan-tablosu.html) - admin/kullanıcıya bir "seçenek" olarak gösterilmez.
-var BUILTIN_PALETTE_REF=[];
-var PREMIUM_PALETTES_REF=[];
+// Yerleşik palet referans listeleri (BUILTIN_PALETTE_REF / PREMIUM_PALETTES_REF) tamamen
+// kaldırıldı - tema kaynağı artık SADECE admin'in eklediği S.customThemes'tir.
 // KULLANICI TALEBİ: "Admin 'Koyu temalar - Normal temalar - Açık temalar - Premium temalar'
 // ekleyebileceği, düzenleyebileceği ve silebileceği bir sistem geliştirilmelidir." - Admin
 // artık 4 kategoride (Koyu/Normal/Açık/Premium) TAMAMEN YENİ temalar (isim + 3 renk: arka
-// plan, vurgu, metin) ekleyip düzenleyip silebilir. Yerleşik (hazır gelen) 12+12 paletin
-// TAMAMI ise "gizle" ile listeden kaldırılabilir (silinen fontlarla AYNI güvenli mantık).
+// plan, vurgu, metin) ekleyip düzenleyip silebilir. Yerleşik/hazır gelen hiçbir palet yoktur -
+// listede yalnızca admin'in kendi eklediği temalar bulunur.
 var THEME_CATEGORIES=[
   {id:'koyu',label:'🌙 Koyu Temalar',mode:'dark'},
   {id:'normal',label:'⚖️ Normal Temalar',mode:'normal'},
@@ -11194,13 +11171,9 @@ function deleteReactionPack(pid){
     }).catch(function(e){toast('❌ Silinemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
   });
 }
-// KULLANICI TALEBİ: Kodun içine gömülü tüm hazır tepki emoji paketleri kaldırıldı. Yapı
-// (paket ekleme/silme/premium işaretleme sistemi, tohumlama mekanizması) AYNEN duruyor -
-// admin artık sıfırdan başlayıp istediği tepki paketlerini kendisi ekliyor (bkz. PALETTES
-// ve FONT_TIERS'taki AYNI mantık - satır ~1732/1349, index.html).
-function buildDefaultReactionPacks(){
-  return {};
-}
+// KULLANICI TALEBİ: Yerleşik emoji sistemi TAMAMEN kaldırıldı - hazır paket listesi de,
+// onları veritabanına yazan "tohumlama" (seeding) mekanizması da artık yok. Tepki paketleri
+// yalnızca admin'in "🎭 Tepki Paketleri" ekranından eklediklerinden oluşur.
 // Tam emoji ızgarasını açan pop-up - admin herhangi bir kayıtlı emojiyle tepki verebilir.
 function adminOpenFullEmojiPicker(matchId,cid){
   var allPacks=Object.values(S.reactionPacks||{});
@@ -12213,59 +12186,28 @@ function openPremiumPricesManager(){
     html+='<div style="font-size:.62rem;font-weight:800;color:var(--ac);text-transform:uppercase;margin-bottom:.35rem">🎭 Tepki Paketleri</div>';
     html+=packs.map(function(p){return priceRow(p.id,p.name);}).join('');
   }
-  var premiumFontIds=getCurrentPremiumFontIds();
-  // HATA DÜZELTMESİ (kullanıcı bildirdi: "admin sildiği bazı unsurlar 'Puan Sistemi ve
-  // Fiyatlar' sekmesinde görünüyor"): KÖK SEBEP - Bu ekran, admin'in SİLDİĞİ yerleşik
-  // yazı tiplerini (S.hiddenFontIds) HİÇ dikkate almıyordu. Yazı Tipi yöneticisinde 🗑️ ile
-  // kaldırılan bir font, burada fiyatlandırılabilir bir unsur olarak görünmeye DEVAM
-  // ediyordu. Artık gizlenen fontlar bu listeden de çıkarılır.
-  // KAPSAMLI TARAMA DÜZELTMESİ: deletedBuiltinFontIds (KALICI silinen yerleşik fontlar) da
-  // eksikti - bunlar hiddenFontIds'ten FARKLI bir liste, kontrol edilmezse kalıcı silinen bir
-  // font hâlâ burada (ve dolayısıyla kullanıcı tarafındaki Puan Mağazası'nda) görünebiliyordu.
-  var hiddenFontIdsPr=S.hiddenFontIds||[];
-  var deletedFontIdsPr=_asIdList(S.deletedBuiltinFontIds);
-  var builtinPremiumFonts=ALL_FONT_IDS_BASE.filter(function(f){return premiumFontIds.indexOf(f.id)>-1&&hiddenFontIdsPr.indexOf(f.id)===-1&&deletedFontIdsPr.indexOf(f.id)===-1;});
+  // Yerleşik yazı tipi/palet sistemi tamamen kaldırıldığı için burada artık SADECE admin'in
+  // kendi eklediği (ve premium işaretlediği) unsurlar listelenir.
   var customPremiumFonts=Object.values(S.customFonts||{}).filter(function(f){return f.premium;});
-  if(builtinPremiumFonts.length||customPremiumFonts.length){
+  if(customPremiumFonts.length){
     html+='<div style="font-size:.62rem;font-weight:800;color:var(--ac);text-transform:uppercase;margin:.6rem 0 .35rem">🔤 Yazı Tipleri</div>';
-    html+=builtinPremiumFonts.map(function(f){return priceRow('font_'+f.id,f.label);}).join('');
     html+=customPremiumFonts.map(function(f){return priceRow('font_'+f.id,f.label);}).join('');
   }
-  // HATA DÜZELTMESİ (kullanıcı bildirdi: "adminin kendi eklediği premium renk paletleri
-  // puan sistemi ve fiyatları üzerinden görünmüyor"): KÖK SEBEP - Bu bölüm SADECE sabit
-  // PREMIUM_PALETTES_REF listesini çiziyordu. Admin'in Tema Yönetimi'nden "Premium
-  // temalar"a EKLEDİĞİ kendi temaları (S.customThemes) buraya HİÇ dahil edilmiyordu, bu
-  // yüzden admin onlara puan fiyatı ATAYAMIYORDU (dolayısıyla kullanıcı da satın alamıyordu).
-  // Ayrıca gizlenen (🗑️) VE KALICI SİLİNEN yerleşik temalar da eleniyor - silinen bir tema
-  // fiyatlandırılabilir görünmemeli (kapsamlı tarama düzeltmesi: deletedBuiltinThemeIds
-  // eksikti, kalıcı silinen bir tema hâlâ burada listelenebiliyordu).
-  var hiddenThemeIdsPr=S.hiddenThemeIds||[];
-  var deletedThemeIdsPr=_asIdList(S.deletedBuiltinThemeIds);
-  var visiblePremiumPalettes=PREMIUM_PALETTES_REF.filter(function(p){return hiddenThemeIdsPr.indexOf(p.id)===-1&&deletedThemeIdsPr.indexOf(p.id)===-1;});
   var customPremiumThemes=Object.values(S.customThemes||{}).filter(function(t){return t.category==='premium';});
-  if(visiblePremiumPalettes.length||customPremiumThemes.length){
+  if(customPremiumThemes.length){
     html+='<div style="font-size:.62rem;font-weight:800;color:var(--ac);text-transform:uppercase;margin:.6rem 0 .35rem">🎨 Renk Paletleri</div>';
-    html+=visiblePremiumPalettes.map(function(p){return priceRow(p.id,p.label);}).join('');
-    // Admin'in kendi eklediği premium temalar - artık fiyatlandırılabilir.
     html+=customPremiumThemes.map(function(t){return priceRow(t.id,t.name);}).join('');
   }
   // HATA DÜZELTMESİ (kullanıcı bildirdi: "admin sildiği bazı unsurlar burada görünüyor"):
   // Bu düzeltmeden ÖNCE silinmiş unsurların fiyat kayıtları hâlâ veride duruyor olabilir.
   // Artık hangi kayıtların ÖKSÜZ (karşılığı olan paket/font/palet artık yok) olduğu tespit
   // edilip admin'e bildirilir ve tek dokunuşla temizlenebilir.
+  // Geçerli unsurlar = admin'in eklediği tepki paketleri + yazı tipleri + temalar.
+  // (Yerleşik sistem kaldırıldığı için "gizlenen/kalıcı silinen yerleşik ID" istisnaları
+  // da gerekmiyor - bir unsur listede yoksa fiyat kaydı öksüzdür, o kadar.)
   var validIds={};
   Object.values(S.reactionPacks||{}).forEach(function(p){validIds[p.id]=true;});
-  // ÖNEMLİ: Gizlenen (🗑️ ile kaldırılan) YERLEŞİK fontlar öksüz SAYILMAZ - "Tümünü Geri
-  // Yükle" ile geri gelebildikleri için fiyatları korunmalıdır, yoksa geri yüklemede
-  // admin'in girdiği fiyat kaybolurdu. Sadece ekranda gizlenirler. KALICI silinenler
-  // (deletedBuiltinFontIds) ise asla geri gelmez - onlar öksüz sayılır.
-  var deletedFontIdsOrphan=_asIdList(S.deletedBuiltinFontIds);
-  ALL_FONT_IDS_BASE.forEach(function(f){ if(deletedFontIdsOrphan.indexOf(f.id)===-1)validIds['font_'+f.id]=true; });
   Object.values(S.customFonts||{}).forEach(function(f){validIds['font_'+f.id]=true;});
-  var deletedThemeIdsOrphan=_asIdList(S.deletedBuiltinThemeIds);
-  PREMIUM_PALETTES_REF.forEach(function(p){ if(deletedThemeIdsOrphan.indexOf(p.id)===-1)validIds[p.id]=true; });
-  // HATA DÜZELTMESİ: Admin'in kendi eklediği premium temalar da GEÇERLİ unsurlardır -
-  // aksi halde onlara atanan fiyatlar "öksüz" sanılıp temizlenmeye aday gösteriliyordu.
   Object.values(S.customThemes||{}).forEach(function(t){validIds[t.id]=true;});
   var orphanIds=Object.keys(S.premiumPrices||{}).filter(function(id){return !validIds[id];});
   if(orphanIds.length){
@@ -12284,18 +12226,7 @@ function openPremiumPricesManager(){
 function cleanOrphanPremiumPrices(){
   var validIds={};
   Object.values(S.reactionPacks||{}).forEach(function(p){validIds[p.id]=true;});
-  // KAPSAMLI TARAMA DÜZELTMESİ: Gizlenen (hiddenFontIds - geri yüklenebilir) yerleşik fontların
-  // fiyatı KORUNUR, ama KALICI SİLİNEN (deletedBuiltinFontIds - asla geri gelmez) fontlar artık
-  // "geçerli" sayılmaz - onların fiyat kayıtları öksüz kabul edilip temizlenebilir olmalı.
-  var deletedFontIdsClean=_asIdList(S.deletedBuiltinFontIds);
-  ALL_FONT_IDS_BASE.forEach(function(f){ if(deletedFontIdsClean.indexOf(f.id)===-1)validIds['font_'+f.id]=true; });
   Object.values(S.customFonts||{}).forEach(function(f){validIds['font_'+f.id]=true;});
-  // Aynı mantık paletler için de geçerli: kalıcı silinen (deletedBuiltinThemeIds) yerleşik
-  // paletler artık geçerli sayılmaz, gizlenenler (hiddenThemeIds) korunur.
-  var deletedThemeIdsClean=_asIdList(S.deletedBuiltinThemeIds);
-  PREMIUM_PALETTES_REF.forEach(function(p){ if(deletedThemeIdsClean.indexOf(p.id)===-1)validIds[p.id]=true; });
-  // HATA DÜZELTMESİ: Admin'in kendi eklediği premium temalar da GEÇERLİ unsurlardır -
-  // aksi halde onlara atanan fiyatlar "öksüz" sanılıp temizlenmeye aday gösteriliyordu.
   Object.values(S.customThemes||{}).forEach(function(t){validIds[t.id]=true;});
   var orphans=Object.keys(S.premiumPrices||{}).filter(function(id){return !validIds[id];});
   if(!orphans.length){toast('ℹ️ Temizlenecek kayıt yok');return;}
@@ -13712,33 +13643,16 @@ function adminDeleteGenericComment(target,matchId,cid){
 }
 // NOT: adminTogglePinMatchComment/adminDeleteMatchComment kaldırıldı - yerlerini genel
 // (hem maç hem Genel Sohbet için çalışan) adminToggleGenericPin/adminDeleteGenericComment aldı.
-// KULLANICI TALEBİ: Yönetici, Puan Tablosu'ndaki AYNI 18 yazı tipini (6 ücretsiz + 12
-// referans numaralı premium) hiçbir koda/talebe gerek kalmadan serbestçe kullanabilir -
-// id'ler Puan Tablosu'ndaki FONT_TIERS ile BİREBİR aynıdır ki gönderilen mesaj orada doğru
-// yazı tipiyle render edilsin.
-// HATA DÜZELTMESİ (kullanıcı bildirdi: "yeni yazı tipi paketleri eklendiğinde admin
-// göremiyor"): Bu liste, Puan Tablosu'na yeni premium font eklendiğinde OTOMATİK
-// güncellenmiyor (iki ayrı dosya/sistem oldukları için) - bu yüzden PT'ye 6 yeni premium
-// font eklendiğinde bu liste ESKİ kalmıştı. Artık PT'deki GÜNCEL 18 fontun (6 ücretsiz + 12
-// premium) TAMAMI burada da mevcut. NOT: Bundan sonra PT'ye yeni bir font eklenirse, bu
-// listenin (ve aşağıdaki loadAllPreviewFontsOnce() içindeki 'families' dizisinin) elle
-// güncellenmesi gerekir - iki ayrı dosya olduğundan gerçek zamanlı otomatik senkron mümkün değildir.
-// HATA DÜZELTMESİ (kullanıcı bildirdi: "Admin kendi eklediği gifi yorumlarda kullanamıyor
-// desem buna yazı tipleri ve emojiler dahil"): Bu liste SABİT/KODLANMIŞ idi - admin'in
-// "🔤 Yazı Tipi Yönetimi" ekranından SONRADAN eklediği özel fontlar burada HİÇ görünmüyordu,
-// admin kendi eklediği fontu kendi mesajında/önizlemesinde kullanamıyordu. Artık ALL_FONT_IDS_BASE
-// (gizlenmemiş olanlar) + S.customFonts DİNAMİK olarak birleştirilir.
+// Yönetici, Puan Tablosu'nda da geçerli olan yazı tiplerini (admin'in kendi eklediği
+// S.customFonts kayıtları) hiçbir koda/talebe gerek kalmadan serbestçe kullanabilir - id'ler
+// iki tarafta BİREBİR aynıdır ki gönderilen mesaj orada doğru yazı tipiyle render edilsin.
+// Admin'in kendi mesaj/önizleme ekranlarında seçebileceği yazı tipleri. Yerleşik font
+// listesi tamamen kaldırıldığı için tek kaynak S.customFonts'tur - admin bir yazı tipi
+// eklemediyse bu liste boş döner ve arayüz varsayılan yazı tipiyle çalışmaya devam eder.
 function getAdminFontOptions(){
-  var premiumIds=getCurrentPremiumFontIds();
-  var hiddenIds=_asIdList(S.hiddenFontIds);
-  var builtin=ALL_FONT_IDS_BASE.filter(function(f){return hiddenIds.indexOf(f.id)===-1;}).map(function(f){
-    var isPremium=premiumIds.indexOf(f.id)>-1;
-    return {id:f.id,label:(isPremium?'✨ ':'')+f.label+(f.id==='outfit'?' (Varsayılan)':''),css:f.css};
-  });
-  var custom=Object.values(S.customFonts||{}).map(function(f){
+  return Object.values(S.customFonts||{}).map(function(f){
     return {id:f.id,label:(f.premium?'✨ ':'')+f.label,css:"'"+f.googleName+"',sans-serif"};
   });
-  return builtin.concat(custom);
 }
 // KULLANICI TALEBİ (kullanıcı bildirdi: "yazı tipi seçenekleri yazınca belli oluyor,
 // kullanıcı yazmadan görebilir[meli]"): Seçim ekranındaki her seçeneğin KENDİ GERÇEK yazı
@@ -13749,9 +13663,8 @@ var _previewFontsLoaded=false;
 function loadAllPreviewFontsOnce(){
   if(_previewFontsLoaded)return;
   _previewFontsLoaded=true;
-  // KULLANICI TALEBİ: Kodun içine gömülü hazır yazı tipi ailesi listesi kaldırıldı
-  // (ALL_FONT_IDS_BASE zaten boş - bkz. yukarısı). Artık SADECE admin'in S.customFonts
-  // üzerinden sıfırdan eklediği fontlar önizleme için yüklenir.
+  // Yerleşik yazı tipi sistemi kaldırıldı - önizleme için SADECE admin'in S.customFonts
+  // üzerinden eklediği fontlar yüklenir.
   var families=[];
   Object.values(S.customFonts||{}).forEach(function(f){
     if(f.googleName)families.push(f.googleName.replace(/ /g,'+'));
@@ -14611,8 +14524,16 @@ function init(){
     }
     populateLeagueSel(meta);
     var saved=localStorage.getItem('adm_curLeague');
-    var useId=(saved&&ids.indexOf(saved)>=0)?saved:ids[0];
-    if(useId!==_curLeagueId){
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "sezon silince eski hâline dönüyor"): Seçili sezon
+    // silindiğinde burada ids[0] (Firebase'in döndürdüğü RASTGELE ilk kayıt) seçiliyordu - bu
+    // genelde bitmiş/arşivlenmiş eski bir sezon oluyor, admin beklenmedik şekilde eski bir
+    // sezona düşüyordu. Üstelik bu seçim, silme akışının kendi (doğru) seçimiyle YARIŞIYOR,
+    // hangisinin kazanacağı zamanlamaya bağlı kalıyordu - "tutarlı çalışmıyor" şikayetinin
+    // sebebi buydu. Artık TEK ve ORTAK kural: en yeni AKTİF sezon (bkz. pickDefaultLeagueId).
+    var curValid=_curLeagueId&&ids.indexOf(_curLeagueId)>=0;
+    var useId=curValid?_curLeagueId
+      :((saved&&ids.indexOf(saved)>=0)?saved:pickDefaultLeagueId(meta));
+    if(useId&&(useId!==_curLeagueId||!_leagueDataListenerId)){
       _curLeagueId=useId;
       localStorage.setItem('adm_curLeague',useId);
       listenToLeague(useId);
@@ -14621,8 +14542,34 @@ function init(){
 }
 
 var _leagueDataListener=null;
+// KRİTİK HATA DÜZELTMESİ (kullanıcı bildirdi: "sezon değiştirdiğimde / bir sezonu sildiğimde
+// bazı özellikler taşınmıyor, eski hâline dönüyor"): KÖK SEBEP burasıydı. Eski dinleyici
+// "db.ref('leagues/'+_curLeagueId).off(...)" ile kaldırılmaya çalışılıyordu - AMA bu fonksiyonu
+// çağıran HER YER (switchLeague, doAddLeagueConfirmed, doNewSeasonTransitionConfirmed,
+// confirmDeleteLeagueFromList) _curLeagueId'yi ÇAĞRIDAN HEMEN ÖNCE zaten YENİ lige ayarlıyordu.
+// Yani off() her seferinde YENİ ligin yolundan ayrılmaya çalışıyor, ESKİ ligin dinleyicisi ise
+// ASLA kaldırılmıyordu. Sonuç: sezon geçişinden sonra ESKİ sezonun dinleyicisi de çalışmaya
+// devam ediyor, S nesnesini eski sezonun verisiyle EZİYOR (="eski hâline dönüyor") ve daha da
+// kötüsü propagateStandingsSettingsToAllLeagues() tetiklenip ESKİ sezonun ayarlarını YENİ
+// sezonun üzerine yazıyordu. Sezon SİLİNDİĞİNDE ise silinen ligin dinleyicisi null verisiyle
+// tetikleniyor, tüm ayarlar varsayılana dönüyordu. Artık dinleyicinin GERÇEKTEN bağlı olduğu
+// lig ayrıca tutulur ve ayrılma HER ZAMAN o ligden yapılır.
+var _leagueDataListenerId=null;
+// Hangi ligin en yeni/uygun varsayılan olduğunu belirleyen TEK kural (Puan Tablosu tarafındaki
+// mantıkla birebir aynı): önce BİTMEMİŞ (aktif) sezonlar arasından EN YENİSİ (uid() Date.now
+// tabanlı olduğu için ID sıralaması = oluşturulma sırası), hiç aktif sezon yoksa en yeni sezon.
+function pickDefaultLeagueId(meta){
+  var ids=Object.keys(meta||{});
+  if(!ids.length)return '';
+  var active=ids.filter(function(id){return meta[id]&&meta[id].status!=='finished';});
+  return (active.length?active:ids).sort().reverse()[0];
+}
 function listenToLeague(leagueId){
-  if(_leagueDataListener)db.ref('leagues/'+_curLeagueId).off('value',_leagueDataListener);
+  if(!leagueId)return;
+  if(_leagueDataListener&&_leagueDataListenerId)db.ref('leagues/'+_leagueDataListenerId).off('value',_leagueDataListener);
+  _leagueDataListenerId=leagueId;
+  _curLeagueId=leagueId; // çağıranlar zaten ayarlıyor; burada da garantiye alınır
+  var _gotDataForThisLeague=false; // bu sezon için en az bir kez gerçek veri geldi mi?
   window._leagueFirstSyncDone=false; // Yeni lig için yükleniyor durumu yeniden gösterilsin.
   // KULLANICI TALEBİ: Farklı bir lige geçildiğinde (sırf görüntülemek için bile) o ligin
   // KENDİ mevcut ayarlarıyla otomatik "değişiklik algılandı" sanılıp diğer liglerin üzerine
@@ -14637,7 +14584,17 @@ function listenToLeague(leagueId){
   // yerine tek bir garantili nokta.
   db.ref('activeDisplayLeague').set(leagueId).catch(function(){});
   _leagueDataListener=function(snap){
+    // GÜVENLİK KİLİDİ: Firebase'in yoldan ayrılma (off) işlemi tamamlanana kadar sırada
+    // bekleyen bir geri çağrı hâlâ tetiklenebilir. Artık aktif olmayan bir ligden gelen
+    // hiçbir senkron S'i (ve dolayısıyla ayar yayılımını) ASLA etkilemez.
+    if(_leagueDataListenerId!==leagueId||_curLeagueId!==leagueId)return;
     var d=snap.val();
+    // Sezon Firebase'den SİLİNMİŞSE (daha önce verisi gelmişti, şimdi null döndü) S'i
+    // varsayılanlara SIFIRLAMA - aksi halde bir sezon silindiği anda tüm ayarlar "eski hâline
+    // dönmüş" gibi görünürdü. Doğru sezona geçişi leaguesMeta dinleyicisi zaten yapar.
+    // Henüz hiç veri gelmemişken null gelmesi (gerçekten boş bir sezon) normal işlenir.
+    if(d===null&&_gotDataForThisLeague)return;
+    if(d!==null)_gotDataForThisLeague=true;
     // Güvenlik amaçlı: bu callback'in içinde beklenmedik bir hata olursa (ör. gelecekte
     // eklenecek bir kod satırı), renderTeams() gibi kritik render işlemlerinin ETKİLENMEMESİ
     // için try/catch ile sarmalanmıştır.
@@ -14689,44 +14646,23 @@ function listenToLeague(leagueId){
       // NOT: adminMenuGroups / pageLayout / settingsSectionOrder artık LİGE ÖZEL değil,
       // globalAdminSettings dinleyicisinden (yukarıda) yükleniyor - "sonraki sezonlarda da
       // geçerli olsun" talebi gereği.
-      // KULLANICI TALEBİ: Admin'in hangi yazı tiplerini premium işaretlediği - hiç
-      // ayarlanmamışsa (null) Puan Tablosu'nun varsayılan ayrımı geçerli kalır.
-      S.premiumFontIds=d.premiumFontIds||null;
       // KULLANICI TALEBİ: "Admin için ücretsiz ve premium yazı tipi ekleyebileceği bir
-      // sistem geliştirilmeli." - Admin'in eklediği tamamen yeni (Google Fonts) yazı tipleri.
+      // sistem geliştirilmeli." - Admin'in eklediği yazı tipleri. Her fontun premium olup
+      // olmadığı KENDİ kaydındaki `premium` bayrağındadır; yerleşik fontlara ait ayrı
+      // premium/gizleme/kalıcı-silme listeleri (premiumFontIds, hiddenFontIds,
+      // deletedBuiltinFontIds, hiddenThemeIds, deletedBuiltinThemeIds) yerleşik sistemle
+      // birlikte TAMAMEN KALDIRILDI - artık ne okunur ne yazılır.
       S.customFonts=d.customFonts||{};
-      S.hiddenFontIds=d.hiddenFontIds||[];
-      // HATA DÜZELTMESİ (kullanıcı bildirdi: "Yazı tipi / renk paleti kalıcı olarak
-      // silinmiyor"): KÖK SEBEP - Kalıcı silinen yerleşik yazı tipi/tema ID'leri
-      // (deletedBuiltinFontIds / deletedBuiltinThemeIds) Firebase'e YAZILIYOR fakat panel
-      // yeniden yüklendiğinde buradan HİÇ OKUNMUYORDU. Bu yüzden S.deletedBuiltin... yerelde
-      // undefined kalıyor, sonraki bir silme/geri-yükleme işleminde _asIdList(...) boş
-      // başlayıp Firebase'deki birikmiş listeyi tek elemanlı listeyle EZİYOR - önceden kalıcı
-      // silinmiş öğeler kullanıcı tarafında yeniden görünüyordu. Artık yükleme sırasında
-      // Firebase'deki mevcut kalıcı-silme listeleri korunarak S'e geri okunur.
-      S.deletedBuiltinFontIds=d.deletedBuiltinFontIds||[];
       S.customThemes=d.customThemes||{};
       S.autoThemeSignatures=d.autoThemeSignatures||{};
-      S.hiddenThemeIds=d.hiddenThemeIds||[];
-      S.deletedBuiltinThemeIds=d.deletedBuiltinThemeIds||[];
       S.gifCatalog=d.gifCatalog||{};
-      // KULLANICI TALEBİ: "Emojileri olduğu gibi geri yükle." - Tepki paketleri artık
-      // Firebase'den yönetilir. İlk kez (hiç paket yoksa) makul bir başlangıç seti ile
-      // tohumlanır. HATA DÜZELTMESİ (kullanıcı bildirdi: "Admin bütün emojileri silince
-      // hepsi geri yükleniyor"): Firebase, bir düğümün TÜM alt öğeleri silindiğinde o
-      // düğümü TAMAMEN KALDIRIR (null döner). Bu yüzden ayrı, KALICI bir
-      // "reactionPacksSeeded" bayrağı kullanılır - tohumlama SADECE HAYAT BOYU BİR KEZ olur.
+      // KULLANICI TALEBİ: Yerleşik emoji sistemi kaldırıldı - tepki paketleri artık
+      // KOD TARAFINDAN HİÇ tohumlanmaz. Liste boşsa boş kalır; admin "🎭 Tepki Paketleri"
+      // ekranından kendi paketlerini ekler.
       S.reactionPacks=d.reactionPacks||{};
-      S.reactionPacksSeeded=!!d.reactionPacksSeeded;
-      if(!S.reactionPacksSeeded){
-        S.reactionPacks=buildDefaultReactionPacks();
-        S.reactionPacksSeeded=true;
-        db.ref('leagues/'+_curLeagueId).update({reactionPacks:S.reactionPacks,reactionPacksSeeded:true}).catch(function(){});
-      }
-      // KULLANICI TALEBİ: Eski gömülü tepki paketlerinin veritabanından temizlenmesi artık
-      // Firebase başlatılır başlatılmaz TÜM ligleri tarayan GLOBAL bir temizlikle yapılıyor
-      // (bkz. dosyanın başı, "legacyReactionPacksPurgedGlobal") - hangi ligin şu an açık
-      // olduğundan BAĞIMSIZ çalışır, bu yüzden burada ayrıca lig-bazlı bir temizliğe gerek yok.
+      // Eski/gömülü kalıntıların veritabanından temizlenmesi, Firebase başlatılır başlatılmaz
+      // TÜM ligleri tarayan GLOBAL tek-seferlik temizlikle yapılır (bkz. dosyanın başı,
+      // purgeBuiltinSystemResiduesGlobally) - hangi ligin açık olduğundan bağımsız çalışır.
       // KULLANICI TALEBİ: "Maç skoru bilerek puan kazanacaklar ve bu puanlarla premium
       // emoji, yazı tipi ve tema satın alabilecekler... tüm detayları admin belirleyecek."
       S.pointsConfig=d.pointsConfig||{enabled:false,defaultPoints:10};
@@ -15338,76 +15274,110 @@ function saveEditLeagueName(){
   });
 }
 
-// KULLANICI TALEBİ: "Lig sil" artık sadece o an açık olan ligi değil, TÜM kayıtlı ligleri
-// (aktif + bitmiş) bir liste halinde gösterir, admin listeden istediğini seçip siler -
-// önceden sadece o an seçili lig silinebiliyordu.
+// KULLANICI TALEBİ: "Admin bir sezon silmek istediği zaman mevcut sezon listeleri çıkacak,
+// oradan istediğini silebilir." - Liste TÜM kayıtlı sezonları (aktif + bitmiş) gösterir.
+// HATA DÜZELTMESİ (kullanıcı bildirdi: "zaten mevcut fakat tutarlı çalışmıyor"): Bu ekranın
+// tutarsızlığının üç ayrı sebebi vardı ve üçü de burada giderildi:
+//   1) Sheet, "openEditLeagueName" anahtarıyla açılıyordu - yani sheet sistemi bu ekranı
+//      "Lig Adını Düzenle" ekranıyla AYNI menü sanıyor, geri tuşu yanlış ekrana dönüyor ve
+//      iki ekran birbirinin yerine sessizce geçebiliyordu. Artık kendi anahtarı var.
+//   2) Liste, silme işleminden sonra Firebase'den TAZE okunmadan yeniden çiziliyordu; silinen
+//      sezonun satırı bir süre daha ekranda kalabiliyor, tekrar tıklanınca artık var olmayan
+//      bir ID ile işlem deneniyordu. Artık her çizim taze veriyle yapılır ve işlem sürerken
+//      butonlar kilitlenir.
+//   3) Silinen sezon o an AÇIK olan sezonsa, hangi sezona geçileceğine iki ayrı yer
+//      (silme akışı + leaguesMeta dinleyicisi) FARKLI kurallarla, yarış hâlinde karar
+//      veriyordu. Artık ikisi de TEK ortak kuralı (pickDefaultLeagueId) kullanır.
+var _leagueDeleteBusy=false;
 function deleteLeague(){
   if(!hasSubperm('league_danger')){toast('🔒 Bu işlem için yetkiniz yok','er');return;}
   db.ref('leaguesMeta').once('value').then(function(snap){
     var meta=snap.val()||{};
     var ids=Object.keys(meta);
-    if(!ids.length){toast('Kayıtlı lig bulunamadı','er');return;}
-    // HATA DÜZELTMESİ (kullanıcı bildirdi: "sezon silme listesi tutarlı çalışmıyor"): Liste
-    // yalnızca 1 (veya 0) sezon kaldığında burada sessizce "return" ediyordu - ama bu fonksiyon
-    // confirmDeleteLeagueFromList tarafından, az önce BİR sezon silindikten SONRA açık olan
-    // sheet'i YENİLEMEK için de çağrılıyor (bkz. aşağıdaki "deleteLeague();" çağrısı). O anda
-    // ekranda hâlâ az önce silinmiş sezonun "🗑️ Sil" butonu görünür kalıyordu; tekrar
-    // tıklanırsa artık var olmayan bir ID ile işlem denenip hataya yol açabiliyordu. Artık bu
-    // durumda açık sheet KAPATILIR, admin'e net bir "son sezon" mesajı kalır.
-    if(ids.length<=1){toast('Son sezon silinemez','er');closeSheet();return;}
+    var listOpen=_sheetCurrent&&_sheetCurrent.openerKey==='deleteLeague';
+    if(!ids.length){toast('Kayıtlı sezon bulunamadı','er');if(listOpen)closeSheet();return;}
+    if(ids.length<=1){
+      // Tek sezon kaldıysa silinemez. Bu ekran az önce bir silme yapıldıktan SONRA kendini
+      // tazelemek için de çağrıldığından, o durumda açık listeyi kapatıp net bir mesaj bırakır.
+      toast('Son sezon silinemez','er');
+      if(listOpen)closeSheet();
+      return;
+    }
+    // En yeni sezon en üstte: admin genelde en son oluşturduğu/yanlışlıkla açtığı sezonu siler.
+    var sorted=ids.slice().sort().reverse();
     var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.65rem;line-height:1.5">Silmek istediğiniz sezonu seçin. Bu işlem GERİ ALINAMAZ - takımlar, maçlar, kadrolar, sohbet mesajları ve fotoğraflar dahil TÜM veriler kalıcı olarak silinir.</div>'
-      +ids.map(function(id){
+      +sorted.map(function(id){
         var m=meta[id]||{};
         var isCur=id===_curLeagueId;
         var isFinished=m.status==='finished';
-        return '<div style="display:flex;align-items:center;gap:.5rem;background:var(--s2);border:1.5px solid var(--br);border-radius:12px;padding:.55rem .7rem;margin-bottom:.5rem">'
+        return '<div style="display:flex;align-items:center;gap:.5rem;background:var(--s2);border:1.5px solid '+(isCur?'var(--ac)':'var(--br)')+';border-radius:12px;padding:.55rem .7rem;margin-bottom:.5rem">'
           +'<div style="flex:1;min-width:0">'
-          +'<div style="font-size:.78rem;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml(m.name||'Lig')+(isCur?' <span style="font-size:.6rem;color:var(--ac)">(Aktif)</span>':'')+'</div>'
-          +(isFinished?'<div style="font-size:.6rem;color:var(--mu)">🏁 Bitmiş</div>':'')
+          +'<div style="font-size:.78rem;font-weight:700;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+escHtml(m.name||'Sezon')+(isCur?' <span style="font-size:.6rem;color:var(--ac)">(Açık)</span>':'')+'</div>'
+          +(isFinished?'<div style="font-size:.6rem;color:var(--mu)">🏁 Bitmiş'+(m.finishedDate?' · '+escHtml(String(m.finishedDate)):'')+'</div>':'<div style="font-size:.6rem;color:var(--mu)">▶️ Aktif</div>')
           +'</div>'
-          +'<button onclick="confirmDeleteLeagueFromList(\''+id+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:.4rem .6rem;color:#f87171;font-size:.68rem;font-weight:800;cursor:pointer;flex-shrink:0">🗑️ Sil</button>'
+          +'<button data-delid="'+id+'" onclick="confirmDeleteLeagueFromList(this.dataset.delid)" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:10px;padding:.4rem .6rem;color:#f87171;font-size:.68rem;font-weight:800;cursor:pointer;flex-shrink:0">🗑️ Sil</button>'
           +'</div>';
       }).join('');
-    openSheet('🗑️ Kayıtlı Ligi Sil',html,'openEditLeagueName');
-  });
+    openSheet('🗑️ Kayıtlı Sezonu Sil',html,'deleteLeague');
+  }).catch(function(e){toast('❌ Sezon listesi okunamadı: '+((e&&e.message)||'bilinmeyen hata'),'er');});
 }
 function confirmDeleteLeagueFromList(delId){
   if(!hasSubperm('league_danger')){toast('🔒 Bu işlem için yetkiniz yok','er');return;}
+  if(_leagueDeleteBusy){toast('⏳ Önceki silme işlemi sürüyor','er');return;}
+  if(!delId){toast('Geçersiz sezon','er');deleteLeague();return;}
   db.ref('leaguesMeta').once('value').then(function(snap){
     var meta=snap.val()||{};
     var ids=Object.keys(meta);
-    if(ids.length<=1){toast('Son sezon silinemez','er');return;}
+    // Liste ekranda eskimiş olabilir (başka bir cihazdan silinmiş olabilir) - HER ZAMAN taze
+    // veriyle doğrulanır, aksi halde var olmayan bir ID ile işlem denenirdi.
+    if(ids.indexOf(delId)===-1){toast('Bu sezon zaten silinmiş','er');deleteLeague();return;}
+    if(ids.length<=1){toast('Son sezon silinemez','er');deleteLeague();return;}
     var name=(meta[delId]&&meta[delId].name)||'Bu sezon';
     dlg('🗑️','Sezonu Sil',name+' ve TÜM verileri (takımlar, maçlar, kadrolar, SOHBET MESAJLARI/yorumlar, fotoğraflar) KALICI OLARAK silinecek! Bu işlem GERİ ALINAMAZ - Firebase\'de çöp kutusu yoktur.','Sil','dor').then(function(ok){
       if(!ok)return;
+      _leagueDeleteBusy=true;
+      // Silinen sezon o an DİNLENİYORSA, dinleyici ÖNCE kaldırılır. Aksi halde silme anında
+      // dinleyici null veriyle tetiklenip S'i boşaltıyor, admin panelindeki tüm ayarlar bir
+      // anlığına "eski hâline dönmüş" gibi görünüyordu.
+      if(_leagueDataListener&&_leagueDataListenerId===delId){
+        db.ref('leagues/'+_leagueDataListenerId).off('value',_leagueDataListener);
+        _leagueDataListenerId=null;
+      }
+      // Geçilecek sezon, SİLME İSTEĞİ GÖNDERİLMEDEN ÖNCE, taze meta üzerinden belirlenir -
+      // böylece leaguesMeta dinleyicisiyle yarışmaz, sonuç her seferinde AYNI olur.
+      var remainingMeta={};
+      ids.forEach(function(id){if(id!==delId)remainingMeta[id]=meta[id];});
+      var wasCurrent=(delId===_curLeagueId);
+      var nextId=wasCurrent?pickDefaultLeagueId(remainingMeta):_curLeagueId;
       db.ref('leagues/'+delId).remove().then(function(){
         return db.ref('leaguesMeta/'+delId).remove();
       }).then(function(){
-        logAction('🗑️ Lig silindi: '+name);
-        toast('✅ Lig silindi');
-        db.ref('leaguesMeta').once('value').then(function(snap2){
-          var meta2=snap2.val()||{};
-          populateLeagueSel(meta2);
-          if(delId===_curLeagueId){
-            // HATA DÜZELTMESİ (kullanıcı bildirdi: "sezon silince bazı özellikler eski haline
-            // dönüyor"): Şu an görüntülenen sezon silindiğinde, önceden Object.keys(meta2)[0]
-            // ile RASTGELE (ekleme sırasına göre) bir sonraki lig seçiliyordu - bu genelde
-            // bitmiş/arşivlenmiş eski bir sezon olabiliyordu, admin beklenmedik şekilde eski
-            // bir sezona düşüyordu. Artık Puan Tablosu tarafındaki (bkz. index.html
-            // attachLeaguesMetaListener) AYNI mantık kullanılır: önce "bitmemiş" (aktif)
-            // sezonlar arasından ID'ye göre EN YENİSİ (uid() Date.now tabanlı olduğu için ID
-            // sıralaması = oluşturulma sırası) seçilir; hiç aktif sezon yoksa (hepsi bitmiş)
-            // en yeni sezona düşülür.
-            var remainingIds=Object.keys(meta2);
-            var activeRemaining=remainingIds.filter(function(id){return meta2[id]&&meta2[id].status!=='finished';});
-            var nextId=(activeRemaining.length?activeRemaining:remainingIds).sort().reverse()[0];
-            if(nextId){_curLeagueId=nextId;localStorage.setItem('adm_curLeague',nextId);listenToLeague(nextId);}
-          }
-          deleteLeague(); // Güncel listeyi tekrar göster, admin ard arda silebilir.
+        logAction('🗑️ Sezon silindi: '+name);
+        if(wasCurrent&&nextId){
+          _curLeagueId=nextId;
+          localStorage.setItem('adm_curLeague',nextId);
+          listenToLeague(nextId);
+          // Puan Tablosu kullanıcıları da silinen sezonda asılı kalmasın diye admin'in yeni
+          // görüntülediği sezon anında yayınlanır (listenToLeague zaten yazar; burada sadece
+          // sıralama garantisi için tekrar edilmez).
+          toast('✅ Sezon silindi, '+((remainingMeta[nextId]&&remainingMeta[nextId].name)||'başka bir sezona')+' geçildi');
+        }else{
+          toast('✅ Sezon silindi');
+        }
+        return db.ref('leaguesMeta').once('value').then(function(snap2){
+          populateLeagueSel(snap2.val()||{});
         });
-      }).catch(function(e){var m=(e&&e.message)?e.message:'bilinmeyen hata';console.error(m,e);toast('❌ İşlem başarısız: '+m,'er');});
+      }).then(function(){
+        _leagueDeleteBusy=false;
+        deleteLeague(); // Güncel listeyi taze veriyle tekrar göster, admin ard arda silebilir.
+      }).catch(function(e){
+        _leagueDeleteBusy=false;
+        var m=(e&&e.message)?e.message:'bilinmeyen hata';console.error(m,e);
+        toast('❌ İşlem başarısız: '+m,'er');
+        deleteLeague();
+      });
     });
-  });
+  }).catch(function(e){_leagueDeleteBusy=false;toast('❌ İşlem başarısız: '+((e&&e.message)||'bilinmeyen hata'),'er');});
 }
 
 if(sessionStorage.getItem('adm')==='1'){

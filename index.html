@@ -1329,20 +1329,15 @@ let _bgPaletteSyncEnabled=localStorage.getItem('pt_bgPaletteSync')!=='off'; // v
 // tipine kendisi erişemiyor olsa bile, o SPESİFİK mesajı gönderenin seçtiği yazı tipiyle
 // görür (tıpkı tepki emojileri gibi - sadece GÖNDERİRKEN erişim gerekir, GÖRÜNTÜLEMEK
 // herkese açıktır). Admin (yönetici) her zaman tüm yazı tiplerini serbestçe kullanabilir.
-// KULLANICI TALEBİ: Kodun içine gömülü tüm hazır yazı tipi seçenekleri kaldırıldı. Yapı
-// (free/premium diziler, findFontById, getAllFontsList, admin'in ekleme/silme/premium
-// işaretleme sistemi) AYNEN duruyor - admin artık İSTEDİĞİ yazı tiplerini S.customFonts
-// üzerinden sıfırdan ekliyor. 'outfit' yalnızca aşağıdaki applyFontFamily() içinde,
-// hiçbir font bulunamazsa devreye giren dahili bir GÜVENLİK VARSAYILANI olarak kalır -
-// kullanıcıya/admin'e bir "seçenek" olarak ASLA gösterilmez.
-const FONT_TIERS={
-  free:[],
-  premium:[]
-};
+// KULLANICI TALEBİ: "Yerleşik tema, yazı tipi veya emoji sistemini tamamen kaldır, admin
+// zaten ekleyebiliyor." - Koda gömülü yazı tipi katmanları (FONT_TIERS.free/premium), yerleşik
+// fontların premium işaret listesi (D.premiumFontIds) ve yerleşik fontları gizleme/kalıcı
+// silme listeleri (hiddenFontIds / deletedBuiltinFontIds) TAMAMEN KALDIRILDI. Tek kaynak
+// admin'in eklediği yazı tipleridir (D.customFonts); premium olup olmadığı her fontun KENDİ
+// `premium` bayrağındadır. 'outfit' yalnızca applyFontFamily() içinde, hiçbir font
+// bulunamazsa devreye giren dahili bir GÜVENLİK VARSAYILANI olarak kalır - kullanıcıya bir
+// "seçenek" olarak ASLA gösterilmez.
 function findFontById(id){
-  // KULLANICI TALEBİ: "Admin için ücretsiz ve premium yazı tipi ekleyebileceği bir sistem
-  // geliştirilmeli." - Admin'in eklediği tamamen yeni (Google Fonts) yazı tipleri de
-  // (D.customFonts) yerleşik fontlarla BİRLİKTE aranır.
   const custom=D.customFonts&&D.customFonts[id];
   // SAVUNMA: Eksik/bozuk bir özel font kaydında googleName tanımsız olabilir; önceden
   // .replace() çağrısı burada TypeError fırlatıp fontu kullanan TÜM ekranı çökertiyordu.
@@ -1354,52 +1349,32 @@ function findFontById(id){
     const cleanFamily=custom.fontUrl?gname:String(gname).replace(/:.*$/,'');
     return {id:custom.id,label:custom.label||gname||custom.id,css:`'${cleanFamily}',sans-serif`,googleName:String(gname).replace(/ /g,'+'),fontUrl:custom.fontUrl||null,_isCustom:true,_customPremium:!!custom.premium};
   }
-  return FONT_TIERS.free.find(s=>s.id===id)||FONT_TIERS.premium.find(s=>s.id===id)||null;
+  return null;
 }
-// KULLANICI TALEBİ: "Kalıcı silinen unsurlar gerçekten kalıcı olmalı." Admin bir yerleşik
-// tema/font'u KALICI sildiğinde ID artık deletedBuiltinThemeIds/deletedBuiltinFontIds'te
-// tutulur (hiddenThemeIds'ten AYRI). Bu yüzden kullanıcı tarafında bir unsurun görünüp
-// görünmeyeceğine karar verirken HEM gizlenenlere HEM kalıcı silinenlere bakılır - böylece
-// admin "Gizlenenleri Geri Yükle" yapsa bile kalıcı silinen unsur asla geri gelmez.
-// KULLANICI TALEBİ (hata): "Yerleşik yazı tipi ve temayı kalıcı olarak silemiyor" - KÖK SEBEP:
-// Firebase, bir diziyi ['ruby'] geri okurken bazen objeye {0:'ruby'} çevirir; bu durumda
-// .indexOf() çalışmaz ve kalıcı silinen öğe kullanıcı tarafında GÖRÜNMEYE DEVAM EDER. Bu
-// yardımcı hem diziyi hem obje-halini güvenli bir string dizisine çevirir.
-function _asIdList(v){
-  if(!v)return [];
-  if(Array.isArray(v))return v.filter(function(x){return x!=null;});
-  if(typeof v==='object')return Object.keys(v).map(function(k){return v[k];}).filter(function(x){return x!=null;});
-  return [];
-}
+// Yerleşik tema/yazı tipi sistemi kaldırıldığı için "gizlenen / kalıcı silinen yerleşik ID"
+// listeleri (hiddenThemeIds, deletedBuiltinThemeIds, hiddenFontIds, deletedBuiltinFontIds) ve
+// onları okuyan _asIdList / isThemeRemoved / isFontRemoved yardımcıları da kaldırıldı. Bir
+// unsur artık ya admin'in listesinde vardır ya da yoktur.
 function isThemeRemoved(pid){
-  return _asIdList(D.hiddenThemeIds).indexOf(pid)>-1 || _asIdList(D.deletedBuiltinThemeIds).indexOf(pid)>-1;
+  // Admin bir temayı sildiğinde/yayından kaldırdığında D.customThemes'te bulunmaz olur.
+  return !(D.customThemes&&D.customThemes[pid]);
 }
 function isFontRemoved(fid){
-  return _asIdList(D.hiddenFontIds).indexOf(fid)>-1 || _asIdList(D.deletedBuiltinFontIds).indexOf(fid)>-1;
+  // 'outfit' koda gömülü bir SEÇENEK değil, hiç font bulunamadığında devreye giren dahili
+  // güvenlik varsayılanıdır - hiçbir zaman "kaldırılmış" sayılmaz.
+  if(!fid||fid==='outfit')return false;
+  return !(D.customFonts&&D.customFonts[fid]);
 }
 function getAllFontsList(){
-  // KULLANICI TALEBİ: "Admin mevcuttaki bütün yazı tipi boyutunu silebilir." - Admin'in
-  // sildiği (S.hiddenFontIds / D.hiddenFontIds) yerleşik yazı tipleri artık kullanıcıya
-  // hiç gösterilmez.
-  // Gizlenen VEYA kalıcı silinmiş yerleşik fontlar kullanıcıya hiç gösterilmez.
-  const hidden=_asIdList(D.hiddenFontIds).concat(_asIdList(D.deletedBuiltinFontIds));
-  // HATA DÜZELTMESİ: findFontById bulunamayan bir id için null döndürüyor ve bu null,
-  // listeye OLDUĞU GİBİ ekleniyordu. Listeyi kullanan her yer (f.label, f.id ...) bir
-  // null üzerinde okuma yapıp ÇÖKÜYORDU. Artık null kayıtlar listeden ayıklanır.
-  return [...FONT_TIERS.free,...FONT_TIERS.premium].filter(f=>!hidden.includes(f.id))
-    .concat(Object.values(D.customFonts||{}).map(f=>findFontById(f.id)))
-    .filter(Boolean);
+  // HATA DÜZELTMESİ: findFontById bulunamayan bir id için null döndürüyor ve bu null, listeye
+  // OLDUĞU GİBİ ekleniyordu. Listeyi kullanan her yer (f.label, f.id ...) bir null üzerinde
+  // okuma yapıp ÇÖKÜYORDU. Artık null kayıtlar listeden ayıklanır.
+  return Object.values(D.customFonts||{}).map(f=>findFontById(f.id)).filter(Boolean);
 }
 function isFontPremium(id){
-  // KULLANICI TALEBİ: "Yönetici için... premium yazı tipi seçici ekle; sadece yöneticinin
-  // seçtiği unsurlar premium olacak." - D.premiumFontIds admin tarafından yönetilir; hiç
-  // ayarlanmamışsa (admin henüz dokunmamışsa) mevcut varsayılan (FONT_TIERS.premium) listesi
-  // kullanılır - böylece geriye dönük uyumluluk korunur. Admin'in EKLEDİĞİ özel bir font ise,
-  // o fontun KENDİ premium bayrağı (D.customFonts[id].premium) esas alınır.
+  // Her yazı tipinin premium olup olmadığı KENDİ kaydındaki `premium` bayrağıyla belirlenir.
   const custom=D.customFonts&&D.customFonts[id];
-  if(custom)return !!custom.premium;
-  if(Array.isArray(D.premiumFontIds))return D.premiumFontIds.includes(id);
-  return FONT_TIERS.premium.some(s=>s.id===id);
+  return !!(custom&&custom.premium);
 }
 let _loadedFontGoogleNames=new Set();
 let _loadedUrlFonts=new Set();
@@ -1724,10 +1699,11 @@ window.endFontTrial=function(apply){
 // KULLANICI TALEBİ: Her kategori artık 12 palet içeriyor (10 mevcut + 2 yeni): Açık/Normal/
 // Koyu temalar "cyan" (Turkuaz) ve "magenta" (Fuşya) ile 12'ye çıktı; Premium ise "emerald"
 // (Zümrüt) ve "amethyst" (Ametist) ile 12'ye çıktı.
-// KULLANICI TALEBİ: Kodun içine gömülü tüm hazır renk paleti/tema seçenekleri kaldırıldı.
-// Yapı (buildTheme, admin'in tema yönetimi, özel tema ekleme - D.customThemes) AYNEN
-// duruyor - admin artık sıfırdan başlayıp istediği temaları kendisi ekliyor.
-const PALETTES={};
+// KULLANICI TALEBİ: "Yerleşik tema, yazı tipi veya emoji sistemini tamamen kaldır, admin
+// zaten ekleyebiliyor." - Koda gömülü palet tablosu (PALETTES) ve ona ait tüm yardımcı
+// mantık (yerleşik premium işareti, sabit mod eşlemesi, gizlenen/kalıcı silinen yerleşik ID
+// listeleri, yerleşik tema renk düzenlemeleri/themeOverrides) TAMAMEN KALDIRILDI. Tema
+// kaynağı artık YALNIZCA admin'in eklediği D.customThemes'tir.
 // Hiçbir tema (ne yerleşik ne admin'in eklediği özel bir tema) bulunamazsa uygulama
 // tamamen renksiz/bozuk kalmasın diye SADECE dahili bir güvenlik varsayılanı - bu asla
 // bir "seçenek" olarak listelenmez/gösterilmez (bkz. buildTheme).
@@ -1780,30 +1756,19 @@ function buildTheme(paletteId,mode){
       lcClass:customTheme.lcClass||'lc-purple'
     };
   }
-  const p=PALETTES[paletteId]||SYSTEM_DEFAULT_PALETTE;
+  // Buraya SADECE admin'in eklediği temalar arasında bulunamayan bir ID ile gelinir
+  // (ör. tema silinmiş ama kullanıcının tercihinde hâlâ duruyor). Bu durumda uygulama
+  // renksiz/bozuk kalmasın diye dahili güvenlik varsayılanı kullanılır.
+  const p=SYSTEM_DEFAULT_PALETTE;
   const safeMode=(mode==='light'||mode==='normal')?mode:'dark';
   const base=safeMode==='light'?LIGHT_BASE:safeMode==='normal'?NORMAL_BASE:DARK_BASE;
-  // ÖNEMLİ KÖK SEBEP DÜZELTMESİ: Kullanıcı "renk paleti seçince hiçbir şey değişmiyor"
-  // şikayetini bildirdi - kesin kanıtlanmış sebep: 1. renk (arkaplan) önceden zemine sadece
-  // %8-12 oranında YUMUŞAK KARIŞTIRILIYORDU (mixWithBase), bu da gözle fark edilemeyecek
-  // kadar ince bir değişikliğe sebep oluyordu. Kullanıcı talebi netti: "1. renk TEMA/ARKAPLAN
-  // için uygulanır" - bu artık DOĞRUDAN ve BASKIN şekilde uygulanır, ince tonlama değil.
   const modeColors=p.modes&&p.modes[safeMode];
   const colorBg=modeColors&&modeColors[0];
-  let colorBtn=modeColors&&modeColors[1];
+  const colorBtn=modeColors&&modeColors[1];
   const colorText=modeColors&&modeColors[2];
-  // KULLANICI TALEBİ: "Admin bütün temaları... 'Premium ve yerleşik' dahil silebilir,
-  // DÜZENLEYEBİLİR." Admin bir YERLEŞİK temanın rengini değiştirdiyse (D.themeOverrides),
-  // o override edilen vurgu rengi kullanılır. Zemin/metin moda göre türetilmeye devam eder,
-  // böylece açık/normal/koyu tutarlılığı korunur.
-  const themeOverride=D.themeOverrides&&D.themeOverrides[paletteId];
-  if(themeOverride&&themeOverride.accent){colorBtn=themeOverride.accent;}
   const btnAccent=colorBtn||'#7c3aed';
-  const btnAccent2=(themeOverride&&themeOverride.accent2)||colorBtn||'#9d5cf0';
-  // KULLANICI TALEBİ: Premium temalar daha güçlü bir ışıltı (glow) alır - normal temalar
-  // 55/22 alfa kullanırken premium 'cc' (daha yoğun) kullanır; böylece premium hissi artar.
-  const isPremiumBuiltin=p.premium;
-  const glowAlpha=isPremiumBuiltin?'cc':(safeMode==='light'?'22':'55');
+  const btnAccent2=colorBtn||'#9d5cf0';
+  const glowAlpha=safeMode==='light'?'22':'55';
   const result={...base,ac:btnAccent,ac2:btnAccent2,ac3:btnAccent2,glow:btnAccent+glowAlpha,lcClass:p.lcClass||'lc-dark'};
   // 1. renk: artık doğrudan tema/arkaplan rengi olarak uygulanır (bg, s, s2, s3) - hafif
   // bir hiyerarşi korunur (s2/s3 biraz daha açık/koyu tonlanır ki kartlar birbirinden
@@ -1835,7 +1800,9 @@ function lightenDarken(hex,percent){
   r=Math.max(0,Math.min(255,r));g=Math.max(0,Math.min(255,g));b=Math.max(0,Math.min(255,b));
   return '#'+(r<<16|g<<8|b).toString(16).padStart(6,'0');
 }
-let _curPalette='violet',_curMode='dark';
+// Yerleşik palet sistemi kaldırıldı: başlangıçta HİÇBİR tema seçili değildir; kullanıcı
+// admin'in eklediği temalardan birini seçene kadar dahili güvenlik varsayılanı kullanılır.
+let _curPalette='',_curMode='dark';
 let _userHasPersonalPalette=!!localStorage.getItem('pt_palette');
 // KULLANICI TALEBİ: 🎨 Takım renklerine göre otomatik tema önerisi - favori takımın forma
 // rengine (kitHome1) en yakın (premium OLMAYAN, herkese açık) paleti bulur. Basit RGB
@@ -1850,11 +1817,13 @@ function colorDistance(hex1,hex2){
   if(!a||!b)return Infinity;
   return Math.sqrt(Math.pow(a.r-b.r,2)+Math.pow(a.g-b.g,2)+Math.pow(a.b-b.b,2));
 }
+// Yerleşik palet tablosu kaldırıldığı için öneri artık admin'in eklediği temalar arasından
+// yapılır - kilitli (premium) temalar önerilmez, herkes uygulayabilsin.
 function suggestPaletteForColor(teamColorHex){
   let best=null,bestDist=Infinity;
-  Object.entries(PALETTES).forEach(([pid,p])=>{
-    if(p.premium)return; // Kilitli premium paletler önerilmez - herkes uygulayabilsin.
-    const accentColor=p.modes&&p.modes.dark&&p.modes.dark[1];
+  Object.entries(D.customThemes||{}).forEach(([pid,t])=>{
+    if(!t||t.category==='premium')return;
+    const accentColor=t.accent||t.accent2;
     if(!accentColor)return;
     const dist=colorDistance(teamColorHex,accentColor);
     if(dist<bestDist){bestDist=dist;best=pid;}
@@ -1870,8 +1839,9 @@ function renderTeamColorThemeSuggestion(){
   const teamColor=team&&(team.kitHome1||team.kitAway1);
   if(!team||!teamColor){box.innerHTML='';return;}
   const suggestedId=suggestPaletteForColor(teamColor);
-  if(!suggestedId||!PALETTES[suggestedId]){box.innerHTML='';return;}
-  const p=PALETTES[suggestedId];
+  const suggestedTheme=suggestedId&&D.customThemes&&D.customThemes[suggestedId];
+  if(!suggestedTheme){box.innerHTML='';return;}
+  const p={label:suggestedTheme.name||'Tema'};
   const isCurrent=_curPalette===suggestedId;
   box.innerHTML=`<div style="background:var(--s2);border:1.5px solid ${teamColor};border-radius:12px;padding:.6rem .7rem;margin-bottom:.9rem;display:flex;align-items:center;gap:.6rem">
     <span style="width:22px;height:22px;border-radius:50%;background:${teamColor};flex-shrink:0;border:2px solid var(--br)"></span>
@@ -1880,13 +1850,14 @@ function renderTeamColorThemeSuggestion(){
   </div>`;
 }
 window.applySuggestedTeamTheme=function(paletteId){
-  if(!PALETTES[paletteId])return;
+  const th=D.customThemes&&D.customThemes[paletteId];
+  if(!th)return;
   _curPalette=paletteId;_curMode='dark';
   localStorage.setItem('pt_palette',paletteId);localStorage.setItem('pt_mode','dark');
   applyTheme();
   applyBgTheme();
   renderTeamColorThemeSuggestion();
-  showToast('✅ Tema uygulandı: '+PALETTES[paletteId].label);
+  showToast('✅ Tema uygulandı: '+(th.name||'Tema'));
 };
 function applyTheme(){
   const th=buildTheme(_curPalette,_curMode);
@@ -1906,11 +1877,9 @@ function applyTheme(){
     if(th.bg)_tcMeta.setAttribute('content',th.bg);
   }catch(e){}
   // KULLANICI TALEBİ: Premium bir tema seçiliyken arayüz belirgin şekilde daha "premium"
-  // hisseder (CSS'teki html[data-premium-active] kuralları devreye girer). Hem yerleşik
-  // premium paletler hem admin'in eklediği özel premium temalar bu işareti tetikler.
-  const builtinPrem=PALETTES[_curPalette]&&PALETTES[_curPalette].premium;
+  // hisseder (CSS'teki html[data-premium-active] kuralları devreye girer).
   const customPrem=D.customThemes&&D.customThemes[_curPalette]&&D.customThemes[_curPalette].category==='premium';
-  if(builtinPrem||customPrem){document.documentElement.setAttribute('data-premium-active','1');}
+  if(customPrem){document.documentElement.setAttribute('data-premium-active','1');}
   else{document.documentElement.removeAttribute('data-premium-active');}
   // ÖNEMLİ KÖK SEBEP DÜZELTMESİ: palet/mod her değiştiğinde --s rengi YENİDEN buildTheme'den
   // atanıyor, ama kart saydamlığı önbelleği (_sOriginalColor) bu değişikliği bilmiyordu - bu
@@ -2218,17 +2187,7 @@ function applyBgTheme(){
     // tema seçiliyse onun accent (vurgu) rengi kaynak alınır - böylece admin'in tema rengi
     // arka plana da otomatik yansır.
     const customThemeSel=D.customThemes&&D.customThemes[_curPalette];
-    if(customThemeSel){
-      paletteColor1=customThemeSel.accent2||customThemeSel.accent||null;
-    }else{
-      const darkColors=PALETTES[_curPalette]&&PALETTES[_curPalette].modes&&PALETTES[_curPalette].modes.dark;
-      paletteColor1=darkColors&&darkColors[1]; // 2. renk (buton/vurgu) kullanılır - daha canlı/doygun bir tondur.
-      if(!paletteColor1){
-        const anyModeColors=PALETTES[_curPalette]&&PALETTES[_curPalette].modes;
-        const firstAvailable=anyModeColors&&Object.values(anyModeColors)[0];
-        paletteColor1=firstAvailable&&(firstAvailable[1]||firstAvailable[0]);
-      }
-    }
+    paletteColor1=customThemeSel?(customThemeSel.accent2||customThemeSel.accent||null):null;
   }
   const baseOverlayRGB=mode==='light'?'255,255,255':'0,0,0';
   const opacity=(bg&&bg.opacity!=null?bg.opacity:35)/100;
@@ -2357,12 +2316,6 @@ window.setPalette=function(paletteId,btn){
   // paletleri (Platin, Obsidyen, Şampanya, Rose Gold, İnci, Fildişi) doğrudan seçip
   // uygulayabiliyordu - "kod X teması için alındı ama Y teması aktive ediliyor" şikayetinin
   // kök sebebi buydu. Artık premium bir palet için gerçek zamanlı erişim kontrolü yapılır.
-  const selectedPalette0=PALETTES[paletteId];
-  // GÜVENLİK AÇIĞI DÜZELTMESİ (bu tur bulundu): Yukarıdaki kontrol SADECE yerleşik
-  // PALETTES listesine bakıyordu. Admin'in Tema Yönetimi'nden eklediği ÖZEL "premium"
-  // temalar (D.customThemes, category==='premium') bu kontrolün TAMAMEN DIŞINDA kalıyor,
-  // yani erişimi olmayan herhangi bir kullanıcı tarafından ÜCRETSİZ uygulanabiliyordu.
-  // Artık özel premium temalar da yerleşikler ile aynı erişim kontrolüne tabidir.
   const customThemeSel=D.customThemes&&D.customThemes[paletteId];
   const isCustomPremium=!!(customThemeSel&&customThemeSel.category==='premium');
   if(isCustomPremium&&!_isDevAdmin&&!hasPremiumAccess(paletteId)){
@@ -2370,25 +2323,9 @@ window.setPalette=function(paletteId,btn){
     else{showToast('🔒 Bu premium bir tema, kullanmak için giriş yapıp erişim talep etmelisiniz');}
     return;
   }
-  if(selectedPalette0&&selectedPalette0.premium&&!_isDevAdmin&&!hasPremiumAccess(paletteId)){
-    if(_userName){requestPremiumAccess(paletteId);}
-    else{showToast('🔒 Bu premium bir tema, kullanmak için giriş yapıp erişim talep etmelisiniz');}
-    return;
-  }
   _curPalette=paletteId;
   _userHasPersonalPalette=true;
   localStorage.setItem('pt_palette',paletteId);
-  // ÖNEMLİ KÖK SEBEP DÜZELTMESİ: Premium paletlerin bazıları (Platin/Obsidyen=sadece koyu,
-  // Şampanya/Rose Gold=sadece normal, İnci/Fildişi=sadece açık) SADECE belirli bir modda
-  // tanımlıdır. Kullanıcı bu paleti farklı bir moddayken seçerse, buildTheme o modda renk
-  // bulamayıp varsayılana düşüyordu - "seçilen palet doğru gösterilmiyor" şikayetinin
-  // kesin kanıtlanmış kök sebeplerinden biri. Artık böyle bir palet seçilince mod da
-  // otomatik olarak o paletin gerektirdiği moda geçer.
-  const selectedPalette=PALETTES[paletteId];
-  if(selectedPalette&&selectedPalette.fixedMode&&selectedPalette.fixedMode!==_curMode){
-    _curMode=selectedPalette.fixedMode;
-    localStorage.setItem('pt_mode',_curMode);
-  }
   applyTheme();
   applyBgTheme(); // ÖNEMLİ: applyTheme() --s'yi opak palet rengine sıfırlar, kart saydamlığının kaybolmaması için hemen yeniden uygulanmalı.
   document.querySelectorAll('.palette-btn').forEach(b=>b.classList.remove('active'));
@@ -2422,7 +2359,7 @@ window.setMode=function(mode,btn){
 (()=>{
   const savedPalette=localStorage.getItem('pt_palette');
   const savedMode=localStorage.getItem('pt_mode');
-  if(savedPalette&&(PALETTES[savedPalette]||(D.customThemes&&D.customThemes[savedPalette]))){_curPalette=savedPalette;}
+  if(savedPalette&&D.customThemes&&D.customThemes[savedPalette]){_curPalette=savedPalette;}
   if(savedMode==='light'||savedMode==='dark'){_curMode=savedMode;}
   applyTheme();
 })();
@@ -2916,7 +2853,7 @@ function registerVisitor(name,isNew){
     // uğrarsa ismin kalıcı olarak kurtarılamaz olmasına sebep oluyordu - kullanıcı "bir süre
     // çevrimdışı olunca İsimsiz Kullanıcı görünüyor" olarak bildirdi).
     favTeam:_favTeam||null,
-    palette:_curPalette||'violet',
+    palette:_curPalette||'',
     mode:_curMode||'dark',
     avatar:_userAvatar||null
   };
@@ -2969,7 +2906,7 @@ function syncProfileToFirebase(){
   if(!_curVisitorId)return;
   const profileData={
     favTeam:_favTeam||null,
-    palette:_curPalette||'violet',
+    palette:_curPalette||'',
     mode:_curMode||'dark',
     avatar:_userAvatar||null
   };
@@ -3305,15 +3242,27 @@ function init(){
         return;
       }
     }
-    // URL hash öncelikli, sonra localStorage, sonra ilk lig
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "bir sezon silindiğinde eski hâline dönüyor"):
+    // Kullanıcının içinde bulunduğu sezon SİLİNDİYSE burada ids[0] (Firebase'in döndürdüğü
+    // RASTGELE ilk kayıt - genelde en eski/bitmiş sezon) seçiliyordu. Artık admin tarafıyla
+    // AYNI kural uygulanır: en yeni AKTİF sezon. Ayrıca hâlâ geçerli olan bir sezondayken
+    // localStorage'daki eski kayıt yüzünden geri sıçrama olmaması için, mevcut sezon geçerliyse
+    // ona dokunulmaz.
     var hashLeague=getHashLeagueId();
     var saved=localStorage.getItem('pt_curLeague');
-    var useId=(hashLeague&&ids.indexOf(hashLeague)>=0)?hashLeague:(saved&&ids.indexOf(saved)>=0)?saved:ids[0];
-    if(useId!==_curLeagueId){
+    var curValid=_curLeagueId&&ids.indexOf(_curLeagueId)>=0;
+    var useId=(hashLeague&&ids.indexOf(hashLeague)>=0)?hashLeague
+      :curValid?_curLeagueId
+      :(saved&&ids.indexOf(saved)>=0)?saved
+      :pickDefaultLeagueId(_leaguesMeta);
+    if(useId&&(useId!==_curLeagueId||!_leagueDataListenerId)){
+      var wasDeleted=_curLeagueId&&!curValid;
       _curLeagueId=useId;
+      localStorage.setItem('pt_curLeague',useId);
       var sel=document.getElementById('loginLeagueSel');
       if(sel)sel.value=useId;
       listenToLeague(useId);
+      if(wasDeleted)showToast('ℹ️ Bulunduğunuz sezon kaldırıldı - '+((_leaguesMeta[useId]&&_leaguesMeta[useId].name)||'güncel sezona')+' geçildi');
     }
   },function(err){
     _leaguesMetaRetryCount++;
@@ -3378,13 +3327,45 @@ var _leagueDataListener=null;
 var _lastDataSnapshot=null; // Performans optimizasyonu: gereksiz tam render'ları atlamak için.
 var _visitorsListener=null;
 var _registeredVisitorNames=[];
+// KRİTİK HATA DÜZELTMESİ (kullanıcı bildirdi: "sezon değiştirdiğimde bazı özellikler eski
+// hâline dönüyor"): Eski dinleyiciler "db.ref('leagues/'+leagueId).off(...)" ile
+// kaldırılmaya çalışılıyordu - ama leagueId burada YENİ ligin ID'si. Yani off() yeni ligin
+// yolundan ayrılmaya çalışıyor, ESKİ ligin dinleyicisi hiç kaldırılmıyordu. Sezon
+// değiştirildikten sonra eski sezonun verisi de gelmeye devam edip D'yi (tema, yazı tipi,
+// şerit, kart stili... TÜM ayarlar dahil) eski değerlerle EZİYORDU. Silinen bir sezonda ise
+// dinleyici null veriyle tetiklenip her şeyi varsayılana döndürüyordu. Artık dinleyicilerin
+// GERÇEKTEN bağlı olduğu lig ayrıca tutulur ve ayrılma HER ZAMAN o ligden yapılır.
+var _leagueDataListenerId=null;
+var _visitorsListenerId=null;
+// Silinen/bitmiş sezon sonrası hangi sezona düşüleceğinin TEK kuralı (admin panelindeki
+// pickDefaultLeagueId ile birebir aynı): önce en yeni AKTİF sezon, hiç yoksa en yeni sezon.
+function pickDefaultLeagueId(meta){
+  var ids=Object.keys(meta||{});
+  if(!ids.length)return '';
+  var active=ids.filter(function(id){return meta[id]&&meta[id].status!=='finished';});
+  return (active.length?active:ids).sort().reverse()[0];
+}
 function listenToLeague(leagueId){
+  if(!leagueId)return;
   _lastDataSnapshot=null; // ÖNEMLİ: lig değişiminde önceki ligin snapshot'ı temizlenir,
   // aksi halde performans optimizasyonu yeni ligin verisini yanlışlıkla "değişmedi" sayıp
   // render'ı atlayabilirdi.
-  if(_leagueDataListener)db.ref('leagues/'+leagueId).off('value',_leagueDataListener);
+  if(_leagueDataListener&&_leagueDataListenerId)db.ref('leagues/'+_leagueDataListenerId).off('value',_leagueDataListener);
+  _leagueDataListenerId=leagueId;
+  _curLeagueId=leagueId; // çağıranlar zaten ayarlıyor; burada da garantiye alınır
+  var _gotDataForThisLeague=false; // bu sezon için en az bir kez gerçek veri geldi mi?
   _leagueDataListener=function(snap){
    try{
+    // GÜVENLİK KİLİDİ: off() tamamlanana kadar sırada bekleyen bir geri çağrı hâlâ
+    // tetiklenebilir - artık aktif olmayan bir ligden gelen senkron D'yi ASLA değiştirmez.
+    if(_leagueDataListenerId!==leagueId||_curLeagueId!==leagueId)return;
+    // Sezon Firebase'den SİLİNMİŞSE (daha önce verisi gelmişti, şimdi null döndü) D'yi
+    // varsayılanlara SIFIRLAMA - aksi halde ekrandaki her şey (tema, ayarlar) bir anda
+    // "eski hâline dönmüş" gibi görünürdü. Doğru sezona geçişi leaguesMeta dinleyicisi
+    // zaten yapar. NOT: Henüz hiç veri gelmemişken null gelmesi (gerçekten boş bir sezon)
+    // normal akışla işlenmeye devam eder - kullanıcı yükleme ekranında asılı kalmaz.
+    if(snap.val()===null&&_gotDataForThisLeague)return;
+    if(snap.val()!==null)_gotDataForThisLeague=true;
     // TEŞHİS İŞARETİ (bkz. checkDataHealth): dinleyicinin en son NE ZAMAN tetiklendiğini
     // kaydeder - uygulama davranışını etkilemez. 'visitors' alt yolu ~15sn'de bir güncellendiği
     // için, bağlantı sağlıklıyken bu değer normalde hiç uzun süre bayatlamaz.
@@ -3716,8 +3697,11 @@ function listenToLeague(leagueId){
   // @bahsetme sistemi için: kayıtlı tüm PT kullanıcılarının isim listesi gerçek zamanlı
   // tutulur - kullanıcı talebi üzerine, kişi hiç sohbete/yoruma katılmamış olsa bile,
   // Puan Tablosuna kayıtlıysa @ yazınca önerilerde çıkmalı.
-  if(_visitorsListener)db.ref('leagues/'+leagueId+'/visitors').off('value',_visitorsListener);
+  // (Ana dinleyiciyle AYNI hata buradaydı: ayrılma yeni ligin yolundan deneniyordu.)
+  if(_visitorsListener&&_visitorsListenerId)db.ref('leagues/'+_visitorsListenerId+'/visitors').off('value',_visitorsListener);
+  _visitorsListenerId=leagueId;
   _visitorsListener=function(snap){
+    if(_visitorsListenerId!==leagueId)return;
     const v=snap.val()||{};
     _registeredVisitorNames=Object.values(v).map(x=>x&&x.name).filter(Boolean);
   };
@@ -7246,7 +7230,6 @@ function getActivePremiumCodes(){
 // mantığını tek bir ID üzerinden uygular.
 function resolvePremiumItemLabel(itemId){
   if(!itemId)return '';
-  if(PALETTES[itemId])return PALETTES[itemId].label;
   const customTheme=D.customThemes&&D.customThemes[itemId];
   if(customTheme)return customTheme.name;
   if(itemId.indexOf('font_')===0){
@@ -7259,10 +7242,6 @@ function resolvePremiumItemLabel(itemId){
 }
 function describePremiumItemInfo(c){
   const itemId=c.paletteId||'';
-  if(PALETTES[itemId]){
-    const p=PALETTES[itemId];
-    return {category:'🎨 Premium Renk Paleti',name:p.label,code:p.ref?('#'+p.ref):itemId};
-  }
   // KULLANICI TALEBİ: "Yöneticinin girdiği unsur ismi dışında başka bir şey yazıyor." - Admin'in
   // eklediği ÖZEL unsurların (tema/paket/font) bir referans numarası (#611 gibi) YOKTUR - eskiden
   // bu durumda çirkin bir dahili ID (örn. "theme_mrvv1h5xyif8") gösteriliyordu. Artık admin'in
@@ -7400,26 +7379,20 @@ let _revokeCheckPending=false;
 function checkRevokedPremiumPalette(){
   if(typeof _trialState!=='undefined'&&_trialState)return;
   // KULLANICI TALEBİ: "Admin bütün temaları, emojileri ve yazı tipini tamamen silebilir,
-  // düzenleyebilir." Admin bir temayı SİLDİĞİNDE (özel tema customThemes'ten kalkar) veya
-  // GİZLEDİĞİNDE (yerleşik tema hiddenThemeIds'e girer), o tema kullanıcının SEÇİLİ teması
-  // ise kullanıcı artık geçersiz/görünmez bir temada kalıyordu. Artık güvenli varsayılana
-  // (violet/koyu) döndürülür - böylece silme işlemi kullanıcı tarafında da tutarlı yansır.
-  const hiddenThemes=_asIdList(D.hiddenThemeIds).concat(_asIdList(D.deletedBuiltinThemeIds));
-  const isBuiltin=!!PALETTES[_curPalette];
-  const isCustom=!!(D.customThemes&&D.customThemes[_curPalette]);
-  const wasCustomButDeleted=(_curPalette.indexOf('theme_')===0&&!isCustom);
-  // Gizlenmiş VEYA kalıcı silinmiş bir yerleşik tema seçiliyse kullanıcı varsayılana döner.
-  const isHiddenBuiltin=isBuiltin&&hiddenThemes.indexOf(_curPalette)>-1;
-  if(wasCustomButDeleted||isHiddenBuiltin){
-    _curPalette='violet';_curMode=(_curMode==='light'||_curMode==='normal')?_curMode:'dark';
-    localStorage.setItem('pt_palette','violet');
+  // düzenleyebilir." Admin bir temayı sildiğinde (veya yayından kaldırdığında) o tema
+  // D.customThemes'ten kalkar; kullanıcının SEÇİLİ teması buysa artık geçersiz/görünmez bir
+  // temada kalırdı. Artık güvenli varsayılana döndürülür - silme işlemi kullanıcı tarafında
+  // da tutarlı yansır. (Yerleşik tema sistemi kaldırıldığı için "gizlenmiş yerleşik tema"
+  // diye bir durum artık yoktur.)
+  const customTheme=D.customThemes&&D.customThemes[_curPalette];
+  if(_curPalette&&!customTheme){
+    _curPalette='';_curMode=(_curMode==='light'||_curMode==='normal')?_curMode:'dark';
+    try{localStorage.removeItem('pt_palette');}catch(e){}
     applyTheme();applyBgTheme();
     if(typeof renderTab==='function')renderTab(_tab);
     return;
   }
-  const p=PALETTES[_curPalette];
-  const customTheme=D.customThemes&&D.customThemes[_curPalette];
-  const isPremiumSelected=(p&&p.premium)||(customTheme&&customTheme.category==='premium');
+  const isPremiumSelected=(customTheme&&customTheme.category==='premium');
   if(isPremiumSelected&&!hasPremiumAccess(_curPalette)){
     if(_revokeCheckPending)return; // Zaten bir doğrulama bekliyor, tekrar tetiklemeye gerek yok.
     _revokeCheckPending=true;
@@ -7429,11 +7402,10 @@ function checkRevokedPremiumPalette(){
       // Bu 2.5 saniyelik bekleme sırasında kullanıcı zaten başka bir temaya geçmiş olabilir -
       // bu durumda artık bu paletin iptalinden bahsetmenin anlamı yoktur.
       if(_curPalette!==paletteAtCheckTime)return;
-      const p2=PALETTES[_curPalette];
       const customTheme2=D.customThemes&&D.customThemes[_curPalette];
-      const stillPremiumSelected=(p2&&p2.premium)||(customTheme2&&customTheme2.category==='premium');
+      const stillPremiumSelected=(customTheme2&&customTheme2.category==='premium');
       if(stillPremiumSelected&&!hasPremiumAccess(_curPalette)){
-        const label=(p2&&p2.label)||(customTheme2&&customTheme2.name)||_curPalette;
+        const label=(customTheme2&&customTheme2.name)||_curPalette;
         selectOriginalTheme();
         addNotification('🚫 Premium Erişim İptal Edildi',label+' temasına erişiminiz sonlandırıldı, varsayılan temaya dönüldü.','🚫');
       }
@@ -11298,8 +11270,8 @@ function checkSubscribedMatchEvents(){
 let _trialState=null;
 window.startPaletteTrial=function(pid){
   const customTheme=D.customThemes&&D.customThemes[pid];
-  const p=customTheme?{label:customTheme.name,fixedMode:'premium'}:PALETTES[pid];
-  if(!p)return;
+  if(!customTheme)return;
+  const p={label:customTheme.name,fixedMode:'premium'};
   if(_trialState)endPaletteTrial(false);
   _trialState={prevPalette:_curPalette,prevMode:_curMode,pid:pid};
   _curPalette=pid;_curMode=p.fixedMode||'dark';
@@ -15203,19 +15175,13 @@ window.openPaletteGroupPopup=function(groupMode){
   window._diagScreen='pt_theme';
   if(groupMode==='premium')localStorage.setItem('pt_seenPremiumTab','1');
   const groupLabel=groupMode==='light'?'☀️ Açık Temalar':groupMode==='normal'?'⚖️ Normal Temalar':groupMode==='premium'?'✨ Premium Temalar':'🌙 Koyu Temalar';
-  // ÖNEMLİ: Açık/Normal/Koyu grupları SADECE kendi 12 ana paletini gösterir, Premium
-  // TAMAMEN AYRI bir grup olarak kendi 12 paletini gösterir - kullanıcı talebi: "Açık mod
-  // 12, normal mod 12, koyu mod 12, Premium mod 12, hepsi kendi içinde toplam 12 renk
-  // paletine sahip olacak" (gruplar arası karışım yok, her biri net 12).
+  // Açık/Normal/Koyu/Premium grupları birbirinden tamamen ayrıdır; her grup yalnızca kendi
+  // kategorisindeki temaları gösterir (gruplar arası karışım yok).
   // KULLANICI TALEBİ: "Admin 'Koyu temalar - Normal temalar - Açık temalar - Premium
   // temalar' ekleyebileceği, düzenleyebileceği ve silebileceği bir sistem geliştirilmelidir."
-  // Admin'in GİZLEDİĞİ yerleşik paletler artık gösterilmez, admin'in EKLEDİĞİ özel temalar
-  // ise bu listeye (kendi kategorisine göre) eklenir.
-  // Gizlenen VEYA kalıcı silinmiş yerleşik temalar seçici listesinde görünmez.
-  const hiddenThemeIds=_asIdList(D.hiddenThemeIds).concat(_asIdList(D.deletedBuiltinThemeIds));
-  const allPalettes=groupMode==='premium'
-    ?Object.entries(PALETTES).filter(([pid,p])=>p.premium&&!hiddenThemeIds.includes(pid))
-    :Object.entries(PALETTES).filter(([pid,p])=>!p.premium&&!hiddenThemeIds.includes(pid));
+  // Yerleşik palet listesi tamamen kaldırıldı - seçicide YALNIZCA admin'in eklediği temalar
+  // (kendi kategorisine göre gruplanmış olarak) gösterilir. Admin o kategoriye henüz tema
+  // eklemediyse liste boş görünür, net bir bilgi mesajıyla.
   const categoryByGroupMode={dark:'koyu',normal:'normal',light:'acik',premium:'premium'};
   const customThemesForGroup=Object.values(D.customThemes||{}).filter(t=>t.category===categoryByGroupMode[groupMode]);
   const html=`<div class="sheet-handle"></div>
@@ -15225,18 +15191,6 @@ window.openPaletteGroupPopup=function(groupMode){
       ${getActivePremiumCodes().map((c,i)=>`<div style="display:flex;justify-content:space-between;align-items:center;font-size:.7rem;padding:.25rem 0;border-bottom:1px solid rgba(255,255,255,.06)"><div>${premiumItemSummaryLine(c)}</div><span class="premium-live-remaining" data-codeidx="${i}" style="color:var(--ac3);font-weight:800;white-space:nowrap;margin-left:.5rem">${premiumRemainingLabel(c)}</span></div>`).join('')}
     </div>`:''}
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;max-height:60vh;overflow-y:auto;padding-bottom:.3rem">
-      ${allPalettes.map(([pid,p])=>{
-        const actualMode=p.fixedMode||groupMode;
-        const mc=(p.modes&&p.modes[actualMode])||['#333','#7c3aed','#fff'];
-        const isSel=_curPalette===pid&&_curMode===actualMode;
-        const isLocked=p.premium&&!_isDevAdmin&&!hasPremiumAccess(pid);
-        const clickHandler=isLocked?`requestPremiumAccess('${pid}')`:`selectPaletteFromGroup('${pid}','${actualMode}')`;
-        return `<button onclick="${clickHandler}" style="position:relative;background:linear-gradient(135deg,${mc[0]} 33%,${mc[1]} 33% 66%,${mc[2]} 66%);border:2.5px solid ${isSel?'var(--ac)':'transparent'};border-radius:12px;padding:.6rem .3rem;cursor:pointer;height:52px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;${isLocked?'filter:saturate(.5)':''}">
-          ${p.premium?(isLocked?'<span style="position:absolute;top:2px;right:3px;font-size:.65rem">🔒</span>':'<span style="position:absolute;top:2px;right:3px;font-size:.6rem">✨</span>'):''}
-          ${isSel?'<span style="position:absolute;top:2px;left:3px;font-size:.65rem">✓</span>':''}
-          <span style="font-size:.56rem;font-weight:700;color:${mc[2]};background:rgba(0,0,0,.25);border-radius:4px;padding:.05rem .25rem">${p.label}</span>
-        </button>`;
-      }).join('')}
       ${customThemesForGroup.map(t=>{
         const isSel=_curPalette===t.id&&_curMode===groupMode;
         const isLocked=groupMode==='premium'&&!_isDevAdmin&&!hasPremiumAccess(t.id);
@@ -15247,7 +15201,8 @@ window.openPaletteGroupPopup=function(groupMode){
           <span style="font-size:.56rem;font-weight:700;color:${t.text};background:rgba(0,0,0,.25);border-radius:4px;padding:.05rem .25rem">${t.name}</span>
         </button>`;
       }).join('')}
-    </div>`;
+    </div>
+    ${customThemesForGroup.length?'':'<div style="text-align:center;color:var(--mu);padding:1.6rem .5rem;font-size:.75rem;line-height:1.5">Bu kategoride henüz tema yok.<br/>Yönetici tema ekledikçe burada görünecek.</div>'}`;
   document.getElementById('sheetContent').innerHTML=html;
   if(window.PTSheetNav)PTSheetNav.mark('sheet@12261');
   document.getElementById('sheetWrap').classList.add('open');
@@ -15318,9 +15273,6 @@ function computePremiumSignature(){
       // Admin'in eklediği ÖZEL temalar da izlenir - aksi halde yeni bir premium tema
       // eklendiğinde/silindiğinde açık ekran güncellenmiyordu.
       ct:Object.values(D.customThemes||{}).map(x=>[x.id,x.name,x.category]),
-      ht:D.hiddenThemeIds||null,
-      pf:D.premiumFontIds||null,
-      hf:D.hiddenFontIds||null,
       pr:D.premiumPrices||null
     });
   }catch(e){return null;}
@@ -15399,14 +15351,9 @@ window.openPointsShop=function(){
   // Yönetimi'nden eklediği ÖZEL premium temalar (D.customThemes) hiç listelenmiyordu -
   // admin fiyat atasa bile kullanıcı bu temaları satın alamıyordu. Artık ikisi birlikte
   // gösterilir. Gizlenen (silinen) yerleşik temalar ise elenir.
-  const hiddenThemeIdsShop=_asIdList(D.hiddenThemeIds).concat(_asIdList(D.deletedBuiltinThemeIds));
-  const builtinPaletteRows=Object.entries(PALETTES)
-    .filter(([pid,p])=>p.premium&&hiddenThemeIdsShop.indexOf(pid)===-1)
-    .map(([pid,p])=>itemRow(pid,p.label,'🎨',`openSettings()`)).filter(Boolean).join('');
-  const customThemeRows=Object.values(D.customThemes||{})
+  const paletteRows=Object.values(D.customThemes||{})
     .filter(t=>t.category==='premium')
     .map(t=>itemRow(t.id,t.name,'🎨',`setPalette('${t.id}')`)).filter(Boolean).join('');
-  const paletteRows=builtinPaletteRows+customThemeRows;
   if(paletteRows)itemsHtml+=`<div style="font-size:.62rem;font-weight:800;color:var(--mu);text-transform:uppercase;margin:.6rem 0 .35rem">Renk Paletleri</div>${paletteRows}`;
   const html=`<div class="sheet-handle"></div>
     <div style="font-size:.92rem;font-weight:900;margin-bottom:.5rem;text-align:center">🛍️ Puan Mağazası</div>
@@ -15646,11 +15593,11 @@ window.redeemGenericPremiumCode=function(){
 
 window.requestPremiumAccess=function(paletteId){
   if(!_userName){showToast('Önce giriş yapın');return;}
-  // KULLANICI TALEBİ: paletteId, admin'in eklediği ÖZEL bir tema (D.customThemes) olabilir -
-  // bu durumda PALETTES yerine o temanın verisinden eşdeğer bir nesne oluşturulur.
+  // Tema kaynağı yalnızca admin'in eklediği temalardır (D.customThemes); önizleme nesnesi
+  // doğrudan o temanın renklerinden üretilir.
   const customTheme=D.customThemes&&D.customThemes[paletteId];
-  const p=customTheme?{label:customTheme.name,fixedMode:'premium',modes:{premium:[customTheme.bg,customTheme.accent,customTheme.text]}}:PALETTES[paletteId];
-  if(!p)return;
+  if(!customTheme)return;
+  const p={label:customTheme.name,fixedMode:'premium',modes:{premium:[customTheme.bg,customTheme.accent,customTheme.text]}};
   // Önizleme rengi: paletin fixedMode'una göre (premium paletler tek bir modda sabit).
   const previewMode=p.fixedMode||'dark';
   const mc=(p.modes&&p.modes[previewMode])||['#333','#7c3aed','#fff'];
@@ -15701,7 +15648,7 @@ window.sendPremiumAccessRequest=function(paletteId){
     closeSheet();
     return;
   }
-  const p=PALETTES[paletteId]||(D.customThemes&&D.customThemes[paletteId]&&{label:D.customThemes[paletteId].name});
+  const p=(D.customThemes&&D.customThemes[paletteId])?{label:D.customThemes[paletteId].name}:null;
   const reqId='req'+Date.now()+Math.random().toString(36).slice(2,6);
   firebase.database().ref('leagues/'+_curLeagueId+'/premiumRequests/'+reqId).set({
     userName:_userName,paletteId:paletteId,paletteLabel:p?p.label:paletteId,ts:Date.now(),status:'pending'
@@ -15718,7 +15665,7 @@ window.openPremiumCodeRedeem=function(paletteId){
   window._redeemContextPaletteId=paletteId;
   document.getElementById('sheetContent').innerHTML=`<div class="sheet-handle"></div>
     <div style="font-size:.92rem;font-weight:900;margin-bottom:.6rem;text-align:center">🔑 Erişim Kodunu Gir</div>
-    <div style="font-size:.66rem;color:var(--mu);text-align:center;margin-bottom:.6rem">${PALETTES[paletteId]?PALETTES[paletteId].label:'Bu tema'} için verilen kodu girin</div>
+    <div style="font-size:.66rem;color:var(--mu);text-align:center;margin-bottom:.6rem">${resolvePremiumItemLabel(paletteId)||'Bu tema'} için verilen kodu girin</div>
     <div class="field"><span class="lbl">Referans Kod</span><input id="premiumCodeInp" placeholder="Örn: VIP-XXXXXX" style="text-transform:uppercase"/></div>
     <button onclick="redeemPremiumCode()" style="width:100%;background:linear-gradient(135deg,var(--ac),var(--ac2));border:none;border-radius:12px;padding:.6rem;color:#fff;font-size:.8rem;font-weight:800;cursor:pointer;margin-top:.5rem">✅ Kodu Kullan</button>`;
   if(window.PTSheetNav)PTSheetNav.mark('sheet@12724');
@@ -15812,9 +15759,9 @@ window.selectPaletteFromGroup=function(pid,groupMode){
   // KULLANICI TALEBİ: "Yönetici her zaman... renk paletlerini kullanabilir (Premium dahil),
   // sonradan eklense bile." - Tepki paketi/yazı tipinde zaten var olan admin bypass'ı burada
   // EKSİKTİ.
-  const p=PALETTES[pid];
+  const p=D.customThemes&&D.customThemes[pid];
   if(!p)return;
-  if(p.premium&&!_isDevAdmin&&!hasPremiumAccess(pid)){
+  if(p.category==='premium'&&!_isDevAdmin&&!hasPremiumAccess(pid)){
     requestPremiumAccess(pid);
     return;
   }
@@ -15828,7 +15775,7 @@ window.selectPaletteFromGroup=function(pid,groupMode){
   renderTab(_tab); // Canlı maç kartının lcClass'ı DOM'da yenilensin.
   syncProfileToFirebase();
   closeSheet();
-  showToast('🎨 '+PALETTES[pid].label+' ('+(groupMode==='light'?'Açık':groupMode==='normal'?'Normal':'Koyu')+') uygulandı');
+  showToast('🎨 '+(p.name||'Tema')+' ('+(groupMode==='light'?'Açık':groupMode==='normal'?'Normal':'Koyu')+') uygulandı');
 };
 
 // "Orijinal Tema": kullanıcı talebi üzerine eklendi - kişisel palet seçimini tamamen
@@ -15838,7 +15785,7 @@ window.selectOriginalTheme=function(){
   localStorage.removeItem('pt_palette');
   localStorage.removeItem('pt_mode');
   _userHasPersonalPalette=false;
-  _curPalette='violet';
+  _curPalette='';
   // ÖNEMLİ KÖK SEBEP DÜZELTMESİ (2. seviye): _curMode önceden 'dark' olarak SABİT
   // kodlanmıştı - kullanıcı Açık veya Normal moddayken "Orijinal Tema"ya tıkladığında,
   // mod da istemsizce Koyu'ya zorlanıyordu. Kullanıcı bunu "Orijinal Tema sadece koyu modda
@@ -15894,7 +15841,6 @@ window.openSettings=function(){
   window._premiumScreenOpen='settings';
   // Geri navigasyonu: Ayarlar bir ROOT (ana giriş) menüdür - yığını sıfırlar.
   loadAllFontPreviewsOnce();
-  const paletteList=Object.entries(PALETTES);
   const _scEl2=document.getElementById('sheetContent');
   // HATA DÜZELTMESİ (KÖK SEBEP BULUNDU): "innerHTML=''; void offsetHeight;" hilesi
   // kaldırıldı - bu, çözüm değil, flaşlamanın kendisinin sebebiydi (tarayıcıyı panel
@@ -16019,11 +15965,11 @@ window.openSettings=function(){
     </div>
     ${!_hasEverTriedPremium()?`<div style="background:linear-gradient(135deg,rgba(212,175,55,.1),rgba(124,58,237,.1));border:1px solid rgba(212,175,55,.3);border-radius:12px;padding:.6rem .7rem;margin-bottom:.5rem">
       <div style="font-size:.7rem;font-weight:800;margin-bottom:.2rem">✨ Henüz Premium temaları denemedin!</div>
-      <div style="font-size:.62rem;color:var(--mu);line-height:1.5">10 özel renk paleti - Platin, Safir, Yakut ve daha fazlası. Ücretsiz önizleyebilirsin, beğenirsen admin'den erişim kodu isteyebilirsin.</div>
+      <div style="font-size:.62rem;color:var(--mu);line-height:1.5">Yöneticinin eklediği özel renk paletleri. Ücretsiz önizleyebilirsin, beğenirsen yöneticiden erişim kodu isteyebilirsin.</div>
     </div>`:''}
     <button onclick="openPaletteGroupPopup('premium')" class="premium-glow-btn" style="width:100%;background:linear-gradient(135deg,rgba(212,175,55,.15),rgba(124,58,237,.15));border:1.5px solid rgba(212,175,55,.4);border-radius:11px;padding:.55rem .3rem;color:var(--tx);font-size:.72rem;font-weight:700;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif;margin-bottom:.45rem;position:relative">✨ Premium Temalar${!_hasEverTriedPremium()?' <span style="background:#d4af37;color:#000;font-size:.55rem;font-weight:900;padding:.08rem .35rem;border-radius:8px;margin-left:.3rem">YENİ</span>':''}</button>
     <button onclick="selectOriginalTheme()" style="width:100%;background:var(--s2);border:1.5px dashed var(--br);border-radius:11px;padding:.5rem .3rem;color:var(--mu);font-size:.7rem;font-weight:700;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif;margin-bottom:.6rem">↩️ Orijinal Tema (Hiçbiri Seçilmedi)</button>
-    <div style="font-size:.62rem;color:var(--mu);text-align:center;margin-bottom:.6rem">Seçili: ${(PALETTES[_curPalette]&&PALETTES[_curPalette].label)||(D.customThemes&&D.customThemes[_curPalette]&&D.customThemes[_curPalette].name)||'Bilinmiyor'}</div>
+    <div style="font-size:.62rem;color:var(--mu);text-align:center;margin-bottom:.6rem">Seçili: ${(D.customThemes&&D.customThemes[_curPalette]&&D.customThemes[_curPalette].name)||'Hiçbiri'}</div>
     <div style="background:var(--s2);border-radius:12px;padding:.65rem .85rem;margin-bottom:.9rem;display:flex;align-items:center;justify-content:space-between;gap:.5rem">
       <span style="font-size:.72rem;font-weight:700;line-height:1.3">🎨 Arkaplan rengini palete göre senkronize et</span>
       <button class="toggle-sw ${_bgPaletteSyncEnabled?'on':''}" id="bgPaletteSyncSw" onclick="toggleBgPaletteSync()" style="flex-shrink:0"></button>
