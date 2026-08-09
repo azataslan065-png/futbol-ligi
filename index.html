@@ -3468,6 +3468,8 @@ function listenToLeague(leagueId){
     // normal akışla işlenmeye devam eder - kullanıcı yükleme ekranında asılı kalmaz.
     if(snap.val()===null&&_gotDataForThisLeague)return;
     if(snap.val()!==null)_gotDataForThisLeague=true;
+    // Bu ligin ilk anlık görüntüsünde veri boyutu profili çıkarılır (yalnızca teşhis açıkken).
+    if(typeof veriBoyutuProfili==='function')veriBoyutuProfili(snap.val());
     // TEŞHİS İŞARETİ (bkz. checkDataHealth): dinleyicinin en son NE ZAMAN tetiklendiğini
     // kaydeder - uygulama davranışını etkilemez. 'visitors' alt yolu ~15sn'de bir güncellendiği
     // için, bağlantı sağlıklıyken bu değer normalde hiç uzun süre bayatlamaz.
@@ -5447,6 +5449,52 @@ let _ptDataDoctor={connected:null,disconnectedSince:null,connWarned:false,deadWa
     });
   }catch(e){DiagSil('baglantiDurumuAbonesi',e);}
 })();
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   VERİ BOYUTU PROFİLİ (pt_data modülü açıkken, oturumda BİR KEZ)
+
+   NEDEN: Firebase panelinde haftalık indirme 2.24 GB görünüyor ama toplam depolama sadece
+   ~8 MB. Yani veri büyük değil, ÇOK KEZ indiriliyor. Uygulama ligin TAMAMINI tek bir
+   dinleyiciyle izlediği için her sayfa açılışında bütün lig düğümü (takımlar, maçlar,
+   kadrolar, sohbet, medya, yönetici günlükleri...) baştan iniyor. Ücretsiz planın aylık
+   sınırı 10 GB; bu hızda ay bitmeden kota tükenir ve veritabanı yanıt vermeyi bırakır.
+
+   NE YAPAR: İlk anlık görüntü geldiğinde her üst alanın kapladığı yeri ölçer ve en büyük
+   12 tanesini kaydeder. Böylece "neyi taşımalıyız / neyi ayrı yüklemeliyiz" sorusu tahminle
+   değil ÖLÇÜMLE cevaplanır. Ölçüm yalnızca "📡 Veri & Bağlantı" modülü AÇIKKEN ve oturumda
+   bir kez yapılır; kapalıyken hiçbir maliyeti yoktur.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+var _boyutProfiliYapildi=false;
+function veriBoyutuProfili(d){
+  try{
+    if(_boyutProfiliYapildi)return;
+    if(!(window.DiagCore&&DiagCore.isOn('pt_data')))return;
+    if(!d||typeof d!=='object')return;
+    _boyutProfiliYapildi=true;
+    var kb=function(n){return Math.round(n/1024*10)/10+' KB';};
+    var toplam=0,liste=[];
+    Object.keys(d).forEach(function(k){
+      var b=0;
+      try{b=JSON.stringify(d[k]).length;}catch(e){b=0;}
+      toplam+=b; liste.push([k,b]);
+    });
+    liste.sort(function(a,b){return b[1]-a[1];});
+    var enBuyuk={};
+    liste.slice(0,12).forEach(function(x){
+      enBuyuk[x[0]]=kb(x[1])+'  ('+Math.round(x[1]/toplam*100)+'%)';
+    });
+    DiagCore.kaydet('pt_data',toplam>1048576?'uyari':'bilgi',
+      'Lig verisi her açılışta indiriliyor: '+kb(toplam),{
+      toplamBoyut:kb(toplam),
+      alanSayisi:liste.length,
+      enBuyukAlanlar:enBuyuk,
+      anlami:'Bu miktar, uygulamanın HER açılışında (her kullanıcı, her yenileme) yeniden iner. '
+        +'Aylık 10 GB ücretsiz sınır, kabaca '+Math.max(1,Math.round(10*1024*1024*1024/Math.max(toplam,1)))
+        +' açılışa denk gelir.',
+      oneri:'En büyük alanlar yalnızca gerektiğinde yüklenecek şekilde ayrı yollara taşınmalı '
+        +'(ör. yönetici günlükleri, arşivler, medya kataloğu Puan Tablosu tarafında hiç gerekmez).'
+    });
+  }catch(e){DiagSil('veriBoyutuProfili',e);}
+}
 function checkDataHealth(){
   try{
     if(!(window.DiagCore&&window.DiagCore.isOn('pt_data')))return;
