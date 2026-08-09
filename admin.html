@@ -1151,7 +1151,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-C';
+window.APP_BUILD='2026-08-09-D';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1630,11 +1630,10 @@ var ADMIN_MENU_ITEMS=[
   {id:'diagnostics',icon:'🩺',label:'Hata Yakalama Kodları',fn:'openDiagnosticsManager'},
   // Veritabanına gömülü kalmış görsel/sesleri dış depolamaya taşıyan tek seferlik bakım aracı
   // (ölçülen sorun: lig verisinin %93'ü gömülü medyaydı ve her açılışta yeniden iniyordu).
-  {id:'mediamigration',icon:'🗜️',label:'Gömülü Medyayı Taşı (veri küçültme)',fn:'openMediaMigration'},
   // Yönetici kimliğini Firebase'e taşıma kurulumu (şifrelerin veritabanında açık durmasını bitirir)
-  {id:'adminaccount',icon:'👤',label:'Yönetici Hesabı (güvenlik)',fn:'openAdminAccountSetup'},
-  // Firebase girişi doğrulandıktan SONRA çalıştırılacak son adım
-  {id:'pwcleanup',icon:'🧹',label:'Açık Metin Şifreleri Temizle',fn:'openPasswordCleanup'}
+  // Yönetici kimliği: hangi hesapla girildiğini gösterir, oturumu kapatır ve yeni bir
+  // yönetici eklemek için gereken kimlik numarasını verir - kalıcı bir araçtır.
+  {id:'adminaccount',icon:'👤',label:'Yönetici Hesabı (güvenlik)',fn:'openAdminAccountSetup'}
 ];
 // KULLANICI TALEBİ: "Admin panelindeki menüleri sıralaması herşeyi kapsıyor değil mi,
 // mesela yönetimdeki bir ayarı başka bir sekmeye atıyabilirim -> Her ikisi de - hem kartların
@@ -17422,155 +17421,15 @@ function openDiagBadgeMap(){
    yükleme başarısız olursa o öğe gömülü haliyle olduğu gibi bırakılır. İşlem yarıda kesilse
    bile veri tutarlıdır ve araç tekrar çalıştırılabilir (kalanları taşır).
    ═══════════════════════════════════════════════════════════════════════════════════════ */
-function _dataUrlToBlob(dataUrl){
-  var virgul=dataUrl.indexOf(',');
-  var bas=dataUrl.slice(0,virgul);
-  var tur=(bas.match(/^data:([^;]+)/)||[])[1]||'application/octet-stream';
-  var ham=dataUrl.slice(virgul+1);
-  var ikili;
-  if(bas.indexOf(';base64')>-1){
-    var bin=atob(ham),len=bin.length,dizi=new Uint8Array(len);
-    for(var i=0;i<len;i++)dizi[i]=bin.charCodeAt(i);
-    ikili=dizi;
-  }else{
-    ikili=new TextEncoder().encode(decodeURIComponent(ham));
-  }
-  return {blob:new Blob([ikili],{type:tur}),tur:tur};
-}
-function _supabaseYukle(dataUrl,klasor){
-  return new Promise(function(res,rej){
-    if(!supabaseClient)return rej(new Error('Supabase bağlantısı yok'));
-    var d;
-    try{d=_dataUrlToBlob(dataUrl);}catch(e){return rej(new Error('Veri çözümlenemedi'));}
-    var uzanti=(d.tur.split('/')[1]||'bin').split('+')[0].replace(/[^a-z0-9]/gi,'');
-    var yol=(klasor||'tasinan')+'/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+uzanti;
-    supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET)
-      .upload(yol,d.blob,{cacheControl:'3600',upsert:false,contentType:d.tur})
-      .then(function(r){
-        if(r.error)throw r.error;
-        var pub=supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET).getPublicUrl(yol);
-        var url=pub&&pub.data&&pub.data.publicUrl;
-        if(!url)throw new Error('Herkese açık adres alınamadı');
-        res(url);
-      })
-      .catch(function(e){rej(e);});
-  });
-}
-// Ağacı gezip taşınacak her "data:" yaprağını, yerine yazabilmek için sahibi+anahtarıyla toplar.
-function _gomuluMedyaBul(kok){
-  var bulunan=[];
-  (function gez(dugum,yol){
-    if(!dugum||typeof dugum!=='object')return;
-    Object.keys(dugum).forEach(function(k){
-      var v=dugum[k];
-      if(typeof v==='string'){
-        if(v.indexOf('data:')===0&&v.length>2048)
-          bulunan.push({sahip:dugum,anahtar:k,yol:yol+'/'+k,boyut:v.length,deger:v});
-      }else if(v&&typeof v==='object'){
-        gez(v,yol+'/'+k);
-      }
-    });
-  })(kok,'');
-  return bulunan;
-}
-/* ═══════════════════════════════════════════════════════════════════════════════════════
-   YÖNETİCİ HESABI (Firebase kimliği)  ·  1. AŞAMA - sadece kurulum, hiçbir davranış değişmez
-
-   ÇÖZÜLMEK İSTENEN SORUN: Yönetici şifreleri şu anda veritabanında AÇIK METİN olarak duruyor
-   (globalConfig/masterAdminPassword ve leagues/{id}/adminAccounts). Veritabanını okuyabilen
-   herkes bu şifreleri okuyabilir - yani mevcut şifre koruması, korumak istediği verinin
-   içinde saklandığı için aslında koruma sağlamıyor. Depo herkese açık olduğundan admin
-   panelinin adresi de gizli değil.
-   Bu tasarımın kendisi kusurlu: giriş kontrolü tarayıcıda yapıldığı sürece şifrenin
-   istemciye ulaşması ZORUNLUDUR. Tek gerçek çözüm, kimlik doğrulamayı Firebase'e devretmek
-   ve yetkiyi VERİTABANI KURALLARINDA tanımlamaktır - böylece yetkisiz bir yazma isteği
-   tarayıcıda değil, SUNUCUDA reddedilir.
-
-   BU EKRAN NE YAPAR: Yöneticiye bir Firebase hesabı (e-posta + şifre) oluşturur veya o
-   hesapla giriş yaptırır, ardından kimlik numarasını (uid) gösterir. Kurallar yalnızca
-   `admins/{uid}` listesindeki kimliklere yazma izni verecek şekilde sıkılaştırılacaktır.
-   ŞU AN HİÇBİR ŞEY DEĞİŞMEZ: mevcut şifreli giriş aynen çalışmaya devam eder. Bu ekran
-   sadece kimliği hazırlar; kurallar ancak siz doğruladıktan sonra sıkılaştırılır. */
-function _authVar(){return !!(window.firebase&&firebase.auth&&window._authOrtamUygun);}
-function _mevcutKimlik(){
-  try{var u=firebase.auth().currentUser;return u||null;}catch(e){return null;}
-}
-/* ═══════════════════════════════════════════════════════════════════════════════════════
-   AÇIK METİN ŞİFRELERİ TEMİZLE  ·  son adım
-
-   Yönetici girişi Firebase hesabına taşındıktan SONRA, veritabanındaki eski şifreler
-   tamamen gereksizdir - ama orada durdukları sürece hâlâ okunabilirler:
-     globalConfig/masterAdminPassword        (ana şifre, açık metin)
-     leagues/{id}/adminAccounts[].pass       (alt yönetici şifreleri, açık metin)
-   Bu araç onları siler. Silmeden ÖNCE Firebase hesabıyla giriş yapabildiğinizi doğrulamanız
-   şarttır; bu yüzden araç, oturum yönetici değilse çalışmayı reddeder.
-
-   ALT YÖNETİCİ HESAPLARI: Sadece ŞİFRE alanı silinir; hesap adı ve izin haritası korunur.
-   Böylece o hesaplara ileride Firebase kimliği bağlandığında izinler olduğu gibi kullanılır -
-   yıllarca uğraşılmış izin yapılandırması kaybolmaz. */
-function openPasswordCleanup(){
-  var u=null;
-  try{u=(window.firebase&&firebase.auth)?firebase.auth().currentUser:null;}catch(e){}
-  var kimlikli=!!(u&&!u.isAnonymous);
-  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.8rem">'
-    +'Yönetici girişi artık Firebase hesabıyla yapılıyor. Veritabanındaki eski şifreler artık '
-    +'hiçbir işe yaramıyor - ama orada durdukları sürece <b>okunabilir durumdalar</b>.<br><br>'
-    +'Bu araç şunları siler:<br>'
-    +'· <code>globalConfig/masterAdminPassword</code> (ana şifre)<br>'
-    +'· Alt yönetici hesaplarının <code>pass</code> alanları<br><br>'
-    +'Alt yönetici hesaplarının <b>adı ve izinleri korunur</b> - yalnızca şifre alanı silinir.'
-    +'</div>';
-  if(!kimlikli){
-    html+='<div style="background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.4);border-radius:10px;padding:.6rem .7rem;font-size:.66rem;line-height:1.6;color:#fbbf24">'
-      +'⚠️ <b>Önce Firebase hesabıyla giriş yapın.</b> Şu an anonim veya eski şifreyle giriş yapılmış görünüyorsunuz. '
-      +'Eski şifreleri silmeden önce yeni giriş yolunun çalıştığından emin olmalısınız - aksi halde panele hiç giremeyebilirsiniz.'
-      +'</div>';
-    openSheet('🧹 Açık Metin Şifreleri Temizle',html,'openPasswordCleanup');
-    return;
-  }
-  html+='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.55rem .7rem;margin-bottom:.8rem;font-size:.66rem;line-height:1.7">'
-    +'Giriş yapan hesap: <b style="color:#22c55e">'+escHtml(u.email||u.uid)+'</b><br>'
-    +'Bu hesapla panele girebildiğinizi <b>en az bir kez</b> doğruladıysanız devam edin.'
-    +'</div>'
-    +'<button class="btn bgh" onclick="runPasswordCleanup()" style="width:100%">🧹 Eski Şifreleri Sil</button>'
-    +'<div id="pwCleanMsg" style="font-size:.66rem;margin-top:.6rem;line-height:1.6"></div>';
-  openSheet('🧹 Açık Metin Şifreleri Temizle',html,'openPasswordCleanup');
-}
-function runPasswordCleanup(){
-  dlg('🧹','Eski Şifreleri Sil','Veritabanındaki açık metin yönetici şifreleri kalıcı olarak silinecek. Bundan sonra panele YALNIZCA Firebase hesabınızla girebilirsiniz.\n\nHesabınızla giriş yapabildiğinizi doğruladınız mı?','Sil','dor').then(function(ok){
-    if(!ok)return;
-    var kutu=qs('pwCleanMsg');
-    var yaz=function(h){if(kutu)kutu.innerHTML=h;};
-    yaz('⏳ Siliniyor...');
-    var upd={};
-    upd['globalConfig/masterAdminPassword']=null;
-    // Tüm liglerdeki alt yönetici hesaplarının SADECE şifre alanı temizlenir.
-    db.ref('leaguesMeta').once('value').then(function(sn){
-      var ids=Object.keys(sn.val()||{});
-      return Promise.all(ids.map(function(id){
-        return db.ref('leagues/'+id+'/adminAccounts').once('value').then(function(a){
-          var accs=a.val();
-          if(!accs)return;
-          Object.keys(accs).forEach(function(k){
-            if(accs[k]&&accs[k].pass!==undefined)upd['leagues/'+id+'/adminAccounts/'+k+'/pass']=null;
-          });
-        }).catch(function(){});
-      }));
-    }).then(function(){
-      return db.ref().update(upd);
-    }).then(function(){
-      _customMasterPassword=null;
-      logAction('🧹 Açık metin yönetici şifreleri veritabanından silindi');
-      yaz('<b style="color:#22c55e">✅ Silindi.</b> Artık panele yalnızca Firebase hesabınızla girebilirsiniz. '
-        +'Bu oturum açık kalmaya devam eder; çıkış yaparsanız e-posta ve şifrenizle girin.');
-      toast('✅ Eski şifreler silindi');
-    }).catch(function(e){
-      yaz('<b style="color:#f87171">❌ Silinemedi:</b> '+escHtml((e&&e.message)||'bilinmeyen hata')
-        +'<br>Veri olduğu gibi korundu, tekrar deneyebilirsiniz.');
-    });
-  });
-}
-
+/* NOT - KALDIRILAN TEK SEFERLİK BAKIM ARAÇLARI (09.08.2026):
+   Bu dosyada iki bakım aracı vardı; ikisi de görevini tamamladığı için kaldırıldı.
+     · "Gömülü Medyayı Taşı" - veritabanına base64 olarak gömülmüş 104 görsel/sesi dış
+       depolamaya taşıdı (3247 KB -> 74 KB). Yeni yüklemeler zaten doğrudan dış depolamaya
+       gittiği için sorunun tekrarlaması mümkün değil.
+     · "Açık Metin Şifreleri Temizle" - yönetici şifrelerini veritabanından sildi. Giriş artık
+       Firebase hesabıyla yapıldığından silinecek şifre kalmadı.
+   Menüde durmaları yanıltıcı olurdu: yapacak işi olmayan, yanlışlıkla çalıştırılabilecek
+   düğmeler. Gerekirse sürüm geçmişinden geri getirilebilirler. */
 function openAdminAccountSetup(){
   if(!_authVar()){
     openSheet('👤 Yönetici Hesabı',
@@ -17678,91 +17537,6 @@ function _authHataTr(e){
     'auth/network-request-failed':'Ağ hatası - bağlantınızı kontrol edin.'
   };
   return harita[k]||((e&&e.message)||'bilinmeyen hata');
-}
-
-function openMediaMigration(){
-  if(!hasSubperm('league_danger')){toast('🔒 Bu işlem için yetkiniz yok','er');return;}
-  var bulunan=_gomuluMedyaBul(S);
-  var toplam=bulunan.reduce(function(a,b){return a+b.boyut;},0);
-  var kb=function(n){return Math.round(n/1024*10)/10+' KB';};
-  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.8rem">'
-    +'Bazı görsel ve sesler veritabanına <b>gömülü</b> saklanıyor. Bunlar uygulamanın <b>her açılışında</b>, '
-    +'her kullanıcıda yeniden iniyor ve ücretsiz Firebase kotasını hızla tüketiyor.<br><br>'
-    +'Bu araç onları dış depolamaya taşır ve yerlerine yalnızca adreslerini bırakır. '
-    +'<b>Görünüşte hiçbir şey değişmez</b> - değişen tek şey, artık her açılışta indirilmemeleridir.'
-    +'</div>';
-  if(!bulunan.length){
-    html+='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.7rem;text-align:center;font-size:.72rem">✅ Gömülü medya bulunamadı - bu sezon zaten temiz.</div>';
-    openSheet('🗜️ Gömülü Medyayı Taşı',html,'openMediaMigration');
-    return;
-  }
-  var ozet={};
-  bulunan.forEach(function(x){
-    var ad=x.yol.split('/').filter(function(p){return p&&!/^m[a-z0-9]{8,}$/.test(p);}).pop()||'diğer';
-    ozet[ad]=(ozet[ad]||0)+x.boyut;
-  });
-  html+='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .7rem;margin-bottom:.8rem">'
-    +'<div style="font-size:.74rem;font-weight:800;margin-bottom:.35rem">Bulunan: '+bulunan.length+' öğe · '+kb(toplam)+'</div>'
-    +Object.keys(ozet).sort(function(a,b){return ozet[b]-ozet[a];}).map(function(k){
-      return '<div style="display:flex;justify-content:space-between;font-size:.64rem;padding:.15rem 0;border-top:1px solid var(--br)">'
-        +'<span>'+escHtml(k)+'</span><b>'+kb(ozet[k])+'</b></div>';
-    }).join('')
-    +'</div>'
-    +'<button class="btn bp" onclick="runMediaMigration()" style="width:100%;margin-bottom:.5rem">🚀 Taşımayı Başlat ('+bulunan.length+' öğe)</button>'
-    +'<div id="migProgress" style="font-size:.66rem;color:var(--mu);line-height:1.6"></div>'
-    +'<div style="font-size:.62rem;color:var(--mu);line-height:1.6;margin-top:.6rem">'
-    +'⚠️ İşlem sırasında sayfayı kapatmayın. Hiçbir şey silinmez: her öğe önce yüklenir, adres alındıktan sonra değiştirilir. '
-    +'Yarıda kesilirse aracı tekrar çalıştırıp kalanları taşıyabilirsiniz.'
-    +'</div>';
-  openSheet('🗜️ Gömülü Medyayı Taşı',html,'openMediaMigration');
-}
-var _migrationCalisiyor=false;
-function runMediaMigration(){
-  if(_migrationCalisiyor){toast('⏳ İşlem zaten sürüyor','er');return;}
-  var bulunan=_gomuluMedyaBul(S);
-  if(!bulunan.length){toast('Taşınacak öğe yok');return;}
-  if(!supabaseClient){toast('❌ Depolama bağlantısı yok, taşıma yapılamaz','er');return;}
-  _migrationCalisiyor=true;
-  var kutu=qs('migProgress');
-  var basarili=0,basarisiz=0,kazanc=0,i=0;
-  function yaz(mesaj){if(kutu)kutu.innerHTML=mesaj;}
-  function sirada(){
-    if(i>=bulunan.length){
-      // Değişiklikler bellekte yapıldı; tek seferde kaydedilir.
-      save().then(function(){
-        _migrationCalisiyor=false;
-        logAction('🗜️ Gömülü medya taşındı: '+basarili+' öğe, '+Math.round(kazanc/1024)+' KB kazanç');
-        yaz('<b style="color:#22c55e">✅ Tamamlandı.</b><br>'+basarili+' öğe taşındı, '
-          +Math.round(kazanc/1024)+' KB kazanıldı.'
-          +(basarisiz?('<br><b style="color:#f87171">'+basarisiz+' öğe taşınamadı</b> - gömülü halde bırakıldı, tekrar deneyebilirsiniz.'):'')
-          +'<br><br>Puan Tablosu\'nu yenileyip teşhis raporunu tekrar alarak yeni boyutu görebilirsiniz.');
-        toast('✅ '+basarili+' öğe taşındı');
-      }).catch(function(e){
-        _migrationCalisiyor=false;
-        yaz('<b style="color:#f87171">❌ Kaydetme başarısız:</b> '+escHtml((e&&e.message)||'bilinmeyen hata')
-          +'<br>Taşınan adresler kaydedilemedi; araç tekrar çalıştırılabilir.');
-      });
-      return;
-    }
-    var x=bulunan[i];
-    yaz('⏳ '+(i+1)+' / '+bulunan.length+' taşınıyor...<br><span style="opacity:.8">'+escHtml(x.yol)+'</span>');
-    var klasor=/mascot/i.test(x.yol)?'team-mascots'
-      :/stadium/i.test(x.yol)?'team-stadiums'
-      :/logo/i.test(x.yol)?'team-logos'
-      :/squad|photo/i.test(x.yol)?'players'
-      :/sound|ses/i.test(x.yol)?'event-sounds':'tasinan';
-    _supabaseYukle(x.deger,klasor).then(function(url){
-      // Yalnızca adres ALINDIKTAN SONRA değiştirilir - yükleme başarısızsa veri korunur.
-      x.sahip[x.anahtar]=url;
-      basarili++; kazanc+=x.boyut-url.length;
-    }).catch(function(){
-      basarisiz++;
-    }).then(function(){
-      i++;
-      setTimeout(sirada,120); // depolama servisini boğmamak için küçük ara
-    });
-  }
-  sirada();
 }
 
 function openDiagnosticsManager(){
