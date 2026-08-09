@@ -1094,7 +1094,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-R';
+window.APP_BUILD='2026-08-09-S';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18822,24 +18822,53 @@ window.voteMvp=function(matchId,player){
   }
 
   /* ── A) YERLEŞİM & YAZI SIKIŞMASI TARAMASI ───────────────────────────────────────── */
-  /* ── TARAMA KAPSAMI ─────────────────────────────────────────────────────────────────
-     KULLANICI BİLDİRDİ: "Hatayı görmüyor." - KÖK SEBEP BURASIYDI. Tarama, elle yazılmış
-     bir seçici listesiyle sınırlıydı: ['.page.active','#sheetContent','#chatScreen',
-     '#matchDetailScreen','#teamDetailScreen','#liveTickerBar'...]. Bu liste TAHMİNE
-     dayanıyordu ve kontrol ettiğimde bu id'lerin ÇOĞU UYGULAMADA HİÇ YOKTU
-     (#matchDetailScreen, #teamDetailScreen, #chatScreen, #liveTickerBar hiç tanımlı değil).
-     Yani sensörler, ekranın büyük bölümüne HİÇ BAKMIYORDU - hatayı görmemesinin sebebi
-     hatayı kaçırması değil, oraya hiç bakmamasıydı.
-     ARTIK: Kök listesi yok. Görünür sayfanın TAMAMI taranır; ekran dışındaki ve gizli
-     dallar zaten atlanır, düğüm sayısı da tavanla sınırlıdır. Böylece yeni bir ekran
-     eklendiğinde listeye eklemeyi unutmak diye bir hata kalmaz. */
+  /* ── TARAMA KAPSAMI VE SIRASI ───────────────────────────────────────────────────────
+     İKİ AYRI HATA BURADAYDI:
+     (1) Kök listesi TAHMİNE dayanıyordu; #matchDetailScreen, #teamDetailScreen, #chatScreen
+         gibi id'ler uygulamada HİÇ YOKTU - sensörler o ekranlara hiç bakmıyordu.
+     (2) Düzeltip "tüm sayfayı tara" dediğimde YENİ bir hata doğdu: düğüm bütçesi (MAX_NODES)
+         belge sırasına göre harcanıyor. Açık menü/sheet, <body>'nin EN SONUNDA durur; sayfada
+         binlerce düğüm olduğu için bütçe, kullanıcının O AN BAKTIĞI ekrana sıra gelmeden
+         tükeniyordu. Yani sensör yine boş dönüyordu - bu kez "baktı ama yetişemedi" diye.
+     ÇÖZÜM: Kökler ÖNCELİK SIRASIYLA verilir. En üstteki görünür katman (açık menü) ilk sırada,
+     sonra aktif sayfa, sonra sabit çubuklar, en son kalan bütçeyle gövdenin geri kalanı.
+     Böylece kullanıcının gördüğü ekran HER ZAMAN taranır, bütçe ona öncelikli harcanır. */
+  function _gorunurMu(el){
+    try{ return !!(el&&el.getClientRects().length); }catch(e){ return false; }
+  }
   function taramaKokleri(){
-    return document.body?[document.body]:[];
+    var out=[];
+    var ekle=function(sel){
+      try{
+        Array.prototype.forEach.call(document.querySelectorAll(sel),function(el){
+          if(_gorunurMu(el)&&out.indexOf(el)===-1)out.push(el);
+        });
+      }catch(e){}
+    };
+    // 1) En üstte duran görünür katman - kullanıcı şu an buraya bakıyor
+    ekle('#sheetWrap.open #sheetContent');
+    ekle('.ov.on, .overlay.on, [class*="ov"].on');
+    // 2) Aktif sayfa ve sabit çubuklar
+    ekle('.page.active');
+    ekle('.pg.on');
+    ekle('.topbar');
+    ekle('#liveTicker');
+    ekle('#mainNav');
+    // 3) Son çare: gövdenin tamamı (kalan bütçeyle)
+    if(document.body)out.push(document.body);
+    return out;
   }
 
-  function tara(){
-    if(!on())return;
-    if(document.hidden)return;
+  function tara(sondaMi){
+    /* KULLANICI BİLDİRDİ: "Sensörler görevlerini layıkıyla yapmıyor." - Bu iddiayı
+       TARTIŞMAK yerine ÖLÇÜLEBİLİR hale getirdim. Her tarama artık kendi istatistiğini
+       tutuyor: kaç kök gezildi, kaç düğüm incelendi, düğüm bütçesi doldu mu, hangi
+       sensör kaç bulgu üretti. "Sonda" modunda (yönetici testi) sonuç doğrudan döndürülür.
+       Böylece "sensör çalışmıyor" ile "sensör çalıştı ama bulacak bir şey yoktu" ayrımı
+       tahminle değil veriyle yapılır. */
+    if(!sondaMi&&!on())return;
+    if(!sondaMi&&document.hidden)return;
+    var _ist={kok:0,dugum:0,butceDoldu:false};
     var yatayKirpik=[],dikeyKirpik=[],kucukYazi=[],darKutu=[],kucukHedef=[];
     var kucukKontrast=[],harfSikisma=[];
     var sayac=0;
@@ -18849,10 +18878,12 @@ window.voteMvp=function(matchId,player){
     // Artık her öğe, kaç kökten görünürse görünsün BİR KEZ değerlendirilir.
     var gorulen=(typeof Set==='function')?new Set():null;
     taramaKokleri().forEach(function(kok){
+      _ist.kok++;
       var list;
       try{list=kok.querySelectorAll('*');}catch(e){return;}
       for(var i=0;i<list.length;i++){
-        if(sayac++>MAX_NODES)break;
+        if(sayac++>MAX_NODES){_ist.butceDoldu=true;break;}
+        _ist.dugum++;
         var el=list[i];
         if(gorulen){if(gorulen.has(el))continue;gorulen.add(el);}
         if(kendiMi(el))continue;                    // teşhis arayüzü ölçülmez
@@ -19067,6 +19098,31 @@ window.voteMvp=function(matchId,player){
       }
     }catch(e){}
 
+    if(sondaMi){
+      return {
+        modulAcik:on(),
+        gezilenKok:_ist.kok,
+        incelenenDugum:_ist.dugum,
+        dugumButcesiDoldu:_ist.butceDoldu,
+        bulgular:{
+          'yatay kesilme':yatayKirpik.length,
+          'alt satır gizlendi':dikeyKirpik.length,
+          'okunamayacak yazı':kucukYazi.length,
+          'aşırı dar kutu':darKutu.length,
+          'küçük dokunma hedefi':kucukHedef.length,
+          'renk soğuması':kucukKontrast.length,
+          'harf sıkışması':harfSikisma.length,
+          'öğe örtülmesi':ortulu.length,
+          'hizalama kayması':kaymaListe.length
+        },
+        ornekler:{
+          ortulme:ortulu.slice(0,3),
+          kayma:kaymaListe.slice(0,3),
+          kontrast:kucukKontrast.slice(0,3),
+          harf:harfSikisma.slice(0,3)
+        }
+      };
+    }
     // 6) PUAN TABLOSU SÜTUN SIKIŞMASI - otomatik ölçek güvenli sınırın altına indiyse
     //    tablo teknik olarak "sığmış" görünür ama okunamayacak kadar ezilmiştir.
     try{
@@ -19192,7 +19248,10 @@ window.voteMvp=function(matchId,player){
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',esitle);
   else setTimeout(esitle,1500);
 
-  window.DiagUI={modul:MOD,tara:tara,baslat:baslat,durdur:durdur,acikMi:on};
+  window.DiagUI={modul:MOD,tara:tara,baslat:baslat,durdur:durdur,acikMi:on,
+    // Yönetici "Sensör Testi" düğmesi buradan çağırır: modül kapalı olsa bile ölçüm yapar
+    // ve sonucu doğrudan döndürür (kayıt açmaz).
+    sonda:function(){try{return tara(true);}catch(e){return {hata:(e&&e.message)||'bilinmeyen'};}}};
 })();
 
 
