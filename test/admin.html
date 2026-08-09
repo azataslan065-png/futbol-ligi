@@ -1171,7 +1171,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-T';
+window.APP_BUILD='2026-08-09-U';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -18019,8 +18019,39 @@ function _authHataTr(e){
    değil ÖLÇÜMLE yapar. Modül kapalı olsa bile taramayı bir kez zorla çalıştırır, kaç kök
    gezildiğini / kaç düğüm incelendiğini / hangi sensörün kaç bulgu ürettiğini gösterir.
    Kayıt açmaz - yalnızca o anki ekranın fotoğrafını çeker. */
+/* Sensör testi sonucunu düz metne çevirir. Ekran görüntüsünde uzun listelerin alt kısmı
+   kesiliyordu; metin olarak kopyalayınca sonucun tamamı paylaşılabiliyor. */
+function sensorTestMetni(r){
+  if(!r)return '';
+  if(r.hata)return '=== SENSÖR TESTİ ===\nHata: '+r.hata;
+  var L=['=== SENSÖR TESTİ (Admin Paneli) ===',
+    'Tarih: '+new Date().toLocaleString('tr-TR'),
+    'Sürüm: '+(window.APP_BUILD||'?'),
+    'Ekran: '+(r.ekran||'?'),
+    'Modül açık: '+(r.modulAcik?'evet':'hayır (test yine de çalıştı)'),
+    'Gezilen kök: '+r.gezilenKok+' · İncelenen düğüm: '+r.incelenenDugum
+      +(r.dugumButcesiDoldu?' · DÜĞÜM BÜTÇESİ DOLDU (kapsam eksik olabilir)':''),''];
+  var b=r.bulgular||{},toplam=0;
+  Object.keys(b).forEach(function(k){toplam+=b[k];});
+  L.push('--- BULGULAR ('+toplam+') ---');
+  Object.keys(b).forEach(function(k){L.push('  '+k+': '+b[k]);});
+  var orn=r.ornekler||{};
+  [['ÖĞE ÖRTÜLMESİ',orn.ortulme],['HİZALAMA KAYMASI',orn.kayma],
+   ['RENK SOĞUMASI',orn.kontrast],['HARF SIKIŞMASI',orn.harf]].forEach(function(x){
+    if(x[1]&&x[1].length){L.push('');L.push('--- '+x[0]+' ---');x[1].forEach(function(y){L.push('  · '+y);});}
+  });
+  return L.join('\n');
+}
+function copySensorTest(){
+  var r=window._sonSensorSonuc;
+  if(!r){toast('Önce testi çalıştırın','er');return;}
+  var txt=sensorTestMetni(r);
+  if(typeof admGlobalCopyText==='function')admGlobalCopyText(txt,'📋 Sensör testi kopyalandı');
+  else if(navigator.clipboard)navigator.clipboard.writeText(txt).then(function(){toast('📋 Kopyalandı');});
+}
 function openSensorTest(){
   var r=(window.DiagUI&&DiagUI.sonda)?DiagUI.sonda():{hata:'DiagUI yüklü değil'};
+  window._sonSensorSonuc=r;
   var satir=function(k,v,vurgu){
     return '<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.32rem 0;border-top:1px solid var(--br);font-size:.7rem">'
       +'<span style="color:var(--mu)">'+escHtml(k)+'</span><b style="'+(vurgu||'')+'">'+escHtml(String(v))+'</b></div>';
@@ -18032,7 +18063,9 @@ function openSensorTest(){
     +'</div>';
   if(r.hata){
     html+='<div style="color:#f87171;font-size:.74rem">❌ '+escHtml(r.hata)+'</div>';
-    openSheet('🔬 Sensör Testi',html,'openSensorTest');return;
+    // data-diag-ui: bu panelin KENDİ içeriği yerleşim ölçümüne girmesin (ilk gerçek ölçümde
+  // panelin kendi yazıları "renk soğuması" olarak raporlanmıştı).
+  openSheet('🔬 Sensör Testi','<div data-diag-ui="1">'+html+'</div>','openSensorTest');return;
   }
   html+='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.55rem .7rem;margin-bottom:.7rem">'
     +satir('Modül açık mı',r.modulAcik?'evet':'HAYIR (test yine de çalıştı)',r.modulAcik?'color:#22c55e':'color:#fbbf24')
@@ -18060,8 +18093,13 @@ function openSensorTest(){
       +(r.incelenenDugum<50?'<b style="color:#f87171">Bu sayı çok düşük - sensör ekrana ulaşamamış olabilir.</b>':'Sayı makul görünüyor; sensör gerçekten baktı.')
       +'</div>';
   }
-  html+='<button class="btn bgh" onclick="openSensorTest()" style="width:100%;margin-top:.7rem">🔄 Tekrar Ölç</button>';
-  openSheet('🔬 Sensör Testi',html,'openSensorTest');
+  html+='<div style="display:flex;gap:.4rem;margin-top:.7rem">'
+    +'<button class="btn bp" onclick="copySensorTest()" style="flex:1">📋 Sonucu Kopyala</button>'
+    +'<button class="btn bgh" onclick="openSensorTest()" style="flex:1">🔄 Tekrar Ölç</button>'
+    +'</div>';
+  // data-diag-ui: bu panelin KENDİ içeriği yerleşim ölçümüne girmesin (ilk gerçek ölçümde
+  // panelin kendi yazıları "renk soğuması" olarak raporlanmıştı).
+  openSheet('🔬 Sensör Testi','<div data-diag-ui="1">'+html+'</div>','openSensorTest');
 }
 
 function openDiagnosticsManager(){
@@ -18827,8 +18865,13 @@ function diagClearRemoteLogs(){
      öğe ne taranır ne de DOM değişiklik sayacına girer. */
   // KULLANICI RAPORUNDAN: "#ptDoctorBadge" hâlâ bulgu üretiyordu - sohbet teşhis butonunun
   // sayaç rozeti de teşhis arayüzünün parçasıdır, ölçüme girmemeli.
+  /* Teşhis arayüzü kendini ölçmemeli. İlk gerçek ölçümde Sensör Testi ekranının KENDİ
+     yazıları "renk soğuması" olarak raporlandı - panel uygulamanın normal sheet'i içinde
+     çizildiği için tanınmıyordu. Artık teşhis içerikleri data-diag-ui işaretiyle de
+     tanınır ve ölçüm dışında kalır. */
   var DIAG_SELF_SEL='.diagHudBadge,#diagHudPanel,#diagRefPhotoOv,#ptDoctorBtn,#admDoctorBtn,'
-    +'#ptDoctorBadge,#admDoctorBadge,#ptDoctorPanel,#admDoctorPanel,#ptDoctorCopyWarn,#diagCopyWarn,.diagMiniBg';
+    +'#ptDoctorBadge,#admDoctorBadge,#ptDoctorPanel,#admDoctorPanel,#ptDoctorCopyWarn,#diagCopyWarn,'
+    +'.diagMiniBg,[data-diag-ui],[data-x="sensorOut"]';
 /* ── RENK OKUNABİLİRLİĞİ YARDIMCILARI ─────────────────────────────────────────────
      KULLANICI TALEBİ: "renk soğuması" da yakalansın - yani yazının arka planıyla arasındaki
      fark azalıp okunmaz hale gelmesi. Bu, tema değişikliklerinde en sık kaçan kusurdur:
@@ -18847,9 +18890,16 @@ function diagClearRemoteLogs(){
   }
   // Öğenin GERÇEK arka planı: kendi arka planı saydamsa ataları taranır (CSS böyle çalışır).
   function _gercekArkaplan(el){
+    /* YANLIŞ ALARM DÜZELTMESİ: Zemin bir DEGRADE veya GÖRSEL ise tek bir renk yoktur;
+       ilk ölçümde "beyaz yazı / beyaz zemin, kontrast 1.00:1" gibi anlamsız bulgular
+       çıktı - çünkü düğmenin zemini gradient'ti ve backgroundColor saydam okunuyordu.
+       Böyle durumlarda ölçüm YAPILMAZ (null döner): yanlış rapor vermektense hiç
+       rapor vermemek doğrudur. */
     var n=el;
     for(var i=0;i<8&&n&&n.nodeType===1;i++){
-      var c;try{c=_rgbCoz(getComputedStyle(n).backgroundColor);}catch(e){return null;}
+      var st;try{st=getComputedStyle(n);}catch(e){return null;}
+      if(st.backgroundImage&&st.backgroundImage!=='none')return null;   // degrade/görsel zemin
+      var c=_rgbCoz(st.backgroundColor);
       if(c&&c.a>=0.9)return c;
       n=n.parentElement;
     }
@@ -19036,6 +19086,17 @@ function diagClearRemoteLogs(){
         if(yr.width<8||yr.height<8)continue;
         yuzenler.push([ye,yr,ycs.position]);
       }
+      /* YANLIŞ ALARM DÜZELTMESİ (ilk gerçek ölçümden çıktı): Açık bir menü/sheet varken
+         arkasındaki her şey onun karartma katmanıyla (#sheetOv gibi) örtülür - ama bu bir
+         KUSUR DEĞİL, tam olarak istenen davranıştır. Rapor "üst bar düğmeleri %100 örtülü"
+         diyordu; doğruydu ama işe yaramazdı. Artık kasıtlı karartma katmanları örten öğe
+         sayılmaz ve onların arkasında kalan içerik hiç incelenmez. */
+      var kasitliOrtu=yuzenler.filter(function(y){
+        var el=y[0];
+        var id=(el.id||'').toLowerCase(), cls=(typeof el.className==='string'?el.className:'').toLowerCase();
+        return /ov$|overlay|backdrop|modal|scrim/.test(id)||/\bov\b|overlay|backdrop|modal|scrim/.test(cls);
+      });
+      yuzenler=yuzenler.filter(function(y){return kasitliOrtu.indexOf(y)===-1;});
       if(yuzenler.length){
         var icerikler=[];
         var hepsiI=document.body?document.body.querySelectorAll('button,a,input,select,textarea,[onclick],.mi-card,.md-info-card,.card,.st-row,.mc'):[];
@@ -19050,6 +19111,14 @@ function diagClearRemoteLogs(){
           var r=el.getBoundingClientRect();
           if(r.width<12||r.height<12)return;
           if(r.bottom<0||r.top>window.innerHeight)return;
+          // Kasıtlı karartma katmanının arkasında kalan içerik hiç incelenmez.
+          var perdeArkasi=false;
+          for(var pi=0;pi<kasitliOrtu.length;pi++){
+            var pr=kasitliOrtu[pi][1];
+            if(kasitliOrtu[pi][0].contains(el))continue;   // katmanın İÇİNDEKİ içerik görünür
+            if(r.left<pr.right&&r.right>pr.left&&r.top<pr.bottom&&r.bottom>pr.top){perdeArkasi=true;break;}
+          }
+          if(perdeArkasi)return;
           for(var k=0;k<yuzenler.length;k++){
             var fe=yuzenler[k][0],fr=yuzenler[k][1];
             if(fe===el||fe.contains(el)||el.contains(fe))continue;
