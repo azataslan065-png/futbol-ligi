@@ -1153,7 +1153,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-G';
+window.APP_BUILD='2026-08-09-H';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -15720,6 +15720,42 @@ if(sessionStorage.getItem('adm')==='1'){
   redirectToFirstAllowedTabIfNeeded();
 }else{
   qs('loginWrap').style.display='flex';
+  /* ── OTURUM SÜREKLİLİĞİ ────────────────────────────────────────────────────────────────
+     KULLANICI BİLDİRDİ: "Admin her giriş sonrası çıkıyor, bunu önle."
+     SEBEP: Panele giriş izni sessionStorage'da tutuluyordu ve sessionStorage sekme
+     kapanınca SİLİNİR. Firebase oturumu ise cihazda kalıcı olduğu için kimlik aslında hâlâ
+     geçerliydi - yani sistem, kimliği olan kişiden gereksiz yere yeniden şifre istiyordu.
+     ÇÖZÜM: Açılışta Firebase oturumu kontrol edilir. Kimlik anonim değilse ve `admins`
+     listesindeyse panel doğrudan açılır; şifre sorulmaz. Yetkisi olmayan bir kimlik varsa
+     giriş ekranı normal şekilde kalır.
+     Not: Oturumu kapatmak isterseniz Ayarlar → Yönetici Hesabı → "Bu Hesaptan Çık". */
+  (function otomatikYoneticiGirisi(){
+    if(!(window.firebase&&firebase.auth&&window._authOrtamUygun))return;
+    var denendi=false;
+    firebase.auth().onAuthStateChanged(function(u){
+      if(denendi||!u||u.isAnonymous)return;
+      denendi=true;
+      db.ref('admins/'+u.uid).once('value').then(function(sn){
+        if(!sn.val())return;                     // kimliği var ama yönetici değil
+        if(sessionStorage.getItem('adm')==='1')return;
+        sessionStorage.setItem('adm','1');
+        sessionStorage.setItem('admRole','full');
+        sessionStorage.removeItem('admPerms');
+        try{sessionStorage.setItem('admName',u.email||'Yönetici');}catch(e){}
+        var lid='';
+        try{lid=localStorage.getItem('adm_curLeague')||'';}catch(e){}
+        var sel=qs('loginLeagueSel');
+        if(!lid&&sel&&sel.value)lid=sel.value;
+        if(lid)localStorage.setItem('adm_curLeague',lid);
+        qs('loginWrap').style.display='none';
+        qs('appWrap').style.display='block';
+        var ov=qs('adminLoadingOverlay');if(ov)ov.style.display='flex';
+        init();
+        applyRoleRestrictions();checkBackupReminder();
+        redirectToFirstAllowedTabIfNeeded();
+      }).catch(function(){/* yetki okunamadıysa giriş ekranı kalır */});
+    });
+  })();
 }
 // ═══════════════════════════════════════════
 // FİKSTÜR DÜZENLE MODAL
