@@ -1144,7 +1144,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-A';
+window.APP_BUILD='2026-08-09-B';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1175,8 +1175,19 @@ window._authSonda={durum:'ortam-uygun-değil',hata:null,uid:null,ms:null,kaynak:
     // Jeton hiç gelmezse sonsuza kadar "deneniyor" yazmasın diye üst sınır.
     setTimeout(function(){if(window._authSonda.durum==='deneniyor')yaz('zaman-aşımı','15 saniyede kimlik alınamadı');},15000);
     auth.onAuthStateChanged(function(u){ if(u&&window._authSonda.durum!=='başarılı')yaz('başarılı',null,u.uid); });
-    auth.signInAnonymously()
-      .then(function(c){yaz('başarılı',null,(c&&c.user&&c.user.uid)||null);})
+    /* OTURUM KALICILIĞI: Oturum cihazda saklanır (LOCAL). Bu olmadan yönetici HER SAYFA
+       YENİLEMESİNDE oturumunu kaybediyor, tekrar e-posta/şifre girmek zorunda kalıyordu.
+       Bu blok zaten yalnızca http/https'te çalıştığı için (bkz. _authOrtamUygun) depolama
+       erişimi güvenlidir; yine de başarısız olursa oturumluk kimliğe düşülür.
+       AYRICA: Zaten açık bir oturum varsa anonim giriş YAPILMAZ - aksi halde yöneticinin
+       e-posta oturumu her yenilemede anonime düşer ve yazma yetkisi kaybolurdu. */
+    Promise.resolve(
+      auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+        .catch(function(){return auth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function(){});})
+    ).then(function(){
+      if(auth.currentUser)return {user:auth.currentUser};
+      return auth.signInAnonymously();
+    }).then(function(c){yaz('başarılı',null,(c&&c.user&&c.user.uid)||null);})
       .catch(function(e){yaz('hata',(e&&(e.code||e.message))||'bilinmeyen hata');});
   }catch(e){yaz('hata',(e&&e.message)||'bilinmeyen hata');}
 })();
