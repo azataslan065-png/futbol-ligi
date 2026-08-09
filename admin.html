@@ -1604,7 +1604,10 @@ var ADMIN_MENU_ITEMS=[
   {id:'pagelayout',icon:'🗂️',label:'Tüm Kartları Sırala/Taşı',fn:'openPageLayoutEditor'},
   {id:'seasonreport',icon:'📊',label:'Sezon Sonu Raporu Oluştur',fn:'generateSeasonReport'},
   // KULLANICI TALEBİ: Yönetim sekmesine "Hata Yakalama Kodları" butonu.
-  {id:'diagnostics',icon:'🩺',label:'Hata Yakalama Kodları',fn:'openDiagnosticsManager'}
+  {id:'diagnostics',icon:'🩺',label:'Hata Yakalama Kodları',fn:'openDiagnosticsManager'},
+  // Veritabanına gömülü kalmış görsel/sesleri dış depolamaya taşıyan tek seferlik bakım aracı
+  // (ölçülen sorun: lig verisinin %93'ü gömülü medyaydı ve her açılışta yeniden iniyordu).
+  {id:'mediamigration',icon:'🗜️',label:'Gömülü Medyayı Taşı (veri küçültme)',fn:'openMediaMigration'}
 ];
 // KULLANICI TALEBİ: "Admin panelindeki menüleri sıralaması herşeyi kapsıyor değil mi,
 // mesela yönetimdeki bir ayarı başka bir sekmeye atıyabilirim -> Her ikisi de - hem kartların
@@ -17311,6 +17314,167 @@ function openDiagBadgeMap(){
     html+='</div>';
   });
   openSheet('🗺️ Rozet Yerleşim Haritası',html,'openDiagBadgeMap');
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   GÖMÜLÜ MEDYA TAŞIMA ARACI  ·  tek seferlik bakım
+
+   ÖLÇÜLEN SORUN (Puan Tablosu teşhis raporu, 09.08.2026):
+     Lig verisi 3247 KB ve HER açılışta baştan iniyor. Dökümü:
+       teams/…/stadiumImage  ≈ 1542 KB   (%48)
+       teams/…/squad         ≈ 1356 KB   (%42, oyuncu fotoğrafları)
+       teams/…/mascot        ≈   95 KB
+       eventCustomSounds     ≈  181 KB
+     Firebase ücretsiz planı aylık 10 GB indirme verir; bu boyutta ~3.200 açılış eder.
+     Yani kota, kullanıcı sayısı artmasa bile kısa sürede biter ve veritabanı durur.
+
+   SEBEP: Bu görseller veritabanına base64 metin olarak GÖMÜLMÜŞ. Yeni yüklemeler artık
+   doğru çalışıyor - compressPhoto() dosyayı Supabase'e yükleyip yalnızca URL saklıyor.
+   Ama o değişiklikten ÖNCE yüklenmiş görseller hâlâ gömülü halde duruyor.
+
+   BU ARAÇ NE YAPAR: Lig verisini baştan sona tarar, 2 KB'den büyük her "data:" içeriğini
+   Supabase'e yükler ve yerine sadece adresini bırakır. Görüntü/ses aynen görünmeye devam
+   eder - değişen tek şey, artık her açılışta indirilmemesidir.
+   Beklenen sonuç: ~3247 KB → ~50 KB, yani indirme trafiğinde yaklaşık 60 kat azalma.
+
+   GÜVENLİK: Hiçbir şey silinmez. Her öğe ÖNCE yüklenir, adres ALINDIKTAN SONRA değiştirilir;
+   yükleme başarısız olursa o öğe gömülü haliyle olduğu gibi bırakılır. İşlem yarıda kesilse
+   bile veri tutarlıdır ve araç tekrar çalıştırılabilir (kalanları taşır).
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+function _dataUrlToBlob(dataUrl){
+  var virgul=dataUrl.indexOf(',');
+  var bas=dataUrl.slice(0,virgul);
+  var tur=(bas.match(/^data:([^;]+)/)||[])[1]||'application/octet-stream';
+  var ham=dataUrl.slice(virgul+1);
+  var ikili;
+  if(bas.indexOf(';base64')>-1){
+    var bin=atob(ham),len=bin.length,dizi=new Uint8Array(len);
+    for(var i=0;i<len;i++)dizi[i]=bin.charCodeAt(i);
+    ikili=dizi;
+  }else{
+    ikili=new TextEncoder().encode(decodeURIComponent(ham));
+  }
+  return {blob:new Blob([ikili],{type:tur}),tur:tur};
+}
+function _supabaseYukle(dataUrl,klasor){
+  return new Promise(function(res,rej){
+    if(!supabaseClient)return rej(new Error('Supabase bağlantısı yok'));
+    var d;
+    try{d=_dataUrlToBlob(dataUrl);}catch(e){return rej(new Error('Veri çözümlenemedi'));}
+    var uzanti=(d.tur.split('/')[1]||'bin').split('+')[0].replace(/[^a-z0-9]/gi,'');
+    var yol=(klasor||'tasinan')+'/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+uzanti;
+    supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET)
+      .upload(yol,d.blob,{cacheControl:'3600',upsert:false,contentType:d.tur})
+      .then(function(r){
+        if(r.error)throw r.error;
+        var pub=supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET).getPublicUrl(yol);
+        var url=pub&&pub.data&&pub.data.publicUrl;
+        if(!url)throw new Error('Herkese açık adres alınamadı');
+        res(url);
+      })
+      .catch(function(e){rej(e);});
+  });
+}
+// Ağacı gezip taşınacak her "data:" yaprağını, yerine yazabilmek için sahibi+anahtarıyla toplar.
+function _gomuluMedyaBul(kok){
+  var bulunan=[];
+  (function gez(dugum,yol){
+    if(!dugum||typeof dugum!=='object')return;
+    Object.keys(dugum).forEach(function(k){
+      var v=dugum[k];
+      if(typeof v==='string'){
+        if(v.indexOf('data:')===0&&v.length>2048)
+          bulunan.push({sahip:dugum,anahtar:k,yol:yol+'/'+k,boyut:v.length,deger:v});
+      }else if(v&&typeof v==='object'){
+        gez(v,yol+'/'+k);
+      }
+    });
+  })(kok,'');
+  return bulunan;
+}
+function openMediaMigration(){
+  if(!hasSubperm('league_danger')){toast('🔒 Bu işlem için yetkiniz yok','er');return;}
+  var bulunan=_gomuluMedyaBul(S);
+  var toplam=bulunan.reduce(function(a,b){return a+b.boyut;},0);
+  var kb=function(n){return Math.round(n/1024*10)/10+' KB';};
+  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.8rem">'
+    +'Bazı görsel ve sesler veritabanına <b>gömülü</b> saklanıyor. Bunlar uygulamanın <b>her açılışında</b>, '
+    +'her kullanıcıda yeniden iniyor ve ücretsiz Firebase kotasını hızla tüketiyor.<br><br>'
+    +'Bu araç onları dış depolamaya taşır ve yerlerine yalnızca adreslerini bırakır. '
+    +'<b>Görünüşte hiçbir şey değişmez</b> - değişen tek şey, artık her açılışta indirilmemeleridir.'
+    +'</div>';
+  if(!bulunan.length){
+    html+='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.7rem;text-align:center;font-size:.72rem">✅ Gömülü medya bulunamadı - bu sezon zaten temiz.</div>';
+    openSheet('🗜️ Gömülü Medyayı Taşı',html,'openMediaMigration');
+    return;
+  }
+  var ozet={};
+  bulunan.forEach(function(x){
+    var ad=x.yol.split('/').filter(function(p){return p&&!/^m[a-z0-9]{8,}$/.test(p);}).pop()||'diğer';
+    ozet[ad]=(ozet[ad]||0)+x.boyut;
+  });
+  html+='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .7rem;margin-bottom:.8rem">'
+    +'<div style="font-size:.74rem;font-weight:800;margin-bottom:.35rem">Bulunan: '+bulunan.length+' öğe · '+kb(toplam)+'</div>'
+    +Object.keys(ozet).sort(function(a,b){return ozet[b]-ozet[a];}).map(function(k){
+      return '<div style="display:flex;justify-content:space-between;font-size:.64rem;padding:.15rem 0;border-top:1px solid var(--br)">'
+        +'<span>'+escHtml(k)+'</span><b>'+kb(ozet[k])+'</b></div>';
+    }).join('')
+    +'</div>'
+    +'<button class="btn bp" onclick="runMediaMigration()" style="width:100%;margin-bottom:.5rem">🚀 Taşımayı Başlat ('+bulunan.length+' öğe)</button>'
+    +'<div id="migProgress" style="font-size:.66rem;color:var(--mu);line-height:1.6"></div>'
+    +'<div style="font-size:.62rem;color:var(--mu);line-height:1.6;margin-top:.6rem">'
+    +'⚠️ İşlem sırasında sayfayı kapatmayın. Hiçbir şey silinmez: her öğe önce yüklenir, adres alındıktan sonra değiştirilir. '
+    +'Yarıda kesilirse aracı tekrar çalıştırıp kalanları taşıyabilirsiniz.'
+    +'</div>';
+  openSheet('🗜️ Gömülü Medyayı Taşı',html,'openMediaMigration');
+}
+var _migrationCalisiyor=false;
+function runMediaMigration(){
+  if(_migrationCalisiyor){toast('⏳ İşlem zaten sürüyor','er');return;}
+  var bulunan=_gomuluMedyaBul(S);
+  if(!bulunan.length){toast('Taşınacak öğe yok');return;}
+  if(!supabaseClient){toast('❌ Depolama bağlantısı yok, taşıma yapılamaz','er');return;}
+  _migrationCalisiyor=true;
+  var kutu=qs('migProgress');
+  var basarili=0,basarisiz=0,kazanc=0,i=0;
+  function yaz(mesaj){if(kutu)kutu.innerHTML=mesaj;}
+  function sirada(){
+    if(i>=bulunan.length){
+      // Değişiklikler bellekte yapıldı; tek seferde kaydedilir.
+      save().then(function(){
+        _migrationCalisiyor=false;
+        logAction('🗜️ Gömülü medya taşındı: '+basarili+' öğe, '+Math.round(kazanc/1024)+' KB kazanç');
+        yaz('<b style="color:#22c55e">✅ Tamamlandı.</b><br>'+basarili+' öğe taşındı, '
+          +Math.round(kazanc/1024)+' KB kazanıldı.'
+          +(basarisiz?('<br><b style="color:#f87171">'+basarisiz+' öğe taşınamadı</b> - gömülü halde bırakıldı, tekrar deneyebilirsiniz.'):'')
+          +'<br><br>Puan Tablosu\'nu yenileyip teşhis raporunu tekrar alarak yeni boyutu görebilirsiniz.');
+        toast('✅ '+basarili+' öğe taşındı');
+      }).catch(function(e){
+        _migrationCalisiyor=false;
+        yaz('<b style="color:#f87171">❌ Kaydetme başarısız:</b> '+escHtml((e&&e.message)||'bilinmeyen hata')
+          +'<br>Taşınan adresler kaydedilemedi; araç tekrar çalıştırılabilir.');
+      });
+      return;
+    }
+    var x=bulunan[i];
+    yaz('⏳ '+(i+1)+' / '+bulunan.length+' taşınıyor...<br><span style="opacity:.8">'+escHtml(x.yol)+'</span>');
+    var klasor=/mascot/i.test(x.yol)?'team-mascots'
+      :/stadium/i.test(x.yol)?'team-stadiums'
+      :/logo/i.test(x.yol)?'team-logos'
+      :/squad|photo/i.test(x.yol)?'players'
+      :/sound|ses/i.test(x.yol)?'event-sounds':'tasinan';
+    _supabaseYukle(x.deger,klasor).then(function(url){
+      // Yalnızca adres ALINDIKTAN SONRA değiştirilir - yükleme başarısızsa veri korunur.
+      x.sahip[x.anahtar]=url;
+      basarili++; kazanc+=x.boyut-url.length;
+    }).catch(function(){
+      basarisiz++;
+    }).then(function(){
+      i++;
+      setTimeout(sirada,120); // depolama servisini boğmamak için küçük ara
+    });
+  }
+  sirada();
 }
 
 function openDiagnosticsManager(){
