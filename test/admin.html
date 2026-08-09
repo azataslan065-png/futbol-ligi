@@ -1171,7 +1171,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-O';
+window.APP_BUILD='2026-08-09-P';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -18730,6 +18730,8 @@ function diagClearRemoteLogs(){
   var STYLE_PER_SEC=10;      // saniyedeki TEMA UYGULAMA TURU bu sayıyı aşarsa "stil çırpınması"
                              // (özellik başına değil, tur başına - bkz. _sonStilTur notu)
   var ST_SCALE_MIN=0.78;     // puan tablosu ölçeği bunun altına inerse "sütun sıkışması"
+  var MAX_ORTUSME=120;       // tek taramada en fazla kaç öğe için örtülme kontrolü yapılır
+  var ORTUSME_TOL=6;         // px - kenar payı; bu kadarlık örtüşme gölge/kenarlık olabilir
 
   function core(){return window.DiagCore;}
   function on(){var c=core();return !!(c&&c.isOn&&c.isOn(MOD));}
@@ -18868,7 +18870,94 @@ function diagClearRemoteLogs(){
       }
     });
 
+    /* ── 12) ÖRTÜLME / ÜST ÜSTE BİNME ────────────────────────────────────────────────
+       KULLANICI BİLDİRDİ: "Maç detayı kartında kayma var, hata yakalama kodu bunu niye
+       tespit etmedi?" - Haklı bir soru. Buraya kadarki ölçümlerin hepsi bir öğeyi KENDİ
+       İÇİNDE inceliyordu: yazısı sığıyor mu, kutusu dar mı, yazısı okunur mu. Ama bir
+       öğenin kendisi kusursuz olabilir ve yine de kullanıcı onu GÖREMEZ - çünkü ÜSTÜNE
+       BAŞKA BİR ÖĞE binmiştir. Bu ölçüm tam olarak o boşluktu.
+       NASIL ÖLÇÜLÜR: Öğenin görünen alanından üç nokta seçilir (orta ve iki iç köşe) ve
+       o noktada EN ÜSTTE hangi öğenin durduğu sorulur. Dönen öğe, incelenen öğenin ne
+       kendisi ne atası ne de çocuğuysa, üstünü örten yabancı bir öğe var demektir.
+       Örten öğe teşhis arayüzünün kendisi olsa bile RAPOR EDİLİR - rozetin içeriği
+       kapatması da gerçek bir kusurdur, görmezden gelmek onu çözmez. */
+    var ortulu=[];
+    try{
+      var adaylar=[];
+      taramaKokleri().forEach(function(kok){
+        var l;try{l=kok.querySelectorAll('button,a,input,select,textarea,[onclick],.mi-card,.md-info-card,.card');}catch(e){return;}
+        for(var q=0;q<l.length&&adaylar.length<MAX_ORTUSME;q++)adaylar.push(l[q]);
+      });
+      adaylar.forEach(function(el){
+        if(ortulu.length>=MAX_REPORT)return;
+        if(kendiMi(el))return;
+        var r;try{r=el.getBoundingClientRect();}catch(e){return;}
+        if(r.width<12||r.height<12)return;
+        if(r.bottom<0||r.top>window.innerHeight||r.right<0||r.left>window.innerWidth)return;  // ekran dışı
+        var noktalar=[
+          [r.left+r.width/2, r.top+r.height/2],
+          [r.left+ORTUSME_TOL+2, r.top+ORTUSME_TOL+2],
+          [r.right-ORTUSME_TOL-2, r.bottom-ORTUSME_TOL-2]
+        ];
+        for(var n=0;n<noktalar.length;n++){
+          var x=noktalar[n][0],y=noktalar[n][1];
+          if(x<0||y<0||x>window.innerWidth||y>window.innerHeight)continue;
+          var ust;try{ust=document.elementFromPoint(x,y);}catch(e){continue;}
+          if(!ust)continue;
+          if(ust===el||el.contains(ust)||ust.contains(el))continue;
+          // Örten öğe bulundu.
+          var kimOrtuyor=yol(ust);
+          var teshisMi=kendiMi(ust);
+          ortulu.push(yol(el)+' · "'+ornek(el)+'" üstünü ÖRTEN: '+kimOrtuyor+(teshisMi?'  ⚠️ (teşhis arayüzünün kendisi)':''));
+          break;
+        }
+      });
+    }catch(e){}
+
     var ekran=ekranAdi();
+    /* ── 13) SATIR İÇİ DİKEY KAYMA ───────────────────────────────────────────────────
+       "Kayma" şikayetinin ikinci olası sebebi: bir satırdaki parçalar (simge, metin, rozet)
+       birbirine göre dikeyde kaymış olabilir. Öğelerin hiçbiri tek başına hatalı görünmez -
+       kusur ancak KARDEŞLERİ birbirine göre ölçüldüğünde ortaya çıkar. Bu ölçüm, yan yana
+       duran kardeşlerin dikey merkezlerini karşılaştırır. */
+    var kaymaListe=[];
+    try{
+      var satirlar=[];
+      taramaKokleri().forEach(function(kok){
+        var l;try{l=kok.querySelectorAll('.mi-row,.md-info-row,.md-link-row');}catch(e){return;}
+        for(var q=0;q<l.length&&satirlar.length<60;q++)satirlar.push(l[q]);
+      });
+      satirlar.forEach(function(sat){
+        if(kaymaListe.length>=MAX_REPORT)return;
+        var cocuklar=[];
+        for(var c=0;c<sat.children.length;c++){
+          var ch=sat.children[c];
+          if(!ch.getClientRects().length)continue;
+          var cr=ch.getBoundingClientRect();
+          if(cr.height>0&&cr.width>0)cocuklar.push([ch,cr]);
+        }
+        if(cocuklar.length<2)return;
+        var merkezler=cocuklar.map(function(x){return x[1].top+x[1].height/2;});
+        var enUst=Math.min.apply(null,merkezler),enAlt=Math.max.apply(null,merkezler);
+        var fark=enAlt-enUst;
+        // Satır yüksekliğinin yarısından fazla kayma varsa hizalama bozulmuş demektir.
+        var satirYuk=sat.getBoundingClientRect().height||1;
+        if(fark>Math.max(10,satirYuk*0.5)){
+          kaymaListe.push(yol(sat)+' · parçalar arası dikey kayma '+Math.round(fark)+'px (satır yüksekliği '+Math.round(satirYuk)+'px) · "'+ornek(sat)+'"');
+        }
+      });
+    }catch(e){}
+    if(kaymaListe.length)say('uyari','Satır içi hizalama kayması ('+kaymaListe.length+' satır)',{
+      ekran:ekranAdi(),ogeler:kaymaListe,
+      anlami:'Bu satırlarda simge, metin ve rozet birbirine göre dikeyde kaymış. Öğelerin '
+        +'hiçbiri tek başına hatalı değildir; kusur ancak kardeşler birbirine göre ölçüldüğünde görünür.'
+    });
+    if(ortulu.length)say('uyari','Öğe üstü örtülüyor ('+ortulu.length+' öğe)',{
+      ekran:ekran,ogeler:ortulu,
+      anlami:'Bu öğeler ekranda duruyor ama üstlerine başka bir öğe bindiği için kullanıcı '
+        +'onları göremiyor veya dokunamıyor. Sabit konumlu (position:fixed) rozet, bant ve '
+        +'yüzen düğmeler en sık sebeptir.'
+    });
     if(yatayKirpik.length)say('uyari','Yazı sıkıştı: yatay kesilme ('+yatayKirpik.length+' öğe)',{ekran:ekran,ogeler:yatayKirpik});
     if(dikeyKirpik.length)say('uyari','Yazı sıkıştı: alt satırlar gizlendi ('+dikeyKirpik.length+' öğe)',{ekran:ekran,ogeler:dikeyKirpik});
     if(kucukYazi.length)say('uyari','Yazı okunamayacak kadar küçüldü ('+kucukYazi.length+' öğe)',{ekran:ekran,ogeler:kucukYazi});
