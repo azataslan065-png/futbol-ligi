@@ -1000,14 +1000,15 @@ button{font-family:Outfit,sans-serif;cursor:pointer;border:none;border-radius:10
          değiştirilemiyordu. Artık bu şifre Firebase'de saklanır ve buradan değiştirilebilir -
          sadece Tam Yetki ile giriş yapıldığında görünür. -->
     <div class="card">
-      <div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.65rem;text-transform:uppercase;letter-spacing:.05em">🔐 Ana Şifreyi Değiştir</div>
-      <div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.5">Bu, TÜM liglerde tam yetkiyle giriş sağlayan ana (master) şifredir. Değiştirildikten sonra eski şifre artık çalışmaz.</div>
-      <div class="field" style="margin-bottom:.4rem"><span class="lbl">Mevcut Ana Şifre</span><input id="curMasterPw" type="password" placeholder="Mevcut şifrenizi girin"/></div>
+      <div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.65rem;text-transform:uppercase;letter-spacing:.05em">🔐 Yönetici Şifresini Değiştir</div>
+      <div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.5">Firebase yönetici hesabınızın şifresidir - panele bu şifreyle giriyorsunuz. Değiştirdikten sonra eski şifre çalışmaz.</div>
+      <div class="field" style="margin-bottom:.4rem"><span class="lbl">Mevcut Şifre</span><input id="curMasterPw" type="password" placeholder="Mevcut şifrenizi girin"/></div>
       <div class="g2" style="margin-bottom:.4rem">
         <div class="field"><span class="lbl">Yeni Şifre</span><input id="newMasterPw" type="password" placeholder="En az 4 karakter"/></div>
         <div class="field"><span class="lbl">Yeni Şifre (Tekrar)</span><input id="newMasterPw2" type="password" placeholder="Tekrar girin"/></div>
       </div>
-      <button class="btn bp" onclick="changeMasterPassword()" style="width:100%">🔐 Ana Şifreyi Değiştir</button>
+      <button class="btn bp" onclick="changeMasterPassword()" style="width:100%">🔐 Şifreyi Değiştir</button>
+      <div id="masterPwMsg" style="font-size:.64rem;margin-top:.5rem;line-height:1.6"></div>
     </div>
     <!-- KULLANICI TALEBİ: "Admin, puan tablosunu bakıma alabilir. Bakıma aldığı zaman
          kullanıcı giriş yapamaz ve ilgili uyarıyı alır. Admin, uyarıyı düzenleyebilir ve
@@ -1151,7 +1152,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-D';
+window.APP_BUILD='2026-08-09-E';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -2472,6 +2473,10 @@ function doLogin(){
         sessionStorage.setItem('admRole','full');
         sessionStorage.removeItem('admPerms');
         try{sessionStorage.setItem('admName',email);}catch(e){}
+        // KULLANICI TALEBİ: "Admin her yeni giriş yaptığında e-posta girmek zorunda olmasın,
+        // şifre yeterli." - Başarılı girişten sonra e-posta cihazda saklanır ve giriş
+        // ekranında otomatik doldurulur; kullanıcı yalnızca şifresini yazar.
+        try{localStorage.setItem('adm_lastEmail',email);}catch(e){}
         localStorage.setItem('adm_curLeague',lid);
         qs('loginWrap').style.display='none';
         qs('appWrap').style.display='block';
@@ -2555,7 +2560,14 @@ function doLogout(){
 }
 qs('pwInp').onkeydown=function(e){if(e.key==='Enter')doLogin();};
 if(qs('admEmailInp'))qs('admEmailInp').onkeydown=function(e){if(e.key==='Enter')doLogin();};
-// Zaten açık bir yönetici oturumu varsa e-posta alanı önceden doldurulur (oturum kalıcı).
+// E-posta alanı otomatik doldurulur: önce en son kullanılan adres (cihazda saklanır),
+// sonra açıksa mevcut oturumun adresi. Böylece yönetici sadece şifresini yazar.
+(function eskiEpostayiDoldur(){
+  try{
+    var kayitli=localStorage.getItem('adm_lastEmail');
+    if(kayitli&&qs('admEmailInp')&&!qs('admEmailInp').value)qs('admEmailInp').value=kayitli;
+  }catch(e){}
+})();
 setTimeout(function(){
   try{
     var u=(window.firebase&&firebase.auth)?firebase.auth().currentUser:null;
@@ -9278,25 +9290,47 @@ function saveEditedAdminPerms(idx){
 // değiştirir. Mevcut şifre doğru girilmeli, yeni şifre en az 4 karakter olmalı ve iki kez
 // aynı yazılmalıdır. Firebase'deki genel (lig'e bağlı olmayan) yola kaydedilir - böylece
 // TÜM cihazlarda/liglerde geçerli olur.
+/* Yönetici şifresi değiştirme.
+   ÖNCEDEN: Şifre veritabanında açık metin tutulan "ana şifre" idi ve burada onunla
+   karşılaştırılıyordu. O şifre güvenlik nedeniyle veritabanından KALDIRILDI; dolayısıyla bu
+   kart "mevcut şifre yanlış" demeye başlamıştı - karşılaştıracak bir şey kalmamıştı.
+   ŞİMDİ: Gerçekten işe yarayan tek şifre Firebase hesabının şifresidir. Değiştirme işlemi de
+   Firebase üzerinden yapılır: önce mevcut şifreyle kimlik tazelenir (Firebase, şifre değişimi
+   gibi hassas işlemler için yakın zamanda giriş yapılmış olmasını şart koşar), sonra yenisi
+   yazılır. Şifre hiçbir aşamada veritabanına yazılmaz. */
 function changeMasterPassword(){
-  if(_myAdminRole!=='full'){toast('🔒 Bu işlem için Tam Yetki gereklidir','er');return;}
+  var kutu=qs('masterPwMsg');
+  var yaz=function(h){if(kutu)kutu.innerHTML=h;};
   var cur=qs('curMasterPw')?qs('curMasterPw').value:'';
   var n1=qs('newMasterPw')?qs('newMasterPw').value:'';
   var n2=qs('newMasterPw2')?qs('newMasterPw2').value:'';
-  if(cur!==getEffectiveMasterPassword()){toast('❌ Mevcut şifre yanlış','er');return;}
-  if(!n1||n1.length<4){toast('❌ Yeni şifre en az 4 karakter olmalı','er');return;}
-  if(n1!==n2){toast('❌ Yeni şifreler birbiriyle eşleşmiyor','er');return;}
-  if(n1===cur){toast('❌ Yeni şifre eskisiyle aynı olamaz','er');return;}
-  dlg('🔐','Ana Şifreyi Değiştir','Ana şifre değiştirilecek - eski şifre bir daha çalışmayacak. Emin misiniz?','Değiştir','dor').then(function(ok){
-    if(!ok)return;
-    db.ref('globalConfig/masterAdminPassword').set(n1).then(function(){
-      _customMasterPassword=n1;
-      logAction('🔐 Ana yönetici şifresi değiştirildi');
-      qs('curMasterPw').value='';qs('newMasterPw').value='';qs('newMasterPw2').value='';
-      toast('✅ Ana şifre değiştirildi');
-    }).catch(function(e){toast('❌ Değiştirilemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
-  });
+  var u=null;
+  try{u=(window.firebase&&firebase.auth)?firebase.auth().currentUser:null;}catch(e){}
+  if(!u||u.isAnonymous||!u.email){
+    yaz('<b style="color:#f87171">Önce yönetici e-postanızla giriş yapmalısınız.</b> Şu anki oturum anonim görünüyor.');
+    return;
+  }
+  if(!cur){yaz('<b style="color:#f87171">Mevcut şifrenizi girin.</b>');return;}
+  if(!n1||n1.length<6){yaz('<b style="color:#f87171">Yeni şifre en az 6 karakter olmalı.</b>');return;}
+  if(n1!==n2){yaz('<b style="color:#f87171">Yeni şifreler eşleşmiyor.</b>');return;}
+  if(n1===cur){yaz('<b style="color:#f87171">Yeni şifre eskisiyle aynı olamaz.</b>');return;}
+  yaz('⏳ Değiştiriliyor...');
+  var cred=firebase.auth.EmailAuthProvider.credential(u.email,cur);
+  u.reauthenticateWithCredential(cred)
+    .then(function(){return u.updatePassword(n1);})
+    .then(function(){
+      logAction('🔐 Yönetici hesabı şifresi değiştirildi');
+      if(qs('curMasterPw'))qs('curMasterPw').value='';
+      if(qs('newMasterPw'))qs('newMasterPw').value='';
+      if(qs('newMasterPw2'))qs('newMasterPw2').value='';
+      yaz('<b style="color:#22c55e">✅ Şifre değiştirildi.</b> Bir sonraki girişte yeni şifreyi kullanın.');
+      toast('✅ Şifre değiştirildi');
+    })
+    .catch(function(e){
+      yaz('<b style="color:#f87171">❌ '+escHtml(typeof _authHataTr==='function'?_authHataTr(e):((e&&e.message)||'değiştirilemedi'))+'</b>');
+    });
 }
+
 // KULLANICI TALEBİ: "Admin, puan tablosunu bakıma alabilir. Bakıma aldığı zaman kullanıcı
 // giriş yapamaz ve ilgili uyarıyı alır. Admin, uyarıyı düzenleyebilir ve bakım saatinin ne
 // zaman başlayıp biteceğini girebilir. Ayrıca manuel olarak da kullanıcının giriş yapmasına
@@ -17421,6 +17455,13 @@ function openDiagBadgeMap(){
    yükleme başarısız olursa o öğe gömülü haliyle olduğu gibi bırakılır. İşlem yarıda kesilse
    bile veri tutarlıdır ve araç tekrar çalıştırılabilir (kalanları taşır).
    ═══════════════════════════════════════════════════════════════════════════════════════ */
+// Yönetici Hesabı ekranının kullandığı iki küçük yardımcı. (Bakım araçları silinirken
+// yanlışlıkla bunlar da silinmişti; ekran açılmıyordu.)
+function _authVar(){return !!(window.firebase&&firebase.auth&&window._authOrtamUygun);}
+function _mevcutKimlik(){
+  try{var u=firebase.auth().currentUser;return u||null;}catch(e){return null;}
+}
+
 /* NOT - KALDIRILAN TEK SEFERLİK BAKIM ARAÇLARI (09.08.2026):
    Bu dosyada iki bakım aracı vardı; ikisi de görevini tamamladığı için kaldırıldı.
      · "Gömülü Medyayı Taşı" - veritabanına base64 olarak gömülmüş 104 görsel/sesi dış
