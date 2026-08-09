@@ -727,8 +727,29 @@ div.md-logo{background:rgba(255,255,255,.06);border-radius:8px;display:flex;alig
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js" onerror="window._fbLoadFailed=true"></script>
+<!-- ═══ KİMLİK DOĞRULAMA SDK'SI - KOŞULLU YÜKLEME ═══════════════════════════════════════
+     Bu SDK sayfaya sabit bir betik etiketiyle eklenemez. Yüklendiği anda kendini Firebase'e bir
+     servis olarak kaydeder ve Realtime Database, bağlanmadan önce ondan kimlik jetonu ister.
+     content:// veya file:// gibi opak kaynaklarda Auth'un iç başlatması IndexedDB'ye
+     erişemediği için asılı kalır; sonuç: veritabanı HİÇ bağlanmaz, uygulama "veriler
+     yüklenmiyor" ekranında kalır. (Bu proje bunu bir kez yaşadı.)
+     Bu yüzden SDK yalnızca http/https ile açıldığında yüklenir. document.write kullanılır
+     çünkü betiğin SIRAYI KORUYARAK, veritabanı bağlanmadan ÖNCE yüklenmesi gerekir -
+     dinamik ekleme bunu garanti etmez.
+     Dosyadan açılan eski kopyalarda hiçbir şey yüklenmez ve uygulama eskisi gibi davranır. -->
+<script>
+(function(){
+  var httpMi=(location.protocol==='https:'||location.protocol==='http:');
+  window._authOrtamUygun=httpMi;
+  if(httpMi){
+    document.write('<scr'+'ipt src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js" onerror="window._fbAuthLoadFailed=true"><\/scr'+'ipt>');
+  }
+})();
+</script>
+
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js" onerror="window._fbLoadFailed=true"></script>
-<!-- KRİTİK NOT - BURAYA firebase-auth-compat.js EKLEMEYİN:
+<!-- (Kimlik doğrulama SDK'sı yukarıda KOŞULLU olarak yükleniyor - aşağıdaki not korunuyor.)
+     KRİTİK NOT - BURAYA KOŞULSUZ firebase-auth-compat.js EKLEMEYİN:
      Kimlik doğrulama SDK'sı sayfayla birlikte yüklendiğinde "hiçbir şey yapmadan durmaz".
      Yüklendiği anda kendini Firebase'e bir servis olarak KAYDEDER ve Realtime Database SDK'sı,
      bağlantıyı kurmadan önce bu servisten bir kimlik jetonu ISTER. content:// veya file://
@@ -1052,65 +1073,38 @@ setTimeout(_adjustTopbarSpacing,300); // Fontlar/ikonlar geç yüklenirse yükse
 const FB={apiKey:"AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY",authDomain:"superlig-208e3.firebaseapp.com",databaseURL:"https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app",projectId:"superlig-208e3",storageBucket:"superlig-208e3.firebasestorage.app",messagingSenderId:"879221404148",appId:"1:879221404148:web:daae84d7187311400209a1"};
 const app=firebase.initializeApp(FB);const db=firebase.database();
 
-/* ═══════════════════════════════════════════════════════════════════════════════════════
-   KİMLİK DOĞRULAMA SONDASI (opsiyonel, VARSAYILAN OLARAK KAPALI)
-
-   NEDEN SONDA, NEDEN DOĞRUDAN AÇMIYORUZ: Bu projede Firebase Authentication (Anonim Giriş)
-   DAHA ÖNCE denendi ve KALDIRILDI - çünkü uygulama telefonda content:// (dosyayı doğrudan
-   açma) protokolüyle çalıştığında signInAnonymously() çağrısının veritabanı bağlantısını
-   bloke ettiği görüldü. Sebebi şudur: content:// ve file:// "opak kaynak" sayılır; Firebase
-   Auth varsayılan olarak oturumu IndexedDB'de saklamaya çalışır ve opak kaynakta bu erişim
-   engellendiği için çağrı hiç sonuçlanmaz, asılı kalır.
-   O yüzden kimlik doğrulamayı doğrudan açmak, uygulamayı YENİDEN bozma riski taşır.
-
-   BU SONDA NE YAPAR: Kimlik doğrulamanın BU CİHAZDA çalışıp çalışmadığını, uygulamanın
-   normal işleyişine HİÇ dokunmadan ölçer. Üç güvenlik önlemi vardır:
-     1. Varsayılan KAPALIDIR - yalnızca yönetici test için açtığında çalışır.
-     2. Veritabanı bağlantısı bu koddan ÖNCE ve BAĞIMSIZ kurulur; sonda başarısız olsa,
-        hatta hiç sonuçlanmasa bile uygulama bugünkü gibi çalışmaya devam eder.
-     3. Oturum kalıcılığı NONE seçilir (IndexedDB'ye hiç dokunulmaz) - önceki denemenin
-        asıl takıldığı nokta muhtemelen buydu; bu haliyle content:// üzerinde de
-        sonuçlanma ihtimali vardır.
-   Sonuç (başarılı / hata kodu / zaman aşımı) cihaz kartına yazılır, böylece yönetici
-   "hangi cihazlarda kimlik doğrulama çalışıyor?" sorusunu gerçek veriyle cevaplayabilir.
-   KURALLAR ANCAK bu test yeterli cihazda BAŞARILI dönerse "auth != null" yapılmalıdır.
-   ═══════════════════════════════════════════════════════════════════════════════════════ */
-window._authSonda={durum:'kapalı',hata:null,uid:null,ms:null,kaynak:location.protocol};
-(function kimlikDogrulamaSondasi(){
-  var acik=false;
-  try{acik=localStorage.getItem('diag_authSonda')==='1';}catch(e){}
-  if(!acik)return;
-  var t0=Date.now(),bitti=false;
-  function bitir(durum,hata,uid){
-    if(bitti)return; bitti=true;
+var DIAG_AUTH_MOD='pt_auth';
+/* ═══ ANONİM GİRİŞ ═══════════════════════════════════════════════════════════════════════
+   Veritabanı kuralları "auth != null" olduğunda her istemcinin bir kimliği olmalıdır.
+   Anonim giriş, kullanıcıdan hiçbir şey istemeden (e-posta/şifre yok) bu kimliği verir;
+   amaç kullanıcıyı tanımak değil, veritabanını uygulama DIŞINDAN gelen isteklere kapatmaktır.
+   SIRALAMA ÖNEMLİ: Bu çağrı firebase.database() ile aynı anda başlatılır; Realtime Database,
+   Auth servisi kayıtlıysa ilk isteği göndermeden önce jetonu bekler, dolayısıyla ilk okuma
+   da kimlikli yapılır.
+   ORTAM UYGUN DEĞİLSE (dosyadan açılmış kopya): SDK hiç yüklenmediği için bu blok sessizce
+   atlanır ve uygulama bugünkü gibi çalışır - ama kurallar sıkılaştırıldıysa o kopya veriye
+   ulaşamaz. Bu bilinçli bir sonuçtur: dağıtım artık dosya değil, adres üzerinden yapılmalıdır. */
+window._authSonda={durum:'ortam-uygun-değil',hata:null,uid:null,ms:null,kaynak:location.protocol};
+(function anonimGiris(){
+  if(!window._authOrtamUygun)return;
+  var t0=Date.now();
+  function yaz(durum,hata,uid){
     window._authSonda={durum:durum,hata:hata||null,uid:uid||null,ms:Date.now()-t0,kaynak:location.protocol};
-    try{if(window.DiagCore&&DiagCore.kaydet)
-      DiagCore.kaydet('pt_auth',durum==='başarılı'?'bilgi':'hata','Kimlik doğrulama sondası: '+durum,window._authSonda);
+    try{if(window.DiagCore&&DiagCore.kaydet&&durum!=='başarılı')
+      DiagCore.kaydet(DIAG_AUTH_MOD,'hata','Anonim giriş yapılamadı: '+durum,window._authSonda);
     }catch(e){}
   }
-  window._authSonda.durum='deneniyor';
-  // SDK yalnızca BURADA, test açıkken yüklenir. Normal kullanıcıda hiç indirilmez ve
-  // veritabanı bağlantısı hiçbir şekilde etkilenmez.
-  function sdkYukle(){
-    return new Promise(function(res,rej){
-      if(window.firebase&&firebase.auth)return res();
-      var sc=document.createElement('script');
-      sc.src='https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js';
-      sc.onload=function(){res();};
-      sc.onerror=function(){rej(new Error('firebase-auth SDK indirilemedi'));};
-      document.head.appendChild(sc);
-    });
-  }
+  if(window._fbAuthLoadFailed||!window.firebase||!firebase.auth){yaz('sdk-yok','firebase-auth SDK yüklenemedi');return;}
   try{
-    // Asılı kalırsa sonsuza kadar beklemeyelim - 8 saniyede sonuç yoksa zaman aşımı yazılır.
-    setTimeout(function(){bitir('zaman-aşımı','8 saniyede sonuç alınamadı (muhtemelen opak kaynak/IndexedDB engeli)');},8000);
-    sdkYukle().then(function(){
+    window._authSonda.durum='deneniyor';
     var auth=firebase.auth();
-    return Promise.resolve(auth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function(){}))
-      .then(function(){return auth.signInAnonymously();})
-      .then(function(c){bitir('başarılı',null,(c&&c.user&&c.user.uid)||null);});
-    }).catch(function(e){bitir('hata',(e&&(e.code||e.message))||'bilinmeyen hata');});
-  }catch(e){bitir('hata',(e&&e.message)||'bilinmeyen hata');}
+    // Jeton hiç gelmezse sonsuza kadar "deneniyor" yazmasın diye üst sınır.
+    setTimeout(function(){if(window._authSonda.durum==='deneniyor')yaz('zaman-aşımı','15 saniyede kimlik alınamadı');},15000);
+    auth.onAuthStateChanged(function(u){ if(u&&window._authSonda.durum!=='başarılı')yaz('başarılı',null,u.uid); });
+    auth.signInAnonymously()
+      .then(function(c){yaz('başarılı',null,(c&&c.user&&c.user.uid)||null);})
+      .catch(function(e){yaz('hata',(e&&(e.code||e.message))||'bilinmeyen hata');});
+  }catch(e){yaz('hata',(e&&e.message)||'bilinmeyen hata');}
 })();
 
 // NOT: Bu projede daha önce Firebase Authentication (Anonim Giriş) ile veritabanı güvenlik
