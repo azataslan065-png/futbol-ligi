@@ -5471,27 +5471,61 @@ function veriBoyutuProfili(d){
     if(!d||typeof d!=='object')return;
     _boyutProfiliYapildi=true;
     var kb=function(n){return Math.round(n/1024*10)/10+' KB';};
-    var toplam=0,liste=[];
-    Object.keys(d).forEach(function(k){
-      var b=0;
-      try{b=JSON.stringify(d[k]).length;}catch(e){b=0;}
-      toplam+=b; liste.push([k,b]);
+    var olc=function(v){try{return JSON.stringify(v).length;}catch(e){return 0;}};
+    var toplam=olc(d);
+
+    // ── Üst düzey alanlar ──────────────────────────────────────────────────────────────
+    var ust=[];
+    Object.keys(d).forEach(function(k){ust.push([k,olc(d[k])]);});
+    ust.sort(function(a,b){return b[1]-a[1];});
+    var ustOzet={};
+    ust.slice(0,10).forEach(function(x){ustOzet[x[0]]=kb(x[1])+'  ('+Math.round(x[1]/toplam*100)+'%)';});
+
+    // ── DERİN TARAMA: en yer kaplayan YOLLAR ───────────────────────────────────────────
+    // Üst düzey döküm "teams %93" der ama SORUNUN NE OLDUĞUNU söylemez. Asıl soru şudur:
+    // takımın hangi alanı şişiriyor - logo mu, maskot mu, stadyum görseli mi, kadro mu?
+    // Bu tarama 3 seviye inip en büyük yaprakları ADIYLA listeler, böylece taşınacak/
+    // sıkıştırılacak veri tahminle değil kesin olarak belirlenir.
+    var yollar=[];
+    (function tara(dugum,yol,derinlik){
+      if(dugum===null||typeof dugum!=='object'){
+        var b=olc(dugum);
+        if(b>4096)yollar.push([yol,b]);
+        return;
+      }
+      if(derinlik>=3){
+        var b2=olc(dugum);
+        if(b2>4096)yollar.push([yol+'/…',b2]);
+        return;
+      }
+      Object.keys(dugum).forEach(function(k){tara(dugum[k],yol?yol+'/'+k:k,derinlik+1);});
+    })(d,'',0);
+    yollar.sort(function(a,b){return b[1]-a[1];});
+    var enBuyukYollar={};
+    yollar.slice(0,15).forEach(function(x){enBuyukYollar[x[0]]=kb(x[1]);});
+
+    // ── Alan ADINA göre toplam (logo, mascot, stadiumImage... hepsi birlikte) ──────────
+    // Aynı isimli alan onlarca takımda tekrar ettiği için asıl suçlu ancak toplamda görünür.
+    var adToplam={};
+    yollar.forEach(function(x){
+      var son=x[0].split('/').pop();
+      adToplam[son]=(adToplam[son]||0)+x[1];
     });
-    liste.sort(function(a,b){return b[1]-a[1];});
-    var enBuyuk={};
-    liste.slice(0,12).forEach(function(x){
-      enBuyuk[x[0]]=kb(x[1])+'  ('+Math.round(x[1]/toplam*100)+'%)';
-    });
+    var adListe=Object.keys(adToplam).map(function(k){return [k,adToplam[k]];})
+      .sort(function(a,b){return b[1]-a[1];}).slice(0,8);
+    var adOzet={};
+    adListe.forEach(function(x){adOzet[x[0]]=kb(x[1])+'  ('+Math.round(x[1]/toplam*100)+'%)';});
+
     DiagCore.kaydet('pt_data',toplam>1048576?'uyari':'bilgi',
       'Lig verisi her açılışta indiriliyor: '+kb(toplam),{
       toplamBoyut:kb(toplam),
-      alanSayisi:liste.length,
-      enBuyukAlanlar:enBuyuk,
-      anlami:'Bu miktar, uygulamanın HER açılışında (her kullanıcı, her yenileme) yeniden iner. '
-        +'Aylık 10 GB ücretsiz sınır, kabaca '+Math.max(1,Math.round(10*1024*1024*1024/Math.max(toplam,1)))
-        +' açılışa denk gelir.',
-      oneri:'En büyük alanlar yalnızca gerektiğinde yüklenecek şekilde ayrı yollara taşınmalı '
-        +'(ör. yönetici günlükleri, arşivler, medya kataloğu Puan Tablosu tarafında hiç gerekmez).'
+      ustDuzeyAlanlar:ustOzet,
+      alanAdinaToplam:adOzet,
+      enBuyukYollar:enBuyukYollar,
+      anlami:'Bu miktar uygulamanın HER açılışında yeniden iner. Aylık 10 GB ücretsiz sınır kabaca '
+        +Math.max(1,Math.round(10*1024*1024*1024/Math.max(toplam,1)))+' açılışa denk gelir.',
+      oneri:'4 KB üstündeki yapraklar listelendi. Büyük görseller genelde base64 olarak veriye '
+        +'gömülmüştür; bunlar dış depolamaya (Supabase) taşınıp yerlerine URL bırakılmalıdır.'
     });
   }catch(e){DiagSil('veriBoyutuProfili',e);}
 }
