@@ -1158,7 +1158,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-J';
+window.APP_BUILD='2026-08-09-K';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -17649,7 +17649,7 @@ function openNewAdminAccount(){
     +'Kendi oturumunuz etkilenmez - işlem ayrı bir bağlantı üzerinden yapılır.'
     +'</div>'
     +'<div class="field"><span class="lbl">E-posta</span><input id="yeniAdmEmail" type="email" placeholder="ikinci.yonetici@ornek.com" autocomplete="off"/></div>'
-    +'<div style="font-size:.6rem;color:var(--mu);margin-top:.25rem;line-height:1.5">Gerçek bir adres olmak zorunda değil ama <b>geçerli biçimde</b> olmalı: türkçe karakter (ı, ğ, ş, ö, ü, ç) içeremez, sonu nokta ile bitemez ve noktadan sonra en az iki harf gelmelidir. Örnek: <code>mazlum@ekip.com</code></div>'
+    +'<div style="font-size:.6rem;color:var(--mu);margin-top:.25rem;line-height:1.5">Gerçek bir adres olmak zorunda değil; istediğiniz adı yazabilirsiniz. Örnek: <code>mazlum@ekip.com</code><br>Firebase adresi kabul etmezse sebebi burada yazar.</div>'
     +'<div class="field" style="margin-top:.4rem"><span class="lbl">Şifre</span><input id="yeniAdmPw" type="text" placeholder="en az 6 karakter" autocomplete="off"/></div>'
     +'<div style="font-size:.6rem;color:var(--mu);margin-top:.3rem;line-height:1.5">Şifre açık gösterilir; oluşturduktan sonra ilgili kişiye iletin. Firebase en az 6 karakter şart koşar.</div>'
     +'<div style="font-size:.62rem;font-weight:800;color:var(--mu);margin:.8rem 0 .4rem;text-transform:uppercase">📋 Erişebileceği Menüler</div>'
@@ -17709,21 +17709,17 @@ function renderAdminList(){
 function createNewAdminAccount(){
   var em=(qs('yeniAdmEmail')||{}).value,pw=(qs('yeniAdmPw')||{}).value;
   var yaz=function(h){var e=qs('yeniAdmMsg');if(e)e.innerHTML=h;};
-  em=(em||'').trim().toLowerCase();
+  em=(em||'').trim();
   if(!em||!pw){yaz('<b style="color:#f87171">E-posta ve şifre girin.</b>');return;}
-  /* E-POSTA BİÇİM KONTROLÜ (kullanıcı bildirdi: "E-posta biçimi geçersiz" hatası).
-     Firebase yalnızca "geçersiz" der, SEBEBİNİ söylemez. En sık iki sebep şudur ve ikisi de
-     denenen adreste vardı: (1) Türkçe karakter - "mazlumunhesabı" içindeki 'ı' harfi,
-     (2) sonu nokta ile biten alan adı - "123." gibi. Burada sebep tek tek söylenir. */
-  if(/[ığşöüçİĞŞÖÜÇ]/.test(em)){
-    yaz('<b style="color:#f87171">E-postada Türkçe karakter kullanılamaz.</b><br>ı, ğ, ş, ö, ü, ç harflerini İngilizce karşılıklarıyla yazın (ör. <code>mazlumunhesabi@ekip.com</code>).');
-    return;
-  }
+  /* KULLANICI TALEBİ: "Admin istediği karakterleri kullanabilir."
+     ÖNCEKİ DAVRANIŞ YANLIŞTI: Türkçe karakterleri ve bazı biçimleri BEN engelliyordum.
+     Oysa hangi adresin kabul edileceğine karar veren merci Firebase'dir; benim koyduğum
+     ek kısıtlama, Firebase'in belki kabul edeceği bir adresi de baştan reddediyordu.
+     ARTIK: Yalnızca "kesinlikle e-posta olamaz" durumları (boşluk, @ yok) engellenir.
+     Gerisini Firebase'e sorarız; reddederse SEBEBİNİ tahmin edip ipucu gösteririz. */
   if(/\s/.test(em)){yaz('<b style="color:#f87171">E-posta boşluk içeremez.</b>');return;}
-  if(!/^[^@]+@[^@\s]+\.[a-z]{2,}$/.test(em)){
-    yaz('<b style="color:#f87171">E-posta biçimi geçersiz.</b><br>'
-      +'Doğru biçim: <code>isim@alanadi.com</code><br>'
-      +'Sonu nokta ile bitemez ve son noktadan sonra en az iki harf olmalıdır.');
+  if(em.indexOf('@')<1||em.indexOf('@')===em.length-1){
+    yaz('<b style="color:#f87171">E-posta bir @ işareti içermeli</b> (ör. <code>isim@alanadi.com</code>).');
     return;
   }
   if(pw.length<6){yaz('<b style="color:#f87171">Firebase en az 6 karakterlik şifre şart koşar.</b>');return;}
@@ -17765,7 +17761,17 @@ function createNewAdminAccount(){
     })
     .catch(function(e){
       ikincilAuth.signOut().catch(function(){});
-      yaz('<b style="color:#f87171">❌ '+escHtml(typeof _authHataTr==='function'?_authHataTr(e):((e&&e.message)||'oluşturulamadı'))+'</b>');
+      var mesaj=escHtml(typeof _authHataTr==='function'?_authHataTr(e):((e&&e.message)||'oluşturulamadı'));
+      // Firebase "geçersiz" derken sebebini söylemez. En sık iki sebep için ipucu eklenir -
+      // ama bu bir KISITLAMA değil, yalnızca yardım: adresi siz belirlersiniz.
+      if((e&&e.code)==='auth/invalid-email'){
+        var ipucu=[];
+        if(/[^\x00-\x7F]/.test(em))ipucu.push('Adreste Türkçe/aksanlı karakter var (ı, ğ, ş, ö, ü, ç). Firebase bunları çoğu zaman kabul etmiyor - İngilizce karşılıklarını deneyin.');
+        if(/\.$/.test(em))ipucu.push('Adres nokta ile bitiyor; son noktadan sonra en az iki harf gerekir (ör. <code>.com</code>).');
+        if(!/\./.test(em.split('@')[1]||''))ipucu.push('@ işaretinden sonra bir nokta ve uzantı olmalı (ör. <code>@ekip.com</code>).');
+        if(ipucu.length)mesaj+='<br><span style="color:var(--mu);font-weight:600">Olası sebep: '+ipucu.join('<br>Olası sebep: ')+'</span>';
+      }
+      yaz('<b style="color:#f87171">❌ '+mesaj+'</b>');
     });
 }
 function removeAdminUid(uid){
