@@ -1094,7 +1094,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-S';
+window.APP_BUILD='2026-08-09-T';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -19045,6 +19045,10 @@ window.voteMvp=function(matchId,player){
         }
       });
     }catch(e){}
+    // Bu satır bir düzenlemede yanlışlıkla silinmişti; aşağıdaki tüm say() çağrıları
+    // 'ekran' değişkenine başvurduğu için tarama en başta çöküyor ve HİÇBİR sensör
+    // sonuç üretemiyordu. Sensörler kusurlu değildi - tarama hiç tamamlanmıyordu.
+    var ekran=ekranAdi();
     if(kaymaListe.length)say('uyari','Satır içi hizalama kayması ('+kaymaListe.length+' satır)',{
       ekran:ekranAdi(),ogeler:kaymaListe,
       anlami:'Bu satırlarda simge, metin ve rozet birbirine göre dikeyde kaymış. Öğelerin '
@@ -19100,6 +19104,7 @@ window.voteMvp=function(matchId,player){
 
     if(sondaMi){
       return {
+        ekran:ekran,
         modulAcik:on(),
         gezilenKok:_ist.kok,
         incelenenDugum:_ist.dugum,
@@ -19738,6 +19743,10 @@ window.voteMvp=function(matchId,player){
       +'<div style="font-size:.6rem;opacity:.75;line-height:1.5;margin-bottom:.6rem">Bu bölüm için hata yakalama <b>açık</b>. Aşağıda yalnızca bu özelliğe ait kayıtlar görünür. Bu göstergeyi gizlemek için Admin Paneli → Yönetim → 🩺 Hata Yakalama Kodları ekranından ilgili modülü kapatın.</div>'
       +'<div style="display:flex;gap:.3rem;margin-bottom:.7rem">'
       +'<button data-x="copy" style="flex:1;background:#7c3aed;border:none;border-radius:9px;padding:.42rem;color:#fff;font-size:.64rem;font-weight:800;cursor:pointer">📋 Kopyala</button>'
+      /* KULLANICI DENEYİMİNDEN ÇIKAN İHTİYAÇ: Sensör testi yalnızca admin panelindeydi; ama
+         admin paneli KENDİ sayfasını ölçer. İncelenmek istenen ekran çoğu zaman Puan
+         Tablosu'nda olduğu için ölçüm hiç yapılamıyordu. Artık test buradan da çalıştırılır. */
+      +'<button data-x="sensor" style="flex:1;background:#0ea5e9;border:none;border-radius:9px;padding:.42rem;color:#fff;font-size:.64rem;font-weight:800;cursor:pointer">🔬 Sensör Testi</button>'
       +'<button data-x="clear" style="flex:1;background:#23262d;border:1px solid #3f434c;border-radius:9px;padding:.42rem;color:#9ca3af;font-size:.64rem;font-weight:800;cursor:pointer">🗑️ Temizle</button>'
       +'</div>'
       +'<div id="diagCopyWarn" style="display:none;margin-top:.5rem;background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.4);border-radius:9px;padding:.45rem .55rem;font-size:.58rem;color:#fbbf24;line-height:1.5">🔒 <b>Bu kayıtlar daha önce kopyalandı.</b> Aynı rapor ikinci kez kopyalanamaz - uygulamayı kapatıp açsanız bile. Bu kural, çoktan düzeltilmiş eski hataların tekrar tekrar bildirilmesini önler. <b>Aynı hata tekrar oluşursa yeni bir kayıt açılır</b> ve o kopyalanabilir.</div>'
@@ -19753,6 +19762,23 @@ window.voteMvp=function(matchId,player){
     ov.addEventListener('click',function(e){
       var x=e.target&&e.target.getAttribute?e.target.getAttribute('data-x'):null;
       if(e.target===ov||x==='close'){ov.remove();return;}
+      if(x==='sensor'){
+        var r=(window.DiagUI&&DiagUI.sonda)?DiagUI.sonda():{hata:'DiagUI yok'};
+        var b=r.bulgular||{},toplam=0;Object.keys(b).forEach(function(k){toplam+=b[k];});
+        var orn=[].concat((r.ornekler&&r.ornekler.ortulme)||[],(r.ornekler&&r.ornekler.kayma)||[],
+                          (r.ornekler&&r.ornekler.kontrast)||[],(r.ornekler&&r.ornekler.harf)||[]);
+        var det=el.querySelector('[data-x="sensorOut"]');
+        if(!det){det=document.createElement('div');det.setAttribute('data-x','sensorOut');
+          det.style.cssText='margin-top:.5rem;font-size:.58rem;line-height:1.5;color:#e2e8f0;background:rgba(0,0,0,.3);border-radius:8px;padding:.45rem';
+          e.target.parentNode.parentNode.appendChild(det);}
+        det.innerHTML=r.hata?('<b style="color:#f87171">Hata: '+esc(r.hata)+'</b>')
+          :('<b>Ekran:</b> '+esc(String(r.ekran))+'<br><b>İncelenen düğüm:</b> '+r.incelenenDugum
+            +(r.dugumButcesiDoldu?' <span style="color:#fbbf24">(bütçe doldu)</span>':'')
+            +'<br><b>Toplam bulgu:</b> '+toplam
+            +Object.keys(b).filter(function(k){return b[k];}).map(function(k){return '<br>· '+esc(k)+': '+b[k];}).join('')
+            +(orn.length?('<br><br>'+orn.slice(0,4).map(function(x){return '· '+esc(x);}).join('<br>')):''));
+        return;
+      }
       if(x==='copy'){
         // HATA DÜZELTMESİ (kullanıcı bildirdi: "hata kaydı kopyalama göremiyor"): Önceden
         // clipboard yazımı BAŞARISIZ olsa bile (özellikle izin kısıtlı ortamlarda .catch
