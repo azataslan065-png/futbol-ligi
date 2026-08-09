@@ -1094,7 +1094,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-U';
+window.APP_BUILD='2026-08-09-V';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18451,6 +18451,41 @@ window.voteMvp=function(matchId,player){
       if(v)db.ref().update(upd).catch(function(){});
     }catch(e){}
   }
+/* ── UZAKTAN SENSÖR TESTİ (cihaz tarafı) ────────────────────────────────────────────
+     KULLANICI TALEBİ: "Sil butonuna kullanıcıdan sensörü test etme özelliği ekle."
+     NEDEN GEREKLİ: Yerleşim kusurları CİHAZA GÖRE değişir - ekran genişliği, yazı tipi
+     boyutu, tarayıcı sürümü, kullanıcının seçtiği tema... Yöneticinin kendi telefonunda
+     hiçbir sorun görünmezken bir kullanıcıda yazılar taşıyor olabilir. O cihazı eline
+     almadan ölçmenin tek yolu, testi UZAKTAN istemektir.
+     NASIL ÇALIŞIR: Yönetici bir cihaz için test ister; istek Firebase'e yazılır. O cihaz
+     uygulamayı açık tuttuğu sürece isteği görür, ölçümü KENDİ ekranında yapar ve sonucu
+     geri yazar. Kullanıcıdan hiçbir şey istenmez, ekranında hiçbir şey değişmez. */
+  function uzakSensorTestiDinle(){
+    try{
+      var db=(window.firebase&&firebase.database)?firebase.database():null;
+      if(!db)return;
+      db.ref('diagnostics/sensorRequests/'+DEV_ID).on('value',function(snap){
+        var istek=snap.val();
+        if(!istek||!istek.ts)return;
+        // Aynı isteği iki kez çalıştırma (dinleyici yeniden bağlanabilir).
+        if(window._sonUzakTestTs===istek.ts)return;
+        window._sonUzakTestTs=istek.ts;
+        setTimeout(function(){
+          var sonuc;
+          try{ sonuc=(window.DiagUI&&DiagUI.sonda)?DiagUI.sonda():{hata:'DiagUI yok'}; }
+          catch(e){ sonuc={hata:(e&&e.message)||'bilinmeyen'}; }
+          try{
+            db.ref('diagnostics/sensorResults/'+DEV_ID).set({
+              ts:Date.now(), istekTs:istek.ts, app:APP, appLabel:APP_LABEL,
+              kullanici:whoAmI(), ekranGenislik:window.innerWidth, ekranYukseklik:window.innerHeight,
+              sonuc:JSON.stringify(sonuc).slice(0,20000)
+            });
+            db.ref('diagnostics/sensorRequests/'+DEV_ID).remove();
+          }catch(e){}
+        },600);   // ölçümden önce ekranın oturmasını bekle
+      },function(){});
+    }catch(e){}
+  }
   function kopyalanmamisKayitlar(modId){
     return LOGS.filter(function(r){return (!modId||r.m===modId)&&!r.kop;});
   }
@@ -18583,6 +18618,7 @@ window.voteMvp=function(matchId,player){
     MODULES.forEach(function(m){(m.fns||[]).forEach(function(fn){wrapFn(fn,m.id);});});
     subscribeFlags();
     abonelikOrtakDamga();
+    uzakSensorTestiDinle();
     // Herhangi bir modül AÇIKSA cihaz kimlik kartı bir kez yazılır - böylece admin, o cihazdan
     // henüz hata gelmemiş olsa bile "kayıtlı cihazlar" listesinde onu görebilir.
     setTimeout(function(){
@@ -19284,6 +19320,22 @@ window.voteMvp=function(matchId,player){
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',esitle);
   else setTimeout(esitle,1500);
 
+  window._ptSensorKopyala=function(){
+    var r=window._sonSensorSonucPT;
+    if(!r)return;
+    var iz='st_'+((r.ekran||'')+'|'+(r.incelenenDugum||0)+'|'+JSON.stringify(r.bulgular||{})).replace(/[^A-Za-z0-9]/g,'').slice(0,60);
+    var damgali=false;
+    try{damgali=localStorage.getItem('sensorKopya_'+iz)==='1';}catch(e){}
+    if(damgali){
+      if(typeof showToast==='function')showToast('🔒 Bu ölçüm daha önce kopyalandı. Tekrar ölçüp yeni sonucu kopyalayabilirsiniz.');
+      return;
+    }
+    var t=window._sensorMetniPT?window._sensorMetniPT():'';
+    if(!t)return;
+    try{localStorage.setItem('sensorKopya_'+iz,'1');}catch(e){}
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t);
+    if(typeof showToast==='function')showToast('📋 Ölçüm kopyalandı');
+  };
   window._sensorMetniPT=function(){
     var r=window._sonSensorSonucPT; if(!r)return '';
     if(r.hata)return '=== SENSÖR TESTİ ===\nHata: '+r.hata;
@@ -19822,7 +19874,8 @@ window.voteMvp=function(matchId,player){
           e.target.parentNode.parentNode.appendChild(det);}
         // Uzun listeler ekrana sığmadığı için sonuç metin olarak da kopyalanabilir.
         window._sonSensorSonucPT=r;
-        det.innerHTML='<button onclick="(function(){var t=window._sensorMetniPT&&window._sensorMetniPT();if(!t)return;if(navigator.clipboard)navigator.clipboard.writeText(t);})()" style="width:100%;background:#7c3aed;border:none;border-radius:7px;padding:.3rem;color:#fff;font-size:.58rem;font-weight:800;cursor:pointer;margin-bottom:.35rem">📋 Sonucu Kopyala</button>'
+        // Kopyalama kuralı hata kayıtlarındakiyle aynı: aynı ölçüm iki kez kopyalanamaz.
+        det.innerHTML='<button onclick="window._ptSensorKopyala&&window._ptSensorKopyala()" style="width:100%;background:#7c3aed;border:none;border-radius:7px;padding:.3rem;color:#fff;font-size:.58rem;font-weight:800;cursor:pointer;margin-bottom:.35rem;min-height:28px">📋 Sonucu Kopyala</button>'
           +(r.hata?('<b style="color:#f87171">Hata: '+esc(r.hata)+'</b>')
           :('<b>Ekran:</b> '+esc(String(r.ekran))+'<br><b>İncelenen düğüm:</b> '+r.incelenenDugum
             +(r.dugumButcesiDoldu?' <span style="color:#fbbf24">(bütçe doldu)</span>':'')

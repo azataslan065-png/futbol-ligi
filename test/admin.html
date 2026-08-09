@@ -1171,7 +1171,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-U';
+window.APP_BUILD='2026-08-09-V';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -17169,6 +17169,41 @@ window.saveBulkScores = async function(wrap) {
       if(v)db.ref().update(upd).catch(function(){});
     }catch(e){}
   }
+/* ── UZAKTAN SENSÖR TESTİ (cihaz tarafı) ────────────────────────────────────────────
+     KULLANICI TALEBİ: "Sil butonuna kullanıcıdan sensörü test etme özelliği ekle."
+     NEDEN GEREKLİ: Yerleşim kusurları CİHAZA GÖRE değişir - ekran genişliği, yazı tipi
+     boyutu, tarayıcı sürümü, kullanıcının seçtiği tema... Yöneticinin kendi telefonunda
+     hiçbir sorun görünmezken bir kullanıcıda yazılar taşıyor olabilir. O cihazı eline
+     almadan ölçmenin tek yolu, testi UZAKTAN istemektir.
+     NASIL ÇALIŞIR: Yönetici bir cihaz için test ister; istek Firebase'e yazılır. O cihaz
+     uygulamayı açık tuttuğu sürece isteği görür, ölçümü KENDİ ekranında yapar ve sonucu
+     geri yazar. Kullanıcıdan hiçbir şey istenmez, ekranında hiçbir şey değişmez. */
+  function uzakSensorTestiDinle(){
+    try{
+      var db=(window.firebase&&firebase.database)?firebase.database():null;
+      if(!db)return;
+      db.ref('diagnostics/sensorRequests/'+DEV_ID).on('value',function(snap){
+        var istek=snap.val();
+        if(!istek||!istek.ts)return;
+        // Aynı isteği iki kez çalıştırma (dinleyici yeniden bağlanabilir).
+        if(window._sonUzakTestTs===istek.ts)return;
+        window._sonUzakTestTs=istek.ts;
+        setTimeout(function(){
+          var sonuc;
+          try{ sonuc=(window.DiagUI&&DiagUI.sonda)?DiagUI.sonda():{hata:'DiagUI yok'}; }
+          catch(e){ sonuc={hata:(e&&e.message)||'bilinmeyen'}; }
+          try{
+            db.ref('diagnostics/sensorResults/'+DEV_ID).set({
+              ts:Date.now(), istekTs:istek.ts, app:APP, appLabel:APP_LABEL,
+              kullanici:whoAmI(), ekranGenislik:window.innerWidth, ekranYukseklik:window.innerHeight,
+              sonuc:JSON.stringify(sonuc).slice(0,20000)
+            });
+            db.ref('diagnostics/sensorRequests/'+DEV_ID).remove();
+          }catch(e){}
+        },600);   // ölçümden önce ekranın oturmasını bekle
+      },function(){});
+    }catch(e){}
+  }
   function kopyalanmamisKayitlar(modId){
     return LOGS.filter(function(r){return (!modId||r.m===modId)&&!r.kop;});
   }
@@ -17294,6 +17329,7 @@ window.saveBulkScores = async function(wrap) {
     MODULES.forEach(function(m){(m.fns||[]).forEach(function(fn){wrapFn(fn,m.id);});});
     subscribeFlags();
     abonelikOrtakDamga();
+    uzakSensorTestiDinle();
     // Herhangi bir modül AÇIKSA cihaz kimlik kartı bir kez yazılır - böylece admin, o cihazdan
     // henüz hata gelmemiş olsa bile "kayıtlı cihazlar" listesinde onu görebilir.
     setTimeout(function(){
@@ -18045,10 +18081,101 @@ function sensorTestMetni(r){
 function copySensorTest(){
   var r=window._sonSensorSonuc;
   if(!r){toast('Önce testi çalıştırın','er');return;}
+  /* Kopyalama kuralı hata kayıtlarındakiyle AYNI: aynı ölçüm iki kez kopyalanamaz.
+     Damga ölçümün parmak izine (bulgu sayıları + ekran + zaman) göre üretilir; yeniden
+     ölçüm yapılırsa yeni bir parmak izi oluşur ve o kopyalanabilir. */
   var txt=sensorTestMetni(r);
+  var iz='st_'+((r.ekran||'')+'|'+(r.incelenenDugum||0)+'|'+JSON.stringify(r.bulgular||{})).replace(/[^A-Za-z0-9]/g,'').slice(0,60);
+  var damgali=false;
+  try{damgali=localStorage.getItem('sensorKopya_'+iz)==='1';}catch(e){}
+  if(damgali){
+    var w=qs('sensorKopyaUyari');
+    if(w)w.style.display='block';
+    toast('🔒 Bu ölçüm daha önce kopyalandı. Tekrar ölçüp yeni sonucu kopyalayabilirsiniz.','er');
+    return;
+  }
+  try{localStorage.setItem('sensorKopya_'+iz,'1');}catch(e){}
   if(typeof admGlobalCopyText==='function')admGlobalCopyText(txt,'📋 Sensör testi kopyalandı');
   else if(navigator.clipboard)navigator.clipboard.writeText(txt).then(function(){toast('📋 Kopyalandı');});
 }
+/* ── UZAKTAN SENSÖR TESTİ (yönetici tarafı) ───────────────────────────────────────────
+   Cihaz listesindeki her cihaz için "sensörü orada çalıştır" isteği gönderir. Cihaz
+   uygulamayı açık tuttuğu sürece isteği görür, kendi ekranında ölçer ve sonucu geri yazar.
+   Kullanıcı bir şey yapmaz, ekranında bir şey değişmez. */
+function requestRemoteSensorTest(devKey){
+  if(!devKey){toast('Cihaz seçilemedi','er');return;}
+  var ts=Date.now();
+  db.ref('diagnostics/sensorRequests/'+devKey).set({ts:ts,isteyen:(function(){
+    try{return sessionStorage.getItem('admName')||'Yönetici';}catch(e){return 'Yönetici';}
+  })()}).then(function(){
+    toast('🔬 Test isteği gönderildi - cihaz uygulamayı açtığında ölçüm yapılacak');
+    renderDiagDeviceLogList();
+  }).catch(function(e){toast('❌ '+((e&&e.message)||'gönderilemedi'),'er');});
+}
+/* Uzaktan gelen sonucu okunur hale getirir. Sonuç JSON olarak saklanır çünkü sensörün
+   çıktısı yapısaldır; burada insan tarafına çevrilir. */
+function renderRemoteSensorResult(devKey,box){
+  if(!box)return;
+  db.ref('diagnostics/sensorResults/'+devKey).once('value').then(function(sn){
+    var v=sn.val();
+    if(!v){box.innerHTML='<div style="font-size:.62rem;color:var(--mu)">Bu cihazdan henüz sensör sonucu gelmedi.</div>';return;}
+    var r={};
+    try{r=JSON.parse(v.sonuc||'{}');}catch(e){r={hata:'sonuç çözümlenemedi'};}
+    var b=r.bulgular||{},toplam=0;Object.keys(b).forEach(function(k){toplam+=b[k];});
+    var orn=[].concat(((r.ornekler||{}).ortulme)||[],((r.ornekler||{}).kayma)||[],
+                      ((r.ornekler||{}).kontrast)||[],((r.ornekler||{}).harf)||[]);
+    window._uzakSensorMetni=uzakSensorMetni(devKey,v,r);
+    box.innerHTML='<div style="background:var(--s3);border-radius:9px;padding:.5rem .6rem;font-size:.62rem;line-height:1.6">'
+      +'<div style="font-weight:800;color:var(--tx);margin-bottom:.25rem">🔬 Uzaktan ölçüm · '+escHtml(diagZaman(v.ts))+'</div>'
+      +(r.hata?('<b style="color:#f87171">Hata: '+escHtml(r.hata)+'</b>')
+        :('Ekran: <b>'+escHtml(String(r.ekran||'?'))+'</b> · '+escHtml(String(v.ekranGenislik||'?'))+'×'+escHtml(String(v.ekranYukseklik||'?'))+'px<br>'
+          +'İncelenen düğüm: <b>'+escHtml(String(r.incelenenDugum||0))+'</b>'+(r.dugumButcesiDoldu?' <span style="color:#fbbf24">(bütçe doldu)</span>':'')+'<br>'
+          +'Toplam bulgu: <b>'+toplam+'</b>'
+          +Object.keys(b).filter(function(k){return b[k];}).map(function(k){return '<br>· '+escHtml(k)+': '+b[k];}).join('')
+          +(orn.length?('<br><br>'+orn.slice(0,5).map(function(x){return '· '+escHtml(x);}).join('<br>')):'')))
+      +'<button onclick="copyRemoteSensorResult(\''+escHtml(devKey).replace(/'/g,"\\'")+'\')" style="width:100%;margin-top:.45rem;background:#7c3aed;border:none;border-radius:7px;padding:.32rem;color:#fff;font-size:.6rem;font-weight:800;cursor:pointer;min-height:28px">📋 Sonucu Kopyala</button>'
+      +'</div>';
+  }).catch(function(e){
+    box.innerHTML='<div style="font-size:.62rem;color:#f87171">Sonuç okunamadı: '+escHtml((e&&e.message)||'')+'</div>';
+  });
+}
+function uzakSensorMetni(devKey,v,r){
+  var L=['=== UZAKTAN SENSÖR TESTİ ===',
+    'Cihaz: '+diagDeviceName(devKey,(v&&v.ua)||''),
+    'Kullanıcı: '+((v&&v.kullanici)||'?'),
+    'Ölçüm zamanı: '+(v&&v.ts?new Date(v.ts).toLocaleString('tr-TR'):'?'),
+    'Ekran: '+((v&&v.ekranGenislik)||'?')+'×'+((v&&v.ekranYukseklik)||'?')+'px',
+    'Görüntülenen ekran: '+((r&&r.ekran)||'?'),
+    'İncelenen düğüm: '+((r&&r.incelenenDugum)||0)+((r&&r.dugumButcesiDoldu)?' (BÜTÇE DOLDU)':''),''];
+  var b=(r&&r.bulgular)||{},t=0;Object.keys(b).forEach(function(k){t+=b[k];});
+  L.push('--- BULGULAR ('+t+') ---');
+  Object.keys(b).forEach(function(k){L.push('  '+k+': '+b[k]);});
+  var o=(r&&r.ornekler)||{};
+  [['ÖĞE ÖRTÜLMESİ',o.ortulme],['HİZALAMA KAYMASI',o.kayma],['RENK SOĞUMASI',o.kontrast],['HARF SIKIŞMASI',o.harf]]
+    .forEach(function(x){if(x[1]&&x[1].length){L.push('');L.push('--- '+x[0]+' ---');x[1].forEach(function(y){L.push('  · '+y);});}});
+  return L.join('\n');
+}
+/* Kopyalama kuralı, hata kayıtlarındakiyle AYNI: bir sonuç bir kez kopyalanır. Damga ortak
+   listede tutulduğu için yönetici de kullanıcı da aynı sonucu ikinci kez alamaz. Yeni bir
+   ölçüm yapılırsa yeni damga oluşur ve o kopyalanabilir. */
+function copyRemoteSensorResult(devKey){
+  db.ref('diagnostics/sensorResults/'+devKey).once('value').then(function(sn){
+    var v=sn.val();
+    if(!v){toast('Sonuç yok','er');return;}
+    var anahtar='sensor_'+devKey+'_'+v.ts;
+    var kutu=_diagCopied[devKey]||{};
+    if(kutu[anahtar]){
+      toast('🔒 Bu ölçüm daha önce kopyalandı. Yeni bir test isteyin, yeni sonuç kopyalanabilir.','er');
+      return;
+    }
+    var txt=window._uzakSensorMetni||'';
+    if(!txt){toast('Önce sonucu görüntüleyin','er');return;}
+    if(typeof admGlobalCopyText==='function')admGlobalCopyText(txt,'📋 Ölçüm kopyalandı');
+    else if(navigator.clipboard)navigator.clipboard.writeText(txt);
+    db.ref('diagnostics/copied/'+devKey+'/'+anahtar).set(Date.now()).catch(function(){});
+  });
+}
+
 function openSensorTest(){
   var r=(window.DiagUI&&DiagUI.sonda)?DiagUI.sonda():{hata:'DiagUI yüklü değil'};
   window._sonSensorSonuc=r;
@@ -18096,7 +18223,8 @@ function openSensorTest(){
   html+='<div style="display:flex;gap:.4rem;margin-top:.7rem">'
     +'<button class="btn bp" onclick="copySensorTest()" style="flex:1">📋 Sonucu Kopyala</button>'
     +'<button class="btn bgh" onclick="openSensorTest()" style="flex:1">🔄 Tekrar Ölç</button>'
-    +'</div>';
+    +'</div>'
+    +'<div id="sensorKopyaUyari" style="display:none;margin-top:.5rem;background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.4);border-radius:9px;padding:.45rem .55rem;font-size:.6rem;color:#fbbf24;line-height:1.5">🔒 Bu ölçüm daha önce kopyalandı. <b>Tekrar Ölç</b> deyip yeni sonucu kopyalayabilirsiniz.</div>';
   // data-diag-ui: bu panelin KENDİ içeriği yerleşim ölçümüne girmesin (ilk gerçek ölçümde
   // panelin kendi yazıları "renk soğuması" olarak raporlanmıştı).
   openSheet('🔬 Sensör Testi','<div data-diag-ui="1">'+html+'</div>','openSensorTest');
@@ -18570,9 +18698,15 @@ function openDiagDeviceLogs(devKey){
     +'<button class="btn bp" onclick="diagCopyDeviceLogs(\''+esc(devKey)+'\')" style="flex:1;padding:.35rem;font-size:.63rem">📋 Kopyalanmamışları Kopyala ('+kalan+')</button>'
     +'<button class="btn bgh" onclick="diagDeleteDeviceLogs(\''+esc(devKey)+'\')" style="flex:1;padding:.35rem;font-size:.63rem">🗑️ Bu Cihazın Kayıtlarını Sil</button>'
     +'</div>'
+    // KULLANICI TALEBİ: Yerleşim kusurları cihaza göre değişir; yöneticinin telefonunda
+    // görünmeyen bir sorun kullanıcının cihazında olabilir. Bu düğme testi O CİHAZDA
+    // çalıştırır - kullanıcı bir şey yapmaz, ekranında bir şey değişmez.
+    +'<button class="btn bp" onclick="requestRemoteSensorTest(\''+esc(devKey)+'\')" style="width:100%;padding:.35rem;font-size:.63rem;margin-bottom:.5rem">🔬 Bu Cihazda Sensör Testi İste</button>'
+    +'<div id="uzakSensorKutu" style="margin-bottom:.7rem"></div>'
     +'<div id="diagDeviceLogList"></div>';
   openSheet('📱 Cihaz Kayıtları',html,'openDiagDeviceLogs');
   renderDiagDeviceLogList();
+  renderRemoteSensorResult(devKey,qs('uzakSensorKutu'));
 }
 function renderDiagDeviceLogList(){
   var box=qs('diagDeviceLogList');if(!box||!_diagOpenDevice)return;
