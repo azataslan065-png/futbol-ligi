@@ -7,6 +7,16 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&display=swap" rel="stylesheet"/>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js" onerror="window._fbLoadFailed=true"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js" onerror="window._fbLoadFailed=true"></script>
+<!-- KRİTİK NOT - BURAYA firebase-auth-compat.js EKLEMEYİN:
+     Kimlik doğrulama SDK'sı sayfayla birlikte yüklendiğinde "hiçbir şey yapmadan durmaz".
+     Yüklendiği anda kendini Firebase'e bir servis olarak KAYDEDER ve Realtime Database SDK'sı,
+     bağlantıyı kurmadan önce bu servisten bir kimlik jetonu ISTER. content:// veya file://
+     gibi opak kaynaklarda Auth'un iç başlatması IndexedDB'ye erişemediği için asılı kalır,
+     dolayısıyla veritabanı bağlantısı HİÇ kurulamaz ve uygulama "Veriler yüklenmesi
+     beklenenden uzun sürüyor" ekranında kalır. (Bu, dosyanın başındaki eski nottaki
+     "signInAnonymously veritabanını bloke ediyor" gözleminin gerçek sebebidir - sorun
+     çağrıda değil, SDK'nın YÜKLENMESİNDEDİR.)
+     Bu yüzden SDK artık yalnızca yönetici testi açtığında, çalışma anında yüklenir. -->
 <!-- KULLANICI TALEBİ: Puan Tablosu ile TUTARLI olması için admin panelinde de video
      yüklemeleri artık Firebase RTDB'ye base64 olarak DEĞİL, Supabase Storage'a GERÇEK DOSYA
      olarak yapılır. -->
@@ -1110,6 +1120,68 @@ button{font-family:Outfit,sans-serif;cursor:pointer;border:none;border-radius:10
 var FB = {apiKey:"AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY",authDomain:"superlig-208e3.firebaseapp.com",databaseURL:"https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app",projectId:"superlig-208e3",storageBucket:"superlig-208e3.firebasestorage.app",messagingSenderId:"879221404148",appId:"1:879221404148:web:daae84d7187311400209a1"};
 firebase.initializeApp(FB);
 var db = firebase.database();
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   KİMLİK DOĞRULAMA SONDASI (opsiyonel, VARSAYILAN OLARAK KAPALI)
+
+   NEDEN SONDA, NEDEN DOĞRUDAN AÇMIYORUZ: Bu projede Firebase Authentication (Anonim Giriş)
+   DAHA ÖNCE denendi ve KALDIRILDI - çünkü uygulama telefonda content:// (dosyayı doğrudan
+   açma) protokolüyle çalıştığında signInAnonymously() çağrısının veritabanı bağlantısını
+   bloke ettiği görüldü. Sebebi şudur: content:// ve file:// "opak kaynak" sayılır; Firebase
+   Auth varsayılan olarak oturumu IndexedDB'de saklamaya çalışır ve opak kaynakta bu erişim
+   engellendiği için çağrı hiç sonuçlanmaz, asılı kalır.
+   O yüzden kimlik doğrulamayı doğrudan açmak, uygulamayı YENİDEN bozma riski taşır.
+
+   BU SONDA NE YAPAR: Kimlik doğrulamanın BU CİHAZDA çalışıp çalışmadığını, uygulamanın
+   normal işleyişine HİÇ dokunmadan ölçer. Üç güvenlik önlemi vardır:
+     1. Varsayılan KAPALIDIR - yalnızca yönetici test için açtığında çalışır.
+     2. Veritabanı bağlantısı bu koddan ÖNCE ve BAĞIMSIZ kurulur; sonda başarısız olsa,
+        hatta hiç sonuçlanmasa bile uygulama bugünkü gibi çalışmaya devam eder.
+     3. Oturum kalıcılığı NONE seçilir (IndexedDB'ye hiç dokunulmaz) - önceki denemenin
+        asıl takıldığı nokta muhtemelen buydu; bu haliyle content:// üzerinde de
+        sonuçlanma ihtimali vardır.
+   Sonuç (başarılı / hata kodu / zaman aşımı) cihaz kartına yazılır, böylece yönetici
+   "hangi cihazlarda kimlik doğrulama çalışıyor?" sorusunu gerçek veriyle cevaplayabilir.
+   KURALLAR ANCAK bu test yeterli cihazda BAŞARILI dönerse "auth != null" yapılmalıdır.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+window._authSonda={durum:'kapalı',hata:null,uid:null,ms:null,kaynak:location.protocol};
+(function kimlikDogrulamaSondasi(){
+  var acik=false;
+  try{acik=localStorage.getItem('diag_authSonda')==='1';}catch(e){}
+  if(!acik)return;
+  var t0=Date.now(),bitti=false;
+  function bitir(durum,hata,uid){
+    if(bitti)return; bitti=true;
+    window._authSonda={durum:durum,hata:hata||null,uid:uid||null,ms:Date.now()-t0,kaynak:location.protocol};
+    try{if(window.DiagCore&&DiagCore.kaydet)
+      DiagCore.kaydet('adm_settings',durum==='başarılı'?'bilgi':'hata','Kimlik doğrulama sondası: '+durum,window._authSonda);
+    }catch(e){}
+  }
+  window._authSonda.durum='deneniyor';
+  // SDK yalnızca BURADA, test açıkken yüklenir. Normal kullanıcıda hiç indirilmez ve
+  // veritabanı bağlantısı hiçbir şekilde etkilenmez.
+  function sdkYukle(){
+    return new Promise(function(res,rej){
+      if(window.firebase&&firebase.auth)return res();
+      var sc=document.createElement('script');
+      sc.src='https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js';
+      sc.onload=function(){res();};
+      sc.onerror=function(){rej(new Error('firebase-auth SDK indirilemedi'));};
+      document.head.appendChild(sc);
+    });
+  }
+  try{
+    // Asılı kalırsa sonsuza kadar beklemeyelim - 8 saniyede sonuç yoksa zaman aşımı yazılır.
+    setTimeout(function(){bitir('zaman-aşımı','8 saniyede sonuç alınamadı (muhtemelen opak kaynak/IndexedDB engeli)');},8000);
+    sdkYukle().then(function(){
+    var auth=firebase.auth();
+    return Promise.resolve(auth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function(){}))
+      .then(function(){return auth.signInAnonymously();})
+      .then(function(c){bitir('başarılı',null,(c&&c.user&&c.user.uid)||null);});
+    }).catch(function(e){bitir('hata',(e&&(e.code||e.message))||'bilinmeyen hata');});
+  }catch(e){bitir('hata',(e&&e.message)||'bilinmeyen hata');}
+})();
+
 // NOT: bkz. puan-tablosu.html'deki AYNI gerekçe - Firebase Authentication (Anonim Giriş) kodu
 // TAMAMEN KALDIRILDI çünkü content:// (telefondan doğrudan dosya açma) protokolünde
 // signInAnonymously() çağrısının kendisi veritabanı bağlantısını bloke ettiği kanıtlandı.
@@ -16608,6 +16680,11 @@ window.saveBulkScores = async function(wrap) {
         marka:DEV_INFO.marka||null,model:DEV_INFO.model||null,
         platform:DEV_INFO.platform||null,platformSurum:DEV_INFO.platformSurum||null,
         tarayici:DEV_INFO.tarayici||null,giris:girisYontemiCoz(),ua:DEV_INFO.ua||null,
+        // Kimlik doğrulama sondasının bu cihazdaki sonucu (bkz. _authSonda). Kurallar
+        // "auth != null" yapılmadan ÖNCE bu alanın yeterli cihazda "başarılı" olması gerekir.
+        kimlikDogrulama:(window._authSonda&&window._authSonda.durum)||'kapalı',
+        kimlikHata:(window._authSonda&&window._authSonda.hata)||null,
+        kaynakProtokol:location.protocol,
         kullanici:whoAmI(),app:APP,appLabel:APP_LABEL,sonGorulme:now
       }).catch(function(){});
     }catch(e){}
@@ -17139,6 +17216,76 @@ function subscribeDiagMissing(){
    haritada gördüğünüz yerleşim ekrandaki gerçek yerleşimin birebir aynısıdır.
    Açık modüller renkli ve tam opak, kapalılar soluk gösterilir; böylece admin "şu an açık
    olanların rozetleri nerede çıkacak" sorusunu bir bakışta görür. */
+
+/* ── KİMLİK DOĞRULAMA TESTİ EKRANI ────────────────────────────────────────────────────────
+   Güvenlik kurallarını "auth != null" yapmadan ÖNCE, kimlik doğrulamanın gerçek cihazlarda
+   çalıştığını KANITLAMAK gerekir. Bu ekran testi açar/kapatır ve toplanan sonuçları gösterir.
+   Test kapalıyken uygulama bugünkü gibi davranır - hiçbir risk yoktur. */
+function diagAuthDurumRozeti(d){
+  var v=(d&&d.kimlikDogrulama)||'kapalı';
+  var renk=v==='başarılı'?'#22c55e':(v==='kapalı'?'var(--mu)':'#ef4444');
+  var etiket={'başarılı':'✅ çalışıyor','kapalı':'⚪ test kapalı','deneniyor':'⏳ deneniyor',
+              'zaman-aşımı':'⛔ zaman aşımı','sdk-yok':'⛔ SDK yok','hata':'⛔ hata'}[v]||v;
+  return '<span style="color:'+renk+';font-weight:800">'+etiket+'</span>';
+}
+function openDiagAuthTest(){
+  var acik=false;
+  try{acik=localStorage.getItem('diag_authSonda')==='1';}catch(e){}
+  var benim=(window._authSonda&&window._authSonda.durum)||'kapalı';
+  var cihazlar=Object.keys(_diagDevices).map(function(k){return {k:k,d:_diagDevices[k]};});
+  var calisan=cihazlar.filter(function(x){return x.d.kimlikDogrulama==='başarılı';}).length;
+  var denenen=cihazlar.filter(function(x){return x.d.kimlikDogrulama&&x.d.kimlikDogrulama!=='kapalı';}).length;
+
+  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.8rem">'
+    +'Veritabanı kurallarını sıkılaştırmadan önce kimlik doğrulamanın <b>gerçek cihazlarda</b> çalıştığını kanıtlamamız gerekiyor. '
+    +'Bu proje daha önce kimlik doğrulamayla denendi ve <b>geri alındı</b>: uygulama telefonda dosyadan doğrudan açıldığında (content://) '
+    +'giriş çağrısı veritabanı bağlantısını kilitliyordu. Bu yüzden önce ölçüyoruz, sonra karar veriyoruz.<br><br>'
+    +'<b>Test kapalıyken uygulama bugünkü gibi çalışır - hiçbir risk yoktur.</b>'
+    +'</div>'
+    +'<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .7rem;margin-bottom:.7rem">'
+    +'<div style="font-size:.72rem;font-weight:800;margin-bottom:.35rem">Bu cihaz</div>'
+    +'<div style="font-size:.64rem;line-height:1.7">'
+    +'Durum: '+diagAuthDurumRozeti({kimlikDogrulama:benim})+'<br>'
+    +'Açılış protokolü: <b>'+escHtml(location.protocol)+'</b>'
+    +(location.protocol==='content:'||location.protocol==='file:'
+      ? ' <span style="color:#fbbf24">← dosyadan açılmış; kimlik doğrulamanın en riskli olduğu durum</span>'
+      : ' <span style="color:#22c55e">← web sunucusundan açılmış; kimlik doğrulama için uygun</span>')
+    +(window._authSonda&&window._authSonda.hata?'<br>Hata: <b style="color:#f87171">'+escHtml(String(window._authSonda.hata))+'</b>':'')
+    +(window._authSonda&&window._authSonda.ms?'<br>Süre: '+window._authSonda.ms+'ms':'')
+    +'</div></div>'
+    +'<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .7rem;margin-bottom:.8rem">'
+    +'<div style="font-size:.72rem;font-weight:800;margin-bottom:.35rem">Tüm cihazlar</div>'
+    +(cihazlar.length
+      ? '<div style="font-size:.64rem;color:var(--mu);margin-bottom:.4rem">'+calisan+' / '+denenen+' test edilen cihazda çalışıyor</div>'
+        +cihazlar.map(function(x){
+          return '<div style="display:flex;justify-content:space-between;gap:.4rem;font-size:.62rem;padding:.2rem 0;border-top:1px solid var(--br)">'
+            +'<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(diagDeviceName(x.k,x.d.ua))+'</span>'
+            +diagAuthDurumRozeti(x.d)+'</div>';
+        }).join('')
+      : '<div style="font-size:.64rem;color:var(--mu)">Henüz kayıtlı cihaz yok.</div>')
+    +'</div>'
+    +'<button class="btn '+(acik?'bgh':'bp')+'" onclick="diagToggleAuthSonda()" style="width:100%;margin-bottom:.5rem">'
+    +(acik?'⛔ Testi Kapat (bu cihazda)':'🔐 Testi Aç (bu cihazda)')+'</button>'
+    +'<div style="font-size:.62rem;color:var(--mu);line-height:1.6">'
+    +'Testi açtıktan sonra sayfayı <b>yenilemeniz</b> gerekir. Puan Tablosu tarafında test etmek için o cihazda da aynı işlemi yapın '
+    +'(Ayarlar → teşhis ekranı) veya tarayıcı konsolundan <code>localStorage.setItem(\'diag_authSonda\',\'1\')</code> çalıştırıp yenileyin.<br><br>'
+    +'⚠️ Test başarılı dönmeden kuralları <code>auth != null</code> yapmayın - uygulama tüm cihazlarda veri okuyamaz hale gelir.'
+    +'</div>';
+  openSheet('🔐 Kimlik Doğrulama Testi',html,'openDiagAuthTest');
+}
+function diagToggleAuthSonda(){
+  var acik=false;
+  try{acik=localStorage.getItem('diag_authSonda')==='1';}catch(e){}
+  try{
+    if(acik)localStorage.removeItem('diag_authSonda');
+    else localStorage.setItem('diag_authSonda','1');
+  }catch(e){toast('❌ Tarayıcı deposu kapalı, ayar saklanamadı','er');return;}
+  dlg('🔄','Sayfa Yenilensin mi?',(acik?'Test kapatıldı.':'Test açıldı.')+' Değişikliğin geçerli olması için sayfanın yenilenmesi gerekiyor.','Yenile','dop').then(function(ok){
+    if(ok)location.reload();
+    else openDiagAuthTest();
+  });
+}
+
 function openDiagBadgeMap(){
   var flags=(window.DiagCore&&DiagCore.flags())||{};
   var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.55;margin-bottom:.8rem">'
@@ -17195,7 +17342,8 @@ function openDiagnosticsManager(){
     +'<button class="btn bg" onclick="diagSetAll(true)" style="flex:1">✅ Tümünü Aç</button>'
     +'<button class="btn bgh" onclick="diagSetAll(false)" style="flex:1">⛔ Tümünü Kapat</button>'
     +'</div>'
-    +'<button class="btn bp" onclick="openDiagBadgeMap()" style="width:100%;margin-bottom:.8rem">🗺️ Rozet Yerleşim Haritası - hangi rozet ekranın neresinde?</button>'
+    +'<button class="btn bp" onclick="openDiagBadgeMap()" style="width:100%;margin-bottom:.5rem">🗺️ Rozet Yerleşim Haritası - hangi rozet ekranın neresinde?</button>'
+    +'<button class="btn bgh" onclick="openDiagAuthTest()" style="width:100%;margin-bottom:.8rem">🔐 Kimlik Doğrulama Testi - güvenlik kuralları sıkılaştırılabilir mi?</button>'
     +'<div id="diagModuleList"></div>'
     +'<div style="height:1px;background:var(--br);margin:1rem 0"></div>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">'
@@ -17630,6 +17778,7 @@ function openDiagDeviceLogs(devKey){
     +'<div><span style="color:var(--mu)">Sistem:</span> <b>'+escHtml([kart.platform,kart.platformSurum].filter(Boolean).join(' ')||'—')+'</b></div>'
     +'<div><span style="color:var(--mu)">Giriş yöntemi:</span> <b>'+escHtml(kart.giris||kart.tarayici||'—')+'</b></div>'
     +'<div><span style="color:var(--mu)">Kullanıcı:</span> <b style="color:var(--ac3)">'+escHtml(diagDeviceUser(devKey,g))+'</b></div>'
+    +'<div><span style="color:var(--mu)">Kimlik doğrulama:</span> '+diagAuthDurumRozeti(kart)+(kart.kaynakProtokol?' <span style="color:var(--mu)">('+escHtml(kart.kaynakProtokol)+')</span>':'')+'</div>'
     +'</div>'
     +(kart.model?'':'<div style="font-size:.55rem;color:var(--mu);margin-top:.25rem">ℹ️ Model boşsa tarayıcı bunu gizlilik nedeniyle paylaşmıyordur (iOS Safari, Firefox) ya da cihaz bu sürümden önce kayıt göndermiştir.</div>')
     +'<div style="font-size:.56rem;color:var(--mu);margin-top:.2rem;word-break:break-all">'+escHtml(g.ua||kart.ua||'(tarayıcı bilgisi yok)')+'</div>'

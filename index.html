@@ -728,6 +728,16 @@ div.md-logo{background:rgba(255,255,255,.06);border-radius:8px;display:flex;alig
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js" onerror="window._fbLoadFailed=true"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js" onerror="window._fbLoadFailed=true"></script>
+<!-- KRİTİK NOT - BURAYA firebase-auth-compat.js EKLEMEYİN:
+     Kimlik doğrulama SDK'sı sayfayla birlikte yüklendiğinde "hiçbir şey yapmadan durmaz".
+     Yüklendiği anda kendini Firebase'e bir servis olarak KAYDEDER ve Realtime Database SDK'sı,
+     bağlantıyı kurmadan önce bu servisten bir kimlik jetonu ISTER. content:// veya file://
+     gibi opak kaynaklarda Auth'un iç başlatması IndexedDB'ye erişemediği için asılı kalır,
+     dolayısıyla veritabanı bağlantısı HİÇ kurulamaz ve uygulama "Veriler yüklenmesi
+     beklenenden uzun sürüyor" ekranında kalır. (Bu, dosyanın başındaki eski nottaki
+     "signInAnonymously veritabanını bloke ediyor" gözleminin gerçek sebebidir - sorun
+     çağrıda değil, SDK'nın YÜKLENMESİNDEDİR.)
+     Bu yüzden SDK artık yalnızca yönetici testi açtığında, çalışma anında yüklenir. -->
 <!-- KULLANICI TALEBİ: Supabase Storage'a geçiş - videolar artık Firebase Realtime Database'e
      base64 olarak DEĞİL, Supabase Storage'a GERÇEK DOSYA olarak yüklenir, sadece kısa bir
      ortak erişim linki (URL) Firebase'e kaydedilir. Bu, ~7MB/45sn olan önceki sert sınırı
@@ -1041,6 +1051,68 @@ setTimeout(_adjustTopbarSpacing,300); // Fontlar/ikonlar geç yüklenirse yükse
 <script>
 const FB={apiKey:"AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY",authDomain:"superlig-208e3.firebaseapp.com",databaseURL:"https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app",projectId:"superlig-208e3",storageBucket:"superlig-208e3.firebasestorage.app",messagingSenderId:"879221404148",appId:"1:879221404148:web:daae84d7187311400209a1"};
 const app=firebase.initializeApp(FB);const db=firebase.database();
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   KİMLİK DOĞRULAMA SONDASI (opsiyonel, VARSAYILAN OLARAK KAPALI)
+
+   NEDEN SONDA, NEDEN DOĞRUDAN AÇMIYORUZ: Bu projede Firebase Authentication (Anonim Giriş)
+   DAHA ÖNCE denendi ve KALDIRILDI - çünkü uygulama telefonda content:// (dosyayı doğrudan
+   açma) protokolüyle çalıştığında signInAnonymously() çağrısının veritabanı bağlantısını
+   bloke ettiği görüldü. Sebebi şudur: content:// ve file:// "opak kaynak" sayılır; Firebase
+   Auth varsayılan olarak oturumu IndexedDB'de saklamaya çalışır ve opak kaynakta bu erişim
+   engellendiği için çağrı hiç sonuçlanmaz, asılı kalır.
+   O yüzden kimlik doğrulamayı doğrudan açmak, uygulamayı YENİDEN bozma riski taşır.
+
+   BU SONDA NE YAPAR: Kimlik doğrulamanın BU CİHAZDA çalışıp çalışmadığını, uygulamanın
+   normal işleyişine HİÇ dokunmadan ölçer. Üç güvenlik önlemi vardır:
+     1. Varsayılan KAPALIDIR - yalnızca yönetici test için açtığında çalışır.
+     2. Veritabanı bağlantısı bu koddan ÖNCE ve BAĞIMSIZ kurulur; sonda başarısız olsa,
+        hatta hiç sonuçlanmasa bile uygulama bugünkü gibi çalışmaya devam eder.
+     3. Oturum kalıcılığı NONE seçilir (IndexedDB'ye hiç dokunulmaz) - önceki denemenin
+        asıl takıldığı nokta muhtemelen buydu; bu haliyle content:// üzerinde de
+        sonuçlanma ihtimali vardır.
+   Sonuç (başarılı / hata kodu / zaman aşımı) cihaz kartına yazılır, böylece yönetici
+   "hangi cihazlarda kimlik doğrulama çalışıyor?" sorusunu gerçek veriyle cevaplayabilir.
+   KURALLAR ANCAK bu test yeterli cihazda BAŞARILI dönerse "auth != null" yapılmalıdır.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+window._authSonda={durum:'kapalı',hata:null,uid:null,ms:null,kaynak:location.protocol};
+(function kimlikDogrulamaSondasi(){
+  var acik=false;
+  try{acik=localStorage.getItem('diag_authSonda')==='1';}catch(e){}
+  if(!acik)return;
+  var t0=Date.now(),bitti=false;
+  function bitir(durum,hata,uid){
+    if(bitti)return; bitti=true;
+    window._authSonda={durum:durum,hata:hata||null,uid:uid||null,ms:Date.now()-t0,kaynak:location.protocol};
+    try{if(window.DiagCore&&DiagCore.kaydet)
+      DiagCore.kaydet('pt_auth',durum==='başarılı'?'bilgi':'hata','Kimlik doğrulama sondası: '+durum,window._authSonda);
+    }catch(e){}
+  }
+  window._authSonda.durum='deneniyor';
+  // SDK yalnızca BURADA, test açıkken yüklenir. Normal kullanıcıda hiç indirilmez ve
+  // veritabanı bağlantısı hiçbir şekilde etkilenmez.
+  function sdkYukle(){
+    return new Promise(function(res,rej){
+      if(window.firebase&&firebase.auth)return res();
+      var sc=document.createElement('script');
+      sc.src='https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js';
+      sc.onload=function(){res();};
+      sc.onerror=function(){rej(new Error('firebase-auth SDK indirilemedi'));};
+      document.head.appendChild(sc);
+    });
+  }
+  try{
+    // Asılı kalırsa sonsuza kadar beklemeyelim - 8 saniyede sonuç yoksa zaman aşımı yazılır.
+    setTimeout(function(){bitir('zaman-aşımı','8 saniyede sonuç alınamadı (muhtemelen opak kaynak/IndexedDB engeli)');},8000);
+    sdkYukle().then(function(){
+    var auth=firebase.auth();
+    return Promise.resolve(auth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function(){}))
+      .then(function(){return auth.signInAnonymously();})
+      .then(function(c){bitir('başarılı',null,(c&&c.user&&c.user.uid)||null);});
+    }).catch(function(e){bitir('hata',(e&&(e.code||e.message))||'bilinmeyen hata');});
+  }catch(e){bitir('hata',(e&&e.message)||'bilinmeyen hata');}
+})();
+
 // NOT: Bu projede daha önce Firebase Authentication (Anonim Giriş) ile veritabanı güvenlik
 // kurallarını sıkılaştırma denendi, ancak content:// (telefondan doğrudan dosya açma)
 // protokolünde signInAnonymously() çağrısının kendisi veritabanı bağlantısını bloke ettiği
@@ -17830,6 +17902,11 @@ window.voteMvp=function(matchId,player){
         marka:DEV_INFO.marka||null,model:DEV_INFO.model||null,
         platform:DEV_INFO.platform||null,platformSurum:DEV_INFO.platformSurum||null,
         tarayici:DEV_INFO.tarayici||null,giris:girisYontemiCoz(),ua:DEV_INFO.ua||null,
+        // Kimlik doğrulama sondasının bu cihazdaki sonucu (bkz. _authSonda). Kurallar
+        // "auth != null" yapılmadan ÖNCE bu alanın yeterli cihazda "başarılı" olması gerekir.
+        kimlikDogrulama:(window._authSonda&&window._authSonda.durum)||'kapalı',
+        kimlikHata:(window._authSonda&&window._authSonda.hata)||null,
+        kaynakProtokol:location.protocol,
         kullanici:whoAmI(),app:APP,appLabel:APP_LABEL,sonGorulme:now
       }).catch(function(){});
     }catch(e){}
