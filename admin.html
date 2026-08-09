@@ -1141,6 +1141,11 @@ button{font-family:Outfit,sans-serif;cursor:pointer;border:none;border-radius:10
 var FB = {apiKey:"AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY",authDomain:"superlig-208e3.firebaseapp.com",databaseURL:"https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app",projectId:"superlig-208e3",storageBucket:"superlig-208e3.firebasestorage.app",messagingSenderId:"879221404148",appId:"1:879221404148:web:daae84d7187311400209a1"};
 firebase.initializeApp(FB);
 var db = firebase.database();
+/* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
+   ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
+   yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
+window.APP_BUILD='2026-08-09-A';
+
 
 var DIAG_AUTH_MOD='adm_settings';
 /* ═══ ANONİM GİRİŞ ═══════════════════════════════════════════════════════════════════════
@@ -1607,7 +1612,9 @@ var ADMIN_MENU_ITEMS=[
   {id:'diagnostics',icon:'🩺',label:'Hata Yakalama Kodları',fn:'openDiagnosticsManager'},
   // Veritabanına gömülü kalmış görsel/sesleri dış depolamaya taşıyan tek seferlik bakım aracı
   // (ölçülen sorun: lig verisinin %93'ü gömülü medyaydı ve her açılışta yeniden iniyordu).
-  {id:'mediamigration',icon:'🗜️',label:'Gömülü Medyayı Taşı (veri küçültme)',fn:'openMediaMigration'}
+  {id:'mediamigration',icon:'🗜️',label:'Gömülü Medyayı Taşı (veri küçültme)',fn:'openMediaMigration'},
+  // Yönetici kimliğini Firebase'e taşıma kurulumu (şifrelerin veritabanında açık durmasını bitirir)
+  {id:'adminaccount',icon:'👤',label:'Yönetici Hesabı (güvenlik)',fn:'openAdminAccountSetup'}
 ];
 // KULLANICI TALEBİ: "Admin panelindeki menüleri sıralaması herşeyi kapsıyor değil mi,
 // mesela yönetimdeki bir ayarı başka bir sekmeye atıyabilirim -> Her ikisi de - hem kartların
@@ -17392,6 +17399,137 @@ function _gomuluMedyaBul(kok){
   })(kok,'');
   return bulunan;
 }
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   YÖNETİCİ HESABI (Firebase kimliği)  ·  1. AŞAMA - sadece kurulum, hiçbir davranış değişmez
+
+   ÇÖZÜLMEK İSTENEN SORUN: Yönetici şifreleri şu anda veritabanında AÇIK METİN olarak duruyor
+   (globalConfig/masterAdminPassword ve leagues/{id}/adminAccounts). Veritabanını okuyabilen
+   herkes bu şifreleri okuyabilir - yani mevcut şifre koruması, korumak istediği verinin
+   içinde saklandığı için aslında koruma sağlamıyor. Depo herkese açık olduğundan admin
+   panelinin adresi de gizli değil.
+   Bu tasarımın kendisi kusurlu: giriş kontrolü tarayıcıda yapıldığı sürece şifrenin
+   istemciye ulaşması ZORUNLUDUR. Tek gerçek çözüm, kimlik doğrulamayı Firebase'e devretmek
+   ve yetkiyi VERİTABANI KURALLARINDA tanımlamaktır - böylece yetkisiz bir yazma isteği
+   tarayıcıda değil, SUNUCUDA reddedilir.
+
+   BU EKRAN NE YAPAR: Yöneticiye bir Firebase hesabı (e-posta + şifre) oluşturur veya o
+   hesapla giriş yaptırır, ardından kimlik numarasını (uid) gösterir. Kurallar yalnızca
+   `admins/{uid}` listesindeki kimliklere yazma izni verecek şekilde sıkılaştırılacaktır.
+   ŞU AN HİÇBİR ŞEY DEĞİŞMEZ: mevcut şifreli giriş aynen çalışmaya devam eder. Bu ekran
+   sadece kimliği hazırlar; kurallar ancak siz doğruladıktan sonra sıkılaştırılır. */
+function _authVar(){return !!(window.firebase&&firebase.auth&&window._authOrtamUygun);}
+function _mevcutKimlik(){
+  try{var u=firebase.auth().currentUser;return u||null;}catch(e){return null;}
+}
+function openAdminAccountSetup(){
+  if(!_authVar()){
+    openSheet('👤 Yönetici Hesabı',
+      '<div style="font-size:.72rem;line-height:1.6">⛔ Bu ekran yalnızca site <b>https://</b> adresinden açıldığında çalışır. '
+      +'Şu anki açılış: <b>'+escHtml(location.protocol)+'</b><br><br>'
+      +'Lütfen paneli <code>https://azataslan065-png.github.io/futbol-ligi/</code> altındaki adresten açın.</div>',
+      'openAdminAccountSetup');
+    return;
+  }
+  var u=_mevcutKimlik();
+  var anonim=!u||u.isAnonymous;
+  var uid=u?u.uid:'';
+  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.8rem">'
+    +'Yönetici şifreleri şu anda <b>veritabanında açık metin</b> duruyor; veritabanını okuyabilen herkes onları görebilir. '
+    +'Yani şifre koruması, korumaya çalıştığı verinin içinde saklandığı için gerçek bir koruma sağlamıyor.<br><br>'
+    +'Kalıcı çözüm: yönetici kimliğini Firebase\'e taşımak. O zaman yetkisiz bir yazma isteği tarayıcıda değil, '
+    +'<b>sunucuda</b> reddedilir - panelin adresini bilen biri bile hiçbir şey değiştiremez.<br><br>'
+    +'<b>Bu ekran şu an hiçbir şeyi değiştirmez.</b> Sadece kimliği hazırlar.'
+    +'</div>'
+    +'<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .7rem;margin-bottom:.8rem">'
+    +'<div style="font-size:.72rem;font-weight:800;margin-bottom:.3rem">Şu anki kimlik</div>'
+    +'<div style="font-size:.64rem;line-height:1.7">'
+    +(anonim
+      ? 'Durum: <b style="color:#fbbf24">anonim</b> (herkes gibi - yönetici yetkisi yok)'
+      : 'Durum: <b style="color:#22c55e">'+escHtml(u.email||'e-posta yok')+'</b>')
+    +(uid?'<br>Kimlik no: <b style="word-break:break-all">'+escHtml(uid)+'</b>':'')
+    +'</div></div>';
+  if(anonim){
+    html+='<div style="font-size:.72rem;font-weight:800;margin-bottom:.4rem">Yönetici hesabıyla giriş</div>'
+      +'<div class="field"><span class="lbl">E-posta</span><input id="admAcctEmail" type="email" placeholder="yonetici@ornek.com" autocomplete="username"/></div>'
+      +'<div class="field" style="margin-top:.4rem"><span class="lbl">Şifre</span><input id="admAcctPw" type="password" placeholder="en az 6 karakter" autocomplete="current-password"/></div>'
+      +'<div style="display:flex;gap:.4rem;margin-top:.6rem">'
+      +'<button class="btn bp" onclick="adminAccountSignIn()" style="flex:1">🔑 Giriş Yap</button>'
+      +'<button class="btn bgh" onclick="adminAccountCreate()" style="flex:1">➕ Hesap Oluştur</button>'
+      +'</div>'
+      +'<div id="admAcctMsg" style="font-size:.66rem;margin-top:.6rem;line-height:1.6"></div>'
+      +'<div style="font-size:.62rem;color:var(--mu);line-height:1.6;margin-top:.7rem">'
+      +'İlk kez kuruyorsanız <b>Hesap Oluştur</b> deyin. E-postanın gerçek olması gerekmez, '
+      +'ama unutmayacağınız bir şey olsun - şifre sıfırlama e-postası ancak gerçek adrese gider.<br><br>'
+      +'Not: Firebase Console → Authentication → Sign-in method bölümünde <b>Email/Password</b> yönteminin açık olması gerekir.'
+      +'</div>';
+  }else{
+    html+='<div id="admAcctMsg" style="font-size:.66rem;margin-bottom:.6rem;line-height:1.6">⏳ Yetki listesi kontrol ediliyor...</div>'
+      +'<div style="background:var(--s3);border-radius:10px;padding:.6rem .7rem;font-size:.64rem;line-height:1.7;margin-bottom:.7rem">'
+      +'<b>Sıradaki adım:</b> Bu kimliği yönetici listesine ekleyin.<br>'
+      +'Firebase Console → Realtime Database → Data → kök dizinde <code>admins</code> düğümü oluşturun ve içine:<br>'
+      +'<b style="word-break:break-all">'+escHtml(uid)+'</b> : <b>true</b>'
+      +'</div>'
+      +'<button class="btn bgh" onclick="adminAccountCopyUid()" style="width:100%;margin-bottom:.4rem">📋 Kimlik No\'yu Kopyala</button>'
+      +'<button class="btn bgh" onclick="adminAccountSignOut()" style="width:100%">🚪 Bu Hesaptan Çık (anonime dön)</button>';
+  }
+  openSheet('👤 Yönetici Hesabı',html,'openAdminAccountSetup');
+  if(!anonim)adminAccountCheckList(uid);
+}
+function _admAcctMsg(html){var e=qs('admAcctMsg');if(e)e.innerHTML=html;}
+function adminAccountCheckList(uid){
+  db.ref('admins/'+uid).once('value').then(function(sn){
+    if(sn.val())_admAcctMsg('<b style="color:#22c55e">✅ Bu kimlik yönetici listesinde.</b> Kurallar sıkılaştırıldığında yazma yetkiniz olacak.');
+    else _admAcctMsg('<b style="color:#fbbf24">⚠️ Bu kimlik henüz yönetici listesinde değil.</b> Aşağıdaki adımı uygulayın.');
+  }).catch(function(e){
+    _admAcctMsg('<b style="color:#f87171">Liste okunamadı:</b> '+escHtml((e&&e.message)||'bilinmeyen hata'));
+  });
+}
+function adminAccountSignIn(){
+  var em=(qs('admAcctEmail')||{}).value,pw=(qs('admAcctPw')||{}).value;
+  if(!em||!pw){_admAcctMsg('<b style="color:#f87171">E-posta ve şifre girin.</b>');return;}
+  _admAcctMsg('⏳ Giriş yapılıyor...');
+  firebase.auth().signInWithEmailAndPassword(em.trim(),pw)
+    .then(function(){toast('✅ Yönetici hesabıyla giriş yapıldı');openAdminAccountSetup();})
+    .catch(function(e){_admAcctMsg('<b style="color:#f87171">Giriş başarısız:</b> '+escHtml(_authHataTr(e)));});
+}
+function adminAccountCreate(){
+  var em=(qs('admAcctEmail')||{}).value,pw=(qs('admAcctPw')||{}).value;
+  if(!em||!pw){_admAcctMsg('<b style="color:#f87171">E-posta ve şifre girin.</b>');return;}
+  if(pw.length<6){_admAcctMsg('<b style="color:#f87171">Şifre en az 6 karakter olmalı.</b>');return;}
+  _admAcctMsg('⏳ Hesap oluşturuluyor...');
+  firebase.auth().createUserWithEmailAndPassword(em.trim(),pw)
+    .then(function(){toast('✅ Yönetici hesabı oluşturuldu');openAdminAccountSetup();})
+    .catch(function(e){_admAcctMsg('<b style="color:#f87171">Oluşturulamadı:</b> '+escHtml(_authHataTr(e)));});
+}
+function adminAccountSignOut(){
+  firebase.auth().signOut().then(function(){
+    // Anonim kimliğe geri dönülür - uygulama kimliksiz kalmamalı.
+    return firebase.auth().signInAnonymously();
+  }).then(function(){toast('Anonim kimliğe dönüldü');openAdminAccountSetup();})
+   .catch(function(e){toast('❌ '+_authHataTr(e),'er');});
+}
+function adminAccountCopyUid(){
+  var u=_mevcutKimlik();if(!u)return;
+  if(typeof admGlobalCopyText==='function')admGlobalCopyText(u.uid,'📋 Kimlik no kopyalandı');
+  else if(navigator.clipboard)navigator.clipboard.writeText(u.uid).then(function(){toast('📋 Kopyalandı');});
+}
+// Firebase hata kodlarını anlaşılır Türkçeye çevirir - ham kodlar kullanıcıya yardımcı olmuyor.
+function _authHataTr(e){
+  var k=(e&&e.code)||'';
+  var harita={
+    'auth/operation-not-allowed':'E-posta/şifre yöntemi kapalı. Firebase Console → Authentication → Sign-in method bölümünden açın.',
+    'auth/email-already-in-use':'Bu e-posta zaten kayıtlı. "Giriş Yap" deneyin.',
+    'auth/invalid-email':'E-posta biçimi geçersiz.',
+    'auth/weak-password':'Şifre çok zayıf (en az 6 karakter).',
+    'auth/wrong-password':'Şifre hatalı.',
+    'auth/user-not-found':'Bu e-postayla kayıtlı hesap yok. Önce "Hesap Oluştur" deyin.',
+    'auth/invalid-credential':'E-posta veya şifre hatalı.',
+    'auth/too-many-requests':'Çok fazla deneme yapıldı, bir süre bekleyin.',
+    'auth/network-request-failed':'Ağ hatası - bağlantınızı kontrol edin.'
+  };
+  return harita[k]||((e&&e.message)||'bilinmeyen hata');
+}
+
 function openMediaMigration(){
   if(!hasSubperm('league_danger')){toast('🔒 Bu işlem için yetkiniz yok','er');return;}
   var bulunan=_gomuluMedyaBul(S);
@@ -17479,6 +17617,8 @@ function runMediaMigration(){
 
 function openDiagnosticsManager(){
   var html=''
+    // Yüklü dosya sürümü: hangi sürümün yayında olduğunu ekrandan doğrulamak için.
+    +'<div style="background:var(--s3);border-radius:8px;padding:.35rem .5rem;margin-bottom:.6rem;font-size:.6rem;color:var(--mu)">📦 Yüklü sürüm: <b style="color:var(--tx)">'+escHtml(window.APP_BUILD||'bilinmiyor')+'</b></div>'
     +'<div style="font-size:.7rem;color:var(--mu);line-height:1.55;margin-bottom:.8rem">'
     +'Her sekme ve özellik için ayrı bir hata yakalama modülü vardır. Bir modülü <b>açtığınızda</b> '
     +'o bölümdeki hatalar, yavaş çalışan işlemler ve beklenmedik durumlar kaydedilmeye başlar; '
