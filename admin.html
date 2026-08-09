@@ -275,6 +275,7 @@ button{font-family:Outfit,sans-serif;cursor:pointer;border:none;border-radius:10
       </div>
     </div>
     <button class="btn bp" onclick="doLogin()" style="width:100%;padding:.62rem;font-size:.88rem;margin-top:.5rem">Giriş Yap</button>
+    <div id="loginSurumRozeti" style="text-align:center;margin-top:.7rem"></div>
     <!-- KULLANICI TALEBİ: Parmak izi/Yüz tanıma (WebAuthn) sistemi TAMAMEN kaldırıldı -
          dosya content://ile (yerel dosya olarak) açıldığında bu özellik tarayıcı güvenlik
          kısıtlaması nedeniyle ÇALIŞMIYOR ve kafa karıştırıcı bir hata bandı gösteriyordu
@@ -1152,7 +1153,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-E';
+window.APP_BUILD='2026-08-09-G';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1166,6 +1167,42 @@ var DIAG_AUTH_MOD='adm_settings';
    ORTAM UYGUN DEĞİLSE (dosyadan açılmış kopya): SDK hiç yüklenmediği için bu blok sessizce
    atlanır ve uygulama bugünkü gibi çalışır - ama kurallar sıkılaştırıldıysa o kopya veriye
    ulaşamaz. Bu bilinçli bir sonuçtur: dağıtım artık dosya değil, adres üzerinden yapılmalıdır. */
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   APP CHECK  ·  "kimliği kim alabilir?" sorusunun cevabı
+
+   NEDEN GEREKLİ: Kurallar artık kimlik istiyor - ama anonim kimliği HERKES alabilir.
+   Firebase ayarları bu dosyanın içinde açık yazdığı için, teknik bilgisi olan biri kendi
+   betiğinden anonim kimlik alıp verinizi OKUYABİLİR. Kural katmanı bunu engelleyemez;
+   çünkü kurallar "kim" olduğuna bakar, "nereden geldiğine" değil.
+   APP CHECK tam olarak bu boşluğu kapatır: reCAPTCHA ile isteğin GERÇEKTEN sizin sitenizden
+   geldiğini doğrular. Doğrulanmayan istekler, geçerli bir kimlik taşısa bile reddedilir.
+
+   KURULUM (tek seferlik, ~10 dakika):
+     1. Firebase Console → App Check → Realtime Database → Register
+     2. Sağlayıcı olarak "reCAPTCHA v3" seçin, site anahtarını alın
+     3. Aşağıdaki APP_CHECK_SITE_KEY değerini o anahtarla değiştirin ve dosyayı yükleyin
+     4. Birkaç gün "Monitor" modunda bırakıp Console'daki isteklerin doğrulandığını görün
+     5. Ancak ondan sonra "Enforce" edin
+   ANAHTAR BOŞ BIRAKILIRSA bu blok hiç çalışmaz ve uygulama bugünkü gibi davranır - yani
+   yanlışlıkla kimseyi dışarıda bırakmaz. */
+window.APP_CHECK_SITE_KEY='6LepCX0tAAAAAZszxjb-6NJi4fwsS88-ypDzyUB';   // reCAPTCHA v3 SİTE anahtarı (herkese açık olması normaldir;
+                                                                // gizli anahtar yalnızca Firebase'de durur, buraya ASLA yazılmaz)
+(function appCheckBaslat(){
+  if(!window.APP_CHECK_SITE_KEY)return;
+  if(!window._authOrtamUygun)return;   // dosyadan açılan kopyalarda App Check çalışmaz
+  try{
+    var sc=document.createElement('script');
+    sc.src='https://www.gstatic.com/firebasejs/10.12.0/firebase-app-check-compat.js';
+    sc.onload=function(){
+      try{
+        firebase.appCheck().activate(window.APP_CHECK_SITE_KEY,true);
+        window._appCheckAktif=true;
+      }catch(e){window._appCheckHata=(e&&e.message)||'etkinleştirilemedi';}
+    };
+    sc.onerror=function(){window._appCheckHata='App Check SDK indirilemedi';};
+    document.head.appendChild(sc);
+  }catch(e){window._appCheckHata=(e&&e.message)||'bilinmeyen hata';}
+})();
 window._authSonda={durum:'ortam-uygun-değil',hata:null,uid:null,ms:null,kaynak:location.protocol};
 (function anonimGiris(){
   if(!window._authOrtamUygun)return;
@@ -1634,7 +1671,9 @@ var ADMIN_MENU_ITEMS=[
   // Yönetici kimliğini Firebase'e taşıma kurulumu (şifrelerin veritabanında açık durmasını bitirir)
   // Yönetici kimliği: hangi hesapla girildiğini gösterir, oturumu kapatır ve yeni bir
   // yönetici eklemek için gereken kimlik numarasını verir - kalıcı bir araçtır.
-  {id:'adminaccount',icon:'👤',label:'Yönetici Hesabı (güvenlik)',fn:'openAdminAccountSetup'}
+  {id:'adminaccount',icon:'👤',label:'Yönetici Hesabı (güvenlik)',fn:'openAdminAccountSetup'},
+  // Yeni yönetici için e-posta + şifre oluşturur ve yetkilendirir
+  {id:'newadmin',icon:'➕',label:'Yeni Yönetici Hesabı Ekle',fn:'openNewAdminAccount'}
 ];
 // KULLANICI TALEBİ: "Admin panelindeki menüleri sıralaması herşeyi kapsıyor değil mi,
 // mesela yönetimdeki bir ayarı başka bir sekmeye atıyabilirim -> Her ikisi de - hem kartların
@@ -2560,6 +2599,10 @@ function doLogout(){
 }
 qs('pwInp').onkeydown=function(e){if(e.key==='Enter')doLogin();};
 if(qs('admEmailInp'))qs('admEmailInp').onkeydown=function(e){if(e.key==='Enter')doLogin();};
+// Giriş ekranındaki sürüm rozeti
+setTimeout(function(){
+  try{var el=qs('loginSurumRozeti');if(el)el.innerHTML=surumRozetiHtml();}catch(e){}
+},300);
 // E-posta alanı otomatik doldurulur: önce en son kullanılan adres (cihazda saklanır),
 // sonra açıksa mevcut oturumun adresi. Böylece yönetici sadece şifresini yazar.
 (function eskiEpostayiDoldur(){
@@ -8810,7 +8853,9 @@ function deleteSeasonTemplate(tid){
 }
 function openArchive(){
   var archives=S.archives||[];
-  var html='<div class="field"><span class="lbl">Arşiv Adı</span><input id="archiveNameInp" placeholder="'+(S.season||'Bu Sezon')+'" value="'+(S.season||'').replace(/"/g,'&quot;')+'"/></div>'
+  // Sezon ekle/düzenle/sil/bitir işlemlerinin toplandığı ekran - sürüm rozeti burada durur.
+  var html=surumRozetiHtml('margin-bottom:.6rem;')
+    +'<div class="field"><span class="lbl">Arşiv Adı</span><input id="archiveNameInp" placeholder="'+(S.season||'Bu Sezon')+'" value="'+(S.season||'').replace(/"/g,'&quot;')+'"/></div>'
     +'<button class="btn by" onclick="doArchiveSeason()" style="width:100%;margin-top:.5rem;margin-bottom:.7rem">📦 Arşivle ve Yeni Sezon Başlat</button>';
   if(archives.length){
     html+='<div style="font-size:.66rem;font-weight:800;color:var(--mu);margin-bottom:.4rem;text-transform:uppercase;letter-spacing:.04em">Geçmiş Sezonlar</div>';
@@ -17457,6 +17502,30 @@ function openDiagBadgeMap(){
    ═══════════════════════════════════════════════════════════════════════════════════════ */
 // Yönetici Hesabı ekranının kullandığı iki küçük yardımcı. (Bakım araçları silinirken
 // yanlışlıkla bunlar da silinmişti; ekran açılmıyordu.)
+/* ── SÜRÜM ROZETİ ─────────────────────────────────────────────────────────────────────
+   KULLANICI TALEBİ: "İlk girişte 'Yüklü sürüm: ... - yeni' görünecek, ikinci ve sonraki
+   girişlerde sadece 'Yüklü sürüm: ...' olarak gösterilecek."
+   NASIL: Görülen sürüm cihazda saklanır. Saklanan sürüm ile çalışan sürüm farklıysa bu
+   AÇILIŞ o sürümün ilk açılışıdır; rozet "yeni" etiketiyle çıkar ve sürüm kaydedilir.
+   Aynı sürümle bir daha açıldığında etiket görünmez. Böylece güncellemenin yüklendiği
+   fark edilir, ama her açılışta dikkat dağıtmaz. */
+function surumRozetiHtml(stil){
+  var v=window.APP_BUILD||'bilinmiyor';
+  var yeniMi=false;
+  try{
+    var gorulen=localStorage.getItem('gorulen_surum');
+    yeniMi=(gorulen!==v);
+    if(yeniMi)localStorage.setItem('gorulen_surum',v);
+  }catch(e){}
+  // Aynı açılışta birden fazla yerde gösterilirse hepsinde "yeni" çıksın diye, bu açılışta
+  // yeni sayılıp sayılmadığı bir kez hesaplanır ve sayfa boyunca korunur.
+  if(window._surumYeniBuAcilis===undefined)window._surumYeniBuAcilis=yeniMi;
+  var yeni=window._surumYeniBuAcilis;
+  return '<div style="'+(stil||'')+'font-size:.6rem;color:var(--mu);display:inline-flex;align-items:center;gap:.35rem">'
+    +'<span>📦 Yüklü sürüm: <b style="color:var(--tx)">'+v+'</b></span>'
+    +(yeni?'<span style="background:#22c55e;color:#04140a;border-radius:6px;padding:0 .3rem;font-size:.52rem;font-weight:900">YENİ</span>':'')
+    +'</div>';
+}
 function _authVar(){return !!(window.firebase&&firebase.auth&&window._authOrtamUygun);}
 function _mevcutKimlik(){
   try{var u=firebase.auth().currentUser;return u||null;}catch(e){return null;}
@@ -17471,6 +17540,111 @@ function _mevcutKimlik(){
        Firebase hesabıyla yapıldığından silinecek şifre kalmadı.
    Menüde durmaları yanıltıcı olurdu: yapacak işi olmayan, yanlışlıkla çalıştırılabilecek
    düğmeler. Gerekirse sürüm geçmişinden geri getirilebilirler. */
+/* ── YENİ YÖNETİCİ HESABI OLUŞTURMA ───────────────────────────────────────────────────
+   KULLANICI TALEBİ: "Admin, başka bir hesap şifresi oluştururken e-postayı da oluşturabilir."
+   TEKNİK ENGEL VE ÇÖZÜMÜ: Firebase'de createUserWithEmailAndPassword() çağrısı, hesabı
+   oluşturduktan sonra SİZİ O HESABA GİRİŞ YAPTIRIR - yani yeni bir yönetici eklerken kendi
+   oturumunuz düşer. Bunu önlemek için ikinci bir Firebase uygulama örneği açılır; hesap
+   ORADA oluşturulur, o örnekten çıkış yapılır ve sizin oturumunuza hiç dokunulmaz.
+   YETKİ: Hesabı oluşturmak yetki vermez. Yeni kimlik `admins` listesine de eklenir; kurallar
+   yazma iznini yalnızca o listeye bakarak verir. */
+var _ikincilApp=null;
+function _ikincilAppAl(){
+  if(_ikincilApp)return _ikincilApp;
+  try{
+    var mevcut=firebase.apps.filter(function(a){return a.name==='hesapOlusturucu';})[0];
+    _ikincilApp=mevcut||firebase.initializeApp(firebase.app().options,'hesapOlusturucu');
+    return _ikincilApp;
+  }catch(e){return null;}
+}
+function openNewAdminAccount(){
+  var u=_mevcutKimlik();
+  if(!_authVar()||!u||u.isAnonymous){
+    openSheet('➕ Yeni Yönetici Hesabı',
+      '<div style="font-size:.72rem;line-height:1.6">⛔ Önce kendi yönetici hesabınızla giriş yapmalısınız. '
+      +'Yeni yönetici ekleme yetkisi yalnızca giriş yapmış yöneticilere aittir.</div>','openNewAdminAccount');
+    return;
+  }
+  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.8rem">'
+    +'Yeni bir yönetici için <b>e-posta ve şifre</b> oluşturur, ardından bu kimliği yönetici '
+    +'listesine ekler. Oluşturduğunuz kişi bu bilgilerle panele girebilir ve <b>tam yetkiyle</b> çalışır.<br><br>'
+    +'Kendi oturumunuz etkilenmez - işlem ayrı bir bağlantı üzerinden yapılır.'
+    +'</div>'
+    +'<div class="field"><span class="lbl">E-posta</span><input id="yeniAdmEmail" type="email" placeholder="ikinci.yonetici@ornek.com" autocomplete="off"/></div>'
+    +'<div class="field" style="margin-top:.4rem"><span class="lbl">Şifre</span><input id="yeniAdmPw" type="text" placeholder="en az 6 karakter" autocomplete="off"/></div>'
+    +'<div style="font-size:.6rem;color:var(--mu);margin-top:.3rem;line-height:1.5">Şifre açık gösterilir; oluşturduktan sonra ilgili kişiye iletin. Firebase en az 6 karakter şart koşar.</div>'
+    +'<button class="btn bp" onclick="createNewAdminAccount()" style="width:100%;margin-top:.7rem">➕ Hesabı Oluştur ve Yetkilendir</button>'
+    +'<div id="yeniAdmMsg" style="font-size:.66rem;margin-top:.6rem;line-height:1.6"></div>'
+    +'<div id="yeniAdmListe" style="margin-top:.9rem"></div>';
+  openSheet('➕ Yeni Yönetici Hesabı',html,'openNewAdminAccount');
+  renderAdminList();
+}
+function renderAdminList(){
+  var box=qs('yeniAdmListe');if(!box)return;
+  db.ref('admins').once('value').then(function(sn){
+    var v=sn.val()||{};
+    var ids=Object.keys(v).filter(function(k){return v[k];});
+    var benim=(_mevcutKimlik()||{}).uid;
+    box.innerHTML='<div style="font-size:.66rem;font-weight:800;color:var(--mu);margin-bottom:.4rem">Yetkili kimlikler ('+ids.length+')</div>'
+      +ids.map(function(id){
+        var ben=(id===benim);
+        return '<div style="display:flex;align-items:center;gap:.4rem;background:var(--s3);border-radius:9px;padding:.4rem .55rem;margin-bottom:.3rem">'
+          +'<span style="flex:1;min-width:0;font-size:.58rem;word-break:break-all;color:var(--tx)">'+escHtml(id)+(ben?' <b style="color:#22c55e">(siz)</b>':'')+'</span>'
+          +(ben?'':'<button onclick="removeAdminUid(\''+escHtml(id)+'\')" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.35);border-radius:8px;padding:.25rem .5rem;min-height:28px;color:#f87171;font-size:.56rem;font-weight:800;cursor:pointer">Yetkiyi Al</button>')
+          +'</div>';
+      }).join('')
+      +'<div style="font-size:.58rem;color:var(--mu);margin-top:.3rem;line-height:1.5">Yetkiyi almak hesabı silmez, yalnızca yazma iznini kaldırır. Hesabı tamamen silmek için Firebase Console → Authentication.</div>';
+  }).catch(function(e){
+    box.innerHTML='<div style="font-size:.64rem;color:#f87171">Liste okunamadı: '+escHtml((e&&e.message)||'')+'</div>';
+  });
+}
+function createNewAdminAccount(){
+  var em=(qs('yeniAdmEmail')||{}).value,pw=(qs('yeniAdmPw')||{}).value;
+  var yaz=function(h){var e=qs('yeniAdmMsg');if(e)e.innerHTML=h;};
+  em=(em||'').trim();
+  if(!em||!pw){yaz('<b style="color:#f87171">E-posta ve şifre girin.</b>');return;}
+  if(pw.length<6){yaz('<b style="color:#f87171">Firebase en az 6 karakterlik şifre şart koşar.</b>');return;}
+  var app=_ikincilAppAl();
+  if(!app){yaz('<b style="color:#f87171">İkincil bağlantı açılamadı.</b>');return;}
+  yaz('⏳ Hesap oluşturuluyor...');
+  var ikincilAuth=app.auth();
+  ikincilAuth.createUserWithEmailAndPassword(em,pw)
+    .then(function(c){
+      var uid=c&&c.user&&c.user.uid;
+      // Kimlik oluştu; şimdi YETKİ verilir. Bu iki adım ayrıdır: hesabı olan herkes
+      // yönetici değildir, yalnızca listeye eklenenler yazabilir.
+      return db.ref('admins/'+uid).set(true).then(function(){return uid;});
+    })
+    .then(function(uid){
+      // İkincil bağlantıdan çıkılır ki o oturum ortalıkta kalmasın.
+      return ikincilAuth.signOut().catch(function(){}).then(function(){return uid;});
+    })
+    .then(function(uid){
+      logAction('➕ Yeni yönetici hesabı oluşturuldu: '+em);
+      yaz('<b style="color:#22c55e">✅ Hesap oluşturuldu ve yetkilendirildi.</b><br>'
+        +'E-posta: <b>'+escHtml(em)+'</b><br>Şifre: <b>'+escHtml(pw)+'</b><br>'
+        +'<span style="color:var(--mu)">Bu bilgileri ilgili kişiye iletin. Şifreyi kendisi değiştirebilir.</span>');
+      if(qs('yeniAdmEmail'))qs('yeniAdmEmail').value='';
+      if(qs('yeniAdmPw'))qs('yeniAdmPw').value='';
+      renderAdminList();
+      toast('✅ Yeni yönetici eklendi');
+    })
+    .catch(function(e){
+      ikincilAuth.signOut().catch(function(){});
+      yaz('<b style="color:#f87171">❌ '+escHtml(typeof _authHataTr==='function'?_authHataTr(e):((e&&e.message)||'oluşturulamadı'))+'</b>');
+    });
+}
+function removeAdminUid(uid){
+  dlg('🔑','Yetkiyi Al','Bu kimliğin yönetici yetkisi kaldırılacak. Hesap silinmez, ama artık hiçbir veriyi değiştiremez.','Yetkiyi Al','dor').then(function(ok){
+    if(!ok)return;
+    db.ref('admins/'+uid).remove().then(function(){
+      logAction('🔑 Yönetici yetkisi kaldırıldı: '+uid);
+      toast('✅ Yetki kaldırıldı');
+      renderAdminList();
+    }).catch(function(e){toast('❌ '+((e&&e.message)||'kaldırılamadı'),'er');});
+  });
+}
+
 function openAdminAccountSetup(){
   if(!_authVar()){
     openSheet('👤 Yönetici Hesabı',
