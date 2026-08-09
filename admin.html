@@ -275,6 +275,11 @@ button{font-family:Outfit,sans-serif;cursor:pointer;border:none;border-radius:10
       </div>
     </div>
     <button class="btn bp" onclick="doLogin()" style="width:100%;padding:.62rem;font-size:.88rem;margin-top:.5rem">Giriş Yap</button>
+    <label style="display:flex;align-items:center;gap:.45rem;margin-top:.6rem;font-size:.7rem;color:var(--mu);cursor:pointer">
+      <input type="checkbox" id="admBeniHatirla" style="width:15px;height:15px;accent-color:var(--ac);cursor:pointer"/>
+      <span>Bu cihazda beni hatırla <span style="font-size:.6rem">(şifre sorulmadan girilir)</span></span>
+    </label>
+    <div style="font-size:.6rem;color:var(--mu);margin-top:.25rem;line-height:1.5">⚠️ Yalnızca size ait, kilitli bir cihazda işaretleyin - işaretlenirse cihazınıza erişen herkes panele girebilir.</div>
     <div id="loginSurumRozeti" style="text-align:center;margin-top:.7rem"></div>
     <!-- KULLANICI TALEBİ: Parmak izi/Yüz tanıma (WebAuthn) sistemi TAMAMEN kaldırıldı -
          dosya content://ile (yerel dosya olarak) açıldığında bu özellik tarayıcı güvenlik
@@ -1153,7 +1158,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-I';
+window.APP_BUILD='2026-08-09-J';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -2504,18 +2509,34 @@ function doLogin(){
         // Hesap doğru olsa bile YETKİ ayrı bir sorudur: kimlik yönetici listesinde mi?
         return db.ref('admins/'+uid).once('value').then(function(sn){
           if(!sn.val())throw new Error('Bu hesap yönetici listesinde değil. Firebase Console → Realtime Database → admins altına kimliğinizi ekleyin.');
-          return c;
+          // Yetki haritası: hesap kısıtlıysa yalnızca izin verilen menülere erişir.
+          return db.ref('adminPerms/'+uid).once('value').then(function(ps){
+            window._girisPerms=ps.val()||null;
+            return c;
+          }).catch(function(){window._girisPerms=null;return c;});
         });
       })
       .then(function(c){
         sessionStorage.setItem('adm','1');
-        sessionStorage.setItem('admRole','full');
-        sessionStorage.removeItem('admPerms');
+        var yp=window._girisPerms;
+        if(yp&&yp.role==='custom'&&yp.perms){
+          sessionStorage.setItem('admRole','custom');
+          sessionStorage.setItem('admPerms',JSON.stringify(yp.perms));
+        }else{
+          sessionStorage.setItem('admRole','full');
+          sessionStorage.removeItem('admPerms');
+        }
         try{sessionStorage.setItem('admName',email);}catch(e){}
         // KULLANICI TALEBİ: "Admin her yeni giriş yaptığında e-posta girmek zorunda olmasın,
         // şifre yeterli." - Başarılı girişten sonra e-posta cihazda saklanır ve giriş
         // ekranında otomatik doldurulur; kullanıcı yalnızca şifresini yazar.
         try{localStorage.setItem('adm_lastEmail',email);}catch(e){}
+        // "Beni hatırla" tercihi burada saklanır; otomatik giriş yalnızca buna bakar.
+        try{
+          var hk=qs('admBeniHatirla');
+          if(hk&&hk.checked)localStorage.setItem('adm_beniHatirla','1');
+          else localStorage.removeItem('adm_beniHatirla');
+        }catch(e){}
         localStorage.setItem('adm_curLeague',lid);
         qs('loginWrap').style.display='none';
         qs('appWrap').style.display='block';
@@ -2609,6 +2630,8 @@ setTimeout(function(){
   try{
     var kayitli=localStorage.getItem('adm_lastEmail');
     if(kayitli&&qs('admEmailInp')&&!qs('admEmailInp').value)qs('admEmailInp').value=kayitli;
+    var hk=qs('admBeniHatirla');
+    if(hk)hk.checked=(localStorage.getItem('adm_beniHatirla')==='1');
   }catch(e){}
 })();
 setTimeout(function(){
@@ -15731,6 +15754,16 @@ if(sessionStorage.getItem('adm')==='1'){
      giriş ekranı normal şekilde kalır.
      Not: Oturumu kapatmak isterseniz Ayarlar → Yönetici Hesabı → "Bu Hesaptan Çık". */
   (function otomatikYoneticiGirisi(){
+    /* GÜVENLİK DÜZELTMESİ (kullanıcı bildirdi: "admin şifre girmeden otomatik giriş
+       yapılıyor"): Bu davranış "her açılışta tekrar giriş yapmak zorunda kalıyorum"
+       şikayetini çözmek için eklenmişti, ama bedeli ağırdı: cihaza erişen HERKES paneli
+       şifresiz açabiliyordu. Artık otomatik giriş VARSAYILAN OLARAK KAPALIDIR ve yalnızca
+       yönetici giriş ekranındaki "Bu cihazda beni hatırla" kutusunu işaretlerse çalışır.
+       İşaretlenmediğinde her açılışta şifre sorulur - e-posta zaten dolu geldiği için
+       yalnızca şifre yazmak yeterlidir. */
+    var hatirla=false;
+    try{hatirla=localStorage.getItem('adm_beniHatirla')==='1';}catch(e){}
+    if(!hatirla)return;
     if(!(window.firebase&&firebase.auth&&window._authOrtamUygun))return;
     var denendi=false;
     firebase.auth().onAuthStateChanged(function(u){
@@ -15739,9 +15772,16 @@ if(sessionStorage.getItem('adm')==='1'){
       db.ref('admins/'+u.uid).once('value').then(function(sn){
         if(!sn.val())return;                     // kimliği var ama yönetici değil
         if(sessionStorage.getItem('adm')==='1')return;
+        return db.ref('adminPerms/'+u.uid).once('value').catch(function(){return {val:function(){return null;}};}).then(function(ps){
+        var yp=ps&&ps.val&&ps.val();
         sessionStorage.setItem('adm','1');
-        sessionStorage.setItem('admRole','full');
-        sessionStorage.removeItem('admPerms');
+        if(yp&&yp.role==='custom'&&yp.perms){
+          sessionStorage.setItem('admRole','custom');
+          sessionStorage.setItem('admPerms',JSON.stringify(yp.perms));
+        }else{
+          sessionStorage.setItem('admRole','full');
+          sessionStorage.removeItem('admPerms');
+        }
         try{sessionStorage.setItem('admName',u.email||'Yönetici');}catch(e){}
         var lid='';
         try{lid=localStorage.getItem('adm_curLeague')||'';}catch(e){}
@@ -15754,6 +15794,7 @@ if(sessionStorage.getItem('adm')==='1'){
         init();
         applyRoleRestrictions();checkBackupReminder();
         redirectToFirstAllowedTabIfNeeded();
+        });
       }).catch(function(){/* yetki okunamadıysa giriş ekranı kalır */});
     });
   })();
@@ -17608,13 +17649,43 @@ function openNewAdminAccount(){
     +'Kendi oturumunuz etkilenmez - işlem ayrı bir bağlantı üzerinden yapılır.'
     +'</div>'
     +'<div class="field"><span class="lbl">E-posta</span><input id="yeniAdmEmail" type="email" placeholder="ikinci.yonetici@ornek.com" autocomplete="off"/></div>'
+    +'<div style="font-size:.6rem;color:var(--mu);margin-top:.25rem;line-height:1.5">Gerçek bir adres olmak zorunda değil ama <b>geçerli biçimde</b> olmalı: türkçe karakter (ı, ğ, ş, ö, ü, ç) içeremez, sonu nokta ile bitemez ve noktadan sonra en az iki harf gelmelidir. Örnek: <code>mazlum@ekip.com</code></div>'
     +'<div class="field" style="margin-top:.4rem"><span class="lbl">Şifre</span><input id="yeniAdmPw" type="text" placeholder="en az 6 karakter" autocomplete="off"/></div>'
     +'<div style="font-size:.6rem;color:var(--mu);margin-top:.3rem;line-height:1.5">Şifre açık gösterilir; oluşturduktan sonra ilgili kişiye iletin. Firebase en az 6 karakter şart koşar.</div>'
-    +'<button class="btn bp" onclick="createNewAdminAccount()" style="width:100%;margin-top:.7rem">➕ Hesabı Oluştur ve Yetkilendir</button>'
+    +'<div style="font-size:.62rem;font-weight:800;color:var(--mu);margin:.8rem 0 .4rem;text-transform:uppercase">📋 Erişebileceği Menüler</div>'
+    +'<div style="font-size:.62rem;color:var(--mu);margin-bottom:.4rem;line-height:1.5">Hiçbir kutu işaretlenmezse hesap <b>tam yetkili</b> olur. Kısıtlamak için erişmesini istediğiniz işlemleri seçin.</div>'
+    +'<div id="yeniAdmPermGrid" style="margin-bottom:.7rem;max-height:300px;overflow-y:auto"></div>'
+    +'<button class="btn bp" onclick="createNewAdminAccount()" style="width:100%;margin-top:.2rem">➕ Hesabı Oluştur ve Yetkilendir</button>'
     +'<div id="yeniAdmMsg" style="font-size:.66rem;margin-top:.6rem;line-height:1.6"></div>'
     +'<div id="yeniAdmListe" style="margin-top:.9rem"></div>';
   openSheet('➕ Yeni Yönetici Hesabı',html,'openNewAdminAccount');
+  renderYeniAdmPermGrid();
   renderAdminList();
+}
+/* Yeni yönetici için izin ızgarası. Yönetim sekmesindeki ek hesap kartıyla AYNI tanımları
+   (ADMIN_MENU_DEFS + ADMIN_SUBPERM_DEFS) kullanır - böylece iki ayrı izin modeli oluşmaz ve
+   ileride bir izin eklendiğinde her iki ekranda birden görünür. */
+function renderYeniAdmPermGrid(){
+  var grid=qs('yeniAdmPermGrid'); if(!grid)return;
+  var custom=(S.customPageTabs||[]).map(function(t){return [t.id,'📄 '+(t.name||t.id)];});
+  var html=ADMIN_MENU_DEFS.map(function(d){
+    var subs=ADMIN_SUBPERM_DEFS[d[0]]||[];
+    var subsHtml=subs.map(function(sp){
+      return '<label style="display:flex;align-items:flex-start;gap:.4rem;padding:.35rem .5rem .35rem 1.2rem;font-size:.63rem;font-weight:600;color:var(--tx);cursor:pointer">'
+        +'<input type="checkbox" class="yeniAdmPermChk" value="'+sp[0]+'" style="width:14px;height:14px;accent-color:var(--ac);cursor:pointer;margin-top:2px;flex-shrink:0"/>'
+        +'<span><b style="font-weight:700">'+sp[1]+'</b><br/><span style="color:var(--mu);font-size:.57rem">'+sp[2]+'</span></span>'
+        +'</label>';
+    }).join('');
+    return '<div style="background:var(--s2);border-radius:9px;padding:.4rem;margin-bottom:.4rem">'
+      +'<div style="font-size:.67rem;font-weight:800;color:var(--ac);padding:.2rem .3rem .3rem">'+d[1]+' <span style="font-weight:600;color:var(--mu);font-size:.58rem">('+subs.length+' seçenek)</span></div>'
+      +subsHtml+'</div>';
+  }).join('');
+  html+=custom.map(function(d){
+    return '<label style="display:flex;align-items:center;gap:.4rem;background:var(--s2);border-radius:9px;padding:.5rem;margin-bottom:.4rem;font-size:.65rem;cursor:pointer">'
+      +'<input type="checkbox" class="yeniAdmPermChk" value="'+d[0]+'" style="width:15px;height:15px;accent-color:var(--ac);cursor:pointer"/>'+d[1]
+      +'</label>';
+  }).join('');
+  grid.innerHTML=html;
 }
 function renderAdminList(){
   var box=qs('yeniAdmListe');if(!box)return;
@@ -17638,9 +17709,29 @@ function renderAdminList(){
 function createNewAdminAccount(){
   var em=(qs('yeniAdmEmail')||{}).value,pw=(qs('yeniAdmPw')||{}).value;
   var yaz=function(h){var e=qs('yeniAdmMsg');if(e)e.innerHTML=h;};
-  em=(em||'').trim();
+  em=(em||'').trim().toLowerCase();
   if(!em||!pw){yaz('<b style="color:#f87171">E-posta ve şifre girin.</b>');return;}
+  /* E-POSTA BİÇİM KONTROLÜ (kullanıcı bildirdi: "E-posta biçimi geçersiz" hatası).
+     Firebase yalnızca "geçersiz" der, SEBEBİNİ söylemez. En sık iki sebep şudur ve ikisi de
+     denenen adreste vardı: (1) Türkçe karakter - "mazlumunhesabı" içindeki 'ı' harfi,
+     (2) sonu nokta ile biten alan adı - "123." gibi. Burada sebep tek tek söylenir. */
+  if(/[ığşöüçİĞŞÖÜÇ]/.test(em)){
+    yaz('<b style="color:#f87171">E-postada Türkçe karakter kullanılamaz.</b><br>ı, ğ, ş, ö, ü, ç harflerini İngilizce karşılıklarıyla yazın (ör. <code>mazlumunhesabi@ekip.com</code>).');
+    return;
+  }
+  if(/\s/.test(em)){yaz('<b style="color:#f87171">E-posta boşluk içeremez.</b>');return;}
+  if(!/^[^@]+@[^@\s]+\.[a-z]{2,}$/.test(em)){
+    yaz('<b style="color:#f87171">E-posta biçimi geçersiz.</b><br>'
+      +'Doğru biçim: <code>isim@alanadi.com</code><br>'
+      +'Sonu nokta ile bitemez ve son noktadan sonra en az iki harf olmalıdır.');
+    return;
+  }
   if(pw.length<6){yaz('<b style="color:#f87171">Firebase en az 6 karakterlik şifre şart koşar.</b>');return;}
+  // Seçilen izinler toplanır. Hiç seçim yoksa hesap tam yetkili olur.
+  var secilen={};
+  var kutular=document.querySelectorAll('.yeniAdmPermChk:checked');
+  for(var i=0;i<kutular.length;i++)secilen[kutular[i].value]=true;
+  var kisitli=Object.keys(secilen).length>0;
   var app=_ikincilAppAl();
   if(!app){yaz('<b style="color:#f87171">İkincil bağlantı açılamadı.</b>');return;}
   yaz('⏳ Hesap oluşturuluyor...');
@@ -17650,16 +17741,22 @@ function createNewAdminAccount(){
       var uid=c&&c.user&&c.user.uid;
       // Kimlik oluştu; şimdi YETKİ verilir. Bu iki adım ayrıdır: hesabı olan herkes
       // yönetici değildir, yalnızca listeye eklenenler yazabilir.
-      return db.ref('admins/'+uid).set(true).then(function(){return uid;});
+      // İzin haritası AYRI bir yolda saklanır (admins/{uid} true kalmalı - veritabanı
+      // kuralları tam olarak bu değere bakıyor, obje yazmak yetkiyi bozardı).
+      var upd={};
+      upd['admins/'+uid]=true;
+      upd['adminPerms/'+uid]=kisitli?{role:'custom',perms:secilen,email:em}:{role:'full',email:em};
+      return db.ref().update(upd).then(function(){return uid;});
     })
     .then(function(uid){
       // İkincil bağlantıdan çıkılır ki o oturum ortalıkta kalmasın.
       return ikincilAuth.signOut().catch(function(){}).then(function(){return uid;});
     })
     .then(function(uid){
-      logAction('➕ Yeni yönetici hesabı oluşturuldu: '+em);
+      logAction('➕ Yeni yönetici hesabı oluşturuldu: '+em+(kisitli?(' ('+Object.keys(secilen).length+' izinle sınırlı)'):' (tam yetki)'));
       yaz('<b style="color:#22c55e">✅ Hesap oluşturuldu ve yetkilendirildi.</b><br>'
         +'E-posta: <b>'+escHtml(em)+'</b><br>Şifre: <b>'+escHtml(pw)+'</b><br>'
+        +'Yetki: <b>'+(kisitli?(Object.keys(secilen).length+' izinle sınırlı'):'tam yetki')+'</b><br>'
         +'<span style="color:var(--mu)">Bu bilgileri ilgili kişiye iletin. Şifreyi kendisi değiştirebilir.</span>');
       if(qs('yeniAdmEmail'))qs('yeniAdmEmail').value='';
       if(qs('yeniAdmPw'))qs('yeniAdmPw').value='';
@@ -17763,6 +17860,10 @@ function adminAccountCreate(){
     .catch(function(e){_admAcctMsg('<b style="color:#f87171">Oluşturulamadı:</b> '+escHtml(_authHataTr(e)));});
 }
 function adminAccountSignOut(){
+  // Çıkışta otomatik giriş tercihi de temizlenir - aksi halde bir sonraki açılışta
+  // (oturum kapalı olmasına rağmen) sistem yeniden girmeye çalışırdı.
+  try{localStorage.removeItem('adm_beniHatirla');}catch(e){}
+  try{sessionStorage.removeItem('adm');}catch(e){}
   firebase.auth().signOut().then(function(){
     // Anonim kimliğe geri dönülür - uygulama kimliksiz kalmamalı.
     return firebase.auth().signInAnonymously();
