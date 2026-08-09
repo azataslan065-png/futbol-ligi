@@ -261,6 +261,13 @@ button{font-family:Outfit,sans-serif;cursor:pointer;border:none;border-radius:10
   <p style="font-size:.78rem;color:var(--mu);text-align:center;margin-bottom:1.5rem">Önce lig seçin, sonra giriş yapın</p>
   <div style="width:100%;max-width:340px">
     <div class="field"><span class="lbl">Lig</span><select id="loginLeagueSel" onchange="onLoginLeagueChange()"><option value="">Yükleniyor...</option></select></div>
+    <!-- KULLANICI GÜVENLİĞİ: Giriş artık Firebase hesabıyla yapılır. E-posta alanı doluysa
+         kimlik doğrulama Firebase üzerinden gerçekleşir ve yazma yetkisi SUNUCUDA verilir.
+         E-posta boş bırakılırsa eski şifreli giriş çalışır ama o oturumun yazma yetkisi YOKTUR
+         (veritabanı kuralları reddeder) - bu, kilitlenmeyi önlemek için bilerek bırakılmıştır. -->
+    <div class="field" style="margin-top:.5rem"><span class="lbl">Yönetici E-postası</span>
+      <input type="email" id="admEmailInp" placeholder="yonetici@ornek.com" autocomplete="username"/>
+    </div>
     <div class="field" style="margin-top:.5rem"><span class="lbl">Şifre</span>
       <div style="position:relative">
         <input type="password" id="pwInp" placeholder="••••••••" style="padding-right:2.4rem"/>
@@ -1144,7 +1151,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-B';
+window.APP_BUILD='2026-08-09-C';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1625,7 +1632,9 @@ var ADMIN_MENU_ITEMS=[
   // (ölçülen sorun: lig verisinin %93'ü gömülü medyaydı ve her açılışta yeniden iniyordu).
   {id:'mediamigration',icon:'🗜️',label:'Gömülü Medyayı Taşı (veri küçültme)',fn:'openMediaMigration'},
   // Yönetici kimliğini Firebase'e taşıma kurulumu (şifrelerin veritabanında açık durmasını bitirir)
-  {id:'adminaccount',icon:'👤',label:'Yönetici Hesabı (güvenlik)',fn:'openAdminAccountSetup'}
+  {id:'adminaccount',icon:'👤',label:'Yönetici Hesabı (güvenlik)',fn:'openAdminAccountSetup'},
+  // Firebase girişi doğrulandıktan SONRA çalıştırılacak son adım
+  {id:'pwcleanup',icon:'🧹',label:'Açık Metin Şifreleri Temizle',fn:'openPasswordCleanup'}
 ];
 // KULLANICI TALEBİ: "Admin panelindeki menüleri sıralaması herşeyi kapsıyor değil mi,
 // mesela yönetimdeki bir ayarı başka bir sekmeye atıyabilirim -> Her ikisi de - hem kartların
@@ -2436,10 +2445,56 @@ function doLogin(){
   var sel=qs('loginLeagueSel');
   var lid=sel?sel.value:'';
   if(!lid){qs('loginErr').textContent='❌ Lütfen bir lig seçin';return;}
+
+  /* ── FIREBASE HESABIYLA GİRİŞ (asıl yol) ────────────────────────────────────────────
+     Eski sistemde şifre TARAYICIDA karşılaştırılıyordu ve karşılaştırılan değer
+     veritabanında açık metin duruyordu - yani şifreyi öğrenmek için onu kırmaya bile gerek
+     yoktu, okumak yetiyordu. Artık doğrulamayı Firebase yapar ve yazma yetkisini VERİTABANI
+     KURALLARI verir; panelin adresini ve eski şifreyi bilen biri giriş yapsa dahi hiçbir
+     veriyi değiştiremez. */
+  var email=(qs('admEmailInp')?qs('admEmailInp').value:'').trim();
+  if(email){
+    if(!(window.firebase&&firebase.auth&&window._authOrtamUygun)){
+      qs('loginErr').textContent='❌ Hesapla giriş yalnızca https:// adresinden çalışır (şu an: '+location.protocol+')';
+      return;
+    }
+    qs('loginErr').textContent='⏳ Giriş yapılıyor...';
+    firebase.auth().signInWithEmailAndPassword(email,pw)
+      .then(function(c){
+        var uid=c&&c.user&&c.user.uid;
+        // Hesap doğru olsa bile YETKİ ayrı bir sorudur: kimlik yönetici listesinde mi?
+        return db.ref('admins/'+uid).once('value').then(function(sn){
+          if(!sn.val())throw new Error('Bu hesap yönetici listesinde değil. Firebase Console → Realtime Database → admins altına kimliğinizi ekleyin.');
+          return c;
+        });
+      })
+      .then(function(c){
+        sessionStorage.setItem('adm','1');
+        sessionStorage.setItem('admRole','full');
+        sessionStorage.removeItem('admPerms');
+        try{sessionStorage.setItem('admName',email);}catch(e){}
+        localStorage.setItem('adm_curLeague',lid);
+        qs('loginWrap').style.display='none';
+        qs('appWrap').style.display='block';
+        var ov=qs('adminLoadingOverlay');if(ov)ov.style.display='flex';
+        init();
+        applyRoleRestrictions();checkBackupReminder();
+      })
+      .catch(function(e){
+        qs('loginErr').textContent='❌ '+(typeof _authHataTr==='function'?_authHataTr(e):((e&&e.message)||'giriş başarısız'));
+      });
+    return;
+  }
+
   if(pw===getEffectiveMasterPassword()){
     // Ana şifre - tüm liglerde tam yetkiyle çalışır (master/owner erişimi).
     sessionStorage.setItem('adm','1');
     sessionStorage.setItem('admRole','full');
+    // Bu yol artık yalnızca kilitlenmeyi önlemek için duruyor: veritabanı kuralları bu
+    // oturuma yazma izni VERMEZ, çünkü kimlik Firebase tarafında yönetici sayılmaz.
+    setTimeout(function(){
+      if(typeof toast==='function')toast('⚠️ Eski şifreyle girdiniz - bu oturumda kayıt yapamazsınız. Yönetici e-postanızla girin.','er');
+    },1500);
     // HATA DÜZELTMESİ (KÖK SEBEP - "Yönetim sekmesi görünmüyor" şikayeti): Önceki bir
     // oturumdan sessionStorage'da kalmış olabilecek admPerms verisi burada MUTLAKA temizlenir.
     // Aksi halde (teorik olarak) bayat/yanlış bir admPerms değeri kalıntı olarak kalabilir.
@@ -2500,6 +2555,14 @@ function doLogout(){
   location.reload();
 }
 qs('pwInp').onkeydown=function(e){if(e.key==='Enter')doLogin();};
+if(qs('admEmailInp'))qs('admEmailInp').onkeydown=function(e){if(e.key==='Enter')doLogin();};
+// Zaten açık bir yönetici oturumu varsa e-posta alanı önceden doldurulur (oturum kalıcı).
+setTimeout(function(){
+  try{
+    var u=(window.firebase&&firebase.auth)?firebase.auth().currentUser:null;
+    if(u&&!u.isAnonymous&&u.email&&qs('admEmailInp')&&!qs('admEmailInp').value)qs('admEmailInp').value=u.email;
+  }catch(e){}
+},1200);
 
 // ── TABS ──
 function showTab(id,el){
@@ -17432,6 +17495,82 @@ function _authVar(){return !!(window.firebase&&firebase.auth&&window._authOrtamU
 function _mevcutKimlik(){
   try{var u=firebase.auth().currentUser;return u||null;}catch(e){return null;}
 }
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   AÇIK METİN ŞİFRELERİ TEMİZLE  ·  son adım
+
+   Yönetici girişi Firebase hesabına taşındıktan SONRA, veritabanındaki eski şifreler
+   tamamen gereksizdir - ama orada durdukları sürece hâlâ okunabilirler:
+     globalConfig/masterAdminPassword        (ana şifre, açık metin)
+     leagues/{id}/adminAccounts[].pass       (alt yönetici şifreleri, açık metin)
+   Bu araç onları siler. Silmeden ÖNCE Firebase hesabıyla giriş yapabildiğinizi doğrulamanız
+   şarttır; bu yüzden araç, oturum yönetici değilse çalışmayı reddeder.
+
+   ALT YÖNETİCİ HESAPLARI: Sadece ŞİFRE alanı silinir; hesap adı ve izin haritası korunur.
+   Böylece o hesaplara ileride Firebase kimliği bağlandığında izinler olduğu gibi kullanılır -
+   yıllarca uğraşılmış izin yapılandırması kaybolmaz. */
+function openPasswordCleanup(){
+  var u=null;
+  try{u=(window.firebase&&firebase.auth)?firebase.auth().currentUser:null;}catch(e){}
+  var kimlikli=!!(u&&!u.isAnonymous);
+  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.8rem">'
+    +'Yönetici girişi artık Firebase hesabıyla yapılıyor. Veritabanındaki eski şifreler artık '
+    +'hiçbir işe yaramıyor - ama orada durdukları sürece <b>okunabilir durumdalar</b>.<br><br>'
+    +'Bu araç şunları siler:<br>'
+    +'· <code>globalConfig/masterAdminPassword</code> (ana şifre)<br>'
+    +'· Alt yönetici hesaplarının <code>pass</code> alanları<br><br>'
+    +'Alt yönetici hesaplarının <b>adı ve izinleri korunur</b> - yalnızca şifre alanı silinir.'
+    +'</div>';
+  if(!kimlikli){
+    html+='<div style="background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.4);border-radius:10px;padding:.6rem .7rem;font-size:.66rem;line-height:1.6;color:#fbbf24">'
+      +'⚠️ <b>Önce Firebase hesabıyla giriş yapın.</b> Şu an anonim veya eski şifreyle giriş yapılmış görünüyorsunuz. '
+      +'Eski şifreleri silmeden önce yeni giriş yolunun çalıştığından emin olmalısınız - aksi halde panele hiç giremeyebilirsiniz.'
+      +'</div>';
+    openSheet('🧹 Açık Metin Şifreleri Temizle',html,'openPasswordCleanup');
+    return;
+  }
+  html+='<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.55rem .7rem;margin-bottom:.8rem;font-size:.66rem;line-height:1.7">'
+    +'Giriş yapan hesap: <b style="color:#22c55e">'+escHtml(u.email||u.uid)+'</b><br>'
+    +'Bu hesapla panele girebildiğinizi <b>en az bir kez</b> doğruladıysanız devam edin.'
+    +'</div>'
+    +'<button class="btn bgh" onclick="runPasswordCleanup()" style="width:100%">🧹 Eski Şifreleri Sil</button>'
+    +'<div id="pwCleanMsg" style="font-size:.66rem;margin-top:.6rem;line-height:1.6"></div>';
+  openSheet('🧹 Açık Metin Şifreleri Temizle',html,'openPasswordCleanup');
+}
+function runPasswordCleanup(){
+  dlg('🧹','Eski Şifreleri Sil','Veritabanındaki açık metin yönetici şifreleri kalıcı olarak silinecek. Bundan sonra panele YALNIZCA Firebase hesabınızla girebilirsiniz.\n\nHesabınızla giriş yapabildiğinizi doğruladınız mı?','Sil','dor').then(function(ok){
+    if(!ok)return;
+    var kutu=qs('pwCleanMsg');
+    var yaz=function(h){if(kutu)kutu.innerHTML=h;};
+    yaz('⏳ Siliniyor...');
+    var upd={};
+    upd['globalConfig/masterAdminPassword']=null;
+    // Tüm liglerdeki alt yönetici hesaplarının SADECE şifre alanı temizlenir.
+    db.ref('leaguesMeta').once('value').then(function(sn){
+      var ids=Object.keys(sn.val()||{});
+      return Promise.all(ids.map(function(id){
+        return db.ref('leagues/'+id+'/adminAccounts').once('value').then(function(a){
+          var accs=a.val();
+          if(!accs)return;
+          Object.keys(accs).forEach(function(k){
+            if(accs[k]&&accs[k].pass!==undefined)upd['leagues/'+id+'/adminAccounts/'+k+'/pass']=null;
+          });
+        }).catch(function(){});
+      }));
+    }).then(function(){
+      return db.ref().update(upd);
+    }).then(function(){
+      _customMasterPassword=null;
+      logAction('🧹 Açık metin yönetici şifreleri veritabanından silindi');
+      yaz('<b style="color:#22c55e">✅ Silindi.</b> Artık panele yalnızca Firebase hesabınızla girebilirsiniz. '
+        +'Bu oturum açık kalmaya devam eder; çıkış yaparsanız e-posta ve şifrenizle girin.');
+      toast('✅ Eski şifreler silindi');
+    }).catch(function(e){
+      yaz('<b style="color:#f87171">❌ Silinemedi:</b> '+escHtml((e&&e.message)||'bilinmeyen hata')
+        +'<br>Veri olduğu gibi korundu, tekrar deneyebilirsiniz.');
+    });
+  });
+}
+
 function openAdminAccountSetup(){
   if(!_authVar()){
     openSheet('👤 Yönetici Hesabı',
