@@ -1075,7 +1075,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-M';
+window.APP_BUILD='2026-08-09-N';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -8936,6 +8936,94 @@ window.submitScorePrediction=function(matchId){
   }).catch(()=>showToast('❌ Tahmin kaydedilemedi','er'));
   }catch(err){console.error('Tahmin kaydedilemedi:',err);showToast('❌ Tahmin kaydedilemedi','er');}
 };
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   BASKIMETRE  ·  maçın nabzı
+
+   İKİ KAYNAK, TEK GÖRÜNÜM:
+   1. GERÇEK VERİ - Admin canlı maç sırasında "baskı" düğmeleriyle dakika dakika işaretleme
+      yapmışsa (m.momentum), grafik doğrudan onu çizer. Bu bir gözlemdir, ölçüm değildir;
+      ama maçı izleyen kişinin gözlemi olduğu için anlamlıdır.
+   2. YEDEK GÖRÜNÜM - Admin hiç işaretleme yapmamışsa grafik BOŞ ÇİZİLMEZ. Bunun yerine
+      maçın olaylarından (gol, kart, değişiklik) bir yoğunluk şeridi üretilir ve başlığı
+      da buna göre değişir: "Olay Yoğunluğu". Bunu "Baskımetre" diye sunmak yanıltıcı
+      olurdu - kullanıcı gerçek bir baskı ölçümü sandığında güven boşa çıkar.
+   Her iki durumda da önemli olaylar (goller) çubukların üzerinde işaretlenir. */
+function renderBaskimetre(m){
+  try{
+    const evs=(m.events||[]).slice();
+    const mom=m.momentum&&Object.keys(m.momentum).length?m.momentum:null;
+    // Maç uzunluğu: en geç olay/işaretleme dakikası (en az 90).
+    let sonDk=90;
+    evs.forEach(e=>{ if((e.min||0)>sonDk)sonDk=e.min; });
+    if(mom)Object.keys(mom).forEach(k=>{ if(Number(k)>sonDk)sonDk=Number(k); });
+    sonDk=Math.min(sonDk,130);
+
+    // Dakika başına değer: gerçek veri varsa o, yoksa olaylardan türetilir.
+    const AGIRLIK={goal:3,pen_goal:3,og:3,red:2,yellow2red:2,yellow:1,pen_awarded:2,pen_miss:1,sub:0.6};
+    const deger=new Array(sonDk+1).fill(0);
+    if(mom){
+      Object.keys(mom).forEach(k=>{const i=Number(k);if(i>=0&&i<=sonDk)deger[i]=Number(mom[k])||0;});
+    }else{
+      evs.forEach(e=>{
+        const w=AGIRLIK[e.type]; if(!w)return;
+        const i=Math.max(0,Math.min(sonDk,e.min||0));
+        deger[i]+=(e.team==='home'?w:-w);
+      });
+      // Tek bir dakikada dikilen çubuk yerine, olayın etkisini komşu dakikalara yaymak
+      // grafiği okunur kılar (referans görseldeki dalgalı görünüm de böyledir).
+      const yumusak=deger.slice();
+      for(let i=0;i<=sonDk;i++){
+        let t=0,n=0;
+        for(let j=i-2;j<=i+2;j++){ if(j<0||j>sonDk)continue; t+=deger[j]*(1-Math.abs(i-j)*0.3); n++; }
+        yumusak[i]=n?t/1.6:0;
+      }
+      for(let i=0;i<=sonDk;i++)deger[i]=yumusak[i];
+    }
+    const enBuyuk=Math.max(1,...deger.map(v=>Math.abs(v)));
+    if(!mom&&enBuyuk<=0.01)return '';   // ne veri ne olay var - hiç çizme
+
+    const golDk=evs.filter(e=>['goal','pen_goal','og'].includes(e.type));
+    const H=64; // grafik yüksekliği (px)
+    const cubuklar=deger.map((v,i)=>{
+      const y=Math.round(Math.abs(v)/enBuyuk*(H/2-2));
+      const evSahibi=v>0;
+      if(!y)return `<div style="flex:1;min-width:0"></div>`;
+      return `<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;height:${H}px">
+        <div style="height:${H/2}px;display:flex;align-items:flex-end;justify-content:center">
+          ${evSahibi?`<div style="width:70%;height:${y}px;background:#3b82f6;border-radius:2px 2px 0 0"></div>`:''}
+        </div>
+        <div style="height:${H/2}px;display:flex;align-items:flex-start;justify-content:center">
+          ${!evSahibi?`<div style="width:70%;height:${y}px;background:#ef4444;border-radius:0 0 2px 2px"></div>`:''}
+        </div>
+      </div>`;
+    }).join('');
+    const golIsaret=golDk.map(e=>{
+      const yuzde=Math.max(0,Math.min(100,(e.min||0)/sonDk*100));
+      const ust=e.team==='home';
+      return `<div title="${e.min}' ${(e.player||'').replace(/"/g,'')}" style="position:absolute;left:${yuzde}%;${ust?'top:-9px':'bottom:-9px'};transform:translateX(-50%);font-size:.62rem;line-height:1">⚽</div>`;
+    }).join('');
+    const baslik=mom?'📊 Baskımetre':'📊 Olay Yoğunluğu';
+    const altYazi=mom
+      ? 'Maçın nabzı: çubuklar hangi takımın baskı kurduğunu ve yoğunluğunu gösterir.'
+      : 'Baskı verisi girilmediği için olayların zamana dağılımı gösteriliyor.';
+    return `<div class="md-section-head">${baslik}</div>
+      <div class="md-info-card" style="padding:.7rem .8rem">
+        <div style="position:relative;margin:10px 0">
+          ${golIsaret}
+          <div style="display:flex;align-items:center;gap:1px;height:${H}px;border-top:1px dashed var(--br);border-bottom:1px dashed var(--br);position:relative">
+            <div style="position:absolute;left:0;right:0;top:50%;height:1px;background:var(--br)"></div>
+            ${cubuklar}
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:.58rem;color:var(--mu);margin-top:.3rem">
+          <span style="color:#3b82f6;font-weight:800">▲ ${(D.teams[m.homeId]||{}).name||'Ev sahibi'}</span>
+          <span>${sonDk}'</span>
+          <span style="color:#ef4444;font-weight:800">▼ ${(D.teams[m.awayId]||{}).name||'Deplasman'}</span>
+        </div>
+        <div style="font-size:.58rem;color:var(--mu);margin-top:.35rem;line-height:1.45">${altYazi}</div>
+      </div>`;
+  }catch(e){DiagSil('renderBaskimetre',e);return '';}
+}
 function renderMdDetay(id,m,h,a,ntInfo){
   const dateStr=m.date?new Date(m.date+'T'+(m.time||'00:00')).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'})+', '+(m.time||''):'Tarih belirlenmedi';
   // KULLANICI TALEBİ: 🔁 Rövanş Bağlantısı - bu iki takımın DAHA ÖNCE oynanmış (bu maçtan
@@ -8952,30 +9040,60 @@ function renderMdDetay(id,m,h,a,ntInfo){
   return `
     ${rematchHtml}
     ${ntInfo?`<div style="padding:.6rem .9rem;margin:0 -1rem;border-bottom:1px solid var(--br);text-align:center"><span style="display:inline-flex;align-items:center;gap:.3rem;background:${ntInfo.color}1a;border:1px solid ${ntInfo.color}55;color:${ntInfo.color};border-radius:20px;padding:.18rem .65rem;font-size:.68rem;font-weight:800">${ntInfo.icon} ${ntInfo.label}</span></div>`:''}
+    <!-- ── MAÇ BİLGİSİ (referans görsele göre yeniden tasarlandı) ────────────────────
+         ÖNCEKİ DÜZENİN SORUNU: Tarih, stadyum, hakem, spiker, yorumcu ve yayıncı farklı
+         kart tiplerinde, bazıları iki sütunlu ızgarada, bazıları tek satırda dağınık
+         duruyordu; boş alanlar için <div></div> yerleştiriliyor, bu da satırların
+         hizasını kaydırıyordu.
+         YENİ DÜZEN: Hepsi aynı görünümde satırlar. Her satır bir simge + başlık + alt
+         açıklama. Görevliler (hakem, yardımcılar, VAR) kendi başlığı altında, yayın
+         bilgisi ayrı bir başlıkta. Boş alanlar hiç çizilmez - dolu olan ne varsa o görünür. -->
+    ${(m.played||m.isLive)?renderBaskimetre(m):''}
     <div class="md-section-head">Maç Bilgisi</div>
     <div class="md-info-card">
       <div class="md-info-row">
         <div class="md-info-icon">📅</div>
-        <div><div class="md-info-title">${dateStr}</div><div class="md-info-sub">${D.leagueName||'Lig'} - Hafta ${m.week||0}</div></div>
+        <div><div class="md-info-title">${dateStr}</div><div class="md-info-sub">${D.leagueName||'Lig'} · ${m.week||0}. Hafta</div></div>
       </div>
     </div>
     ${renderScorePredictionHtml(id,m,h,a)}
     ${m.stadium?`<div class="md-info-card">
       <div class="md-info-row">
         <div class="md-info-icon">🏟️</div>
-        <div><div class="md-info-title">${m.stadium}</div>${m.weather?`<div class="md-info-sub">Hava: ${m.weather}</div>`:''}</div>
+        <div><div class="md-info-title">${m.stadium}</div>${m.weather?`<div class="md-info-sub">🌤️ ${m.weather}</div>`:''}</div>
       </div>
     </div>`:''}
-    ${(m.referee||m.spiker||m.yorumcu)?`<div class="md-officials-grid">
-      ${m.referee?`<div class="md-link-row"><span class="md-link-icon">🚩</span><span class="md-link-text">${m.referee}</span></div>`:'<div></div>'}
-      ${m.spiker?`<div class="md-link-row"><span class="md-link-icon">🎙️</span><span class="md-link-text">${m.spiker}</span></div>`:'<div></div>'}
-    </div>
-    ${m.yorumcu?`<div class="md-link-row"><span class="md-link-icon">🗣️</span><span class="md-link-text">${m.yorumcu}</span></div>`:''}`:''}
-    ${(m.assistRef1||m.assistRef2)?`<div class="md-officials-grid">
-      ${m.assistRef1?`<div class="md-link-row"><span class="md-link-icon">🚩</span><span class="md-link-text">${m.assistRef1} (1. YH)</span></div>`:'<div></div>'}
-      ${m.assistRef2?`<div class="md-link-row"><span class="md-link-icon">🚩</span><span class="md-link-text">${m.assistRef2} (2. YH)</span></div>`:'<div></div>'}
-    </div>`:''}
-    ${m.tv?`<div class="md-link-row"><span class="md-link-icon">📺</span><span class="md-link-text">${m.tv}</span></div>`:''}
+    ${(function(){
+      // Görevliler tek bir listede toplanır; yalnızca DOLU olanlar satır üretir.
+      const gorevliler=[];
+      if(m.referee)gorevliler.push(['🧑‍⚖️','Hakem',m.referee]);
+      if(m.assistRef1)gorevliler.push(['🚩','1. Yardımcı Hakem',m.assistRef1]);
+      if(m.assistRef2)gorevliler.push(['🚩','2. Yardımcı Hakem',m.assistRef2]);
+      if(!gorevliler.length)return '';
+      return `<div class="md-section-head">Görevliler</div>
+      <div class="md-info-card">
+        ${gorevliler.map(([ik,rol,ad],idx)=>`
+          <div class="md-info-row" style="${idx?'border-top:1px solid var(--br);':''}">
+            <div class="md-info-icon">${ik}</div>
+            <div><div class="md-info-title">${ad}</div><div class="md-info-sub">${rol}</div></div>
+          </div>`).join('')}
+      </div>`;
+    })()}
+    ${(function(){
+      const yayin=[];
+      if(m.tv)yayin.push(['📺','Yayıncı',m.tv]);
+      if(m.spiker)yayin.push(['🎙️','Spiker',m.spiker]);
+      if(m.yorumcu)yayin.push(['🗣️','Yorumcu',m.yorumcu]);
+      if(!yayin.length)return '';
+      return `<div class="md-section-head">Yayın</div>
+      <div class="md-info-card">
+        ${yayin.map(([ik,rol,ad],idx)=>`
+          <div class="md-info-row" style="${idx?'border-top:1px solid var(--br);':''}">
+            <div class="md-info-icon">${ik}</div>
+            <div><div class="md-info-title">${ad}</div><div class="md-info-sub">${rol}</div></div>
+          </div>`).join('')}
+      </div>`;
+    })()}
     <div style="padding:.85rem .9rem;display:flex;gap:.5rem">
       <button onclick="shareMatch('${id}')" style="flex:1;background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.5rem;color:var(--tx);font-size:.78rem;font-weight:700;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">📤 Paylaş</button>
       ${m.played?`<button onclick="generateMatchSummaryCard('${id}')" style="flex:1;background:linear-gradient(135deg,var(--ac),var(--ac2));border:none;border-radius:12px;padding:.5rem;color:#fff;font-size:.78rem;font-weight:700;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">📸 Maç Akış Özeti</button>`:''}
@@ -9907,48 +10025,79 @@ function renderMdKarne(id,m,h,a){
   }
   if(!evsAll.length)return '<div style="text-align:center;color:var(--mu);padding:2.5rem 1rem;font-size:.82rem">Maç olayı kaydı yok</div>';
   if(!evs.length)return filterBar+'<div style="text-align:center;color:var(--mu);padding:2rem 1rem;font-size:.8rem">Bu filtrede olay yok</div>';
-  return `${filterBar}<div style="padding:.85rem .9rem">
+
+  /* ── MAÇ AKIŞI: ZAMAN ÇİZELGESİ DÜZENİ ─────────────────────────────────────────────
+     KULLANICI BİLDİRDİ: "Maç akışı emojileri çok karışık duruyor."
+     ÖNCEKİ DÜZENİN SORUNU: Her satırda AYNI ikon İKİ KEZ çiziliyordu - biri oyuncu adının
+     yanında, biri satırın ortasında. Üstelik ortadaki ikon sütunu, dakika ve isimlerle
+     birlikte satır başına dört ayrı hizalama noktası oluşturuyordu; göz nereye bakacağını
+     bilemiyordu.
+     YENİ DÜZEN (referans görseldeki gibi): Ortada tek bir dikey çizgi var; dakika bu çizgi
+     üzerinde bir rozet olarak duruyor. Olay içeriği takımına göre SOLDA veya SAĞDA, ikon
+     her olayda YALNIZCA BİR KEZ ve daima içeriğin çizgiye bakan tarafında. Goller vurgulu
+     rozetle, oyuncu değişiklikleri giren/çıkan olarak alt alta gösteriliyor. */
+  const _cizgi='linear-gradient(180deg,transparent,var(--br) 12%,var(--br) 88%,transparent)';
+  function orta(icerik,vurgu){
+    return `<div style="position:relative;display:flex;justify-content:center;padding:.5rem 0">
+      <div style="position:absolute;left:50%;top:0;bottom:0;width:2px;margin-left:-1px;background:${_cizgi}"></div>
+      <span style="position:relative;background:${vurgu?'var(--s3)':'var(--s2)'};border:1px solid var(--br);border-radius:999px;
+        padding:.18rem .6rem;font-size:.63rem;font-weight:800;color:var(--mu);white-space:nowrap">${icerik}</span>
+    </div>`;
+  }
+  function satir(e){
+    const isHome=e.team==='home';
+    const teamId=isHome?m.homeId:m.awayId;
+    const isGoal=GOAL_TYPES.includes(e.type);
+    const isSub=e.type==='sub';
+    const ikon=evIcon(e.type);
+    let icerik;
+    if(isSub){
+      // Giren üstte yeşil, çıkan altta soluk - referans görseldeki gibi.
+      icerik=`<div style="line-height:1.25">
+        <div style="font-size:.76rem;font-weight:700;color:var(--tx)">${playerLink(e.player,teamId)}</div>
+        ${e.player2?`<div style="font-size:.72rem;color:var(--mu)">${playerLink(e.player2,teamId)}</div>`:''}
+      </div>`;
+    }else{
+      const asist=(isGoal&&e.player2)?`<div style="font-size:.68rem;color:var(--mu)">${playerLink(e.player2,teamId)}</div>`:'';
+      const sebep=(!isGoal&&e.note)?`<div style="font-size:.68rem;color:var(--mu)">${String(e.note).replace(/</g,'&lt;')}</div>`:'';
+      icerik=`<div style="line-height:1.25">
+        <div style="font-size:.78rem;font-weight:${isGoal?800:700};color:var(--tx)">${playerLink(e.player,teamId)}</div>
+        ${asist}${sebep}
+      </div>`;
+    }
+    // İkon her zaman içeriğin ÇİZGİYE BAKAN tarafında durur; böylece göz çizgiden dışa doğru okur.
+    const blok=isHome
+      ? `<div style="display:flex;align-items:center;gap:.45rem;justify-content:flex-end;text-align:right">${icerik}<span style="font-size:.95rem;flex-shrink:0">${ikon}</span></div>`
+      : `<div style="display:flex;align-items:center;gap:.45rem;justify-content:flex-start;text-align:left"><span style="font-size:.95rem;flex-shrink:0">${ikon}</span>${icerik}</div>`;
+    const rozetRenk=isGoal?'background:var(--ac);color:#fff;border-color:var(--ac)':'background:var(--s2);color:var(--mu)';
+    return `<div style="position:relative;display:grid;grid-template-columns:1fr 46px 1fr;align-items:center;padding:.45rem 0">
+      <div style="position:absolute;left:50%;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--br)"></div>
+      <div style="min-width:0">${isHome?blok:''}</div>
+      <div style="display:flex;justify-content:center">
+        <span style="position:relative;border:1px solid var(--br);border-radius:999px;padding:.15rem .4rem;
+          font-size:.62rem;font-weight:800;white-space:nowrap;${rozetRenk}">${e.min}'</span>
+      </div>
+      <div style="min-width:0">${!isHome?blok:''}</div>
+    </div>`;
+  }
+  return `${filterBar}<div style="padding:.6rem .9rem 1rem">
     ${evs.map(e=>{
       if(e.type==='extra_time'){
         const halfLabel=e.half===1?'İlk Yarı':e.half===2?'Maç Sonu':e.half===3?'Uzatma 1. Yarı':'Uzatma Sonu';
-        const halfIcon=e.half===1?'İY':'⏱️';
-        return `<div style="text-align:center;padding:.5rem 0;font-size:.7rem;color:var(--mu);font-weight:700">${halfIcon} ${halfLabel}: +${e.extraMin} dakika uzatma</div>`;
+        return orta(`${renderEventIconHtml('extra_time')||'⏱️'} ${halfLabel} · +${e.extraMin} dk`,false);
       }
-      if(e.type==='match_start'){
-        // HATA DÜZELTMESİ (kullanıcı bildirdi: "Maç başladı ve maç bitti için emoji ekle,
-        // admin zaten bunu değiştirebiliyor"): Bu SATIR daha önceki merkezi emoji
-        // birleştirmesinin (getEventEmoji) DIŞINDA kalmıştı - admin ayarlardan emoji
-        // değiştirse bile burada hep SABİT bir düdük SVG'si gösteriliyordu. Artık admin'in
-        // gerçek/güncel emoji seçimi kullanılıyor.
-        // KULLANICI TALEBİ: "Maç akışındaki 'Maç başladı - Maç bitti' yazılarını kaldır."
-        // Sadece ikon gösteriliyor, yanındaki metin etiketi kaldırıldı.
-        return `<div style="text-align:center;padding:.6rem 0;font-size:1.1rem">${renderEventIconHtml('match_start')}</div>`;
-      }
-      if(e.type==='match_end'){
-        return `<div style="text-align:center;padding:.6rem 0;font-size:1.1rem">${renderEventIconHtml('match_end')}</div>`;
-      }
-      // KULLANICI TALEBİ: Canlı Serbest Metin Yorumu - admin'in sabit olay türleri dışında
-      // eklediği serbest metin yorumları, maç akışında diğer olaylarla karışık şekilde görünür.
+      if(e.type==='match_start')return orta(renderEventIconHtml('match_start'),true);
+      if(e.type==='match_end')return orta(renderEventIconHtml('match_end'),true);
+      if(e.type==='half_time')return orta('İY',true);
       if(e.type==='free_comment'){
-        return `<div style="display:flex;gap:.5rem;padding:.5rem 0;border-bottom:1px solid rgba(51,65,85,.3)">
-          <span style="font-size:.7rem;font-weight:700;color:var(--gr2);flex-shrink:0">${e.min}'</span>
-          <span style="font-size:.76rem;color:var(--tx);font-style:italic">📝 ${(e.text||'').replace(/</g,'&lt;')}</span>
+        return `<div style="position:relative;display:grid;grid-template-columns:1fr 46px 1fr;align-items:center;padding:.45rem 0">
+          <div style="position:absolute;left:50%;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--br)"></div>
+          <div></div>
+          <div style="display:flex;justify-content:center"><span style="position:relative;background:var(--s2);border:1px solid var(--br);border-radius:999px;padding:.15rem .4rem;font-size:.62rem;font-weight:800;color:var(--mu)">${e.min}'</span></div>
+          <div style="min-width:0;font-size:.74rem;color:var(--tx);font-style:italic">📝 ${(e.text||'').replace(/</g,'&lt;')}</div>
         </div>`;
       }
-      const isSub=e.type==='sub';
-      const isGoal=e.type==='goal';
-      const isHome=e.team==='home';
-      const teamId=isHome?m.homeId:m.awayId;
-      const playerHtml=playerLink(e.player,teamId);
-      const player2Html=e.player2?playerLink(e.player2,teamId):'';
-      const playerTxt=isSub?playerHtml+(player2Html?' ↔ '+player2Html:''):(isGoal&&e.player2)?playerHtml+' <span style="opacity:.65;font-weight:600">'+renderEventIconHtml('assist')+' '+player2Html+'</span>':playerHtml;
-      return `<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem 0;border-bottom:1px solid rgba(51,65,85,.3)">
-        ${isHome?`<span style="font-size:.7rem;font-weight:700;color:var(--gr2);min-width:24px">${e.min}'</span>`:'<span style="flex:1"></span>'}
-        <span style="flex:1;text-align:${isHome?'left':'right'};font-size:.78rem;font-weight:${isHome?700:400}">${isHome?evIcon(e.type)+' '+playerTxt:''}</span>
-        <span style="font-size:.85rem">${evIcon(e.type)}</span>
-        <span style="flex:1;text-align:${!isHome?'right':'left'};font-size:.78rem;font-weight:${!isHome?700:400}">${!isHome?playerTxt+' '+evIcon(e.type):''}</span>
-        ${!isHome?`<span style="font-size:.7rem;font-weight:700;color:var(--gr2);min-width:24px;text-align:right">${e.min}'</span>`:'<span style="flex:1"></span>'}
-      </div>`;
+      return satir(e);
     }).join('')}
   </div>`;
 }

@@ -1171,7 +1171,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-M';
+window.APP_BUILD='2026-08-09-N';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -4045,6 +4045,23 @@ function openLivePanel(){
   buildLivePanel(live);
   qs('liveOv').classList.add('on');
 }
+/* Baskımetre puanı ekler. yon: +1 ev sahibi, -1 deplasman, 0 bu dakikayı sıfırla.
+   Değer o dakikada birikir (üst üste basınca baskı yoğunluğu artar) ve -5..+5 ile sınırlanır -
+   böylece tek bir dakika grafiğin tamamını ezmez. */
+function addMomentum(yon){
+  var live=getManagedLiveMatch();
+  if(!live){toast('Canlı maç yok','er');return;}
+  var min=String(live.minute||0);
+  if(!live.momentum)live.momentum={};
+  if(yon===0){delete live.momentum[min];}
+  else{
+    var v=(Number(live.momentum[min])||0)+yon;
+    v=Math.max(-5,Math.min(5,v));
+    if(v===0)delete live.momentum[min];else live.momentum[min]=v;
+  }
+  save();
+  buildLivePanel(live);
+}
 function closeLivePanel(){qs('liveOv').classList.remove('on');if(_liveTimer){clearInterval(_liveTimer);_liveTimer=null;}}
 // KULLANICI TALEBİ: Birden fazla maç canlıyken, admin bu şeritten hangi maçı yönetmek
 // istediğini seçebilir - girilen goller/kartlar/vb. artık SEÇİLEN maça uygulanır.
@@ -4097,6 +4114,31 @@ function buildLivePanel(live){
     +'<div style="text-align:center"><div style="font-size:.75rem;font-weight:800;color:#fff">'+a.name+'</div>'+(live.events||[]).filter(function(e){return e.team==='away'&&e.type==='goal';}).slice(-2).map(function(e){return '<div style="font-size:.5rem;color:rgba(255,255,255,.55)">⚽ '+(e.player||'')+' '+e.min+"'</div>";}).join('')+'</div>'
     +'</div></div>'
     +'<div style="padding:.7rem .88rem">'
+    /* ── BASKIMETRE GİRİŞİ ────────────────────────────────────────────────────────────
+       Puan Tablosu'ndaki momentum grafiği, maçın hangi anında hangi takımın baskı
+       kurduğunu gösterir. Bu veri HİÇBİR yerden otomatik türetilemez - maçı izleyen
+       kişinin gözlemidir. Bu yüzden admin, maçı izlerken bastığı iki düğmeyle besler:
+       her basış O ANKİ DAKİKAYA bir baskı puanı ekler.
+       Admin hiç basmazsa veri boş kalır ve Puan Tablosu tarafı sessizce olay yoğunluğu
+       görünümüne düşer (bkz. index.html/renderBaskimetre) - yani boş bir grafik çizilmez. */
+    +(isHT?'':(function(){
+        var mm=live.momentum||{};
+        var suan=Number(mm[String(min)]||0);
+        var toplam=Object.keys(mm).length;
+        return '<div style="background:rgba(59,130,246,.07);border:1px solid rgba(59,130,246,.22);border-radius:11px;padding:.55rem .6rem;margin-bottom:.6rem">'
+          +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.4rem">'
+          +'<span style="font-size:.68rem;font-weight:800;color:#60a5fa">📊 Baskımetre</span>'
+          +'<span style="font-size:.6rem;color:var(--mu)">'+min+"' · bu dakika: "+(suan>0?('+'+suan+' '+(h.name||'ev')):suan<0?(suan+' '+(a.name||'dep')):'nötr')+'</span>'
+          +'</div>'
+          +'<div style="display:flex;gap:.35rem">'
+          +'<button onclick="addMomentum(-1)" style="flex:1;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.35);border-radius:9px;padding:.45rem;color:#f87171;font-size:.7rem;font-weight:800;cursor:pointer;min-height:34px">◀ '+(a.name||'Deplasman')+'</button>'
+          +'<button onclick="addMomentum(0)" style="width:44px;background:var(--s3);border:1px solid var(--br);border-radius:9px;padding:.45rem;color:var(--mu);font-size:.7rem;font-weight:800;cursor:pointer;min-height:34px" title="Bu dakikayı sıfırla">↺</button>'
+          +'<button onclick="addMomentum(1)" style="flex:1;background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.35);border-radius:9px;padding:.45rem;color:#60a5fa;font-size:.7rem;font-weight:800;cursor:pointer;min-height:34px">'+(h.name||'Ev Sahibi')+' ▶</button>'
+          +'</div>'
+          +'<div style="font-size:.58rem;color:var(--mu);margin-top:.35rem;line-height:1.4">Baskı kuran takımın düğmesine basın. Girmezseniz grafik olay yoğunluğuna göre çizilir.'
+          +(toplam?(' · '+toplam+' dakika işaretlendi'):'')+'</div>'
+          +'</div>';
+      })())
     +(isHT?(function(){
         var hGoals=(live.events||[]).filter(function(e){return e.team==='home'&&e.type==='goal';}).length;
         var aGoals=(live.events||[]).filter(function(e){return e.team==='away'&&e.type==='goal';}).length;
