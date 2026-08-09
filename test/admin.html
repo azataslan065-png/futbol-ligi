@@ -1171,7 +1171,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-V';
+window.APP_BUILD='2026-08-09-Y';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -18176,6 +18176,104 @@ function copyRemoteSensorResult(devKey){
   });
 }
 
+/* ── TEŞHİS SAĞLIK KONTROLÜ ───────────────────────────────────────────────────────────
+   KULLANICI BİLDİRDİ: "Sensörler ve hata yakalama kodu bir işe yaramıyor."
+   Bu cümle doğru olabilir ama TEK BAŞINA hiçbir şey söylemiyor - teşhis sistemi bir
+   zincirdir ve zincirin herhangi bir halkası koparsa sonuç aynı görünür: hiçbir şey olmaz.
+   Halkalar şunlar:
+     1. Firebase kimliği var mı, yönetici mi?
+     2. Modül anahtarları OKUNABİLİYOR mu? (kural: diagnostics/flags okuma)
+     3. Modül anahtarları YAZILABİLİYOR mu? (kural: yalnızca yönetici yazabilir)
+     4. Kayıt gönderme yolu yazılabiliyor mu? (diagnostics/logs)
+     5. Cihaz kartı yazılabiliyor mu? (diagnostics/devices)
+     6. Kopyalama damgası yazılabiliyor mu? (diagnostics/copied)
+     7. Uzaktan test isteği yazılabiliyor mu? (diagnostics/sensorRequests)
+     8. Teşhis çekirdeği yüklü mü, kaç modül açık?
+     9. Yerleşim sensörleri çalışıyor mu? (gerçek ölçüm)
+   Bu ekran halkaları TEK TEK dener ve HANGİSİNİN koptuğunu tam hata mesajıyla söyler.
+   Böylece "çalışmıyor" iddiası, düzeltilebilir tek bir satıra iner. */
+function openDiagHealthCheck(){
+  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.7rem">'
+    +'Teşhis sistemi bir zincirdir; bir halka koparsa sonuç hep aynı görünür: hiçbir şey olmaz. '
+    +'Bu kontrol halkaları tek tek dener ve <b>hangisinin koptuğunu</b> söyler.'
+    +'</div><div id="dhcList"></div>';
+  openSheet('🩺 Teşhis Sağlık Kontrolü','<div data-diag-ui="1">'+html+'</div>','openDiagHealthCheck');
+  runDiagHealthCheck();
+}
+function _dhcSatir(ad,durum,not){
+  var renk=durum==='ok'?'#22c55e':durum==='uyari'?'#fbbf24':'#f87171';
+  var ikon=durum==='ok'?'✅':durum==='uyari'?'⚠️':'❌';
+  return '<div style="background:var(--s2);border:1px solid var(--br);border-radius:9px;padding:.45rem .55rem;margin-bottom:.35rem">'
+    +'<div style="display:flex;gap:.4rem;align-items:flex-start">'
+    +'<span style="flex-shrink:0">'+ikon+'</span>'
+    +'<div style="flex:1;min-width:0"><div style="font-size:.7rem;font-weight:800;color:var(--tx)">'+escHtml(ad)+'</div>'
+    +(not?'<div style="font-size:.6rem;color:'+renk+';line-height:1.45;word-break:break-word">'+escHtml(not)+'</div>':'')
+    +'</div></div></div>';
+}
+function runDiagHealthCheck(){
+  var box=qs('dhcList');if(!box)return;
+  var out=[];
+  var yaz=function(){box.innerHTML=out.join('')+'<button class="btn bgh" onclick="runDiagHealthCheck()" style="width:100%;margin-top:.5rem">🔄 Yeniden Dene</button>';};
+  out.push('<div style="font-size:.66rem;color:var(--mu);margin-bottom:.4rem">⏳ Kontrol ediliyor...</div>');yaz();out=[];
+
+  // 1) Kimlik
+  var u=null;try{u=(window.firebase&&firebase.auth)?firebase.auth().currentUser:null;}catch(e){}
+  if(!u)out.push(_dhcSatir('Firebase kimliği','hata','Oturum yok. Kurallar kimlik istediği için hiçbir teşhis verisi okunamaz/yazılamaz.'));
+  else if(u.isAnonymous)out.push(_dhcSatir('Firebase kimliği','uyari','Anonim oturum. Modül açıp kapatmak için YÖNETİCİ hesabıyla giriş gerekir.'));
+  else out.push(_dhcSatir('Firebase kimliği','ok',u.email||u.uid));
+  yaz();
+
+  var testler=[
+    ['Modül anahtarlarını okuma','diagnostics/flags','read'],
+    ['Modül anahtarlarını yazma','diagnostics/flags/_saglikTest','write'],
+    ['Kayıt gönderme (logs)','diagnostics/logs/_saglikTest','write'],
+    ['Cihaz kartı yazma (devices)','diagnostics/devices/_saglikTest','write'],
+    ['Kopyalama damgası (copied)','diagnostics/copied/_saglikTest/_x','write'],
+    ['Uzak test isteği (sensorRequests)','diagnostics/sensorRequests/_saglikTest','write']
+  ];
+  var i=0;
+  function sonraki(){
+    if(i>=testler.length){bitir();return;}
+    var t=testler[i++],ad=t[0],yol=t[1],tip=t[2];
+    var p=(tip==='read')?db.ref(yol).once('value')
+      :db.ref(yol).set(Date.now()).then(function(){return db.ref(yol).remove().catch(function(){});});
+    p.then(function(){out.push(_dhcSatir(ad,'ok','izin var'));yaz();sonraki();})
+     .catch(function(e){
+        var m=(e&&e.message)||'bilinmeyen hata';
+        var ipucu=/permission|denied/i.test(m)
+          ? 'Veritabanı kuralları bu yolu engelliyor. Kural dosyasının SON sürümünü yayınladığınızdan ve yönetici hesabıyla giriş yaptığınızdan emin olun.'
+          : m;
+        out.push(_dhcSatir(ad,'hata',ipucu));yaz();sonraki();
+     });
+  }
+  function bitir(){
+    // 8) Çekirdek
+    var C=window.DiagCore;
+    if(!C)out.push(_dhcSatir('Teşhis çekirdeği (DiagCore)','hata','Yüklü değil - dosya eksik veya bir hata yüklenmesini engellemiş.'));
+    else{
+      var f=C.flags()||{},acik=Object.keys(f).filter(function(k){return f[k]===true;});
+      out.push(_dhcSatir('Teşhis çekirdeği (DiagCore)',acik.length?'ok':'uyari',
+        C.modules.length+' modül tanımlı · '+acik.length+' tanesi AÇIK'
+        +(acik.length?(': '+acik.join(', ')):' - hiçbir modül açık değilse hiçbir kayıt oluşmaz, bu normaldir.')));
+    }
+    // 9) Sensörler
+    var UI=window.DiagUI;
+    if(!UI||!UI.sonda)out.push(_dhcSatir('Yerleşim sensörleri (DiagUI)','hata','Yüklü değil.'));
+    else{
+      var r=UI.sonda();
+      if(r&&r.hata)out.push(_dhcSatir('Yerleşim sensörleri (DiagUI)','hata','Ölçüm sırasında hata: '+r.hata));
+      else{
+        var b=(r&&r.bulgular)||{},t=0;Object.keys(b).forEach(function(k){t+=b[k];});
+        out.push(_dhcSatir('Yerleşim sensörleri (DiagUI)',(r&&r.incelenenDugum>20)?'ok':'uyari',
+          (r?r.incelenenDugum:0)+' düğüm incelendi · '+t+' bulgu'
+          +((r&&r.incelenenDugum<=20)?' - bu sayı çok düşük, sensör ekrana ulaşamamış olabilir':'')));
+      }
+    }
+    yaz();
+  }
+  sonraki();
+}
+
 function openSensorTest(){
   var r=(window.DiagUI&&DiagUI.sonda)?DiagUI.sonda():{hata:'DiagUI yüklü değil'};
   window._sonSensorSonuc=r;
@@ -18253,7 +18351,8 @@ function openDiagnosticsManager(){
     +'</div>'
     +'<button class="btn bp" onclick="openDiagBadgeMap()" style="width:100%;margin-bottom:.5rem">🗺️ Rozet Yerleşim Haritası - hangi rozet ekranın neresinde?</button>'
     +'<button class="btn bgh" onclick="openDiagAuthTest()" style="width:100%;margin-bottom:.5rem">🔐 Kimlik Doğrulama Durumu - hangi cihazlar kimlikli bağlanıyor?</button>'
-    +'<button class="btn bgh" onclick="openSensorTest()" style="width:100%;margin-bottom:.8rem">🔬 Sensör Testi - yerleşim sensörleri bu ekranda ne görüyor?</button>'
+    +'<button class="btn bgh" onclick="openSensorTest()" style="width:100%;margin-bottom:.5rem">🔬 Sensör Testi - yerleşim sensörleri bu ekranda ne görüyor?</button>'
+    +'<button class="btn bp" onclick="openDiagHealthCheck()" style="width:100%;margin-bottom:.8rem">🩺 Sağlık Kontrolü - teşhis zincirinin hangi halkası kopuk?</button>'
     +'<div id="diagModuleList"></div>'
     +'<div style="height:1px;background:var(--br);margin:1rem 0"></div>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">'
