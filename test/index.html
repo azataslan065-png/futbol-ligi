@@ -1094,7 +1094,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-Y';
+window.APP_BUILD='2026-08-09-Z';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18970,7 +18970,12 @@ window.voteMvp=function(matchId,player){
             darKutu.push(yol(el)+' · genişlik '+w+'px / '+txt.length+' karakter · "'+ornek(el)+'"');
           }
           // 14) RENK SOĞUMASI
-          if(kucukKontrast.length<MAX_REPORT){
+          /* Emoji ve simgelerde kontrast ölçmek anlamsızdır: emoji KENDİ renkleriyle çizilir,
+             CSS yazı rengi onu etkilemez. Gerçek ölçümde "🗑️ · kontrast 2.52:1" gibi bulgular
+             çıktı - teknik olarak doğru, pratikte tamamen yanıltıcı. Artık metinde en az bir
+             harf veya rakam yoksa kontrast ölçülmez. */
+          var harfVarMi=/[0-9A-Za-zÇĞİÖŞÜçğıöşü]/.test(txt);
+          if(harfVarMi&&kucukKontrast.length<MAX_REPORT){
             var onC=_rgbCoz(cs.color);
             if(onC&&onC.a>=0.5){
               var arkaC=_gercekArkaplan(el);
@@ -19052,6 +19057,10 @@ window.voteMvp=function(matchId,player){
         }
         icerikler.forEach(function(el){
           if(ortulu.length>=MAX_REPORT)return;
+          // Karartma/katman kapsayıcısının KENDİSİ "örtülen öğe" olarak anlamsızdır - o
+          // zaten bir kaplamadır; ölçülmesi gereken onun İÇİNDEKİ içeriktir.
+          var _kid=(el.id||'').toLowerCase(), _kcls=(typeof el.className==='string'?el.className:'').toLowerCase();
+          if(/ov$|overlay|backdrop|modal|scrim/.test(_kid)||/\bov\b|overlay|backdrop|modal|scrim/.test(_kcls))return;
           var r=el.getBoundingClientRect();
           if(r.width<12||r.height<12)return;
           if(r.bottom<0||r.top>window.innerHeight)return;
@@ -19074,6 +19083,19 @@ window.voteMvp=function(matchId,player){
             // Eşik düşük tutulur: gerçek bir örtüşme testinde rozetin kartı kapatma oranı
             // %9 çıktı - %8'lik eşik sınıra çok yakındı ve benzer durumları kaçırabilirdi.
             if(oran<4)continue;   // bu kadarı gölge/kenarlık payı sayılır
+            /* KRİTİK DÜZELTME (gerçek ölçümden çıktı): Geometri tek başına YETMİYOR.
+               Rapor "üst bar, açık menünün geri düğmesini %79 örtüyor" dedi - oysa gerçekte
+               menü üst barın ÜSTÜNDE duruyor ve kullanıcı düğmeyi rahatça görüyor. İki
+               dikdörtgen kesişiyor olabilir; hangisinin ÖNDE olduğunu belirleyen şey
+               yığınlama sırasıdır (z-index / stacking context) ve dikdörtgenler bunu bilmez.
+               ÇÖZÜM: Kesişimin ortasında GERÇEKTEN en üstte ne olduğu tarayıcıya sorulur.
+               En üstteki öğe, örttüğü iddia edilen öğe (veya onun çocuğu) değilse örtme yoktur. */
+            var kmx=Math.max(r.left,fr.left)+kx/2, kmy=Math.max(r.top,fr.top)+ky/2;
+            if(kmx<0||kmy<0||kmx>window.innerWidth||kmy>window.innerHeight)continue;
+            var enUst=null;
+            try{enUst=document.elementFromPoint(kmx,kmy);}catch(e){}
+            if(!enUst)continue;
+            if(!(enUst===fe||fe.contains(enUst)))continue;   // örten öğe gerçekte önde değil
             ortulu.push(yol(el)+' · "'+ornek(el)+'" · %'+oran+' oranında ÖRTEN: '+yol(fe)+(kendiMi(fe)?'  ⚠️ (teşhis arayüzünün kendisi)':''));
             break;
           }
