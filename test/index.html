@@ -655,22 +655,7 @@ body.ticker-on{--ticker-h:38px}
 .bench-row{display:flex;align-items:center;gap:.5rem;padding:.4rem .6rem;background:var(--s2);border-radius:10px;margin-bottom:.3rem}
 
 /* ── MAÇ DETAY BANNER (görsel referanslı) ── */
-/* HATA DÜZELTMESİ (KULLANICI GÖSTERDİ - ekran görüntüsünde daire içine aldı: "Takım logoları
-   ve oradaki unsurlar çizdiğim yerde olmalıydı. Ekranı aşağı kaydırınca onlar iniyor, çizdiğim
-   yer kalıyor."): KÖK SEBEP - hemen üstteki .sheet-back-btn (PTSheetNav tarafından enjekte
-   edilen "◀" düğmesi) position:sticky;top:0 ile sabit kalıyordu, AMA bu banner (takım logoları,
-   VS, isimler) position:relative İDİ - yani kaydırınca SADECE küçük "◀" dairesi yerinde
-   kalıyor, banner'ın TAMAMI (kullanıcının "orada olmalıydı" dediği asıl içerik) yukarı doğru
-   kayıp gözden kayboluyordu. Kullanıcının ekranda gördüğü/çizdiği "kayma" tam olarak bu
-   ikisinin TUTARSIZ davranışıydı (biri sabit, biri değil). Standart CLS/layout-shift ölçümü
-   bunu hiç yakalamaz çünkü bu bir "sıçrama" değil - banner KASITLI OLARAK normal akışta
-   kaydırmayla birlikte hareket ediyordu, sadece kullanıcının BEKLENTİSİ (sabit kalması)
-   farklıydı. ÇÖZÜM: Banner da AYNI şekilde sticky yapıldı (z-index, "◀" düğmesinin
-   z-index:5'inin ALTINDA - 4 - tutuldu ki düğme her zaman banner'ın üzerinde/köşesinde
-   görünsün, iki öğe artık BİRLİKTE aynı noktada sabit kalıyor). Sekmeler (.md-tabs) ve altındaki
-   içerik kasıtlı olarak sticky YAPILMADI - kullanıcının çizdiği daire sekmeleri kapsamıyordu,
-   onlar normal şekilde kaymaya devam eder. */
-.md-banner{position:sticky;top:0;z-index:4;background:linear-gradient(135deg,#0a2818,#0d1f12);border-radius:16px 16px 0 0;padding:1.1rem .9rem .9rem;overflow:hidden;margin:-1.2rem -1rem 0}
+.md-banner{position:relative;background:linear-gradient(135deg,#0a2818,#0d1f12);border-radius:16px 16px 0 0;padding:1.1rem .9rem .9rem;overflow:hidden;margin:-1.2rem -1rem 0}
 .md-banner::before{content:'';position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(255,255,255,.02) 0px,rgba(255,255,255,.02) 40px,transparent 40px,transparent 80px);opacity:.5}
 .md-banner-row{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:.5rem;z-index:1}
 .md-team-col{display:flex;flex-direction:column;align-items:center;gap:.4rem}
@@ -19037,9 +19022,19 @@ window.voteMvp=function(matchId,player){
           var harfVarMi=/[0-9A-Za-zÇĞİÖŞÜçğıöşü]/.test(txt);
           if(harfVarMi&&kucukKontrast.length<MAX_REPORT){
             var onC=_rgbCoz(cs.color);
-            if(onC&&onC.a>=0.5){
+            if(onC&&onC.a>=0.15){
               var arkaC=_gercekArkaplan(el);
               if(arkaC){
+                /* SAYDAM YAZI RENGİ DÜZELTMESİ: Sekme yazıları rgba(255,255,255,.6) gibi
+                   YARI SAYDAM tanımlanır. Ham rengi (saf beyaz) ölçmek gerçeği yansıtmaz -
+                   ekranda görünen renk, yazı renginin arka planla KARIŞMIŞ halidir. Saydamlık
+                   hesaba katılmazsa açık zeminlerde kontrast olduğundan iyi görünür ve gerçek
+                   okunamazlık sensörden kaçar. Artık önce karışım yapılır, sonra ölçülür. */
+                if(onC.a<1){
+                  onC={ r:onC.a*onC.r+(1-onC.a)*arkaC.r,
+                        g:onC.a*onC.g+(1-onC.a)*arkaC.g,
+                        b:onC.a*onC.b+(1-onC.a)*arkaC.b, a:1 };
+                }
                 var or=_kontrast(onC,arkaC);
                 var kalin=(parseInt(cs.fontWeight,10)||400)>=700;
                 var buyuk=(fs>=24)||(fs>=18.66&&kalin);
@@ -19292,7 +19287,7 @@ window.voteMvp=function(matchId,player){
 
   /* ── B) TİTREME & GÖRSEL KARARSIZLIK ─────────────────────────────────────────────── */
   var _mo=null,_po=null,_scanT=null,_secT=null;
-  var _mutSayac=0,_cls=0,_clsSheetNav=0,_stilSayac=0,_sonStilTur=0;
+  var _mutSayac=0,_cls=0,_stilSayac=0,_sonStilTur=0;
   var _sonYazim={},_ardArda={};
 
   function moKur(){
@@ -19345,27 +19340,7 @@ window.voteMvp=function(matchId,player){
       _po=new PerformanceObserver(function(list){
         list.getEntries().forEach(function(en){
           // Kullanıcı etkileşiminden kaynaklanan kaymalar normaldir, sayılmaz.
-          if(en.hadRecentInput){
-            // HATA DÜZELTMESİ (KÖK SEBEP - kullanıcı bildirdi: "Maç Detayı'ndan Takım
-            // Detayı'na geçerken görüntü kayıyor ama Hata Yakalama Kodları bunu hiç
-            // göstermiyor"): Tarayıcının standart CLS ölçümü, bir dokunuştan SONRAKİ
-            // ~500ms içindeki TÜM kaymaları "girdi kaynaklı, dolayısıyla normal" sayıp
-            // yukarıdaki satırda tamamen ATLIYORDU. Ama "Maç Detayı → Takım Detayı" gibi
-            // sheet İÇİ ekran geçişleri DE her zaman bir dokunuşun hemen ardından olur -
-            // yani kullanıcının şikayet ettiği TAM OLARAK bu tür bir kaymaydı ve tasarımı
-            // gereği asla ölçülmüyordu. Çözüm: kaymanın kaynağı (en.sources) #sheetContent
-            // (Maç/Takım Detayı'nın render edildiği ortak konteyner) İÇİNDEYSE, girdi
-            // kaynaklı olsa bile AYRI bir sayaçta ('_clsSheetNav') biriktirilir - genel CLS
-            // ölçümü (_cls) ve dış davranış hiç değişmez, sadece bu özel durum için ek bir
-            // göz eklenmiş olur.
-            try{
-              var kaynakSheetIcinde=(en.sources||[]).some(function(s){
-                return s&&s.node&&s.node.nodeType===1&&s.node.closest&&s.node.closest('#sheetContent');
-              });
-              if(kaynakSheetIcinde)_clsSheetNav+=(en.value||0);
-            }catch(e){}
-            return;
-          }
+          if(en.hadRecentInput)return;
           _cls+=en.value||0;
         });
       });
@@ -19394,17 +19369,7 @@ window.voteMvp=function(matchId,player){
         anlami:'İçerik yerleştikten SONRA yer değiştiriyor; kullanıcı okurken/ dokunurken satır kayıyor. Genelde boyutu bildirilmemiş görsel veya sonradan eklenen şerit/banner sebep olur.'
       });
     }
-    // (bkz. yukarıdaki poKur() içindeki kök sebep notu) Maç/Takım Detayı gibi sheet içi
-    // ekran geçişlerinde oluşan, dokunuş kaynaklı olduğu için standart CLS ölçümünün
-    // ATLADIĞI kaymalar - önceden HİÇBİR modül bunu göremiyordu, artık pt_ui altında
-    // ayrı bir bulgu olarak raporlanıyor.
-    if(_clsSheetNav>CLS_LIMIT){
-      say('uyari','Ekran/sekme geçişinde görüntü kayması',{
-        ekran:ekranAdi(),birikim:_clsSheetNav.toFixed(3),esik:CLS_LIMIT,
-        anlami:'Maç Detayı ↔ Takım Detayı gibi sheet içi geçişlerde oluşan kayma - dokunuştan hemen sonra gerçekleştiği için tarayıcının standart CLS ölçümü bunu "girdi kaynaklı, normal" sayıp yok sayıyordu; bu kayıt özel olarak o durumu yakalar.'
-      });
-    }
-    _mutSayac=0;_stilSayac=0;_cls=0;_clsSheetNav=0;
+    _mutSayac=0;_stilSayac=0;_cls=0;
   }
 
   /* ── Aç/kapa ─────────────────────────────────────────────────────────────────────── */
@@ -19419,7 +19384,7 @@ window.voteMvp=function(matchId,player){
     if(_scanT){clearInterval(_scanT);_scanT=null;}
     if(_secT){clearInterval(_secT);_secT=null;}
     moSok();poSok();
-    _mutSayac=0;_cls=0;_clsSheetNav=0;_stilSayac=0;_sonYazim={};_ardArda={};
+    _mutSayac=0;_cls=0;_stilSayac=0;_sonYazim={};_ardArda={};
   }
   function esitle(){if(on())baslat();else durdur();}
 
