@@ -1178,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-10-D';
+window.APP_BUILD='2026-08-10-E';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -18080,7 +18080,8 @@ function sensorTestMetni(r){
   Object.keys(b).forEach(function(k){L.push('  '+k+': '+b[k]);});
   var orn=r.ornekler||{};
   [['ÖĞE ÖRTÜLMESİ',orn.ortulme],['HİZALAMA KAYMASI',orn.kayma],
-   ['RENK SOĞUMASI',orn.kontrast],['HARF SIKIŞMASI',orn.harf]].forEach(function(x){
+   ['RENK SOĞUMASI',orn.kontrast],['HARF SIKIŞMASI',orn.harf],
+   ['İŞLEVSİZ BOŞ ALAN',orn.bosAlan]].forEach(function(x){
     if(x[1]&&x[1].length){L.push('');L.push('--- '+x[0]+' ---');x[1].forEach(function(y){L.push('  · '+y);});}
   });
   return L.join('\n');
@@ -18318,7 +18319,8 @@ function openSensorTest(){
       +liste.map(function(x){return '<div style="font-size:.6rem;color:var(--tx);background:var(--s3);border-radius:8px;padding:.35rem .45rem;margin-bottom:.25rem;word-break:break-word;line-height:1.45">'+escHtml(x)+'</div>';}).join('');
   };
   html+=ornBlok('Öğe örtülmesi',orn.ortulme)+ornBlok('Hizalama kayması',orn.kayma)
-      +ornBlok('Renk soğuması',orn.kontrast)+ornBlok('Harf sıkışması',orn.harf);
+      +ornBlok('Renk soğuması',orn.kontrast)+ornBlok('Harf sıkışması',orn.harf)
+      +ornBlok('İşlevsiz boş alan',orn.bosAlan);
   if(!toplam){
     html+='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-top:.5rem">'
       +'Bu ekranda ölçülebilir bir kusur bulunamadı. '+r.incelenenDugum+' düğüm incelendi. '
@@ -19223,7 +19225,7 @@ function diagClearRemoteLogs(){
     if(!sondaMi&&document.hidden)return;
     var _ist={kok:0,dugum:0,butceDoldu:false};
     var yatayKirpik=[],dikeyKirpik=[],kucukYazi=[],darKutu=[],kucukHedef=[];
-    var kucukKontrast=[],harfSikisma=[];
+    var kucukKontrast=[],harfSikisma=[],bosAlan=[];
     var sayac=0;
     // KULLANICI RAPORUNDAN ÇIKAN HATA: Aynı öğe iki kez listeleniyordu ("div#pg-standings >
     // ... > button.st-filter-btn" ve "div.page.active > ... > button.st-filter-btn" aslında
@@ -19471,7 +19473,51 @@ function diagClearRemoteLogs(){
     // Bu satır bir düzenlemede yanlışlıkla silinmişti; aşağıdaki tüm say() çağrıları
     // 'ekran' değişkenine başvurduğu için tarama en başta çöküyor ve HİÇBİR sensör
     // sonuç üretemiyordu. Sensörler kusurlu değildi - tarama hiç tamamlanmıyordu.
+    /* ── 16) İŞLEVSİZ BOŞ ALAN ────────────────────────────────────────────────────────
+       KULLANICI BİLDİRDİ: "Üzerini çizdiğim alan orada sabit kalıyor ve hata yakalama kodu
+       bunu görmüyor." Haklıydı ve sebebi yapısaldı: buraya kadarki ölçümlerin HEPSİ İÇERİK
+       ÜZERİNDEN çalışıyordu - yazı sığıyor mu, renk okunuyor mu, düğme basılabilir mi.
+       Hiçbiri "burada ekranı yiyen ama HİÇBİR ŞEY GÖSTERMEYEN bir kutu var mı?" diye
+       sormuyordu. İçeriği olmayan bir kutunun ölçülecek yazısı, rengi, hedefi de yoktur;
+       dolayısıyla bütün sensörlerin arasından görünmeden geçiyordu.
+       NASIL ÖLÇÜLÜR: Ekranın enine yayılmış, kayda değer yükseklikte, ama içinde yazı,
+       görsel veya form öğesi BULUNMAYAN ve kendi zemini de olmayan kutular aranır. Böyle
+       bir kutu ya unutulmuş bir kalıntıdır ya da yanlış hesaplanmış bir boşluktur. */
+    try{
+      var _vpW=window.innerWidth||360, _vpH=window.innerHeight||640;
+      taramaKokleri().forEach(function(kok){
+        if(bosAlan.length>=MAX_REPORT)return;
+        var l;try{l=kok.querySelectorAll('div,section,header,footer,aside');}catch(e){return;}
+        for(var q=0;q<l.length&&bosAlan.length<MAX_REPORT;q++){
+          var el=l[q];
+          if(kendiMi(el))continue;
+          if(!el.getClientRects().length)continue;
+          var r=el.getBoundingClientRect();
+          if(r.height<28)continue;                       // küçük boşluklar normaldir
+          if(r.width<_vpW*0.4)continue;                  // dar kutular sütun olabilir
+          if(r.bottom<0||r.top>_vpH)continue;            // ekran dışı
+          if((el.textContent||'').trim())continue;       // yazısı var
+          var ic;try{ic=el.querySelector('img,svg,canvas,video,input,select,textarea,button,a');}catch(e){ic=null;}
+          if(ic&&ic.getClientRects().length)continue;    // görsel/etkileşimli içeriği var
+          var cs2;try{cs2=getComputedStyle(el);}catch(e){continue;}
+          if(cs2.backgroundImage&&cs2.backgroundImage!=='none')continue;   // kendi görseli var
+          var bg=_rgbCoz(cs2.backgroundColor);
+          if(bg&&bg.a>0.05)continue;                     // kendi zemini var (ayırıcı olabilir)
+          if(parseFloat(cs2.borderTopWidth)>0||parseFloat(cs2.borderBottomWidth)>0)continue;
+          var kls=(typeof el.className==='string'?el.className:'').toLowerCase();
+          if(/spacer|gap|divider|sep|placeholder|skeleton/.test(kls))continue;  // bilinçli boşluk
+          bosAlan.push(yol(el)+' · '+Math.round(r.width)+'×'+Math.round(r.height)+'px boş alan');
+        }
+      });
+    }catch(e){}
+
     var ekran=ekranAdi();
+    if(bosAlan.length)say('uyari','İşlevsiz boş alan ('+bosAlan.length+' kutu)',{
+      ekran:ekran,ogeler:bosAlan,
+      anlami:'Bu kutular ekranda yer kaplıyor ama içlerinde yazı, görsel veya düğme yok ve '
+        +'kendi zeminleri de yok - kullanıcıya hiçbir şey göstermiyorlar. Genelde silinmiş bir '
+        +'bölümden kalan kalıntı ya da yanlış hesaplanmış bir boşluktur.'
+    });
     if(kaymaListe.length)say('uyari','Satır içi hizalama kayması ('+kaymaListe.length+' satır)',{
       ekran:ekranAdi(),ogeler:kaymaListe,
       anlami:'Bu satırlarda simge, metin ve rozet birbirine göre dikeyde kaymış. Öğelerin '
@@ -19541,13 +19587,15 @@ function diagClearRemoteLogs(){
           'renk soğuması':kucukKontrast.length,
           'harf sıkışması':harfSikisma.length,
           'öğe örtülmesi':ortulu.length,
-          'hizalama kayması':kaymaListe.length
+          'hizalama kayması':kaymaListe.length,
+          'işlevsiz boş alan':bosAlan.length
         },
         ornekler:{
           ortulme:ortulu.slice(0,3),
           kayma:kaymaListe.slice(0,3),
           kontrast:kucukKontrast.slice(0,3),
-          harf:harfSikisma.slice(0,3)
+          harf:harfSikisma.slice(0,3),
+          bosAlan:bosAlan.slice(0,3)
         }
       };
     }
