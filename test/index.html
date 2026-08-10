@@ -688,13 +688,19 @@ div.md-logo{background:rgba(255,255,255,.06);border-radius:8px;display:flex;alig
 .md-ht{font-size:.62rem;color:rgba(255,255,255,.5)}
 
 /* ── MINI TABS (Detay/Karne/Kadro...) ── */
+/* SENSÖR BULGUSU + GÖRSEL HATA: Sekme yazıları BEYAZ sabitti ve zemin tema vurgu rengiydi.
+   Açık bir vurgu rengi (sarı-yeşil gibi) seçildiğinde beyaz yazı zeminden ayrışmıyordu.
+   Aynı şekilde "Maç Bilgisi" başlığı #374151 lacivert sabitti ve tema ne olursa olsun
+   değişmiyordu - yeşil temanın ortasında yabancı bir bant gibi duruyordu.
+   ÇÖZÜM: Her ikisi de artık --md-on-ac / --md-head-bg değişkenlerini kullanır; bu
+   değişkenler vurgu renginin AÇIKLIĞINA göre çalışma anında hesaplanır (bkz. mdTemaUygula). */
 .md-tabs{display:flex;overflow-x:auto;background:var(--ac);margin:0 -1rem;padding:0 .3rem;touch-action:pan-x}
 .md-tabs::-webkit-scrollbar{display:none}
-.md-tab{flex-shrink:0;padding:.65rem .85rem;font-size:.78rem;font-weight:700;color:rgba(255,255,255,.6);cursor:pointer;background:transparent;border:none;border-bottom:3px solid transparent;font-family:var(--font-family,'Outfit'),sans-serif;white-space:nowrap}
-.md-tab.active{color:#fff;border-bottom-color:#fff}
+.md-tab{flex-shrink:0;padding:.65rem .85rem;font-size:.78rem;font-weight:700;color:var(--md-on-ac-dim,rgba(255,255,255,.6));cursor:pointer;background:transparent;border:none;border-bottom:3px solid transparent;font-family:var(--font-family,'Outfit'),sans-serif;white-space:nowrap}
+.md-tab.active{color:var(--md-on-ac,#fff);border-bottom-color:var(--md-on-ac,#fff)}
 
 /* ── INFO CARDS ── */
-.md-section-head{background:#374151;color:#fff;font-weight:800;font-size:.8rem;padding:.55rem .9rem;margin:0 -1rem}
+.md-section-head{background:var(--md-head-bg,#374151);color:var(--md-head-tx,#fff);font-weight:800;font-size:.8rem;padding:.55rem .9rem;margin:0 -1rem}
 .md-info-card{background:var(--s);border-radius:0;padding:.85rem .9rem;margin:0 -1rem;border-bottom:1px solid var(--br)}
 .md-info-row{display:flex;align-items:center;gap:.65rem}
 .md-info-icon{width:34px;height:34px;border-radius:50%;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:.95rem;flex-shrink:0}
@@ -1094,7 +1100,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-10-A';
+window.APP_BUILD='2026-08-10-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -8864,6 +8870,8 @@ function renderMatchDetailContent(){
     </div>`;
 
   let body='';
+  // Tema değişmiş olabilir; sekme ve başlık renkleri her çizimde yeniden hesaplanır.
+  try{mdTemaUygula();}catch(e){}
   if(_mdTab==='detay')body=renderMdDetay(id,m,h,a,ntInfo);
   else if(_mdTab==='kadro')body=renderMdKadro(id,m,h,a);
   else if(_mdTab==='karne')body=renderMdKarne(id,m,h,a);
@@ -9102,6 +9110,43 @@ function renderBaskimetre(m){
         <div style="font-size:.58rem;color:var(--mu);margin-top:.35rem;line-height:1.45">${altYazi}</div>
       </div>`;
   }catch(e){DiagSil('renderBaskimetre',e);return '';}
+}
+/* Maç detayı ekranının tema uyumu.
+   Vurgu rengi ile üzerindeki yazının kontrastı ölçülür; yazı rengi (beyaz mı koyu mu)
+   buna göre seçilir. "Maç Bilgisi" başlık bandı da sabit lacivert olmaktan çıkarılıp
+   sayfanın kendi yüzey rengine bağlanır - böylece hangi tema seçilirse seçilsin bant
+   yabancı durmaz. */
+function mdTemaUygula(){
+  try{
+    var kok=document.documentElement, st=getComputedStyle(kok);
+    var acStr=st.getPropertyValue('--ac')||'#7c3aed';
+    var c=_mdRenkCoz(acStr.trim());
+    if(!c)return;
+    // WCAG göreli parlaklık: 0 (siyah) - 1 (beyaz)
+    var f=function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);};
+    var L=0.2126*f(c.r)+0.7152*f(c.g)+0.0722*f(c.b);
+    var acikZemin=L>0.45;                       // vurgu rengi açık mı?
+    kok.style.setProperty('--md-on-ac',acikZemin?'#111827':'#ffffff');
+    kok.style.setProperty('--md-on-ac-dim',acikZemin?'rgba(17,24,39,.62)':'rgba(255,255,255,.62)');
+    // Başlık bandı: sayfanın yüzey rengiyle uyumlu, hafif koyulaştırılmış bir ton.
+    var s3=(st.getPropertyValue('--s3')||'').trim();
+    kok.style.setProperty('--md-head-bg',s3||'#374151');
+    var t=_mdRenkCoz(s3);
+    if(t){
+      var Lt=0.2126*f(t.r)+0.7152*f(t.g)+0.0722*f(t.b);
+      kok.style.setProperty('--md-head-tx',Lt>0.45?'#111827':'#ffffff');
+    }
+  }catch(e){DiagSil('mdTemaUygula',e);}
+}
+function _mdRenkCoz(str){
+  str=(str||'').trim();
+  var m=str.match(/rgba?\(([^)]+)\)/);
+  if(m){var p=m[1].split(',').map(parseFloat);return {r:p[0],g:p[1],b:p[2]};}
+  m=str.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if(!m)return null;
+  var h=m[1];
+  if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+  return {r:parseInt(h.slice(0,2),16),g:parseInt(h.slice(2,4),16),b:parseInt(h.slice(4,6),16)};
 }
 function renderMdDetay(id,m,h,a,ntInfo){
   const dateStr=m.date?new Date(m.date+'T'+(m.time||'00:00')).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'})+', '+(m.time||''):'Tarih belirlenmedi';
