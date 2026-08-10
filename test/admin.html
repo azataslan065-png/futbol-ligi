@@ -1178,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-10-E';
+window.APP_BUILD='2026-08-10-F';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -18081,7 +18081,7 @@ function sensorTestMetni(r){
   var orn=r.ornekler||{};
   [['ÖĞE ÖRTÜLMESİ',orn.ortulme],['HİZALAMA KAYMASI',orn.kayma],
    ['RENK SOĞUMASI',orn.kontrast],['HARF SIKIŞMASI',orn.harf],
-   ['İŞLEVSİZ BOŞ ALAN',orn.bosAlan]].forEach(function(x){
+   ['İŞLEVSİZ BOŞ ALAN',orn.bosAlan],['AŞIRI DİKEY BOŞLUK',orn.asiriBosluk]].forEach(function(x){
     if(x[1]&&x[1].length){L.push('');L.push('--- '+x[0]+' ---');x[1].forEach(function(y){L.push('  · '+y);});}
   });
   return L.join('\n');
@@ -18320,7 +18320,7 @@ function openSensorTest(){
   };
   html+=ornBlok('Öğe örtülmesi',orn.ortulme)+ornBlok('Hizalama kayması',orn.kayma)
       +ornBlok('Renk soğuması',orn.kontrast)+ornBlok('Harf sıkışması',orn.harf)
-      +ornBlok('İşlevsiz boş alan',orn.bosAlan);
+      +ornBlok('İşlevsiz boş alan',orn.bosAlan)+ornBlok('Aşırı dikey boşluk',orn.asiriBosluk);
   if(!toplam){
     html+='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-top:.5rem">'
       +'Bu ekranda ölçülebilir bir kusur bulunamadı. '+r.incelenenDugum+' düğüm incelendi. '
@@ -19506,12 +19506,76 @@ function diagClearRemoteLogs(){
           if(parseFloat(cs2.borderTopWidth)>0||parseFloat(cs2.borderBottomWidth)>0)continue;
           var kls=(typeof el.className==='string'?el.className:'').toLowerCase();
           if(/spacer|gap|divider|sep|placeholder|skeleton/.test(kls))continue;  // bilinçli boşluk
+          /* YANLIŞ ALARM DÜZELTMESİ (ilk gerçek bulgudan): Sensör #bgFixedLayer'ı
+             "384×952px boş alan" olarak raporladı. Teknik olarak doğru - içi boş - ama bu
+             bir ARKA PLAN KATMANI; işi zaten boş durup arkada beklemek. Ekranın tamamına
+             yakınını kaplayan katmanlar ve adında arka plan/katman geçen öğeler ölçüm dışı. */
+          var kimlik=(el.id||'').toLowerCase();
+          if(/bg|background|layer|backdrop|fixedlayer/.test(kimlik))continue;
+          if(/bg-|background|layer/.test(kls))continue;
+          if((r.width*r.height)/(_vpW*_vpH)>0.85)continue;   // ekranı kaplayan katman
           bosAlan.push(yol(el)+' · '+Math.round(r.width)+'×'+Math.round(r.height)+'px boş alan');
         }
       });
     }catch(e){}
 
+    /* ── 17) AŞIRI DİKEY BOŞLUK ───────────────────────────────────────────────────────
+       Şikayet edilen boşluk her zaman ayrı bir KUTU olmayabilir - çoğu zaman bir kapsayıcının
+       iç boşluğudur (padding) ya da iki öğe arasındaki kenar boşluğudur (margin). Böyle bir
+       boşluğun kendi öğesi yoktur; dolayısıyla "boş kutu" sensörü onu göremez.
+       Bu ölçüm kapsayıcının içine bakar: üst kenarı ile ilk çocuğu arasındaki ve ardışık
+       çocuklar arasındaki dikey açıklığı ölçer. Ekranda gözle görülür bir boşluk bırakan
+       açıklıklar (48px üstü) raporlanır. */
+    var asiriBosluk=[];
+    try{
+      var _vp2=window.innerHeight||640;
+      taramaKokleri().forEach(function(kok){
+        if(asiriBosluk.length>=MAX_REPORT)return;
+        var l;try{l=kok.querySelectorAll('div,section,main,form');}catch(e){return;}
+        for(var q=0;q<l.length&&asiriBosluk.length<MAX_REPORT;q++){
+          var kap=l[q];
+          if(kendiMi(kap))continue;
+          if(!kap.getClientRects().length)continue;
+          var kr=kap.getBoundingClientRect();
+          if(kr.height<80||kr.width<80)continue;
+          if(kr.bottom<0||kr.top>_vp2)continue;
+          var cs3;try{cs3=getComputedStyle(kap);}catch(e){continue;}
+          if(cs3.overflowY==='auto'||cs3.overflowY==='scroll')continue;  // kaydırılan alanlar
+          var cocuk=[];
+          for(var c=0;c<kap.children.length;c++){
+            var ch=kap.children[c];
+            if(kendiMi(ch))continue;
+            if(!ch.getClientRects().length)continue;
+            var chr=ch.getBoundingClientRect();
+            if(chr.height>0)cocuk.push(chr);
+          }
+          if(!cocuk.length)continue;
+          cocuk.sort(function(a,b){return a.top-b.top;});
+          // Üst kenar ile ilk çocuk arasındaki açıklık
+          var ustBosluk=cocuk[0].top-kr.top;
+          if(ustBosluk>48){
+            asiriBosluk.push(yol(kap)+' · üst kenarında '+Math.round(ustBosluk)+'px boşluk (ilk içerikten önce)');
+            continue;
+          }
+          // Ardışık çocuklar arasındaki açıklık
+          for(var d=1;d<cocuk.length;d++){
+            var ara=cocuk[d].top-cocuk[d-1].bottom;
+            if(ara>48){
+              asiriBosluk.push(yol(kap)+' · içinde '+Math.round(ara)+'px boşluk (iki öğe arasında)');
+              break;
+            }
+          }
+        }
+      });
+    }catch(e){}
+
     var ekran=ekranAdi();
+    if(asiriBosluk.length)say('uyari','Aşırı dikey boşluk ('+asiriBosluk.length+' yer)',{
+      ekran:ekran,ogeler:asiriBosluk,
+      anlami:'Bu noktalarda ekranda gözle görülür bir açıklık var ama orada bir öğe yok - '
+        +'boşluk kapsayıcının iç/dış kenar boşluğundan geliyor. Silinmiş bir bölümden kalan '
+        +'kenar boşluğu ya da yanlış hesaplanmış bir yükseklik olabilir.'
+    });
     if(bosAlan.length)say('uyari','İşlevsiz boş alan ('+bosAlan.length+' kutu)',{
       ekran:ekran,ogeler:bosAlan,
       anlami:'Bu kutular ekranda yer kaplıyor ama içlerinde yazı, görsel veya düğme yok ve '
@@ -19588,14 +19652,16 @@ function diagClearRemoteLogs(){
           'harf sıkışması':harfSikisma.length,
           'öğe örtülmesi':ortulu.length,
           'hizalama kayması':kaymaListe.length,
-          'işlevsiz boş alan':bosAlan.length
+          'işlevsiz boş alan':bosAlan.length,
+          'aşırı dikey boşluk':asiriBosluk.length
         },
         ornekler:{
           ortulme:ortulu.slice(0,3),
           kayma:kaymaListe.slice(0,3),
           kontrast:kucukKontrast.slice(0,3),
           harf:harfSikisma.slice(0,3),
-          bosAlan:bosAlan.slice(0,3)
+          bosAlan:bosAlan.slice(0,3),
+          asiriBosluk:asiriBosluk.slice(0,3)
         }
       };
     }
