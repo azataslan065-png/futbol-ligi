@@ -124,6 +124,10 @@ button{font-family:Outfit,sans-serif;cursor:pointer;border:none;border-radius:10
    zıplamaz. topbar #appWrap içinde sticky kalır. */
 #appWrap{display:none;height:100vh;height:100dvh;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:none}
 /* Topbar */
+/* SENSÖR BULGUSU: Bu düğmeler 17-25px yüksekliğindeydi (parmakla güvenli sınır 28px) ve
+   ıskalanıyordu. Görsel boyut ve yazı korunarak yalnızca dokunma alanı büyütüldü. */
+#alpLeft,#alpCenter,#alpRight,#alpHidden{min-height:32px}
+.card .g2>button,.card .g3>button{min-height:32px}
 .topbar{background:rgba(10,10,15,.95);backdrop-filter:blur(12px);border-bottom:1px solid var(--br);padding:.58rem 1rem;display:flex;align-items:center;gap:.6rem;position:sticky;top:0;z-index:50}
 .sync{font-size:.6rem;font-weight:700;padding:.16rem .48rem;border-radius:20px}
 .s-ok{background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.3);color:#34d399}
@@ -299,7 +303,10 @@ button{font-family:Outfit,sans-serif;cursor:pointer;border:none;border-radius:10
 <div id="appWrap" style="display:none">
   <div class="topbar">
     <div id="topLogo" style="width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--ac),var(--ac2));display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0;overflow:hidden">⚙</div>
-    <span id="topTitle" style="font-size:.86rem;font-weight:800;flex:1">Admin</span>
+    <!-- SENSÖR BULGUSU (kontrast 1.11:1): Üst barın zemini temadan BAĞIMSIZ olarak koyudur
+         (rgba(10,10,15,.95)), ama başlık rengi temadan geliyordu. Açık temada metin
+         koyulaşınca koyu zemin üzerinde neredeyse görünmez hale geliyordu. Renk sabitlendi. -->
+    <span id="topTitle" style="font-size:.86rem;font-weight:800;flex:1;color:#f1f5f9">Admin</span>
     <button onclick="showTab('admin',document.getElementById('adminTabBtn'))" style="position:relative;background:transparent;border:none;color:var(--mu);font-size:1.1rem;cursor:pointer;padding:.3rem" title="Premium Talepleri">🔔<span class="premium-req-badge" id="premBadge_top" style="display:none"></span></button>
     <button onclick="openAdminChatScreen()" style="background:transparent;border:none;color:var(--mu);font-size:1.1rem;cursor:pointer;padding:.3rem" title="Sohbet (Geliştirici olarak)">💬</button>
     <span id="syncEl" class="sync s-wait">⏳</span>
@@ -1171,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-09-Z';
+window.APP_BUILD='2026-08-10-A';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -18502,12 +18509,8 @@ function subscribeDiagLogs(){
       var v=snap.val()||{};
       _diagRemoteLogs=Object.keys(v).map(function(k){var o=v[k]||{};o._key=k;return o;})
         .sort(function(a,b){return (b.ts||0)-(a.ts||0);});
-      renderDiagLogList();
-      // Modül listesindeki yeşil/kırmızı logolar da canlı kalsın (yeni hata geldiğinde
-      // o modülün logosu anında kırmızıya döner ve baloncuk sayısı artar).
-      if(qs('diagModuleList'))renderDiagModuleList();
-      // Cihaz detayı açıkken yeni kayıt gelirse/kayıt silinirse liste anında tazelenir.
-      if(_diagOpenDevice)renderDiagDeviceLogList();
+      // Üç dinleyici de aynı biriktiriciyi çağırır; ekran tek seferde çizilir.
+      scheduleDiagRender();
     },function(err){
       var box=qs('diagLogList');
       if(box)box.innerHTML='<div style="font-size:.68rem;color:#f87171;padding:.6rem">Kayıtlar okunamadı: '+escHtml(err&&err.message||'yetki hatası')+'</div>';
@@ -18553,8 +18556,7 @@ function subscribeDiagCopied(){
     _diagCopiedRef=db.ref('diagnostics/copied');
     _diagCopiedRef.on('value',function(snap){
       _diagCopied=snap.val()||{};
-      renderDiagLogList();
-      if(_diagOpenDevice)renderDiagDeviceLogList();
+      scheduleDiagRender();
     },function(){});
   }catch(e){}
 }
@@ -18593,8 +18595,7 @@ function subscribeDiagDevices(){
     _diagDevicesRef=db.ref('diagnostics/devices');
     _diagDevicesRef.on('value',function(snap){
       _diagDevices=snap.val()||{};
-      renderDiagLogList();
-      if(_diagOpenDevice)renderDiagDeviceLogList();
+      scheduleDiagRender();
     },function(){});
   }catch(e){}
 }
@@ -18735,6 +18736,21 @@ function diagMarkCopied(keys){
   });
 }
 
+/* Çizim biriktirici: Aynı listeyi üç ayrı dinleyici (logs, devices, copied) tetikliyordu ve
+   her biri ayrı çizim yaptırıyordu - sensör bunu "400ms içinde 3 kez yeniden çizim" ve
+   "saniyede 261 DOM değişikliği" olarak yakaladı. Artık arka arkaya gelen istekler tek bir
+   çizimde toplanır; ekranda görünen sonuç aynı, maliyeti üçte bir. */
+var _diagCizimBekliyor=false;
+function scheduleDiagRender(){
+  if(_diagCizimBekliyor)return;
+  _diagCizimBekliyor=true;
+  requestAnimationFrame(function(){
+    _diagCizimBekliyor=false;
+    try{renderDiagLogList();}catch(e){}
+    try{if(_diagOpenDevice)renderDiagDeviceLogList();}catch(e){}
+    try{if(qs('diagModuleList'))renderDiagModuleList();}catch(e){}
+  });
+}
 function renderDiagLogList(){
   var fb=qs('diagLogFilters');
   if(fb){
@@ -19834,7 +19850,10 @@ function diagClearRemoteLogs(){
      ızgarada bir sonraki boş hücreye kayar. Hepsi doluysa kendi hücresinde kalır (rozet
      asla kaybolmaz). Ölçüm yalnızca modül değiştiğinde veya ekran boyutu değiştiğinde
      yapılır, her saniye değil - maliyeti ihmal edilebilir. */
-  var HUD_BLOCKERS=['.diagHudBadge','#admDoctorBtn','.bottomnav','.nav','#livePanel .live-actions','#sheetWrap.open .sheet-actions',
+  /* SENSÖR BULGUSU: "Rozet, açık menüdeki düğmeleri %21 örtüyor." Rozet yalnızca sabit
+     uygulama öğelerinden (alt menü, şerit) kaçıyordu; AÇIK MENÜNÜN İÇERİĞİNİ hesaba
+     katmıyordu. Menü listeye eklendi - artık rozet açık menünün üstüne binmiyor. */
+  var HUD_BLOCKERS=['.diagHudBadge','#sheetOv.open .sheet','#admDoctorBtn','.bottomnav','.nav','#livePanel .live-actions','#sheetWrap.open .sheet-actions',
     '#adminChatInputBar','.fab','#uploadProgressBar'];
   function _kesisiyor(a,b){
     return !(a.right<b.left||a.left>b.right||a.bottom<b.top||a.top>b.bottom);
