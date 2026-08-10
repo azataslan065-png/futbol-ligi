@@ -1100,7 +1100,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-10-B';
+window.APP_BUILD='2026-08-10-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -19277,7 +19277,7 @@ window.voteMvp=function(matchId,player){
 
   /* ── B) TİTREME & GÖRSEL KARARSIZLIK ─────────────────────────────────────────────── */
   var _mo=null,_po=null,_scanT=null,_secT=null;
-  var _mutSayac=0,_cls=0,_stilSayac=0,_sonStilTur=0;
+  var _mutSayac=0,_cls=0,_clsSheetNav=0,_stilSayac=0,_sonStilTur=0;
   var _sonYazim={},_ardArda={};
 
   function moKur(){
@@ -19330,7 +19330,27 @@ window.voteMvp=function(matchId,player){
       _po=new PerformanceObserver(function(list){
         list.getEntries().forEach(function(en){
           // Kullanıcı etkileşiminden kaynaklanan kaymalar normaldir, sayılmaz.
-          if(en.hadRecentInput)return;
+          if(en.hadRecentInput){
+            // HATA DÜZELTMESİ (KÖK SEBEP - kullanıcı bildirdi: "Maç Detayı'ndan Takım
+            // Detayı'na geçerken görüntü kayıyor ama Hata Yakalama Kodları bunu hiç
+            // göstermiyor"): Tarayıcının standart CLS ölçümü, bir dokunuştan SONRAKİ
+            // ~500ms içindeki TÜM kaymaları "girdi kaynaklı, dolayısıyla normal" sayıp
+            // yukarıdaki satırda tamamen ATLIYORDU. Ama "Maç Detayı → Takım Detayı" gibi
+            // sheet İÇİ ekran geçişleri DE her zaman bir dokunuşun hemen ardından olur -
+            // yani kullanıcının şikayet ettiği TAM OLARAK bu tür bir kaymaydı ve tasarımı
+            // gereği asla ölçülmüyordu. Çözüm: kaymanın kaynağı (en.sources) #sheetContent
+            // (Maç/Takım Detayı'nın render edildiği ortak konteyner) İÇİNDEYSE, girdi
+            // kaynaklı olsa bile AYRI bir sayaçta ('_clsSheetNav') biriktirilir - genel CLS
+            // ölçümü (_cls) ve dış davranış hiç değişmez, sadece bu özel durum için ek bir
+            // göz eklenmiş olur.
+            try{
+              var kaynakSheetIcinde=(en.sources||[]).some(function(s){
+                return s&&s.node&&s.node.nodeType===1&&s.node.closest&&s.node.closest('#sheetContent');
+              });
+              if(kaynakSheetIcinde)_clsSheetNav+=(en.value||0);
+            }catch(e){}
+            return;
+          }
           _cls+=en.value||0;
         });
       });
@@ -19359,7 +19379,17 @@ window.voteMvp=function(matchId,player){
         anlami:'İçerik yerleştikten SONRA yer değiştiriyor; kullanıcı okurken/ dokunurken satır kayıyor. Genelde boyutu bildirilmemiş görsel veya sonradan eklenen şerit/banner sebep olur.'
       });
     }
-    _mutSayac=0;_stilSayac=0;_cls=0;
+    // (bkz. yukarıdaki poKur() içindeki kök sebep notu) Maç/Takım Detayı gibi sheet içi
+    // ekran geçişlerinde oluşan, dokunuş kaynaklı olduğu için standart CLS ölçümünün
+    // ATLADIĞI kaymalar - önceden HİÇBİR modül bunu göremiyordu, artık pt_ui altında
+    // ayrı bir bulgu olarak raporlanıyor.
+    if(_clsSheetNav>CLS_LIMIT){
+      say('uyari','Ekran/sekme geçişinde görüntü kayması',{
+        ekran:ekranAdi(),birikim:_clsSheetNav.toFixed(3),esik:CLS_LIMIT,
+        anlami:'Maç Detayı ↔ Takım Detayı gibi sheet içi geçişlerde oluşan kayma - dokunuştan hemen sonra gerçekleştiği için tarayıcının standart CLS ölçümü bunu "girdi kaynaklı, normal" sayıp yok sayıyordu; bu kayıt özel olarak o durumu yakalar.'
+      });
+    }
+    _mutSayac=0;_stilSayac=0;_cls=0;_clsSheetNav=0;
   }
 
   /* ── Aç/kapa ─────────────────────────────────────────────────────────────────────── */
@@ -19374,7 +19404,7 @@ window.voteMvp=function(matchId,player){
     if(_scanT){clearInterval(_scanT);_scanT=null;}
     if(_secT){clearInterval(_secT);_secT=null;}
     moSok();poSok();
-    _mutSayac=0;_cls=0;_stilSayac=0;_sonYazim={};_ardArda={};
+    _mutSayac=0;_cls=0;_clsSheetNav=0;_stilSayac=0;_sonYazim={};_ardArda={};
   }
   function esitle(){if(on())baslat();else durdur();}
 
