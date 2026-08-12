@@ -1178,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-G';
+window.APP_BUILD='2026-08-12-J';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1257,63 +1257,76 @@ window.APP_CHECK_SITE_KEY='6Ld4-4EtAAAAAPC1eNtLyCC-w74V0PGwFAz9Cpbf';   // reCAP
     else document.addEventListener('DOMContentLoaded',yaz);
   }catch(e){}
 })();
-/* ── FARE İLE YATAY SÜRÜKLEME ─────────────────────────────────────────────────────────
-   KULLANICI BİLDİRDİ: "Mouse ile butonlar kaydırılamıyor."
-   SEBEP: Yatay şeritler (sekmeler, tarih şeridi, filtre düğmeleri) `overflow-x:auto` ile
-   kaydırılabilir yapılmıştı. Dokunmatik ekranda parmakla sürüklemek işe yarar, ama FARE ile
-   sürüklemek tarayıcıda varsayılan olarak ÇALIŞMAZ - kullanıcı ya kaydırma çubuğunu
-   bulmak ya da Shift+tekerlek gibi bir kısayol bilmek zorunda kalır. Projeksiyon veya
-   masaüstünde şerit kullanılamaz hale geliyordu.
-   ÇÖZÜM: Basılı tutup sürükleme davranışı eklenir. Ayırt etmesi gereken iki durum var:
-     · Kısa basış + bırakma  → bu bir TIKLAMADIR, düğme çalışmalı
-     · Basılı tutup kaydırma → bu bir SÜRÜKLEMEDİR, tıklama iptal edilmeli
-   Bu ayrım eşiği 5 pikseldir: fare bu kadar hareket ettiyse sürükleme sayılır ve o
-   hareketin sonundaki tıklama yutulur (aksi halde sürükledikten sonra parmağın kalktığı
-   düğme yanlışlıkla tetiklenir). */
+/* ── FARE İLE KAYDIRMA (genel) ────────────────────────────────────────────────────────
+   KULLANICI BİLDİRDİ: "Her menüdeki her düğme için söylemiştim."
+   ÖNCEKİ SÜRÜMÜN KUSURU: Fare sürüklemesi ELLE YAZILMIŞ bir seçici listesine bağlıydı
+   ('.main-nav, .stat-tab-row, .md-tabs' ...). Listede olmayan hiçbir yer sürüklenemiyordu -
+   ve uygulamada kaydırılabilir onlarca kapsayıcı var: açılan menülerin içi, uzun listeler,
+   filtre şeritleri, kadro alanları. Bugün birkaç kez yaşadığımız hatanın aynısı: tahmine
+   dayalı bir liste, gerçeği kapsamıyor.
+   YENİ YAKLAŞIM: Liste yok. Fare basılan noktadan yukarı doğru gidilir ve GERÇEKTEN
+   kaydırılabilen ilk kapsayıcı bulunur (içeriği kutusundan taşıyor mu + CSS kaydırmaya
+   izin veriyor mu). Yatay veya dikey fark etmez; hangisi mümkünse o yönde kaydırılır.
+   Böylece yeni bir ekran eklendiğinde burayı güncellemek gerekmez. */
 (function fareIleKaydirma(){
-  var AKTIF_SEC='.main-nav,.stat-tab-row,.date-strip-scroll,.md-tabs,.formation-picker,.hscroll-preserve,.st-filter-row,.lt-track';
-  var SURUKLEME_ESIGI=5;
+  var ESIK=5;                 // bu kadar px hareket = sürükleme (altı tıklama sayılır)
   var st=null;
-  function kaydirilabilirBul(el){
-    for(var n=el;n&&n!==document.body;n=n.parentElement){
-      try{ if(n.matches&&n.matches(AKTIF_SEC)&&n.scrollWidth>n.clientWidth+2)return n; }catch(e){}
+  function kaydirilirMi(el,yon){
+    var cs;try{cs=getComputedStyle(el);}catch(e){return false;}
+    var ov=(yon==='x')?(cs.overflowX||cs.overflow):(cs.overflowY||cs.overflow);
+    if(ov!=='auto'&&ov!=='scroll'&&ov!=='overlay')return false;
+    return (yon==='x')?(el.scrollWidth>el.clientWidth+2):(el.scrollHeight>el.clientHeight+2);
+  }
+  function kutuBul(el){
+    for(var n=el;n&&n!==document.documentElement;n=n.parentElement){
+      if(n.nodeType!==1)continue;
+      var x=kaydirilirMi(n,'x'), y=kaydirilirMi(n,'y');
+      if(x||y)return {el:n,x:x,y:y};
     }
     return null;
   }
+  // Metin girişlerinde sürükleme yapılmaz - orada sürükleme METİN SEÇMEK demektir.
+  function girisMi(el){
+    try{ return !!(el.closest&&el.closest('input,textarea,select,[contenteditable="true"]')); }catch(e){ return false; }
+  }
   document.addEventListener('mousedown',function(e){
     if(e.button!==0)return;
-    var kutu=kaydirilabilirBul(e.target);
-    if(!kutu)return;
-    st={kutu:kutu,x0:e.clientX,sol0:kutu.scrollLeft,surukledi:false};
+    if(girisMi(e.target))return;
+    var k=kutuBul(e.target);
+    if(!k)return;
+    st={k:k,x0:e.clientX,y0:e.clientY,sol0:k.el.scrollLeft,ust0:k.el.scrollTop,surukledi:false};
   },true);
   document.addEventListener('mousemove',function(e){
     if(!st)return;
-    var dx=e.clientX-st.x0;
-    if(!st.surukledi&&Math.abs(dx)<SURUKLEME_ESIGI)return;
+    var dx=e.clientX-st.x0, dy=e.clientY-st.y0;
+    if(!st.surukledi&&Math.abs(dx)<ESIK&&Math.abs(dy)<ESIK)return;
     st.surukledi=true;
-    st.kutu.scrollLeft=st.sol0-dx;
-    st.kutu.style.cursor='grabbing';
-    e.preventDefault();        // metin seçilmesini engelle
+    if(st.k.x)st.k.el.scrollLeft=st.sol0-dx;
+    if(st.k.y)st.k.el.scrollTop=st.ust0-dy;
+    st.k.el.style.cursor='grabbing';
+    e.preventDefault();
   },true);
-  document.addEventListener('mouseup',function(e){
+  document.addEventListener('mouseup',function(){
     if(!st)return;
     var s=st; st=null;
-    s.kutu.style.cursor='';
-    if(!s.surukledi)return;    // sürükleme yoktu: normal tıklama geçsin
-    // Sürükleme sonrası tıklama yutulur - yoksa parmağın kalktığı düğme tetiklenir.
+    s.k.el.style.cursor='';
+    if(!s.surukledi)return;   // hareket yoktu: normal tıklama geçsin
+    /* Sürükleme sonrası tıklama YUTULUR. Yoksa fareyi bıraktığınız düğme tetiklenir -
+       şeridi kaydırdıktan sonra istemediğiniz bir sekmeye geçmeniz anlamına gelir. */
     var yut=function(ev){ev.stopPropagation();ev.preventDefault();document.removeEventListener('click',yut,true);};
     document.addEventListener('click',yut,true);
     setTimeout(function(){document.removeEventListener('click',yut,true);},0);
   },true);
-  document.addEventListener('mouseleave',function(){ if(st){st.kutu.style.cursor='';st=null;} },true);
-  /* Fare tekerleği: dikey tekerlek hareketi yatay şeritlerde yatay kaydırmaya çevrilir -
-     masaüstünde en doğal beklenti budur. */
+  document.addEventListener('mouseleave',function(){ if(st){st.k.el.style.cursor='';st=null;} },true);
+  /* Tekerlek: YALNIZCA yatay kaydırılan (dikey kaydırılamayan) şeritlerde dikey tekerlek
+     hareketi yataya çevrilir. Hem yatay hem dikey kaydırılabilen alanlarda tarayıcının
+     kendi davranışı korunur - aksi halde uzun listelerde sayfa aşağı inmez olurdu. */
   document.addEventListener('wheel',function(e){
-    if(e.deltaY===0)return;
-    var kutu=kaydirilabilirBul(e.target);
-    if(!kutu)return;
-    if(Math.abs(e.deltaX)>Math.abs(e.deltaY))return;   // zaten yatay hareket var
-    kutu.scrollLeft+=e.deltaY;
+    if(!e.deltaY)return;
+    if(Math.abs(e.deltaX)>Math.abs(e.deltaY))return;
+    var k=kutuBul(e.target);
+    if(!k||!k.x||k.y)return;
+    k.el.scrollLeft+=e.deltaY;
     e.preventDefault();
   },{passive:false,capture:true});
 })();
