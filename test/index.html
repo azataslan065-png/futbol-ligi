@@ -1146,7 +1146,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-G';
+window.APP_BUILD='2026-08-12-H';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -9371,124 +9371,80 @@ function gorevliDetay(ad,rol){
 function renderBaskimetre(m){
   try{
     /* ── BASKIMETRE / OLAY YOĞUNLUĞU ─────────────────────────────────────────────────
-       KULLANICI BİLDİRDİ: "Olay yoğunluğu çok kaba duruyor."
-       ÖNCEKİ TASARIMIN SORUNU: Her dakika için AYRI bir çubuk çiziliyordu - 90 dakikalık
-       maçta 90 ince dikme. Olaylar birkaç dakikaya toplandığı için grafiğin %95'i boş
-       kalıyor, geri kalanı da sol köşede sıkışmış keskin dikmelere dönüşüyordu. Ne bilgi
-       veriyordu ne de hoş görünüyordu.
-       YENİ TASARIM: Dakika dakika çubuk yerine SÜREKLİ BİR ALAN EĞRİSİ çizilir (SVG).
-       Değerler yumuşatılır, eğri kıvrımlı geçer ve dolgu saydam bir renk geçişiyle biter.
-       Böylece boş dakikalar da eğrinin doğal parçası olur; grafik seyrek veriyle bile
-       dolu ve sakin görünür. Goller eğrinin üstünde küçük noktalarla işaretlenir.
-       Ayrıca yarı çizgisi ve dakika kılavuzları eklendi - grafik artık zamanı da anlatıyor. */
+       KULLANICI TALEBİ: "Eski görünümü güzeldi, sadece fazla kalın görünüyordu. Eski
+       görünümü geri getir, yukarıdan aşağıya incelt, yarı yarıya."
+       Bir ara SVG alan eğrisine çevirmiştim; kullanıcı çubuklu hâli tercih etti. Çubuklu
+       tasarım geri alındı ve iki ölçü inceltildi:
+         · Grafik yüksekliği 64px → 32px (yarı yarıya)
+         · Çubuk genişliği %70 → %38 (araları açılınca dikmeler zarifleşiyor)
+       Yumuşatma da eski değerine (±2 dakika) döndürüldü - çubuklu görünümde geniş
+       yumuşatma dikmeleri birbirine yapıştırıp bulanık bir kütle oluşturuyordu. */
     const evs=(m.events||[]).slice();
     const mom=m.momentum&&Object.keys(m.momentum).length?m.momentum:null;
     let sonDk=90;
     evs.forEach(e=>{ if((e.min||0)>sonDk)sonDk=e.min; });
     if(mom)Object.keys(mom).forEach(k=>{ if(Number(k)>sonDk)sonDk=Number(k); });
-    sonDk=Math.min(Math.max(sonDk,90),130);
+    sonDk=Math.min(sonDk,130);
 
-    const AGIRLIK={goal:3,pen_goal:3,og:3,red:2.2,yellow2red:2.2,yellow:1,pen_awarded:2,pen_miss:1.4,sub:0.5};
-    const ham=new Array(sonDk+1).fill(0);
+    const AGIRLIK={goal:3,pen_goal:3,og:3,red:2,yellow2red:2,yellow:1,pen_awarded:2,pen_miss:1,sub:0.6};
+    const deger=new Array(sonDk+1).fill(0);
     if(mom){
-      Object.keys(mom).forEach(k=>{const i=Number(k);if(i>=0&&i<=sonDk)ham[i]=Number(mom[k])||0;});
+      Object.keys(mom).forEach(k=>{const i=Number(k);if(i>=0&&i<=sonDk)deger[i]=Number(mom[k])||0;});
     }else{
       evs.forEach(e=>{
         const w=AGIRLIK[e.type]; if(!w)return;
         const i=Math.max(0,Math.min(sonDk,e.min||0));
-        ham[i]+=(e.team==='home'?w:-w);
+        deger[i]+=(e.team==='home'?w:-w);
       });
-    }
-    /* Yumuşatma: olayın etkisi komşu dakikalara Gauss benzeri bir eğriyle yayılır. Önceki
-       sürümde pencere ±2 dakikaydı ve keskin dikmeler kalıyordu; ±6 dakika ile eğri
-       gerçekten akıcı hale gelir. */
-    const deger=new Array(sonDk+1).fill(0);
-    const R=6;
-    for(let i=0;i<=sonDk;i++){
-      let t=0;
-      for(let j=Math.max(0,i-R);j<=Math.min(sonDk,i+R);j++){
-        if(!ham[j])continue;
-        const d=(i-j)/R;
-        t+=ham[j]*Math.exp(-3*d*d);
+      // Olayın etkisi komşu dakikalara yayılır; tek dakikalık dikmeler yerine küçük tepeler.
+      const yumusak=deger.slice();
+      for(let i=0;i<=sonDk;i++){
+        let t=0,n=0;
+        for(let j=i-2;j<=i+2;j++){ if(j<0||j>sonDk)continue; t+=deger[j]*(1-Math.abs(i-j)*0.3); n++; }
+        yumusak[i]=n?t/1.6:0;
       }
-      deger[i]=t;
+      for(let i=0;i<=sonDk;i++)deger[i]=yumusak[i];
     }
-    const enBuyuk=Math.max(0.001,...deger.map(v=>Math.abs(v)));
-    if(!mom&&enBuyuk<=0.02)return '';
+    const enBuyuk=Math.max(1,...deger.map(v=>Math.abs(v)));
+    if(!mom&&enBuyuk<=0.01)return '';
 
-    // ── SVG eğrisi ────────────────────────────────────────────────────────────────
-    const W=100, H=100, ORTA=H/2;                  // viewBox birimleri (yüzde tabanlı)
-    const nokta=i=>{
-      const x=(i/sonDk)*W;
-      const y=ORTA-(deger[i]/enBuyuk)*(ORTA-6);
-      return [x,y];
-    };
-    // Catmull-Rom benzeri yumuşak yol: her nokta arasında kübik eğri.
-    let yol='';
-    for(let i=0;i<=sonDk;i++){
-      const [x,y]=nokta(i);
-      if(i===0){yol=`M ${x.toFixed(2)} ${y.toFixed(2)}`;continue;}
-      const [px,py]=nokta(i-1);
-      const cx=(px+x)/2;
-      yol+=` C ${cx.toFixed(2)} ${py.toFixed(2)}, ${cx.toFixed(2)} ${y.toFixed(2)}, ${x.toFixed(2)} ${y.toFixed(2)}`;
-    }
-    const dolguUst=`${yol} L ${W} ${ORTA} L 0 ${ORTA} Z`;
-    const gid='bm'+Math.random().toString(36).slice(2,7);
-
-    // Dakika kılavuzları: 15'er dakika, sessiz çizgiler.
-    let kilavuz='';
-    for(let d=15;d<sonDk;d+=15){
-      const x=(d/sonDk)*W;
-      kilavuz+=`<line x1="${x}" y1="4" x2="${x}" y2="${H-4}" stroke="var(--br)" stroke-width=".3" stroke-dasharray="2 3" opacity=".5"/>`;
-    }
-    // Devre arası çizgisi biraz daha belirgin.
-    const yariX=(45/sonDk)*W;
-    kilavuz+=`<line x1="${yariX}" y1="2" x2="${yariX}" y2="${H-2}" stroke="var(--mu)" stroke-width=".45" opacity=".55"/>`;
-
-    // Goller: eğrinin üstünde küçük daireler.
-    const goller=evs.filter(e=>['goal','pen_goal','og'].includes(e.type)).map(e=>{
-      const i=Math.max(0,Math.min(sonDk,e.min||0));
-      const [x,y]=nokta(i);
-      const renk=e.team==='home'?'#3b82f6':'#ef4444';
-      return `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="1.6" fill="${renk}" stroke="var(--s2)" stroke-width=".6"/>`;
+    const golDk=evs.filter(e=>['goal','pen_goal','og'].includes(e.type));
+    const H=32;   // eskiden 64 - kullanıcı talebiyle yarıya indirildi
+    const cubuklar=deger.map((v,i)=>{
+      const y=Math.round(Math.abs(v)/enBuyuk*(H/2-1));
+      const evSahibi=v>0;
+      if(!y)return `<div style="flex:1;min-width:0"></div>`;
+      return `<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;height:${H}px">
+        <div style="height:${H/2}px;display:flex;align-items:flex-end;justify-content:center">
+          ${evSahibi?`<div style="width:38%;height:${y}px;background:#3b82f6;border-radius:1px 1px 0 0"></div>`:''}
+        </div>
+        <div style="height:${H/2}px;display:flex;align-items:flex-start;justify-content:center">
+          ${!evSahibi?`<div style="width:38%;height:${y}px;background:#ef4444;border-radius:0 0 1px 1px"></div>`:''}
+        </div>
+      </div>`;
     }).join('');
-
-    const evAd=escHtml((D.teams[m.homeId]||{}).name||'Ev sahibi');
-    const depAd=escHtml((D.teams[m.awayId]||{}).name||'Deplasman');
+    const golIsaret=golDk.map(e=>{
+      const yuzde=Math.max(0,Math.min(100,(e.min||0)/sonDk*100));
+      const ust=e.team==='home';
+      return `<div title="${e.min}' ${(e.player||'').replace(/"/g,'')}" style="position:absolute;left:${yuzde}%;${ust?'top:-8px':'bottom:-8px'};transform:translateX(-50%);font-size:.56rem;line-height:1">⚽</div>`;
+    }).join('');
     const baslik=mom?'📊 Baskımetre':'📊 Olay Yoğunluğu';
     const altYazi=mom
-      ? 'Maçın nabzı: eğri yukarıdayken ev sahibi, aşağıdayken deplasman baskısı.'
+      ? 'Maçın nabzı: çubuklar hangi takımın baskı kurduğunu ve yoğunluğunu gösterir.'
       : 'Baskı verisi girilmediği için olayların zamana dağılımı gösteriliyor.';
-
     return `<div class="md-section-head">${baslik}</div>
-      <div class="mi-card" style="padding:.7rem .75rem">
-        <div style="position:relative;width:100%;height:96px">
-          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%;display:block;overflow:visible">
-            <defs>
-              <linearGradient id="${gid}u" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#3b82f6" stop-opacity=".38"/>
-                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
-              </linearGradient>
-              <linearGradient id="${gid}d" x1="0" y1="1" x2="0" y2="0">
-                <stop offset="0%" stop-color="#ef4444" stop-opacity=".38"/>
-                <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
-              </linearGradient>
-              <clipPath id="${gid}cu"><rect x="0" y="0" width="${W}" height="${ORTA}"/></clipPath>
-              <clipPath id="${gid}cd"><rect x="0" y="${ORTA}" width="${W}" height="${ORTA}"/></clipPath>
-            </defs>
-            ${kilavuz}
-            <path d="${dolguUst}" fill="url(#${gid}u)" clip-path="url(#${gid}cu)"/>
-            <path d="${dolguUst}" fill="url(#${gid}d)" clip-path="url(#${gid}cd)"/>
-            <line x1="0" y1="${ORTA}" x2="${W}" y2="${ORTA}" stroke="var(--br)" stroke-width=".5"/>
-            <path d="${yol}" fill="none" stroke="var(--tx)" stroke-width=".9" stroke-opacity=".75"
-                  stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
-            ${goller}
-          </svg>
+      <div class="mi-card" style="padding:.6rem .8rem">
+        <div style="position:relative;margin:9px 0">
+          ${golIsaret}
+          <div style="display:flex;align-items:center;gap:1px;height:${H}px;border-top:1px dashed var(--br);border-bottom:1px dashed var(--br);position:relative">
+            <div style="position:absolute;left:0;right:0;top:50%;height:1px;background:var(--br)"></div>
+            ${cubuklar}
+          </div>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:.58rem;color:var(--mu);margin-top:.35rem">
-          <span style="color:#3b82f6;font-weight:800">▲ ${evAd}</span>
-          <span>45'</span>
-          <span style="color:#ef4444;font-weight:800">▼ ${depAd}</span>
+        <div style="display:flex;justify-content:space-between;font-size:.58rem;color:var(--mu);margin-top:.3rem">
+          <span style="color:#3b82f6;font-weight:800">▲ ${(D.teams[m.homeId]||{}).name||'Ev sahibi'}</span>
+          <span>${sonDk}'</span>
+          <span style="color:#ef4444;font-weight:800">▼ ${(D.teams[m.awayId]||{}).name||'Deplasman'}</span>
         </div>
         <div style="font-size:.58rem;color:var(--mu);margin-top:.3rem;line-height:1.45">${altYazi}</div>
       </div>`;
