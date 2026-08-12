@@ -1146,7 +1146,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-D';
+window.APP_BUILD='2026-08-12-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -2452,14 +2452,22 @@ function applyBgTheme(){
   const blur=bg&&bg.blur!=null?bg.blur:0;
   const saturate=bg&&bg.saturate!=null?bg.saturate:100;
   const brightness=bg&&bg.brightness!=null?bg.brightness:100;
+  /* KULLANICI TALEBİ: "Arka plan rengini palete göre senkronize etmek için admin filtre
+     uygulayabilir." Palet katmanı zaten vardı ama gücü KODA GÖMÜLÜYDÜ (.68/.43/.60) -
+     yönetici ne azaltabiliyor ne kapatabiliyordu. Artık güç `tint` ayarından gelir:
+     0 = görselin özgün rengi, 100 = eski (tam güçlü) davranış. Ayar kaydedilmemişse 100
+     kabul edilir; böylece mevcut liglerin görünümü değişmez. */
+  const tintGuc=(bg&&bg.tint!=null?Number(bg.tint):100)/100;
   let tintLayer='';
-  if(paletteColor1){
+  if(paletteColor1&&tintGuc>0.01){
     const num=parseInt(paletteColor1.slice(1),16);
     const tintRGB=`${num>>16},${(num>>8)&0x00FF},${num&0x0000FF}`;
     // Palet rengi artık çok daha YÜKSEK opaklıkla (%70'e kadar) ve doygun bir tonda
     // eklenir - kullanıcı talebi "göze hitap edecek ama stabil ultra bir UI" idi, önceki
     // ince versiyon yetersiz kalıyordu.
-    tintLayer=`linear-gradient(160deg,rgba(${tintRGB},.68) 0%,rgba(${tintRGB},.43) 50%,rgba(${tintRGB},.60) 100%),`;
+    // Opaklıklar tint gücüyle ölçeklenir; oranlar korunur, sadece şiddet değişir.
+    const a1=(0.68*tintGuc).toFixed(3), a2=(0.43*tintGuc).toFixed(3), a3=(0.60*tintGuc).toFixed(3);
+    tintLayer=`linear-gradient(160deg,rgba(${tintRGB},${a1}) 0%,rgba(${tintRGB},${a2}) 50%,rgba(${tintRGB},${a3}) 100%),`;
   }
   let bgImage='none';
   // HATA DÜZELTMESİ (KESİN KANITLANMIŞ KÖK SEBEP - kullanıcı netleştirdi: "Görsel eklediğinde
@@ -8767,6 +8775,38 @@ window.openScenarioScreen=function(){
   const sw=document.getElementById('sheetWrap');
   if(sw){ sw.classList.add('open'); if(window.PTSheetNav)PTSheetNav.mark('scenario@'+Date.now()); }
 };
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   AVERAJ SENARYOLARI  ·  genişletilmiş hesap
+
+   KULLANICI TALEBİ: "Kaç puan lazım, kaç averaj lazım (hem yükselme hem düşme potası için)."
+   ÖNCEKİ SÜRÜMÜN EKSİĞİ: Yalnızca "matematiksel şans var/yok" diyordu ve bölgeler sabit
+   varsayımlara dayanıyordu (şampiyonluk = 1. sıra, küme = son 3). Oysa bölgeler ligden lige
+   değişir ve zaten `rankNotes` içinde tanımlıdır - o tanım kullanılmıyordu.
+
+   YENİ HESAP: Her hedef bölge için üç ayrı soru cevaplanır:
+     1. GARANTİ  - rakip TÜM kalan maçlarını kazansa bile hedefte kalınır mı? (kesin durum)
+     2. GEREKLİ  - hedefteki son takımı geçmek için kaç puan / kaç galibiyet gerekir?
+     3. AVERAJ   - puanlar eşitlenirse kaç averaj farkı gerekir?
+   Averaj hesabı önemlidir çünkü çoğu ligde eşitlik averajla bozulur ve takımlar sezon sonunda
+   "puan yetiyor ama averaj yetmiyor" durumuna düşer - bunu önceden görmek gerekir.
+
+   DÜRÜSTLÜK KURALI: Hesaplar rakiplerin kalan maçlarının SONUCUNU bilemez. Bu yüzden iki uç
+   senaryo verilir (rakip hepsini kazanır / hepsini kaybeder) ve arası "belirsiz" denir.
+   Kesin olmayan bir şeyi kesinmiş gibi sunmak, kullanıcının güvenini boşa çıkarır. */
+function scenarioBolgeler(totalTeams){
+  /* Bölgeler öncelikle ligin KENDİ tanımından (rankNotes) okunur. Tanım yoksa makul
+     varsayılanlara düşülür - ama bu durum kullanıcıya ayrıca belirtilir. */
+  var notes=(D.rankNotes||[]).filter(function(n){return n&&n.from&&n.to;});
+  if(notes.length){
+    return notes.map(function(n){
+      return {ad:n.label||'Bölge',renk:n.color||'#7c3aed',bas:Number(n.from),son:Number(n.to),kaynak:'lig'};
+    }).sort(function(a,b){return a.bas-b.bas;});
+  }
+  return [
+    {ad:'Şampiyonluk',renk:'#fbbf24',bas:1,son:1,kaynak:'varsayılan'},
+    {ad:'Küme Düşme',renk:'#ef4444',bas:Math.max(2,totalTeams-2),son:totalTeams,kaynak:'varsayılan'}
+  ];
+}
 function renderScenarioSheet(){
   const sc=document.getElementById('sheetContent');
   if(!sc)return;
@@ -8776,66 +8816,136 @@ function renderScenarioSheet(){
   const teamList=Object.values(teams);
   const totalTeams=teamList.length;
   const allMatches=Object.values(matches);
-  function remainingFor(tid){
-    return allMatches.filter(m=>!m.played&&(m.homeId===tid||m.awayId===tid)).length;
-  }
   const cfg=D.lgConfig||{};
-  const WIN=cfg.winPts||3;
+  const WIN=cfg.winPts||3, DRAW=(cfg.drawPts!=null?cfg.drawPts:1);
   const sel=window._scenarioSelected;
   const anySel=Object.keys(sel).some(k=>sel[k]);
+
+  function kalan(tid){return allMatches.filter(m=>!m.played&&(m.homeId===tid||m.awayId===tid)).length;}
+  const rankOf={}; table.forEach((t,i)=>{rankOf[t.id]=i+1;});
+  const bolgeler=scenarioBolgeler(totalTeams);
+  const bolgeKaynak=bolgeler.length?bolgeler[0].kaynak:'varsayılan';
+
   const chips=teamList.map(t=>{
     const on=!!sel[t.id];
     return `<button onclick="toggleScenarioTeam('${t.id}')" style="display:flex;align-items:center;gap:.35rem;padding:.35rem .6rem;border-radius:20px;font-size:.7rem;font-weight:700;border:1.5px solid ${on?'var(--ac)':'var(--br)'};background:${on?'var(--ac)':'transparent'};color:${on?'#fff':'var(--tx)'};cursor:pointer;margin:.15rem">
       ${t.logo?`<img src="${t.logo}" style="width:16px;height:16px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:''}${escHtml(t.name||'?')}
     </button>`;
   }).join('');
+
+  const kutu=(baslik,deger,renk)=>`<div style="background:var(--s);border-radius:8px;padding:.4rem .5rem">
+    <div style="color:var(--mu);font-size:.58rem">${baslik}</div>
+    <div style="font-weight:900;font-size:.88rem${renk?';color:'+renk:''}">${deger}</div></div>`;
+
   let scenarioCards='';
   if(anySel){
-    const rankOf={};
-    table.forEach((t,i)=>{rankOf[t.id]=i+1;});
     teamList.filter(t=>sel[t.id]).forEach(t=>{
       const row=table.find(x=>x.id===t.id);
       if(!row)return;
-      const rem=remainingFor(t.id);
-      const curP=row.P;
-      const maxP=curP+rem*WIN;
-      const rank=rankOf[t.id]||'-';
-      const leaderP=table[0]?table[0].P:curP;
-      const canBeChampion=maxP>=leaderP && rank<=Math.max(4,totalTeams);
-      const relegationZone=totalTeams-3;
-      const inRelegation=rank>relegationZone;
+      const rem=kalan(t.id), curP=row.P, maxP=curP+rem*WIN, rank=rankOf[t.id]||'-';
+      const curAV=(row.AG||0)-(row.YG||0);
+
+      let bolgeHtml='';
+      bolgeler.forEach(function(b){
+        const icinde=(rank>=b.bas&&rank<=b.son);
+        // Bölgenin SINIR takımı: bölgeye girmek için geçilmesi gereken son takım.
+        const sinirIdx=Math.min(b.son,table.length)-1;
+        const sinir=table[sinirIdx];
+        if(!sinir)return;
+        const sinirBenMi=(sinir.id===t.id);
+        const sinirRem=kalan(sinir.id);
+        const sinirP=sinir.P, sinirMaxP=sinirP+sinirRem*WIN;
+        const sinirAV=(sinir.AG||0)-(sinir.YG||0);
+
+        let durum='',renk='',detay='';
+        if(icinde){
+          // Bölgede KALMAK için: bölgenin hemen ALTINDAKİ takım tehdit oluşturur.
+          const tehditIdx=b.son;   // 0-tabanlı: bölgenin bir altındaki sıra
+          const tehdit=table[tehditIdx];
+          if(!tehdit){
+            durum='✅ Bu bölgede ve altında rakip yok';renk='#4ade80';
+          }else{
+            const tehditMax=tehdit.P+kalan(tehdit.id)*WIN;
+            if(curP>tehditMax){
+              durum='🔒 Garanti';renk='#4ade80';
+              detay=`${escHtml(tehdit.name)} tüm kalan maçlarını kazansa bile (${tehditMax} puan) geçemez.`;
+            }else{
+              const acik=curP-tehdit.P;
+              const gerekli=Math.max(0,Math.ceil((tehditMax-curP+1)/WIN));
+              durum='⚠️ Garanti değil';renk='#fbbf24';
+              detay=`${escHtml(tehdit.name)} en fazla <b>${tehditMax}</b> puana ulaşabilir. Garantilemek için <b>${gerekli} galibiyet</b> daha gerekir`
+                +(acik>0?` (şu an ${acik} puan öndesiniz).`:acik===0?` (puanlar eşit, averaj belirleyici).`:` (şu an ${-acik} puan geridesiniz).`);
+              if(acik===0){
+                const avFark=curAV-(( tehdit.AG||0)-(tehdit.YG||0));
+                detay+=` Averaj farkı: <b>${avFark>0?'+':''}${avFark}</b>.`;
+              }
+            }
+          }
+        }else if(rank>b.son){
+          // Bölgeye ÇIKMAK için
+          if(maxP<sinirP){
+            durum='⛔ Matematiksel olarak imkânsız';renk='#f87171';
+            detay=`Tüm kalan maçları kazansanız bile ${maxP} puanda kalırsınız; ${escHtml(sinir.name)} şimdiden ${sinirP} puanda.`;
+          }else{
+            const puanFarki=sinirP-curP;
+            const gerekliGalibiyet=Math.max(0,Math.ceil((puanFarki+1)/WIN));
+            const yetmeziMi=gerekliGalibiyet>rem;
+            durum=yetmeziMi?'🔴 Kalan maç yetmiyor':'🎯 Şans var';renk=yetmeziMi?'#f87171':'#fbbf24';
+            detay=`${escHtml(sinir.name)} ile aranızda <b>${puanFarki} puan</b> var. Geçmek için <b>${gerekliGalibiyet} galibiyet</b> gerekir`
+              +(yetmeziMi?` ama sadece <b>${rem}</b> maçınız kaldı.`:` (kalan maç: ${rem}).`);
+            if(puanFarki===0||puanFarki%WIN===0){
+              const avFark=sinirAV-curAV;
+              detay+=` Puanlar eşitlenirse averajı <b>${avFark>=0?avFark+1:1}</b> kadar iyileştirmeniz gerekir (şu anki fark: ${avFark>0?'-':''}${Math.abs(avFark)}).`;
+            }
+          }
+        }else{
+          durum='⬆️ Bu bölgenin üstündesiniz';renk='#4ade80';
+          detay=`Şu an ${rank}. sıradasınız; bu bölge ${b.bas}-${b.son}. sıralar arası.`;
+        }
+        if(sinirBenMi&&!icinde)return;
+        bolgeHtml+=`<div style="border-left:3px solid ${b.renk};background:var(--s);border-radius:0 8px 8px 0;padding:.45rem .55rem;margin-top:.4rem">
+          <div style="display:flex;justify-content:space-between;gap:.4rem;align-items:baseline">
+            <b style="font-size:.72rem">${escHtml(b.ad)}</b>
+            <span style="font-size:.6rem;color:var(--mu)">${b.bas===b.son?b.bas+'. sıra':b.bas+'-'+b.son+'. sıra'}</span>
+          </div>
+          <div style="font-size:.7rem;font-weight:800;color:${renk};margin-top:.15rem">${durum}</div>
+          ${detay?`<div style="font-size:.66rem;color:var(--tx);line-height:1.55;margin-top:.2rem">${detay}</div>`:''}
+        </div>`;
+      });
+
       scenarioCards+=`<div style="background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.7rem .8rem;margin-bottom:.6rem">
         <div style="display:flex;align-items:center;gap:.45rem;margin-bottom:.5rem">
           ${t.logo?`<img src="${t.logo}" style="width:26px;height:26px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:''}
-          <div style="flex:1"><div style="font-size:.85rem;font-weight:900">${escHtml(t.name)}</div><div style="font-size:.62rem;color:var(--mu)">${rank}. sıra · ${curP} puan</div></div>
+          <div style="flex:1"><div style="font-size:.85rem;font-weight:900">${escHtml(t.name)}</div>
+          <div style="font-size:.62rem;color:var(--mu)">${rank}. sıra · ${curP} puan · averaj ${curAV>0?'+':''}${curAV}</div></div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;font-size:.66rem">
-          <div style="background:var(--s);border-radius:8px;padding:.4rem .5rem"><div style="color:var(--mu);font-size:.58rem">Kalan Maç</div><div style="font-weight:900;font-size:.9rem">${rem}</div></div>
-          <div style="background:var(--s);border-radius:8px;padding:.4rem .5rem"><div style="color:var(--mu);font-size:.58rem">Ulaşabileceği En Yüksek</div><div style="font-weight:900;font-size:.9rem;color:var(--ac3)">${maxP} puan</div></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.4rem">
+          ${kutu('Kalan Maç',rem)}
+          ${kutu('En Fazla',maxP+' puan','var(--ac3)')}
+          ${kutu('En Az',curP+' puan')}
         </div>
-        <div style="margin-top:.5rem;font-size:.68rem;line-height:1.6">
-          ${rank===1?`<div style="color:#4ade80">🏆 Şu an lider.${rem>0?' Kalan maçları kazanmak şampiyonluğu yaklaştırır.':' Sezon bitti, şampiyon!'}</div>`
-            : canBeChampion?`<div style="color:#fbbf24">⭐ Matematiksel şampiyonluk şansı var. Tüm kalan maçları kazanırsa ${maxP} puana ulaşır (lider: ${leaderP}).</div>`
-            : `<div style="color:var(--mu)">📉 Şampiyonluk matematiksel olarak çok zor (en fazla ${maxP} puan, lider ${leaderP}).</div>`}
-          ${inRelegation?`<div style="color:#f87171;margin-top:.3rem">⚠️ Küme düşme bölgesinde (son 3). Çıkmak için puan toplaması şart.</div>`
-            : rank>relegationZone-2?`<div style="color:#fbbf24;margin-top:.3rem">😐 Küme düşme hattına yakın.</div>`
-            : `<div style="color:#4ade80;margin-top:.3rem">✅ Küme düşme tehlikesi şu an uzak.</div>`}
-        </div>
+        ${bolgeHtml}
       </div>`;
     });
   }else{
     scenarioCards='<div style="text-align:center;color:var(--mu);padding:1.5rem;font-size:.76rem">Senaryosunu görmek istediğin takımları yukarıdan seç.</div>';
   }
+
   sc.innerHTML=`<div class="sheet-handle"></div>
     <div style="font-size:1rem;font-weight:900;margin-bottom:.3rem">🎯 Averaj Senaryoları</div>
-    <div style="font-size:.66rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Takım seç, kalan maçlara göre şampiyonluk ve küme düşme senaryolarını gör.</div>
+    <div style="font-size:.66rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">
+      Her bölge için <b>kaç puan</b> ve <b>kaç averaj</b> gerektiğini gösterir. Hesaplar rakiplerin
+      kalan maçlarının sonucunu bilemez; bu yüzden "garanti" ve "şans var" ayrı ayrı belirtilir.
+      ${bolgeKaynak==='varsayılan'?'<br><span style="color:#fbbf24">⚠️ Lig için bölge tanımı yapılmamış; varsayılan bölgeler kullanılıyor. Yönetim → Sıra Notları\'ndan tanımlayabilirsiniz.</span>':''}
+    </div>
     <div style="display:flex;gap:.3rem;margin-bottom:.5rem">
-      <button onclick="scenarioSelectAll(true)" style="flex:1;padding:.4rem 0;border-radius:9px;font-size:.66rem;font-weight:700;border:1.5px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer">✓ Tümünü Seç</button>
-      <button onclick="scenarioSelectAll(false)" style="flex:1;padding:.4rem 0;border-radius:9px;font-size:.66rem;font-weight:700;border:1.5px solid var(--br);background:transparent;color:var(--mu);cursor:pointer">✕ Temizle</button>
+      <button onclick="scenarioSelectAll(true)" style="flex:1;padding:.4rem 0;border-radius:9px;font-size:.66rem;font-weight:700;border:1.5px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer;min-height:30px">✓ Tümünü Seç</button>
+      <button onclick="scenarioSelectAll(false)" style="flex:1;padding:.4rem 0;border-radius:9px;font-size:.66rem;font-weight:700;border:1.5px solid var(--br);background:transparent;color:var(--mu);cursor:pointer;min-height:30px">✕ Temizle</button>
     </div>
     <div style="display:flex;flex-wrap:wrap;margin-bottom:.7rem">${chips}</div>
     ${scenarioCards}`;
 }
+
 window.toggleScenarioTeam=function(tid){
   window._scenarioSelected[tid]=!window._scenarioSelected[tid];
   renderScenarioSheet();
