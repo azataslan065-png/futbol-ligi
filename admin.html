@@ -1178,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-E';
+window.APP_BUILD='2026-08-12-J';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1256,6 +1256,79 @@ window.APP_CHECK_SITE_KEY='6Ld4-4EtAAAAAPC1eNtLyCC-w74V0PGwFAz9Cpbf';   // reCAP
     if(document.body)yaz();
     else document.addEventListener('DOMContentLoaded',yaz);
   }catch(e){}
+})();
+/* ── FARE İLE KAYDIRMA (genel) ────────────────────────────────────────────────────────
+   KULLANICI BİLDİRDİ: "Her menüdeki her düğme için söylemiştim."
+   ÖNCEKİ SÜRÜMÜN KUSURU: Fare sürüklemesi ELLE YAZILMIŞ bir seçici listesine bağlıydı
+   ('.main-nav, .stat-tab-row, .md-tabs' ...). Listede olmayan hiçbir yer sürüklenemiyordu -
+   ve uygulamada kaydırılabilir onlarca kapsayıcı var: açılan menülerin içi, uzun listeler,
+   filtre şeritleri, kadro alanları. Bugün birkaç kez yaşadığımız hatanın aynısı: tahmine
+   dayalı bir liste, gerçeği kapsamıyor.
+   YENİ YAKLAŞIM: Liste yok. Fare basılan noktadan yukarı doğru gidilir ve GERÇEKTEN
+   kaydırılabilen ilk kapsayıcı bulunur (içeriği kutusundan taşıyor mu + CSS kaydırmaya
+   izin veriyor mu). Yatay veya dikey fark etmez; hangisi mümkünse o yönde kaydırılır.
+   Böylece yeni bir ekran eklendiğinde burayı güncellemek gerekmez. */
+(function fareIleKaydirma(){
+  var ESIK=5;                 // bu kadar px hareket = sürükleme (altı tıklama sayılır)
+  var st=null;
+  function kaydirilirMi(el,yon){
+    var cs;try{cs=getComputedStyle(el);}catch(e){return false;}
+    var ov=(yon==='x')?(cs.overflowX||cs.overflow):(cs.overflowY||cs.overflow);
+    if(ov!=='auto'&&ov!=='scroll'&&ov!=='overlay')return false;
+    return (yon==='x')?(el.scrollWidth>el.clientWidth+2):(el.scrollHeight>el.clientHeight+2);
+  }
+  function kutuBul(el){
+    for(var n=el;n&&n!==document.documentElement;n=n.parentElement){
+      if(n.nodeType!==1)continue;
+      var x=kaydirilirMi(n,'x'), y=kaydirilirMi(n,'y');
+      if(x||y)return {el:n,x:x,y:y};
+    }
+    return null;
+  }
+  // Metin girişlerinde sürükleme yapılmaz - orada sürükleme METİN SEÇMEK demektir.
+  function girisMi(el){
+    try{ return !!(el.closest&&el.closest('input,textarea,select,[contenteditable="true"]')); }catch(e){ return false; }
+  }
+  document.addEventListener('mousedown',function(e){
+    if(e.button!==0)return;
+    if(girisMi(e.target))return;
+    var k=kutuBul(e.target);
+    if(!k)return;
+    st={k:k,x0:e.clientX,y0:e.clientY,sol0:k.el.scrollLeft,ust0:k.el.scrollTop,surukledi:false};
+  },true);
+  document.addEventListener('mousemove',function(e){
+    if(!st)return;
+    var dx=e.clientX-st.x0, dy=e.clientY-st.y0;
+    if(!st.surukledi&&Math.abs(dx)<ESIK&&Math.abs(dy)<ESIK)return;
+    st.surukledi=true;
+    if(st.k.x)st.k.el.scrollLeft=st.sol0-dx;
+    if(st.k.y)st.k.el.scrollTop=st.ust0-dy;
+    st.k.el.style.cursor='grabbing';
+    e.preventDefault();
+  },true);
+  document.addEventListener('mouseup',function(){
+    if(!st)return;
+    var s=st; st=null;
+    s.k.el.style.cursor='';
+    if(!s.surukledi)return;   // hareket yoktu: normal tıklama geçsin
+    /* Sürükleme sonrası tıklama YUTULUR. Yoksa fareyi bıraktığınız düğme tetiklenir -
+       şeridi kaydırdıktan sonra istemediğiniz bir sekmeye geçmeniz anlamına gelir. */
+    var yut=function(ev){ev.stopPropagation();ev.preventDefault();document.removeEventListener('click',yut,true);};
+    document.addEventListener('click',yut,true);
+    setTimeout(function(){document.removeEventListener('click',yut,true);},0);
+  },true);
+  document.addEventListener('mouseleave',function(){ if(st){st.k.el.style.cursor='';st=null;} },true);
+  /* Tekerlek: YALNIZCA yatay kaydırılan (dikey kaydırılamayan) şeritlerde dikey tekerlek
+     hareketi yataya çevrilir. Hem yatay hem dikey kaydırılabilen alanlarda tarayıcının
+     kendi davranışı korunur - aksi halde uzun listelerde sayfa aşağı inmez olurdu. */
+  document.addEventListener('wheel',function(e){
+    if(!e.deltaY)return;
+    if(Math.abs(e.deltaX)>Math.abs(e.deltaY))return;
+    var k=kutuBul(e.target);
+    if(!k||!k.x||k.y)return;
+    k.el.scrollLeft+=e.deltaY;
+    e.preventDefault();
+  },{passive:false,capture:true});
 })();
 window._authSonda={durum:'ortam-uygun-değil',hata:null,uid:null,ms:null,kaynak:location.protocol};
 (function anonimGiris(){
@@ -15386,13 +15459,58 @@ function renderRefereePoolSheet(refs){
       if(!list.length)return;
       html+='<div style="font-size:.64rem;font-weight:800;color:var(--mu);margin:.5rem 0 .35rem;text-transform:uppercase">'+roleLabels[role]+'</div>';
       html+=list.map(function(id){
-        return '<div class="mrow"><span style="flex:1;font-size:.78rem;font-weight:600">'+refs[id].name+'</span><button class="btn" style="font-size:.65rem;padding:.2rem .4rem;background:rgba(239,68,68,.15);color:#f87171" onclick="deleteReferee(\''+id+'\')">🗑️</button></div>';
+        /* KULLANICI TALEBİ: "Hakem fotoğrafları yüklenebilir olsun, yüklenmezse mevcut emoji
+           kullanılacak." Fotoğraf, oyuncu fotoğraflarıyla AYNI yoldan geçer: compressPhoto()
+           dosyayı küçültüp dış depolamaya yükler ve veritabanına yalnızca adresini yazar.
+           Görsel gömmek, bugün 3 MB'lık veri sorununa yol açan hatanın ta kendisiydi. */
+        var _r=refs[id];
+        var _avatar=_r.photo
+          ? '<img src="'+_r.photo+'" style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.style.display=\'none\'"/>'
+          : '<span style="width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0">'+(role==='spiker'?'🎙️':role==='yorumcu'?'🗣️':role==='assist'?'🏁':'🧑‍⚖️')+'</span>';
+        return '<div class="mrow">'+_avatar
+          +'<span style="flex:1;font-size:.78rem;font-weight:600;margin-left:.5rem">'+_r.name+'</span>'
+          +'<button class="btn" style="font-size:.62rem;padding:.3rem .5rem;min-height:30px;margin-right:.3rem" onclick="pickRefereePhoto(\''+id+'\')">📷</button>'
+          +(_r.photo?'<button class="btn" style="font-size:.62rem;padding:.3rem .5rem;min-height:30px;margin-right:.3rem" onclick="clearRefereePhoto(\''+id+'\')">🚫</button>':'')
+          +'<button class="btn" style="font-size:.65rem;padding:.2rem .4rem;background:rgba(239,68,68,.15);color:#f87171" onclick="deleteReferee(\''+id+'\')">🗑️</button></div>';
       }).join('');
     });
   }
   openSheet('🚩 Hakem & Yayın Havuzu',html, 'renderRefereePoolSheet');
 }
 
+/* Hakem/spiker fotoğrafı seçimi. Gizli bir dosya girişi kullanılır; seçilen görsel
+   compressPhoto() ile küçültülüp dış depolamaya yüklenir ve yalnızca URL saklanır. */
+function pickRefereePhoto(id){
+  var inp=document.getElementById('refPhotoFile');
+  if(!inp){
+    inp=document.createElement('input');
+    inp.type='file'; inp.accept='image/*'; inp.id='refPhotoFile';
+    inp.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none';
+    document.body.appendChild(inp);
+  }
+  inp.onchange=function(){
+    var f=inp.files&&inp.files[0];
+    inp.value='';
+    if(!f)return;
+    toast('⏳ Fotoğraf yükleniyor...');
+    compressPhoto(f,function(url){
+      db.ref('referees/'+id+'/photo').set(url).then(function(){
+        toast('✅ Fotoğraf eklendi');
+        openRefereePool();
+      }).catch(function(e){toast('❌ Kaydedilemedi: '+((e&&e.message)||''),'er');});
+    },220,function(msg){toast('❌ '+(msg||'yüklenemedi'),'er');},'referees');
+  };
+  inp.click();
+}
+function clearRefereePhoto(id){
+  dlg('🚫','Fotoğrafı Kaldır','Bu kişinin fotoğrafı kaldırılsın mı? Yerine varsayılan simge gösterilir.','Kaldır','dor').then(function(ok){
+    if(!ok)return;
+    db.ref('referees/'+id+'/photo').remove().then(function(){
+      toast('🚫 Fotoğraf kaldırıldı');
+      openRefereePool();
+    });
+  });
+}
 function addRefereeToPool(){
   var name=qs('refNameInp').value.trim();
   if(!name){toast('Ad soyad giriniz','er');return;}
