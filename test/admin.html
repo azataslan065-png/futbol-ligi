@@ -1178,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-F';
+window.APP_BUILD='2026-08-12-G';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -15446,13 +15446,58 @@ function renderRefereePoolSheet(refs){
       if(!list.length)return;
       html+='<div style="font-size:.64rem;font-weight:800;color:var(--mu);margin:.5rem 0 .35rem;text-transform:uppercase">'+roleLabels[role]+'</div>';
       html+=list.map(function(id){
-        return '<div class="mrow"><span style="flex:1;font-size:.78rem;font-weight:600">'+refs[id].name+'</span><button class="btn" style="font-size:.65rem;padding:.2rem .4rem;background:rgba(239,68,68,.15);color:#f87171" onclick="deleteReferee(\''+id+'\')">🗑️</button></div>';
+        /* KULLANICI TALEBİ: "Hakem fotoğrafları yüklenebilir olsun, yüklenmezse mevcut emoji
+           kullanılacak." Fotoğraf, oyuncu fotoğraflarıyla AYNI yoldan geçer: compressPhoto()
+           dosyayı küçültüp dış depolamaya yükler ve veritabanına yalnızca adresini yazar.
+           Görsel gömmek, bugün 3 MB'lık veri sorununa yol açan hatanın ta kendisiydi. */
+        var _r=refs[id];
+        var _avatar=_r.photo
+          ? '<img src="'+_r.photo+'" style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.style.display=\'none\'"/>'
+          : '<span style="width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0">'+(role==='spiker'?'🎙️':role==='yorumcu'?'🗣️':role==='assist'?'🏁':'🧑‍⚖️')+'</span>';
+        return '<div class="mrow">'+_avatar
+          +'<span style="flex:1;font-size:.78rem;font-weight:600;margin-left:.5rem">'+_r.name+'</span>'
+          +'<button class="btn" style="font-size:.62rem;padding:.3rem .5rem;min-height:30px;margin-right:.3rem" onclick="pickRefereePhoto(\''+id+'\')">📷</button>'
+          +(_r.photo?'<button class="btn" style="font-size:.62rem;padding:.3rem .5rem;min-height:30px;margin-right:.3rem" onclick="clearRefereePhoto(\''+id+'\')">🚫</button>':'')
+          +'<button class="btn" style="font-size:.65rem;padding:.2rem .4rem;background:rgba(239,68,68,.15);color:#f87171" onclick="deleteReferee(\''+id+'\')">🗑️</button></div>';
       }).join('');
     });
   }
   openSheet('🚩 Hakem & Yayın Havuzu',html, 'renderRefereePoolSheet');
 }
 
+/* Hakem/spiker fotoğrafı seçimi. Gizli bir dosya girişi kullanılır; seçilen görsel
+   compressPhoto() ile küçültülüp dış depolamaya yüklenir ve yalnızca URL saklanır. */
+function pickRefereePhoto(id){
+  var inp=document.getElementById('refPhotoFile');
+  if(!inp){
+    inp=document.createElement('input');
+    inp.type='file'; inp.accept='image/*'; inp.id='refPhotoFile';
+    inp.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none';
+    document.body.appendChild(inp);
+  }
+  inp.onchange=function(){
+    var f=inp.files&&inp.files[0];
+    inp.value='';
+    if(!f)return;
+    toast('⏳ Fotoğraf yükleniyor...');
+    compressPhoto(f,function(url){
+      db.ref('referees/'+id+'/photo').set(url).then(function(){
+        toast('✅ Fotoğraf eklendi');
+        openRefereePool();
+      }).catch(function(e){toast('❌ Kaydedilemedi: '+((e&&e.message)||''),'er');});
+    },220,function(msg){toast('❌ '+(msg||'yüklenemedi'),'er');},'referees');
+  };
+  inp.click();
+}
+function clearRefereePhoto(id){
+  dlg('🚫','Fotoğrafı Kaldır','Bu kişinin fotoğrafı kaldırılsın mı? Yerine varsayılan simge gösterilir.','Kaldır','dor').then(function(ok){
+    if(!ok)return;
+    db.ref('referees/'+id+'/photo').remove().then(function(){
+      toast('🚫 Fotoğraf kaldırıldı');
+      openRefereePool();
+    });
+  });
+}
 function addRefereeToPool(){
   var name=qs('refNameInp').value.trim();
   if(!name){toast('Ad soyad giriniz','er');return;}

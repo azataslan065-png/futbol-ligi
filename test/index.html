@@ -1146,7 +1146,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-F';
+window.APP_BUILD='2026-08-12-G';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -9286,6 +9286,29 @@ window.submitScorePrediction=function(matchId){
    Hakem kart ortalaması UYDURULMAZ: ligdeki TÜM maçlar taranır, o hakemin yönettiği
    oynanmış maçlardaki sarı/kırmızı kartlar sayılır ve maç sayısına bölünür. Hakem hiç maç
    yönetmediyse rozet hiç gösterilmez - "0.00" yazmak veri varmış izlenimi verirdi. */
+/* Görevli fotoğrafı: `referees` havuzunda ADI eşleşen kayıt aranır ve fotoğrafı varsa
+   döndürülür. Havuz Puan Tablosu tarafında zaten yükleniyor (_refereePool). Fotoğraf yoksa
+   boş döner ve çağıran taraf varsayılan simgeyi kullanır - böylece hiçbir görevli
+   fotoğrafsız kalmaz, sadece görünümü değişir. */
+function gorevliFoto(ad){
+  try{
+    if(!ad||!window._refereePool)return '';
+    var kayit=Object.values(window._refereePool).find(function(r){
+      return r&&r.name&&r.name.trim().toLocaleLowerCase('tr')===String(ad).trim().toLocaleLowerCase('tr');
+    });
+    return (kayit&&kayit.photo)||'';
+  }catch(e){return '';}
+}
+/* Görevli avatarı: fotoğraf varsa yuvarlak resim, yoksa role uygun simge. */
+function gorevliAvatar(ad,varsayilanSimge,boyut){
+  var px=boyut||26;
+  var f=gorevliFoto(ad);
+  if(f){
+    return '<img src="'+f+'" style="width:'+px+'px;height:'+px+'px;border-radius:50%;object-fit:cover;flex-shrink:0" '
+      +'onerror="this.outerHTML=\'<span style=&quot;font-size:1.15rem&quot;>'+varsayilanSimge+'</span>\'"/>';
+  }
+  return '<span style="font-size:1.15rem">'+varsayilanSimge+'</span>';
+}
 function hakemIstatistik(ad){
   try{
     if(!ad)return {mac:0};
@@ -9327,8 +9350,11 @@ function gorevliDetay(ad,rol){
   const yardimci=Object.values(D.matches||{}).filter(mm=>mm&&(mm.assistRef1===ad||mm.assistRef2===ad)).length;
   const varMac=Object.values(D.matches||{}).filter(mm=>mm&&(mm.varRef===ad||mm.avarRef===ad)).length;
   const satir=(k,v)=>`<div style="display:flex;justify-content:space-between;padding:.4rem 0;border-top:1px solid var(--br);font-size:.74rem"><span style="color:var(--mu)">${k}</span><b>${v}</b></div>`;
-  let html=`<div style="font-size:.95rem;font-weight:900;margin-bottom:.2rem">${ad}</div>
-    <div style="font-size:.7rem;color:var(--mu);margin-bottom:.7rem">${rol}</div>`;
+  let html=`<div style="display:flex;align-items:center;gap:.6rem;margin-bottom:.7rem">
+      ${gorevliAvatar(ad,'🧑‍⚖️',52)}
+      <div><div style="font-size:.95rem;font-weight:900">${ad}</div>
+      <div style="font-size:.7rem;color:var(--mu)">${rol}</div></div>
+    </div>`;
   if(ist.mac){
     html+=`<div style="font-size:.68rem;font-weight:800;color:var(--mu);text-transform:uppercase;margin-bottom:.2rem">Hakem olarak</div>`
       +satir('Yönettiği maç',ist.mac)
@@ -9344,125 +9370,131 @@ function gorevliDetay(ad,rol){
 }
 function renderBaskimetre(m){
   try{
+    /* ── BASKIMETRE / OLAY YOĞUNLUĞU ─────────────────────────────────────────────────
+       KULLANICI BİLDİRDİ: "Olay yoğunluğu çok kaba duruyor."
+       ÖNCEKİ TASARIMIN SORUNU: Her dakika için AYRI bir çubuk çiziliyordu - 90 dakikalık
+       maçta 90 ince dikme. Olaylar birkaç dakikaya toplandığı için grafiğin %95'i boş
+       kalıyor, geri kalanı da sol köşede sıkışmış keskin dikmelere dönüşüyordu. Ne bilgi
+       veriyordu ne de hoş görünüyordu.
+       YENİ TASARIM: Dakika dakika çubuk yerine SÜREKLİ BİR ALAN EĞRİSİ çizilir (SVG).
+       Değerler yumuşatılır, eğri kıvrımlı geçer ve dolgu saydam bir renk geçişiyle biter.
+       Böylece boş dakikalar da eğrinin doğal parçası olur; grafik seyrek veriyle bile
+       dolu ve sakin görünür. Goller eğrinin üstünde küçük noktalarla işaretlenir.
+       Ayrıca yarı çizgisi ve dakika kılavuzları eklendi - grafik artık zamanı da anlatıyor. */
     const evs=(m.events||[]).slice();
     const mom=m.momentum&&Object.keys(m.momentum).length?m.momentum:null;
-    // Maç uzunluğu: en geç olay/işaretleme dakikası (en az 90).
     let sonDk=90;
     evs.forEach(e=>{ if((e.min||0)>sonDk)sonDk=e.min; });
     if(mom)Object.keys(mom).forEach(k=>{ if(Number(k)>sonDk)sonDk=Number(k); });
-    sonDk=Math.min(sonDk,130);
+    sonDk=Math.min(Math.max(sonDk,90),130);
 
-    // Dakika başına değer: gerçek veri varsa o, yoksa olaylardan türetilir.
-    const AGIRLIK={goal:3,pen_goal:3,og:3,red:2,yellow2red:2,yellow:1,pen_awarded:2,pen_miss:1,sub:0.6};
-    const deger=new Array(sonDk+1).fill(0);
+    const AGIRLIK={goal:3,pen_goal:3,og:3,red:2.2,yellow2red:2.2,yellow:1,pen_awarded:2,pen_miss:1.4,sub:0.5};
+    const ham=new Array(sonDk+1).fill(0);
     if(mom){
-      Object.keys(mom).forEach(k=>{const i=Number(k);if(i>=0&&i<=sonDk)deger[i]=Number(mom[k])||0;});
+      Object.keys(mom).forEach(k=>{const i=Number(k);if(i>=0&&i<=sonDk)ham[i]=Number(mom[k])||0;});
     }else{
       evs.forEach(e=>{
         const w=AGIRLIK[e.type]; if(!w)return;
         const i=Math.max(0,Math.min(sonDk,e.min||0));
-        deger[i]+=(e.team==='home'?w:-w);
+        ham[i]+=(e.team==='home'?w:-w);
       });
-      // Tek bir dakikada dikilen çubuk yerine, olayın etkisini komşu dakikalara yaymak
-      // grafiği okunur kılar (referans görseldeki dalgalı görünüm de böyledir).
-      const yumusak=deger.slice();
-      for(let i=0;i<=sonDk;i++){
-        let t=0,n=0;
-        for(let j=i-2;j<=i+2;j++){ if(j<0||j>sonDk)continue; t+=deger[j]*(1-Math.abs(i-j)*0.3); n++; }
-        yumusak[i]=n?t/1.6:0;
-      }
-      for(let i=0;i<=sonDk;i++)deger[i]=yumusak[i];
     }
-    const enBuyuk=Math.max(1,...deger.map(v=>Math.abs(v)));
-    if(!mom&&enBuyuk<=0.01)return '';   // ne veri ne olay var - hiç çizme
+    /* Yumuşatma: olayın etkisi komşu dakikalara Gauss benzeri bir eğriyle yayılır. Önceki
+       sürümde pencere ±2 dakikaydı ve keskin dikmeler kalıyordu; ±6 dakika ile eğri
+       gerçekten akıcı hale gelir. */
+    const deger=new Array(sonDk+1).fill(0);
+    const R=6;
+    for(let i=0;i<=sonDk;i++){
+      let t=0;
+      for(let j=Math.max(0,i-R);j<=Math.min(sonDk,i+R);j++){
+        if(!ham[j])continue;
+        const d=(i-j)/R;
+        t+=ham[j]*Math.exp(-3*d*d);
+      }
+      deger[i]=t;
+    }
+    const enBuyuk=Math.max(0.001,...deger.map(v=>Math.abs(v)));
+    if(!mom&&enBuyuk<=0.02)return '';
 
-    const golDk=evs.filter(e=>['goal','pen_goal','og'].includes(e.type));
-    const H=64; // grafik yüksekliği (px)
-    const cubuklar=deger.map((v,i)=>{
-      const y=Math.round(Math.abs(v)/enBuyuk*(H/2-2));
-      const evSahibi=v>0;
-      if(!y)return `<div style="flex:1;min-width:0"></div>`;
-      return `<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;height:${H}px">
-        <div style="height:${H/2}px;display:flex;align-items:flex-end;justify-content:center">
-          ${evSahibi?`<div style="width:70%;height:${y}px;background:#3b82f6;border-radius:2px 2px 0 0"></div>`:''}
-        </div>
-        <div style="height:${H/2}px;display:flex;align-items:flex-start;justify-content:center">
-          ${!evSahibi?`<div style="width:70%;height:${y}px;background:#ef4444;border-radius:0 0 2px 2px"></div>`:''}
-        </div>
-      </div>`;
+    // ── SVG eğrisi ────────────────────────────────────────────────────────────────
+    const W=100, H=100, ORTA=H/2;                  // viewBox birimleri (yüzde tabanlı)
+    const nokta=i=>{
+      const x=(i/sonDk)*W;
+      const y=ORTA-(deger[i]/enBuyuk)*(ORTA-6);
+      return [x,y];
+    };
+    // Catmull-Rom benzeri yumuşak yol: her nokta arasında kübik eğri.
+    let yol='';
+    for(let i=0;i<=sonDk;i++){
+      const [x,y]=nokta(i);
+      if(i===0){yol=`M ${x.toFixed(2)} ${y.toFixed(2)}`;continue;}
+      const [px,py]=nokta(i-1);
+      const cx=(px+x)/2;
+      yol+=` C ${cx.toFixed(2)} ${py.toFixed(2)}, ${cx.toFixed(2)} ${y.toFixed(2)}, ${x.toFixed(2)} ${y.toFixed(2)}`;
+    }
+    const dolguUst=`${yol} L ${W} ${ORTA} L 0 ${ORTA} Z`;
+    const gid='bm'+Math.random().toString(36).slice(2,7);
+
+    // Dakika kılavuzları: 15'er dakika, sessiz çizgiler.
+    let kilavuz='';
+    for(let d=15;d<sonDk;d+=15){
+      const x=(d/sonDk)*W;
+      kilavuz+=`<line x1="${x}" y1="4" x2="${x}" y2="${H-4}" stroke="var(--br)" stroke-width=".3" stroke-dasharray="2 3" opacity=".5"/>`;
+    }
+    // Devre arası çizgisi biraz daha belirgin.
+    const yariX=(45/sonDk)*W;
+    kilavuz+=`<line x1="${yariX}" y1="2" x2="${yariX}" y2="${H-2}" stroke="var(--mu)" stroke-width=".45" opacity=".55"/>`;
+
+    // Goller: eğrinin üstünde küçük daireler.
+    const goller=evs.filter(e=>['goal','pen_goal','og'].includes(e.type)).map(e=>{
+      const i=Math.max(0,Math.min(sonDk,e.min||0));
+      const [x,y]=nokta(i);
+      const renk=e.team==='home'?'#3b82f6':'#ef4444';
+      return `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="1.6" fill="${renk}" stroke="var(--s2)" stroke-width=".6"/>`;
     }).join('');
-    const golIsaret=golDk.map(e=>{
-      const yuzde=Math.max(0,Math.min(100,(e.min||0)/sonDk*100));
-      const ust=e.team==='home';
-      return `<div title="${e.min}' ${(e.player||'').replace(/"/g,'')}" style="position:absolute;left:${yuzde}%;${ust?'top:-9px':'bottom:-9px'};transform:translateX(-50%);font-size:.62rem;line-height:1">⚽</div>`;
-    }).join('');
+
+    const evAd=escHtml((D.teams[m.homeId]||{}).name||'Ev sahibi');
+    const depAd=escHtml((D.teams[m.awayId]||{}).name||'Deplasman');
     const baslik=mom?'📊 Baskımetre':'📊 Olay Yoğunluğu';
     const altYazi=mom
-      ? 'Maçın nabzı: çubuklar hangi takımın baskı kurduğunu ve yoğunluğunu gösterir.'
+      ? 'Maçın nabzı: eğri yukarıdayken ev sahibi, aşağıdayken deplasman baskısı.'
       : 'Baskı verisi girilmediği için olayların zamana dağılımı gösteriliyor.';
+
     return `<div class="md-section-head">${baslik}</div>
-      <div class="md-info-card" style="padding:.7rem .8rem">
-        <div style="position:relative;margin:10px 0">
-          ${golIsaret}
-          <div style="display:flex;align-items:center;gap:1px;height:${H}px;border-top:1px dashed var(--br);border-bottom:1px dashed var(--br);position:relative">
-            <div style="position:absolute;left:0;right:0;top:50%;height:1px;background:var(--br)"></div>
-            ${cubuklar}
-          </div>
+      <div class="mi-card" style="padding:.7rem .75rem">
+        <div style="position:relative;width:100%;height:96px">
+          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:100%;display:block;overflow:visible">
+            <defs>
+              <linearGradient id="${gid}u" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity=".38"/>
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+              </linearGradient>
+              <linearGradient id="${gid}d" x1="0" y1="1" x2="0" y2="0">
+                <stop offset="0%" stop-color="#ef4444" stop-opacity=".38"/>
+                <stop offset="100%" stop-color="#ef4444" stop-opacity="0"/>
+              </linearGradient>
+              <clipPath id="${gid}cu"><rect x="0" y="0" width="${W}" height="${ORTA}"/></clipPath>
+              <clipPath id="${gid}cd"><rect x="0" y="${ORTA}" width="${W}" height="${ORTA}"/></clipPath>
+            </defs>
+            ${kilavuz}
+            <path d="${dolguUst}" fill="url(#${gid}u)" clip-path="url(#${gid}cu)"/>
+            <path d="${dolguUst}" fill="url(#${gid}d)" clip-path="url(#${gid}cd)"/>
+            <line x1="0" y1="${ORTA}" x2="${W}" y2="${ORTA}" stroke="var(--br)" stroke-width=".5"/>
+            <path d="${yol}" fill="none" stroke="var(--tx)" stroke-width=".9" stroke-opacity=".75"
+                  stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+            ${goller}
+          </svg>
         </div>
-        <div style="display:flex;justify-content:space-between;font-size:.58rem;color:var(--mu);margin-top:.3rem">
-          <span style="color:#3b82f6;font-weight:800">▲ ${(D.teams[m.homeId]||{}).name||'Ev sahibi'}</span>
-          <span>${sonDk}'</span>
-          <span style="color:#ef4444;font-weight:800">▼ ${(D.teams[m.awayId]||{}).name||'Deplasman'}</span>
+        <div style="display:flex;justify-content:space-between;font-size:.58rem;color:var(--mu);margin-top:.35rem">
+          <span style="color:#3b82f6;font-weight:800">▲ ${evAd}</span>
+          <span>45'</span>
+          <span style="color:#ef4444;font-weight:800">▼ ${depAd}</span>
         </div>
-        <div style="font-size:.58rem;color:var(--mu);margin-top:.35rem;line-height:1.45">${altYazi}</div>
+        <div style="font-size:.58rem;color:var(--mu);margin-top:.3rem;line-height:1.45">${altYazi}</div>
       </div>`;
   }catch(e){DiagSil('renderBaskimetre',e);return '';}
 }
-/* Maç detayı ekranının tema uyumu.
-   Vurgu rengi ile üzerindeki yazının kontrastı ölçülür; yazı rengi (beyaz mı koyu mu)
-   buna göre seçilir. "Maç Bilgisi" başlık bandı da sabit lacivert olmaktan çıkarılıp
-   sayfanın kendi yüzey rengine bağlanır - böylece hangi tema seçilirse seçilsin bant
-   yabancı durmaz. */
-function mdTemaUygula(){
-  try{
-    var kok=document.documentElement, st=getComputedStyle(kok);
-    var acStr=st.getPropertyValue('--ac')||'#7c3aed';
-    var c=_mdRenkCoz(acStr.trim());
-    if(!c)return;
-    // WCAG göreli parlaklık: 0 (siyah) - 1 (beyaz)
-    var f=function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);};
-    var L=0.2126*f(c.r)+0.7152*f(c.g)+0.0722*f(c.b);
-    var acikZemin=L>0.45;                       // vurgu rengi açık mı?
-    kok.style.setProperty('--md-on-ac',acikZemin?'#111827':'#ffffff');
-    /* SENSÖR BULGUSU: Pasif sekmeler "kontrast 2.68:1" ile hâlâ eşiğin altındaydı. Sebep
-       soluklaştırma oranıydı: %62 opaklık, koyu zeminde bile yazıyı zemine yaklaştırıyordu.
-       Pasif sekmenin aktiften ayrılması gerekir ama okunamayacak kadar solmamalı - oran
-       %80'e çekildi. */
-    /* Ölçüm gösterdi ki saydamlıkla soluklaştırma bu iş için uygun değil: %80'de bile
-       kontrast 3.54:1'de kalıyor, eşik 4.5. Pasif sekmeyi aktiften ayırmanın okunabilirliği
-       bozmayan yolu SAYDAMLIK değil, KALINLIK ve alt çizgi farkıdır. Yazı rengi tam opak
-       bırakıldı (4.73:1); ayrım .md-tab.active'in kalınlığı ve alt çizgisiyle sağlanıyor. */
-    kok.style.setProperty('--md-on-ac-dim',acikZemin?'#111827':'#ffffff');
-    // Başlık bandı: sayfanın yüzey rengiyle uyumlu, hafif koyulaştırılmış bir ton.
-    var s3=(st.getPropertyValue('--s3')||'').trim();
-    kok.style.setProperty('--md-head-bg',s3||'#374151');
-    var t=_mdRenkCoz(s3);
-    if(t){
-      var Lt=0.2126*f(t.r)+0.7152*f(t.g)+0.0722*f(t.b);
-      kok.style.setProperty('--md-head-tx',Lt>0.45?'#111827':'#ffffff');
-    }
-  }catch(e){DiagSil('mdTemaUygula',e);}
-}
-function _mdRenkCoz(str){
-  str=(str||'').trim();
-  var m=str.match(/rgba?\(([^)]+)\)/);
-  if(m){var p=m[1].split(',').map(parseFloat);return {r:p[0],g:p[1],b:p[2]};}
-  m=str.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-  if(!m)return null;
-  var h=m[1];
-  if(h.length===3)h=h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
-  return {r:parseInt(h.slice(0,2),16),g:parseInt(h.slice(2,4),16),b:parseInt(h.slice(4,6),16)};
-}
+
 function renderMdDetay(id,m,h,a,ntInfo){
   const dateStr=m.date?new Date(m.date+'T'+(m.time||'00:00')).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'})+', '+(m.time||''):'Tarih belirlenmedi';
   // KULLANICI TALEBİ: 🔁 Rövanş Bağlantısı - bu iki takımın DAHA ÖNCE oynanmış (bu maçtan
@@ -9517,7 +9549,7 @@ function renderMdDetay(id,m,h,a,ntInfo){
       const ist=hakemIstatistik(m.referee);
       return `<div class="mi-card">
         <div class="mi-row mi-click" onclick="gorevliDetay('${m.referee.replace(/'/g,"\\'")}','Hakem')">
-          <div class="mi-ic">🧑‍⚖️</div>
+          <div class="mi-ic">${gorevliAvatar(m.referee,'🧑‍⚖️',30)}</div>
           <div class="mi-body"><div class="mi-t">${m.referee}</div></div>
           ${ist.mac?`<span class="mi-badge" style="background:#dc2626"></span><span class="mi-num">${ist.kirmiziOrt}</span>
                      <span class="mi-badge" style="background:#facc15"></span><span class="mi-num">${ist.sariOrt}</span>`:''}
@@ -9526,15 +9558,15 @@ function renderMdDetay(id,m,h,a,ntInfo){
       </div>`;
     })():''}
     ${(m.assistRef1||m.assistRef2)?`<div class="mi-grid">
-      ${m.assistRef1?`<div class="mi-card mi-click" onclick="gorevliDetay('${m.assistRef1.replace(/'/g,"\\'")}','1. Yardımcı Hakem')"><div class="mi-row"><div class="mi-ic">🏁</div><div class="mi-body"><div class="mi-t">${m.assistRef1}</div></div><span class="mi-arrow">›</span></div></div>`:''}
-      ${m.assistRef2?`<div class="mi-card mi-click" onclick="gorevliDetay('${m.assistRef2.replace(/'/g,"\\'")}','2. Yardımcı Hakem')"><div class="mi-row"><div class="mi-ic">🏁</div><div class="mi-body"><div class="mi-t">${m.assistRef2}</div></div><span class="mi-arrow">›</span></div></div>`:''}
+      ${m.assistRef1?`<div class="mi-card mi-click" onclick="gorevliDetay('${m.assistRef1.replace(/'/g,"\\'")}','1. Yardımcı Hakem')"><div class="mi-row"><div class="mi-ic">${gorevliAvatar(m.assistRef1,'🏁',26)}</div><div class="mi-body"><div class="mi-t">${m.assistRef1}</div></div><span class="mi-arrow">›</span></div></div>`:''}
+      ${m.assistRef2?`<div class="mi-card mi-click" onclick="gorevliDetay('${m.assistRef2.replace(/'/g,"\\'")}','2. Yardımcı Hakem')"><div class="mi-row"><div class="mi-ic">${gorevliAvatar(m.assistRef2,'🏁',26)}</div><div class="mi-body"><div class="mi-t">${m.assistRef2}</div></div><span class="mi-arrow">›</span></div></div>`:''}
     </div>`:''}
     ${(m.varRef||m.avarRef)?`<div class="mi-grid">
       ${m.varRef?`<div class="mi-card mi-click" onclick="gorevliDetay('${m.varRef.replace(/'/g,"\\'")}','VAR')"><div class="mi-row"><div class="mi-tag">VAR</div><div class="mi-body"><div class="mi-t">${m.varRef}</div></div><span class="mi-arrow">›</span></div></div>`:''}
       ${m.avarRef?`<div class="mi-card mi-click" onclick="gorevliDetay('${m.avarRef.replace(/'/g,"\\'")}','AVAR')"><div class="mi-row"><div class="mi-tag">AVAR</div><div class="mi-body"><div class="mi-t">${m.avarRef}</div></div><span class="mi-arrow">›</span></div></div>`:''}
     </div>`:''}
     ${m.tv?`<div class="mi-card"><div class="mi-row"><div class="mi-ic">📺</div><div class="mi-body"><div class="mi-t">${m.tv}</div></div></div></div>`:''}
-    ${(m.spiker||m.yorumcu)?`<div class="mi-card"><div class="mi-row"><div class="mi-ic">🎙️</div><div class="mi-body"><div class="mi-t">${[m.spiker,m.yorumcu].filter(Boolean).join(' · ')}</div><div class="mi-s">${m.spiker?'Spiker':''}${m.spiker&&m.yorumcu?' · ':''}${m.yorumcu?'Yorumcu':''}</div></div></div></div>`:''}
+    ${(m.spiker||m.yorumcu)?`<div class="mi-card"><div class="mi-row"><div class="mi-ic">${gorevliAvatar(m.spiker||m.yorumcu,'🎙️',26)}</div><div class="mi-body"><div class="mi-t">${[m.spiker,m.yorumcu].filter(Boolean).join(' · ')}</div><div class="mi-s">${m.spiker?'Spiker':''}${m.spiker&&m.yorumcu?' · ':''}${m.yorumcu?'Yorumcu':''}</div></div></div></div>`:''}
     <div style="padding:.85rem .9rem;display:flex;gap:.5rem">
       <button onclick="shareMatch('${id}')" style="flex:1;background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.5rem;color:var(--tx);font-size:.78rem;font-weight:700;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">📤 Paylaş</button>
       ${m.played?`<button onclick="generateMatchSummaryCard('${id}')" style="flex:1;background:linear-gradient(135deg,var(--ac),var(--ac2));border:none;border-radius:12px;padding:.5rem;color:#fff;font-size:.78rem;font-weight:700;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">📸 Maç Akış Özeti</button>`:''}
@@ -18843,6 +18875,18 @@ window.voteMvp=function(matchId,player){
      NASIL ÇALIŞIR: Yönetici bir cihaz için test ister; istek Firebase'e yazılır. O cihaz
      uygulamayı açık tuttuğu sürece isteği görür, ölçümü KENDİ ekranında yapar ve sonucu
      geri yazar. Kullanıcıdan hiçbir şey istenmez, ekranında hiçbir şey değişmez. */
+  /* Görevli havuzu (hakem/spiker/yorumcu fotoğrafları) Puan Tablosu tarafında YÜKLENMİYORDU -
+     `gorevliFoto` bu veriye baktığı için fotoğraflar hiç görünmezdi. Havuz küçük bir liste
+     olduğu için bir kez okunup bellekte tutulur; her maç detayında yeniden istenmez. */
+  function gorevliHavuzunuYukle(){
+    try{
+      var db=(window.firebase&&firebase.database)?firebase.database():null;
+      if(!db)return;
+      db.ref('referees').on('value',function(sn){
+        window._refereePool=sn.val()||{};
+      },function(){ window._refereePool={}; });
+    }catch(e){ window._refereePool={}; }
+  }
   function uzakSensorTestiDinle(){
     try{
       var db=(window.firebase&&firebase.database)?firebase.database():null;
@@ -19002,6 +19046,7 @@ window.voteMvp=function(matchId,player){
     subscribeFlags();
     abonelikOrtakDamga();
     uzakSensorTestiDinle();
+    gorevliHavuzunuYukle();
     // Herhangi bir modül AÇIKSA cihaz kimlik kartı bir kez yazılır - böylece admin, o cihazdan
     // henüz hata gelmemiş olsa bile "kayıtlı cihazlar" listesinde onu görebilir.
     setTimeout(function(){
