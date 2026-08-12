@@ -493,7 +493,11 @@ html[data-premium-active] .tab.active{
 .lt-clock-colon-static{display:inline-block;min-width:.5em;text-align:center;opacity:1;animation:none}
 #liveTicker .lt-track{display:inline-flex;align-items:center;white-space:nowrap;will-change:transform;animation:ltScroll 30s linear infinite;transform:translate3d(0,0,0);backface-visibility:hidden}
 #liveTicker.paused .lt-track{animation-play-state:paused}
-@keyframes ltScroll{from{transform:translate3d(0,0,0)}to{transform:translate3d(-50%,0,0)}}
+/* Şerit döngüsü: kopya sayısı ekran genişliğine göre değiştiği için (bkz.
+   tickerKopyaSayisi) sabit -50% artık doğru değildi. Kayma miktarı TEK KOPYA genişliği
+   kadar olmalı; bu değer çalışma anında --lt-shift değişkenine yazılır. Değişken yoksa
+   eski davranışa (iki kopya) düşülür. */
+@keyframes ltScroll{from{transform:translate3d(0,0,0)}to{transform:translate3d(calc(-1 * var(--lt-shift,50%)),0,0)}}
 .lt-item{display:inline-flex;align-items:center;gap:.3rem;padding:0 .9rem;font-size:.68rem;font-weight:700;color:var(--tx);border-right:1px solid var(--br)}
 /* KRİTİK KONTRAST DÜZELTMESİ (kesin kanıtlanmış - şeritteki 2. kontrast sorunu): .lt-sc
    (skor kutucuğu) ÖNCEDEN color:#fff (sabit beyaz) + background:var(--s3) kullanıyordu.
@@ -603,7 +607,14 @@ body.ticker-on{--ticker-h:38px}
 .sheet-wrap{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:2000;display:flex;align-items:flex-end;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s ease}
 .sheet-wrap.open{opacity:1;pointer-events:auto}
 @keyframes fi{from{opacity:0}to{opacity:1}}
+/* KULLANICI BİLDİRDİ: "Sekmelere geçiş yapınca menü boyutu değişiyor, çok tutarsız."
+   KÖK SEBEP: Menü yüksekliği yalnızca max-height ile sınırlıydı; gerçek yükseklik İÇERİĞE
+   göre belirleniyordu. Kadro sekmesi uzun, Yorumlar kısaysa menü her geçişte zıplıyordu.
+   ÇÖZÜM: Sekmeli menülerde (maç ve takım detayı) yükseklik SABİTLENİR - min-height ile
+   taban verilir, içerik kısa kalırsa boşluk bırakılır, uzunsa kendi içinde kaydırılır.
+   Sekmesiz normal menüler (Ayarlar, Tema vb.) eskisi gibi içeriğe göre boyutlanır. */
 .sheet{position:relative;background:var(--s);border-radius:20px 20px 0 0;width:100%;max-width:500px;max-height:80vh;overflow-y:auto;overscroll-behavior:none;padding:1.2rem 1rem 2rem;animation:su .22s}
+.sheet.sheet-fixed-h{height:80vh;max-height:80vh}
 @keyframes su{from{transform:translateY(100%)}to{transform:translateY(0)}}
 /* KÖK SEBEP (kullanıcı bildirdi: "yukarı kaydırınca arka planda boşluk oluyor"):
    Tutamak çubuğu AKIŞTA duruyordu - kendi yüksekliği (4px) ve alt boşluğu (1rem = 16px)
@@ -1135,7 +1146,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-C';
+window.APP_BUILD='2026-08-12-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -2441,14 +2452,22 @@ function applyBgTheme(){
   const blur=bg&&bg.blur!=null?bg.blur:0;
   const saturate=bg&&bg.saturate!=null?bg.saturate:100;
   const brightness=bg&&bg.brightness!=null?bg.brightness:100;
+  /* KULLANICI TALEBİ: "Arka plan rengini palete göre senkronize etmek için admin filtre
+     uygulayabilir." Palet katmanı zaten vardı ama gücü KODA GÖMÜLÜYDÜ (.68/.43/.60) -
+     yönetici ne azaltabiliyor ne kapatabiliyordu. Artık güç `tint` ayarından gelir:
+     0 = görselin özgün rengi, 100 = eski (tam güçlü) davranış. Ayar kaydedilmemişse 100
+     kabul edilir; böylece mevcut liglerin görünümü değişmez. */
+  const tintGuc=(bg&&bg.tint!=null?Number(bg.tint):100)/100;
   let tintLayer='';
-  if(paletteColor1){
+  if(paletteColor1&&tintGuc>0.01){
     const num=parseInt(paletteColor1.slice(1),16);
     const tintRGB=`${num>>16},${(num>>8)&0x00FF},${num&0x0000FF}`;
     // Palet rengi artık çok daha YÜKSEK opaklıkla (%70'e kadar) ve doygun bir tonda
     // eklenir - kullanıcı talebi "göze hitap edecek ama stabil ultra bir UI" idi, önceki
     // ince versiyon yetersiz kalıyordu.
-    tintLayer=`linear-gradient(160deg,rgba(${tintRGB},.68) 0%,rgba(${tintRGB},.43) 50%,rgba(${tintRGB},.60) 100%),`;
+    // Opaklıklar tint gücüyle ölçeklenir; oranlar korunur, sadece şiddet değişir.
+    const a1=(0.68*tintGuc).toFixed(3), a2=(0.43*tintGuc).toFixed(3), a3=(0.60*tintGuc).toFixed(3);
+    tintLayer=`linear-gradient(160deg,rgba(${tintRGB},${a1}) 0%,rgba(${tintRGB},${a2}) 50%,rgba(${tintRGB},${a3}) 100%),`;
   }
   let bgImage='none';
   // HATA DÜZELTMESİ (KESİN KANITLANMIŞ KÖK SEBEP - kullanıcı netleştirdi: "Görsel eklediğinde
@@ -4153,6 +4172,9 @@ window._simMode=false;
 window.openSheet=function(title,html){
   window._sheetGeneration=(window._sheetGeneration||0)+1;
   const sc=document.getElementById('sheetContent');
+  // Sabit yükseklik yalnızca SEKMELİ menülere aittir (maç/takım detayı). Normal menüler
+  // içeriğine göre boyutlanmalı - aksi halde kısa bir menü de ekranın %80'ini kaplardı.
+  if(sc)sc.classList.remove('sheet-fixed-h');
   const ccEl=document.getElementById('chatScreenContent');
   if(ccEl)ccEl.style.display='none';
   sc.style.display='block';
@@ -5093,7 +5115,10 @@ function renderLiveTicker(highlightId){
     // İlk başlatma: hemen çiz.
     window._tickerCurrentHTML=oneCopy;
     window._tickerStructSig=structSig;
-    track.innerHTML=oneCopy+oneCopy;
+    // Kopya sayısı ekran genişliğine göre hesaplanır (geniş ekranda 2 kopya yetmiyor).
+    var _kopya=tickerKopyaSayisi(track,oneCopy);
+    window._tickerKopyaN=_kopya;
+    track.innerHTML=new Array(_kopya+1).join(oneCopy);
     setTickerAnimForContent(true);
   } else {
     // KULLANICI TALEBİ (kök çözüm): Yapısal değişiklik (yeni/silinen maç veya duyuru) VAR ama
@@ -5310,7 +5335,10 @@ function _rebuildTickerStructureNow(){
   window._tickerCurrentHTML=oneCopy;
   window._tickerStructSig=structSig;
   // KULLANICI TALEBİ (kasma düzeltmesi): animasyon SIFIRLANMAZ, akış kesintisiz devam eder.
-  track.innerHTML=oneCopy+oneCopy;
+  // Kopya sayısı ekran genişliğine göre hesaplanır - geniş ekranda iki kopya boşluk bırakıyordu.
+  var _kopyaN=tickerKopyaSayisi(track,oneCopy);
+  window._tickerKopyaN=_kopyaN;
+  track.innerHTML=new Array(_kopyaN+1).join(oneCopy);
   setTickerAnimForContent(false);
 }
 
@@ -5320,6 +5348,37 @@ function _rebuildTickerStructureNow(){
 // (duration) daha önce ölçülenden belirgin şekilde farklıysa (örn. duyuru eklenip toplam
 // genişlik değiştiyse) güncellenir - bu da CSS'in "animation-duration değişince akışı kesmeden
 // devam etmesi" özelliğinden faydalanır (tarayıcılar animation-duration'ı canlı günceller).
+/* ── ŞERİT KOPYA SAYISI ───────────────────────────────────────────────────────────────
+   KULLANICI BİLDİRDİ: "Projeksiyon ekranında şeridin yarısı boş geliyor; son yazı yarıya
+   gelince boşluk doluyor ve döngü oluşuyor."
+   KÖK SEBEP: Şerit kesintisiz akış için içeriği İKİ KEZ yan yana basıyordu ve animasyon
+   tam yarı yolda başa dönüyordu. Bu, tek kopyanın EKRANDAN GENİŞ olduğu varsayımına
+   dayanıyor - telefonda doğru. Ama projeksiyon gibi geniş ekranlarda tek kopya ekranı
+   doldurmuyor; ikinci kopya henüz ekrana girmeden birincisi bitiyor ve arada boşluk
+   görünüyor. Az sayıda maç varsa telefonda bile olabilir.
+   ÇÖZÜM: Kopya sayısı sabit 2 değil, HESAPLANIR. Tek kopyanın genişliği ölçülür ve ekranı
+   en az iki kez dolduracak kadar tekrarlanır. Böylece hangi ekran genişliğinde olursa
+   olsun akış kesintisiz kalır. */
+function tickerKopyaSayisi(track,oneCopy){
+  try{
+    // Ölçüm için tek kopya geçici olarak basılır (görünmez ölçüm yapılamaz - şerit zaten
+    // ekranda; bu yüzden ölçüm mevcut içerik üzerinden oranlanır).
+    var olcuk=document.createElement('div');
+    olcuk.style.cssText='position:absolute;visibility:hidden;white-space:nowrap;left:-99999px;top:0';
+    olcuk.innerHTML=oneCopy;
+    document.body.appendChild(olcuk);
+    var birW=olcuk.scrollWidth||olcuk.offsetWidth||0;
+    document.body.removeChild(olcuk);
+    var ekranW=window.innerWidth||360;
+    if(!birW)return 2;
+    // Ekranı en az iki kez doldur: akış hiçbir anda boşluk göstermesin.
+    /* Ekranı en az iki kez doldur. Üst sınır 12'ydi ama çok kısa içerikte (tek maç) bu bile
+       yetmiyordu - ölçümde 300px içerik / 1920px ekranda 12 kopya = 3600px, gereken 3840px.
+       Sınır 30'a çıkarıldı; şerit öğeleri hafif olduğu için DOM maliyeti kabul edilebilir. */
+    var n=Math.ceil((ekranW*2)/birW)+1;
+    return Math.max(2,Math.min(30,n));
+  }catch(e){return 2;}
+}
 function setTickerAnimForContent(forceReset){
   const track=document.getElementById('liveTickerTrack');
   if(!track)return;
@@ -5331,7 +5390,13 @@ function setTickerAnimForContent(forceReset){
   }
   // scrollWidth ölçümü içerik basıldıktan sonra hazır olsun diye bir kare bekle.
   requestAnimationFrame(function(){
-    const halfW=(track.scrollWidth/2)||800;
+    /* Kayma mesafesi = TEK KOPYA genişliği. Önceden scrollWidth/2 kullanılıyordu; bu,
+       içeriğin her zaman iki kopya olduğu varsayımına dayanıyordu. Kopya sayısı artık
+       ekrana göre değiştiği için tek kopya genişliği kopya sayısından hesaplanır. */
+    const kopyaN=Math.max(2,Number(window._tickerKopyaN)||2);
+    const toplamW=track.scrollWidth||1600;
+    const halfW=(toplamW/kopyaN)||800;
+    track.style.setProperty('--lt-shift',(100/kopyaN)+'%');
     const absSpeed=Math.abs(speed);
     const pxPerSec=Math.max(4,absSpeed*16);
     const dur=Math.max(3,Math.round(halfW/pxPerSec));
@@ -8710,6 +8775,38 @@ window.openScenarioScreen=function(){
   const sw=document.getElementById('sheetWrap');
   if(sw){ sw.classList.add('open'); if(window.PTSheetNav)PTSheetNav.mark('scenario@'+Date.now()); }
 };
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   AVERAJ SENARYOLARI  ·  genişletilmiş hesap
+
+   KULLANICI TALEBİ: "Kaç puan lazım, kaç averaj lazım (hem yükselme hem düşme potası için)."
+   ÖNCEKİ SÜRÜMÜN EKSİĞİ: Yalnızca "matematiksel şans var/yok" diyordu ve bölgeler sabit
+   varsayımlara dayanıyordu (şampiyonluk = 1. sıra, küme = son 3). Oysa bölgeler ligden lige
+   değişir ve zaten `rankNotes` içinde tanımlıdır - o tanım kullanılmıyordu.
+
+   YENİ HESAP: Her hedef bölge için üç ayrı soru cevaplanır:
+     1. GARANTİ  - rakip TÜM kalan maçlarını kazansa bile hedefte kalınır mı? (kesin durum)
+     2. GEREKLİ  - hedefteki son takımı geçmek için kaç puan / kaç galibiyet gerekir?
+     3. AVERAJ   - puanlar eşitlenirse kaç averaj farkı gerekir?
+   Averaj hesabı önemlidir çünkü çoğu ligde eşitlik averajla bozulur ve takımlar sezon sonunda
+   "puan yetiyor ama averaj yetmiyor" durumuna düşer - bunu önceden görmek gerekir.
+
+   DÜRÜSTLÜK KURALI: Hesaplar rakiplerin kalan maçlarının SONUCUNU bilemez. Bu yüzden iki uç
+   senaryo verilir (rakip hepsini kazanır / hepsini kaybeder) ve arası "belirsiz" denir.
+   Kesin olmayan bir şeyi kesinmiş gibi sunmak, kullanıcının güvenini boşa çıkarır. */
+function scenarioBolgeler(totalTeams){
+  /* Bölgeler öncelikle ligin KENDİ tanımından (rankNotes) okunur. Tanım yoksa makul
+     varsayılanlara düşülür - ama bu durum kullanıcıya ayrıca belirtilir. */
+  var notes=(D.rankNotes||[]).filter(function(n){return n&&n.from&&n.to;});
+  if(notes.length){
+    return notes.map(function(n){
+      return {ad:n.label||'Bölge',renk:n.color||'#7c3aed',bas:Number(n.from),son:Number(n.to),kaynak:'lig'};
+    }).sort(function(a,b){return a.bas-b.bas;});
+  }
+  return [
+    {ad:'Şampiyonluk',renk:'#fbbf24',bas:1,son:1,kaynak:'varsayılan'},
+    {ad:'Küme Düşme',renk:'#ef4444',bas:Math.max(2,totalTeams-2),son:totalTeams,kaynak:'varsayılan'}
+  ];
+}
 function renderScenarioSheet(){
   const sc=document.getElementById('sheetContent');
   if(!sc)return;
@@ -8719,66 +8816,136 @@ function renderScenarioSheet(){
   const teamList=Object.values(teams);
   const totalTeams=teamList.length;
   const allMatches=Object.values(matches);
-  function remainingFor(tid){
-    return allMatches.filter(m=>!m.played&&(m.homeId===tid||m.awayId===tid)).length;
-  }
   const cfg=D.lgConfig||{};
-  const WIN=cfg.winPts||3;
+  const WIN=cfg.winPts||3, DRAW=(cfg.drawPts!=null?cfg.drawPts:1);
   const sel=window._scenarioSelected;
   const anySel=Object.keys(sel).some(k=>sel[k]);
+
+  function kalan(tid){return allMatches.filter(m=>!m.played&&(m.homeId===tid||m.awayId===tid)).length;}
+  const rankOf={}; table.forEach((t,i)=>{rankOf[t.id]=i+1;});
+  const bolgeler=scenarioBolgeler(totalTeams);
+  const bolgeKaynak=bolgeler.length?bolgeler[0].kaynak:'varsayılan';
+
   const chips=teamList.map(t=>{
     const on=!!sel[t.id];
     return `<button onclick="toggleScenarioTeam('${t.id}')" style="display:flex;align-items:center;gap:.35rem;padding:.35rem .6rem;border-radius:20px;font-size:.7rem;font-weight:700;border:1.5px solid ${on?'var(--ac)':'var(--br)'};background:${on?'var(--ac)':'transparent'};color:${on?'#fff':'var(--tx)'};cursor:pointer;margin:.15rem">
       ${t.logo?`<img src="${t.logo}" style="width:16px;height:16px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:''}${escHtml(t.name||'?')}
     </button>`;
   }).join('');
+
+  const kutu=(baslik,deger,renk)=>`<div style="background:var(--s);border-radius:8px;padding:.4rem .5rem">
+    <div style="color:var(--mu);font-size:.58rem">${baslik}</div>
+    <div style="font-weight:900;font-size:.88rem${renk?';color:'+renk:''}">${deger}</div></div>`;
+
   let scenarioCards='';
   if(anySel){
-    const rankOf={};
-    table.forEach((t,i)=>{rankOf[t.id]=i+1;});
     teamList.filter(t=>sel[t.id]).forEach(t=>{
       const row=table.find(x=>x.id===t.id);
       if(!row)return;
-      const rem=remainingFor(t.id);
-      const curP=row.P;
-      const maxP=curP+rem*WIN;
-      const rank=rankOf[t.id]||'-';
-      const leaderP=table[0]?table[0].P:curP;
-      const canBeChampion=maxP>=leaderP && rank<=Math.max(4,totalTeams);
-      const relegationZone=totalTeams-3;
-      const inRelegation=rank>relegationZone;
+      const rem=kalan(t.id), curP=row.P, maxP=curP+rem*WIN, rank=rankOf[t.id]||'-';
+      const curAV=(row.AG||0)-(row.YG||0);
+
+      let bolgeHtml='';
+      bolgeler.forEach(function(b){
+        const icinde=(rank>=b.bas&&rank<=b.son);
+        // Bölgenin SINIR takımı: bölgeye girmek için geçilmesi gereken son takım.
+        const sinirIdx=Math.min(b.son,table.length)-1;
+        const sinir=table[sinirIdx];
+        if(!sinir)return;
+        const sinirBenMi=(sinir.id===t.id);
+        const sinirRem=kalan(sinir.id);
+        const sinirP=sinir.P, sinirMaxP=sinirP+sinirRem*WIN;
+        const sinirAV=(sinir.AG||0)-(sinir.YG||0);
+
+        let durum='',renk='',detay='';
+        if(icinde){
+          // Bölgede KALMAK için: bölgenin hemen ALTINDAKİ takım tehdit oluşturur.
+          const tehditIdx=b.son;   // 0-tabanlı: bölgenin bir altındaki sıra
+          const tehdit=table[tehditIdx];
+          if(!tehdit){
+            durum='✅ Bu bölgede ve altında rakip yok';renk='#4ade80';
+          }else{
+            const tehditMax=tehdit.P+kalan(tehdit.id)*WIN;
+            if(curP>tehditMax){
+              durum='🔒 Garanti';renk='#4ade80';
+              detay=`${escHtml(tehdit.name)} tüm kalan maçlarını kazansa bile (${tehditMax} puan) geçemez.`;
+            }else{
+              const acik=curP-tehdit.P;
+              const gerekli=Math.max(0,Math.ceil((tehditMax-curP+1)/WIN));
+              durum='⚠️ Garanti değil';renk='#fbbf24';
+              detay=`${escHtml(tehdit.name)} en fazla <b>${tehditMax}</b> puana ulaşabilir. Garantilemek için <b>${gerekli} galibiyet</b> daha gerekir`
+                +(acik>0?` (şu an ${acik} puan öndesiniz).`:acik===0?` (puanlar eşit, averaj belirleyici).`:` (şu an ${-acik} puan geridesiniz).`);
+              if(acik===0){
+                const avFark=curAV-(( tehdit.AG||0)-(tehdit.YG||0));
+                detay+=` Averaj farkı: <b>${avFark>0?'+':''}${avFark}</b>.`;
+              }
+            }
+          }
+        }else if(rank>b.son){
+          // Bölgeye ÇIKMAK için
+          if(maxP<sinirP){
+            durum='⛔ Matematiksel olarak imkânsız';renk='#f87171';
+            detay=`Tüm kalan maçları kazansanız bile ${maxP} puanda kalırsınız; ${escHtml(sinir.name)} şimdiden ${sinirP} puanda.`;
+          }else{
+            const puanFarki=sinirP-curP;
+            const gerekliGalibiyet=Math.max(0,Math.ceil((puanFarki+1)/WIN));
+            const yetmeziMi=gerekliGalibiyet>rem;
+            durum=yetmeziMi?'🔴 Kalan maç yetmiyor':'🎯 Şans var';renk=yetmeziMi?'#f87171':'#fbbf24';
+            detay=`${escHtml(sinir.name)} ile aranızda <b>${puanFarki} puan</b> var. Geçmek için <b>${gerekliGalibiyet} galibiyet</b> gerekir`
+              +(yetmeziMi?` ama sadece <b>${rem}</b> maçınız kaldı.`:` (kalan maç: ${rem}).`);
+            if(puanFarki===0||puanFarki%WIN===0){
+              const avFark=sinirAV-curAV;
+              detay+=` Puanlar eşitlenirse averajı <b>${avFark>=0?avFark+1:1}</b> kadar iyileştirmeniz gerekir (şu anki fark: ${avFark>0?'-':''}${Math.abs(avFark)}).`;
+            }
+          }
+        }else{
+          durum='⬆️ Bu bölgenin üstündesiniz';renk='#4ade80';
+          detay=`Şu an ${rank}. sıradasınız; bu bölge ${b.bas}-${b.son}. sıralar arası.`;
+        }
+        if(sinirBenMi&&!icinde)return;
+        bolgeHtml+=`<div style="border-left:3px solid ${b.renk};background:var(--s);border-radius:0 8px 8px 0;padding:.45rem .55rem;margin-top:.4rem">
+          <div style="display:flex;justify-content:space-between;gap:.4rem;align-items:baseline">
+            <b style="font-size:.72rem">${escHtml(b.ad)}</b>
+            <span style="font-size:.6rem;color:var(--mu)">${b.bas===b.son?b.bas+'. sıra':b.bas+'-'+b.son+'. sıra'}</span>
+          </div>
+          <div style="font-size:.7rem;font-weight:800;color:${renk};margin-top:.15rem">${durum}</div>
+          ${detay?`<div style="font-size:.66rem;color:var(--tx);line-height:1.55;margin-top:.2rem">${detay}</div>`:''}
+        </div>`;
+      });
+
       scenarioCards+=`<div style="background:var(--s2);border:1px solid var(--br);border-radius:12px;padding:.7rem .8rem;margin-bottom:.6rem">
         <div style="display:flex;align-items:center;gap:.45rem;margin-bottom:.5rem">
           ${t.logo?`<img src="${t.logo}" style="width:26px;height:26px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:''}
-          <div style="flex:1"><div style="font-size:.85rem;font-weight:900">${escHtml(t.name)}</div><div style="font-size:.62rem;color:var(--mu)">${rank}. sıra · ${curP} puan</div></div>
+          <div style="flex:1"><div style="font-size:.85rem;font-weight:900">${escHtml(t.name)}</div>
+          <div style="font-size:.62rem;color:var(--mu)">${rank}. sıra · ${curP} puan · averaj ${curAV>0?'+':''}${curAV}</div></div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;font-size:.66rem">
-          <div style="background:var(--s);border-radius:8px;padding:.4rem .5rem"><div style="color:var(--mu);font-size:.58rem">Kalan Maç</div><div style="font-weight:900;font-size:.9rem">${rem}</div></div>
-          <div style="background:var(--s);border-radius:8px;padding:.4rem .5rem"><div style="color:var(--mu);font-size:.58rem">Ulaşabileceği En Yüksek</div><div style="font-weight:900;font-size:.9rem;color:var(--ac3)">${maxP} puan</div></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.4rem">
+          ${kutu('Kalan Maç',rem)}
+          ${kutu('En Fazla',maxP+' puan','var(--ac3)')}
+          ${kutu('En Az',curP+' puan')}
         </div>
-        <div style="margin-top:.5rem;font-size:.68rem;line-height:1.6">
-          ${rank===1?`<div style="color:#4ade80">🏆 Şu an lider.${rem>0?' Kalan maçları kazanmak şampiyonluğu yaklaştırır.':' Sezon bitti, şampiyon!'}</div>`
-            : canBeChampion?`<div style="color:#fbbf24">⭐ Matematiksel şampiyonluk şansı var. Tüm kalan maçları kazanırsa ${maxP} puana ulaşır (lider: ${leaderP}).</div>`
-            : `<div style="color:var(--mu)">📉 Şampiyonluk matematiksel olarak çok zor (en fazla ${maxP} puan, lider ${leaderP}).</div>`}
-          ${inRelegation?`<div style="color:#f87171;margin-top:.3rem">⚠️ Küme düşme bölgesinde (son 3). Çıkmak için puan toplaması şart.</div>`
-            : rank>relegationZone-2?`<div style="color:#fbbf24;margin-top:.3rem">😐 Küme düşme hattına yakın.</div>`
-            : `<div style="color:#4ade80;margin-top:.3rem">✅ Küme düşme tehlikesi şu an uzak.</div>`}
-        </div>
+        ${bolgeHtml}
       </div>`;
     });
   }else{
     scenarioCards='<div style="text-align:center;color:var(--mu);padding:1.5rem;font-size:.76rem">Senaryosunu görmek istediğin takımları yukarıdan seç.</div>';
   }
+
   sc.innerHTML=`<div class="sheet-handle"></div>
     <div style="font-size:1rem;font-weight:900;margin-bottom:.3rem">🎯 Averaj Senaryoları</div>
-    <div style="font-size:.66rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Takım seç, kalan maçlara göre şampiyonluk ve küme düşme senaryolarını gör.</div>
+    <div style="font-size:.66rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">
+      Her bölge için <b>kaç puan</b> ve <b>kaç averaj</b> gerektiğini gösterir. Hesaplar rakiplerin
+      kalan maçlarının sonucunu bilemez; bu yüzden "garanti" ve "şans var" ayrı ayrı belirtilir.
+      ${bolgeKaynak==='varsayılan'?'<br><span style="color:#fbbf24">⚠️ Lig için bölge tanımı yapılmamış; varsayılan bölgeler kullanılıyor. Yönetim → Sıra Notları\'ndan tanımlayabilirsiniz.</span>':''}
+    </div>
     <div style="display:flex;gap:.3rem;margin-bottom:.5rem">
-      <button onclick="scenarioSelectAll(true)" style="flex:1;padding:.4rem 0;border-radius:9px;font-size:.66rem;font-weight:700;border:1.5px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer">✓ Tümünü Seç</button>
-      <button onclick="scenarioSelectAll(false)" style="flex:1;padding:.4rem 0;border-radius:9px;font-size:.66rem;font-weight:700;border:1.5px solid var(--br);background:transparent;color:var(--mu);cursor:pointer">✕ Temizle</button>
+      <button onclick="scenarioSelectAll(true)" style="flex:1;padding:.4rem 0;border-radius:9px;font-size:.66rem;font-weight:700;border:1.5px solid var(--ac);background:var(--ac);color:#fff;cursor:pointer;min-height:30px">✓ Tümünü Seç</button>
+      <button onclick="scenarioSelectAll(false)" style="flex:1;padding:.4rem 0;border-radius:9px;font-size:.66rem;font-weight:700;border:1.5px solid var(--br);background:transparent;color:var(--mu);cursor:pointer;min-height:30px">✕ Temizle</button>
     </div>
     <div style="display:flex;flex-wrap:wrap;margin-bottom:.7rem">${chips}</div>
     ${scenarioCards}`;
 }
+
 window.toggleScenarioTeam=function(tid){
   window._scenarioSelected[tid]=!window._scenarioSelected[tid];
   renderScenarioSheet();
@@ -8911,6 +9078,8 @@ function renderMatchDetailContent(){
   let body='';
   // Tema değişmiş olabilir; sekme ve başlık renkleri her çizimde yeniden hesaplanır.
   try{mdTemaUygula();}catch(e){}
+  // Sekmeli menü: yükseklik sabitlenir ki sekme değiştirince kutu zıplamasın.
+  try{var _sc=document.getElementById('sheetContent');if(_sc)_sc.classList.add('sheet-fixed-h');}catch(e){}
   if(_mdTab==='detay')body=renderMdDetay(id,m,h,a,ntInfo);
   else if(_mdTab==='kadro')body=renderMdKadro(id,m,h,a);
   else if(_mdTab==='karne')body=renderMdKarne(id,m,h,a);
@@ -9220,6 +9389,10 @@ function renderMdDetay(id,m,h,a,ntInfo){
            5. VAR / AVAR        : iki sütun, VAR rozeti + detay oku
            6. Yayın             : ekran simgesi + yayıncılar
          Boş alanlar hiç çizilmez - admin ne girdiyse o görünür. -->
+    <!-- KULLANICI BİLDİRDİ: "Baskımetre puan tablosu tarafında görünmüyor."
+         KÖK SEBEP: Fonksiyon duruyordu ama ÇAĞRISI, maç bilgisi ekranı yeniden
+         tasarlanırken (2026-08-09-O) yanlışlıkla silinmişti. Geri kondu. -->
+    ${(m.played||m.isLive)?renderBaskimetre(m):''}
     <div class="md-section-head">Maç Bilgisi</div>
     <div class="mi-card">
       <div class="mi-row">
@@ -18295,11 +18468,23 @@ window.voteMvp=function(matchId,player){
   var REMOTE_MIN_SEV=2;              // bu ve üstü ciddiyetteki kayıtlar Firebase'e de gider
 
   // ── Bayraklar (hangi modül açık?) ───────────────────────────────────────────────────
+  /* KULLANICI BİLDİRDİ: "Bütün hata yakalama kodları açık ama aslen kapalı konumda."
+     KÖK SEBEP: Bayraklar önce localStorage'daki SON BİLİNEN durumdan yükleniyor, sonra
+     Firebase'den gelen güncel durumla değiştiriliyordu. Ama Firebase okuması BAŞARISIZ
+     olursa (kural izni yok, ağ yok, kimlik henüz alınmamış) `applyFlags` hiç çağrılmıyor
+     ve cihaz GÜNLER ÖNCESİNİN bayraklarıyla çalışmaya devam ediyordu. Yönetici modülleri
+     kapatmış olsa bile o cihazda rozetler görünmeye devam ediyordu.
+     ÇÖZÜM: Yerel kopya yalnızca GEÇİCİ bir başlangıç değeridir. Firebase'den ilk yanıt
+     gelene kadar kullanılır; belirli bir süre içinde yanıt gelmezse ya da okuma hata
+     verirse bayraklar KAPATILIR. Teşhis sistemi şüphe durumunda AÇIK değil KAPALI olmalı -
+     kullanıcıya görünen bir arayüzün yanlışlıkla açık kalması kabul edilemez. */
   var FLAGS={};
+  var _flagsTazeMi=false;
   try{FLAGS=JSON.parse(localStorage.getItem('diag_flags')||'{}');}catch(e){FLAGS={};}
   function isOn(id){return FLAGS[id]===true;}
 
   function applyFlags(obj){
+    _flagsTazeMi=true;
     FLAGS=obj||{};
     try{localStorage.setItem('diag_flags',JSON.stringify(FLAGS));}catch(e){}
     if(typeof window.onDiagFlagsChanged==='function')try{window.onDiagFlagsChanged(FLAGS);}catch(e){}
@@ -18310,8 +18495,13 @@ window.voteMvp=function(matchId,player){
     try{
       var db=(window.firebase&&firebase.database)?firebase.database():null;
       if(!db)return;
-      db.ref('diagnostics/flags').on('value',function(snap){applyFlags(snap.val()||{});});
-    }catch(e){}
+      db.ref('diagnostics/flags').on('value',
+        function(snap){applyFlags(snap.val()||{});},
+        function(){ /* okuma reddedildi: güvenli tarafta kal, hepsini kapat */ applyFlags({}); }
+      );
+      // Yanıt hiç gelmezse (ağ sessizce düşmüş olabilir) 12 saniye sonra bayraklar kapatılır.
+      setTimeout(function(){ if(!_flagsTazeMi)applyFlags({}); },12000);
+    }catch(e){ applyFlags({}); }
   }
 
   /* ── CİHAZ KİMLİĞİ VE KİMLİK KARTI ────────────────────────────────────────────────────
