@@ -1178,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-10-G';
+window.APP_BUILD='2026-08-12-A';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -18200,6 +18200,75 @@ function copyRemoteSensorResult(devKey){
      9. Yerleşim sensörleri çalışıyor mu? (gerçek ölçüm)
    Bu ekran halkaları TEK TEK dener ve HANGİSİNİN koptuğunu tam hata mesajıyla söyler.
    Böylece "çalışmıyor" iddiası, düzeltilebilir tek bir satıra iner. */
+/* ── APP CHECK DURUMU ─────────────────────────────────────────────────────────────────
+   Firebase Console "Verified %0 / Unverified %100" gösteriyordu; yani hiçbir istek App
+   Check jetonu taşımıyor. Sebebi tarayıcı konsolundan bakmak gerekiyordu ama Chrome,
+   adres çubuğuna javascript: yazılmasına izin vermiyor - ölçüm yapılamıyordu.
+   Bu ekran aynı bilgiyi uygulamanın içinden gösterir: anahtar var mı, SDK yüklendi mi,
+   etkinleştirme başarılı mı, jeton gerçekten alınabiliyor mu. */
+function openAppCheckStatus(){
+  var sat=function(k,v,renk){
+    return '<div style="display:flex;justify-content:space-between;gap:.5rem;padding:.4rem 0;border-top:1px solid var(--br);font-size:.68rem">'
+      +'<span style="color:var(--mu);flex-shrink:0">'+escHtml(k)+'</span>'
+      +'<b style="text-align:right;word-break:break-all;'+(renk||'')+'">'+escHtml(String(v))+'</b></div>';
+  };
+  var anahtar=window.APP_CHECK_SITE_KEY||'';
+  var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.7rem">'
+    +'App Check jetonu üretilmiyorsa Firebase tarafında tüm istekler "doğrulanmamış" görünür. '
+    +'Bu ekran zincirin hangi halkasında koptuğunu gösterir.</div>'
+    +'<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.55rem .7rem;margin-bottom:.7rem">'
+    +sat('Açılış protokolü',location.protocol,location.protocol==='https:'?'color:#22c55e':'color:#f87171')
+    +sat('Ortam uygun mu',window._authOrtamUygun?'evet':'HAYIR',window._authOrtamUygun?'color:#22c55e':'color:#f87171')
+    +sat('Site anahtarı',anahtar?(anahtar.slice(0,12)+'…'+anahtar.slice(-6)+' ('+anahtar.length+' karakter)'):'YOK',anahtar?'':'color:#f87171')
+    +sat('SDK yüklendi mi',(window.firebase&&firebase.appCheck)?'evet':'HAYIR',(window.firebase&&firebase.appCheck)?'color:#22c55e':'color:#f87171')
+    +sat('Etkinleştirme',window._appCheckAktif?'başarılı':'yapılmadı',window._appCheckAktif?'color:#22c55e':'color:#fbbf24')
+    +sat('Hata',window._appCheckHata||'yok',window._appCheckHata?'color:#f87171':'')
+    +'</div>'
+    +'<button class="btn bp" onclick="testAppCheckToken()" style="width:100%">🎫 Jeton Almayı Dene</button>'
+    +'<div id="acTokenOut" style="font-size:.66rem;margin-top:.6rem;line-height:1.6"></div>'
+    +'<div style="font-size:.62rem;color:var(--mu);line-height:1.6;margin-top:.7rem">'
+    +'Anahtarın tamamını görmek için aşağıdaki düğmeyi kullanın; reCAPTCHA yönetim sayfasındaki '
+    +'değerle <b>karakter karakter</b> karşılaştırın - tek bir harf farkı jeton üretimini engeller.</div>'
+    +'<button class="btn bgh" onclick="copyAppCheckKey()" style="width:100%;margin-top:.4rem">📋 Site Anahtarını Kopyala</button>';
+  openSheet('🛡️ App Check Durumu','<div data-diag-ui="1">'+html+'</div>','openAppCheckStatus');
+}
+function copyAppCheckKey(){
+  var k=window.APP_CHECK_SITE_KEY||'';
+  if(!k){toast('Anahtar yok','er');return;}
+  if(typeof admGlobalCopyText==='function')admGlobalCopyText(k,'📋 Anahtar kopyalandı');
+  else if(navigator.clipboard)navigator.clipboard.writeText(k).then(function(){toast('📋 Kopyalandı');});
+}
+/* Jetonu GERÇEKTEN istemeyi dener. Başarılıysa App Check çalışıyor demektir ve Console'daki
+   sıfır oran yalnızca ölçüm gecikmesidir; başarısızsa hata mesajı sebebi söyler. */
+function testAppCheckToken(){
+  var k=qs('acTokenOut');
+  var yaz=function(h){if(k)k.innerHTML=h;};
+  if(!(window.firebase&&firebase.appCheck)){
+    yaz('<b style="color:#f87171">SDK yüklü değil.</b> Site anahtarı boşsa veya sayfa https:// dışından açıldıysa SDK hiç yüklenmez.');
+    return;
+  }
+  yaz('⏳ Jeton isteniyor...');
+  try{
+    firebase.appCheck().getToken(true)
+      .then(function(r){
+        var t=(r&&r.token)||'';
+        yaz('<b style="color:#22c55e">✅ Jeton alındı.</b><br>Uzunluk: '+t.length+' karakter<br>'
+          +'<span style="color:var(--mu)">App Check çalışıyor. Console\'daki oran birkaç saat içinde düzelir; '
+          +'ölçüm penceresi geriye dönüktür.</span>');
+      })
+      .catch(function(e){
+        var m=(e&&(e.message||e.code))||'bilinmeyen hata';
+        var ipucu='';
+        if(/recaptcha|site key|invalid/i.test(m))ipucu='<br><span style="color:var(--mu)">Site anahtarı yanlış olabilir veya reCAPTCHA ayarlarında bu alan adı kayıtlı değil.</span>';
+        else if(/403|permission|forbidden/i.test(m))ipucu='<br><span style="color:var(--mu)">Firebase tarafında uygulama kaydı eksik olabilir (App Check → Apps).</span>';
+        else if(/network|fetch/i.test(m))ipucu='<br><span style="color:var(--mu)">Ağ engeli - reCAPTCHA sunucularına ulaşılamıyor olabilir.</span>';
+        yaz('<b style="color:#f87171">❌ Jeton alınamadı:</b> '+escHtml(m)+ipucu);
+      });
+  }catch(e){
+    yaz('<b style="color:#f87171">❌ '+escHtml((e&&e.message)||'bilinmeyen hata')+'</b>');
+  }
+}
+
 function openDiagHealthCheck(){
   var html='<div style="font-size:.7rem;color:var(--mu);line-height:1.6;margin-bottom:.7rem">'
     +'Teşhis sistemi bir zincirdir; bir halka koparsa sonuç hep aynı görünür: hiçbir şey olmaz. '
@@ -18361,7 +18430,8 @@ function openDiagnosticsManager(){
     +'<button class="btn bp" onclick="openDiagBadgeMap()" style="width:100%;margin-bottom:.5rem">🗺️ Rozet Yerleşim Haritası - hangi rozet ekranın neresinde?</button>'
     +'<button class="btn bgh" onclick="openDiagAuthTest()" style="width:100%;margin-bottom:.5rem">🔐 Kimlik Doğrulama Durumu - hangi cihazlar kimlikli bağlanıyor?</button>'
     +'<button class="btn bgh" onclick="openSensorTest()" style="width:100%;margin-bottom:.5rem">🔬 Sensör Testi - yerleşim sensörleri bu ekranda ne görüyor?</button>'
-    +'<button class="btn bp" onclick="openDiagHealthCheck()" style="width:100%;margin-bottom:.8rem">🩺 Sağlık Kontrolü - teşhis zincirinin hangi halkası kopuk?</button>'
+    +'<button class="btn bp" onclick="openDiagHealthCheck()" style="width:100%;margin-bottom:.5rem">🩺 Sağlık Kontrolü - teşhis zincirinin hangi halkası kopuk?</button>'
+    +'<button class="btn bgh" onclick="openAppCheckStatus()" style="width:100%;margin-bottom:.8rem">🛡️ App Check Durumu - jeton üretiliyor mu?</button>'
     +'<div id="diagModuleList"></div>'
     +'<div style="height:1px;background:var(--br);margin:1rem 0"></div>'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">'
