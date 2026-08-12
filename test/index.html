@@ -1146,7 +1146,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-E';
+window.APP_BUILD='2026-08-12-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -1224,6 +1224,66 @@ window.APP_CHECK_SITE_KEY='6Ld4-4EtAAAAAPC1eNtLyCC-w74V0PGwFAz9Cpbf';   // reCAP
     if(document.body)yaz();
     else document.addEventListener('DOMContentLoaded',yaz);
   }catch(e){}
+})();
+/* ── FARE İLE YATAY SÜRÜKLEME ─────────────────────────────────────────────────────────
+   KULLANICI BİLDİRDİ: "Mouse ile butonlar kaydırılamıyor."
+   SEBEP: Yatay şeritler (sekmeler, tarih şeridi, filtre düğmeleri) `overflow-x:auto` ile
+   kaydırılabilir yapılmıştı. Dokunmatik ekranda parmakla sürüklemek işe yarar, ama FARE ile
+   sürüklemek tarayıcıda varsayılan olarak ÇALIŞMAZ - kullanıcı ya kaydırma çubuğunu
+   bulmak ya da Shift+tekerlek gibi bir kısayol bilmek zorunda kalır. Projeksiyon veya
+   masaüstünde şerit kullanılamaz hale geliyordu.
+   ÇÖZÜM: Basılı tutup sürükleme davranışı eklenir. Ayırt etmesi gereken iki durum var:
+     · Kısa basış + bırakma  → bu bir TIKLAMADIR, düğme çalışmalı
+     · Basılı tutup kaydırma → bu bir SÜRÜKLEMEDİR, tıklama iptal edilmeli
+   Bu ayrım eşiği 5 pikseldir: fare bu kadar hareket ettiyse sürükleme sayılır ve o
+   hareketin sonundaki tıklama yutulur (aksi halde sürükledikten sonra parmağın kalktığı
+   düğme yanlışlıkla tetiklenir). */
+(function fareIleKaydirma(){
+  var AKTIF_SEC='.main-nav,.stat-tab-row,.date-strip-scroll,.md-tabs,.formation-picker,.hscroll-preserve,.st-filter-row,.lt-track';
+  var SURUKLEME_ESIGI=5;
+  var st=null;
+  function kaydirilabilirBul(el){
+    for(var n=el;n&&n!==document.body;n=n.parentElement){
+      try{ if(n.matches&&n.matches(AKTIF_SEC)&&n.scrollWidth>n.clientWidth+2)return n; }catch(e){}
+    }
+    return null;
+  }
+  document.addEventListener('mousedown',function(e){
+    if(e.button!==0)return;
+    var kutu=kaydirilabilirBul(e.target);
+    if(!kutu)return;
+    st={kutu:kutu,x0:e.clientX,sol0:kutu.scrollLeft,surukledi:false};
+  },true);
+  document.addEventListener('mousemove',function(e){
+    if(!st)return;
+    var dx=e.clientX-st.x0;
+    if(!st.surukledi&&Math.abs(dx)<SURUKLEME_ESIGI)return;
+    st.surukledi=true;
+    st.kutu.scrollLeft=st.sol0-dx;
+    st.kutu.style.cursor='grabbing';
+    e.preventDefault();        // metin seçilmesini engelle
+  },true);
+  document.addEventListener('mouseup',function(e){
+    if(!st)return;
+    var s=st; st=null;
+    s.kutu.style.cursor='';
+    if(!s.surukledi)return;    // sürükleme yoktu: normal tıklama geçsin
+    // Sürükleme sonrası tıklama yutulur - yoksa parmağın kalktığı düğme tetiklenir.
+    var yut=function(ev){ev.stopPropagation();ev.preventDefault();document.removeEventListener('click',yut,true);};
+    document.addEventListener('click',yut,true);
+    setTimeout(function(){document.removeEventListener('click',yut,true);},0);
+  },true);
+  document.addEventListener('mouseleave',function(){ if(st){st.kutu.style.cursor='';st=null;} },true);
+  /* Fare tekerleği: dikey tekerlek hareketi yatay şeritlerde yatay kaydırmaya çevrilir -
+     masaüstünde en doğal beklenti budur. */
+  document.addEventListener('wheel',function(e){
+    if(e.deltaY===0)return;
+    var kutu=kaydirilabilirBul(e.target);
+    if(!kutu)return;
+    if(Math.abs(e.deltaX)>Math.abs(e.deltaY))return;   // zaten yatay hareket var
+    kutu.scrollLeft+=e.deltaY;
+    e.preventDefault();
+  },{passive:false,capture:true});
 })();
 window._authSonda={durum:'ortam-uygun-değil',hata:null,uid:null,ms:null,kaynak:location.protocol};
 (function anonimGiris(){
@@ -8793,6 +8853,34 @@ window.openScenarioScreen=function(){
    DÜRÜSTLÜK KURALI: Hesaplar rakiplerin kalan maçlarının SONUCUNU bilemez. Bu yüzden iki uç
    senaryo verilir (rakip hepsini kazanır / hepsini kaybeder) ve arası "belirsiz" denir.
    Kesin olmayan bir şeyi kesinmiş gibi sunmak, kullanıcının güvenini boşa çıkarır. */
+/* ── PUAN ULAŞILABİLİRLİĞİ ────────────────────────────────────────────────────────────
+   KULLANICI BİLDİRDİ: "Bazı durumlarda puanlar eşit olsa bile averaj hesaba katılmıyor."
+   ÖNCEKİ KUSUR: Averaj yalnızca `puanFarki===0 || puanFarki%WIN===0` olduğunda hesaplanıyordu.
+   Bu yanlıştı - bir takım galibiyet DIŞINDA beraberlik de alabilir, dolayısıyla WIN'in katı
+   olmayan farklar da kapatılabilir. Örneğin 3 puanlık sistemde 2 puanlık fark iki beraberlikle
+   kapanır ama eski kural bunu "averaj devreye girmez" sayıyordu.
+   DOĞRU HESAP: k galibiyet + b beraberlik ile elde edilebilen puanlar { k*WIN + b*DRAW } ve
+   k+b ≤ kalan maç. Bu kümede hedef fark varsa PUAN EŞİTLİĞİ MÜMKÜNDÜR ve averaj belirleyici
+   olur. Aşağıdaki fonksiyon bunu tam olarak hesaplar. */
+function puanUlasilirMi(hedefFark,kalanMac,WIN,DRAW){
+  if(hedefFark<0)return false;
+  if(hedefFark===0)return true;
+  for(var k=0;k<=kalanMac;k++){
+    for(var b=0;b+k<=kalanMac;b++){
+      if(k*WIN+b*DRAW===hedefFark)return true;
+    }
+  }
+  return false;
+}
+/* Averaj cümlesi. İki takımın puanı eşitlenirse hangi averaj farkının gerektiğini söyler.
+   Ligin eşitlik bozma kuralı averaj değilse (ikili maç sonucu gibi) bunu da belirtir -
+   yanlış bir kesinlik vermemek için. */
+function averajCumlesi(benimAV,rakipAV,rakipAd){
+  var fark=benimAV-rakipAV;
+  if(fark>0)return `Puanlar eşitlenirse averaj sizin lehinize (<b>+${fark}</b> önde).`;
+  if(fark===0)return `Puanlar eşitlenirse averaj da eşit - bir sonraki ölçüt (atılan gol) belirleyici olur.`;
+  return `Puanlar eşitlenirse averajı <b>${-fark+1}</b> iyileştirmeniz gerekir (${escHtml(rakipAd)} averajda ${-fark} önde).`;
+}
 function scenarioBolgeler(totalTeams){
   /* Bölgeler öncelikle ligin KENDİ tanımından (rankNotes) okunur. Tanım yoksa makul
      varsayılanlara düşülür - ama bu durum kullanıcıya ayrıca belirtilir. */
@@ -8872,12 +8960,16 @@ function renderScenarioSheet(){
             }else{
               const acik=curP-tehdit.P;
               const gerekli=Math.max(0,Math.ceil((tehditMax-curP+1)/WIN));
+              const tehditAV=(tehdit.AG||0)-(tehdit.YG||0);
+              const tehditRem=kalan(tehdit.id);
               durum='⚠️ Garanti değil';renk='#fbbf24';
               detay=`${escHtml(tehdit.name)} en fazla <b>${tehditMax}</b> puana ulaşabilir. Garantilemek için <b>${gerekli} galibiyet</b> daha gerekir`
-                +(acik>0?` (şu an ${acik} puan öndesiniz).`:acik===0?` (puanlar eşit, averaj belirleyici).`:` (şu an ${-acik} puan geridesiniz).`);
-              if(acik===0){
-                const avFark=curAV-(( tehdit.AG||0)-(tehdit.YG||0));
-                detay+=` Averaj farkı: <b>${avFark>0?'+':''}${avFark}</b>.`;
+                +(acik>0?` (şu an ${acik} puan öndesiniz).`:acik===0?` (puanlar şu an eşit).`:` (şu an ${-acik} puan geridesiniz).`);
+              /* AVERAJ: Rakip sizi puanda YAKALAYABİLİYORSA averaj belirleyici olur.
+                 Bu, farkın WIN'in katı olmasına bağlı değildir - beraberlikler de sayılır. */
+              const yakalayabilir=puanUlasilirMi(Math.max(0,acik),tehditRem,WIN,DRAW);
+              if(yakalayabilir){
+                detay+=`<br>⚖️ ${averajCumlesi(curAV,tehditAV,tehdit.name)}`;
               }
             }
           }
@@ -8893,9 +8985,16 @@ function renderScenarioSheet(){
             durum=yetmeziMi?'🔴 Kalan maç yetmiyor':'🎯 Şans var';renk=yetmeziMi?'#f87171':'#fbbf24';
             detay=`${escHtml(sinir.name)} ile aranızda <b>${puanFarki} puan</b> var. Geçmek için <b>${gerekliGalibiyet} galibiyet</b> gerekir`
               +(yetmeziMi?` ama sadece <b>${rem}</b> maçınız kaldı.`:` (kalan maç: ${rem}).`);
-            if(puanFarki===0||puanFarki%WIN===0){
-              const avFark=sinirAV-curAV;
-              detay+=` Puanlar eşitlenirse averajı <b>${avFark>=0?avFark+1:1}</b> kadar iyileştirmeniz gerekir (şu anki fark: ${avFark>0?'-':''}${Math.abs(avFark)}).`;
+            /* AVERAJ: Puan eşitliği kalan maçlarla SAĞLANABİLİYORSA averaj belirleyicidir.
+               Eski kural yalnızca WIN'in katı farkları sayıyordu - beraberlikleri yok sayıyordu
+               ve "2 puan geride" gibi çok yaygın bir durumda averaj hiç gösterilmiyordu. */
+            if(puanUlasilirMi(puanFarki,rem,WIN,DRAW)){
+              detay+=`<br>⚖️ ${averajCumlesi(curAV,sinirAV,sinir.name)}`;
+              // Averaj yetersizse, eşitlikte geçmek için gereken gol farkı da söylenir.
+              const avAcik=sinirAV-curAV;
+              if(avAcik>=0){
+                detay+=` Yani kalan ${rem} maçta net <b>${avAcik+1}</b> gol daha fazla üretmeniz gerekir.`;
+              }
             }
           }
         }else{
