@@ -1178,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-C';
+window.APP_BUILD='2026-08-12-D';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -16926,11 +16926,23 @@ window.saveBulkScores = async function(wrap) {
   var REMOTE_MIN_SEV=2;              // bu ve üstü ciddiyetteki kayıtlar Firebase'e de gider
 
   // ── Bayraklar (hangi modül açık?) ───────────────────────────────────────────────────
+  /* KULLANICI BİLDİRDİ: "Bütün hata yakalama kodları açık ama aslen kapalı konumda."
+     KÖK SEBEP: Bayraklar önce localStorage'daki SON BİLİNEN durumdan yükleniyor, sonra
+     Firebase'den gelen güncel durumla değiştiriliyordu. Ama Firebase okuması BAŞARISIZ
+     olursa (kural izni yok, ağ yok, kimlik henüz alınmamış) `applyFlags` hiç çağrılmıyor
+     ve cihaz GÜNLER ÖNCESİNİN bayraklarıyla çalışmaya devam ediyordu. Yönetici modülleri
+     kapatmış olsa bile o cihazda rozetler görünmeye devam ediyordu.
+     ÇÖZÜM: Yerel kopya yalnızca GEÇİCİ bir başlangıç değeridir. Firebase'den ilk yanıt
+     gelene kadar kullanılır; belirli bir süre içinde yanıt gelmezse ya da okuma hata
+     verirse bayraklar KAPATILIR. Teşhis sistemi şüphe durumunda AÇIK değil KAPALI olmalı -
+     kullanıcıya görünen bir arayüzün yanlışlıkla açık kalması kabul edilemez. */
   var FLAGS={};
+  var _flagsTazeMi=false;
   try{FLAGS=JSON.parse(localStorage.getItem('diag_flags')||'{}');}catch(e){FLAGS={};}
   function isOn(id){return FLAGS[id]===true;}
 
   function applyFlags(obj){
+    _flagsTazeMi=true;
     FLAGS=obj||{};
     try{localStorage.setItem('diag_flags',JSON.stringify(FLAGS));}catch(e){}
     if(typeof window.onDiagFlagsChanged==='function')try{window.onDiagFlagsChanged(FLAGS);}catch(e){}
@@ -16941,8 +16953,13 @@ window.saveBulkScores = async function(wrap) {
     try{
       var db=(window.firebase&&firebase.database)?firebase.database():null;
       if(!db)return;
-      db.ref('diagnostics/flags').on('value',function(snap){applyFlags(snap.val()||{});});
-    }catch(e){}
+      db.ref('diagnostics/flags').on('value',
+        function(snap){applyFlags(snap.val()||{});},
+        function(){ /* okuma reddedildi: güvenli tarafta kal, hepsini kapat */ applyFlags({}); }
+      );
+      // Yanıt hiç gelmezse (ağ sessizce düşmüş olabilir) 12 saniye sonra bayraklar kapatılır.
+      setTimeout(function(){ if(!_flagsTazeMi)applyFlags({}); },12000);
+    }catch(e){ applyFlags({}); }
   }
 
   /* ── CİHAZ KİMLİĞİ VE KİMLİK KARTI ────────────────────────────────────────────────────
