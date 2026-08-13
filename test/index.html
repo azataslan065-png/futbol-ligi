@@ -1174,7 +1174,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-L';
+window.APP_BUILD='2026-08-12-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -1409,7 +1409,10 @@ try{
 // SAYEDE xhr.upload.onprogress ile GERÇEK bayt bazlı ilerleme (ve buradan hesaplanan
 // tahmini kalan süre) okunabilir. callback(err, publicUrl) şeklinde çağrılır.
 function _supabaseXhrUpload(blob,path,contentType,onProgress,callback){
-  if(!SUPABASE_URL||!SUPABASE_ANON_KEY){callback(new Error('Yükleme servisi yapılandırılmamış'));return;}
+  if(!SUPABASE_URL||!SUPABASE_ANON_KEY){
+    if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Yükleme servisi yapılandırılmamış',{yol:path,tur:contentType});
+    callback(new Error('Yükleme servisi yapılandırılmamış'));return;
+  }
   const xhr=new XMLHttpRequest();
   const url=SUPABASE_URL+'/storage/v1/object/'+SUPABASE_VIDEO_BUCKET+'/'+path;
   xhr.open('POST',url,true);
@@ -1417,22 +1420,50 @@ function _supabaseXhrUpload(blob,path,contentType,onProgress,callback){
   xhr.setRequestHeader('apikey',SUPABASE_ANON_KEY);
   xhr.setRequestHeader('Content-Type',contentType);
   xhr.setRequestHeader('x-upsert','false');
+  // KULLANICI TALEBİ: "Fotoğraf/video yüklerken bir sorun olduğunda Sohbet Teşhis
+  // Paneli'nde 'Dosya yükleme' kategorisinde göstersin." - Mevcut [MEDYA] kategorisi
+  // sadece GÖRÜNTÜLEME aşamasındaki kırık linkleri yakalıyordu (bkz. aşağıdaki 8. bölüm),
+  // YÜKLEME aşamasındaki başarısızlıklar (Supabase hatası, servis kapalı, bağlantı koptu,
+  // yükleme donması) hiçbir yerde kaydedilmiyordu. Bu, hem fotoğraf hem video için TEK
+  // ortak yükleme fonksiyonu olduğundan, tüm yükleme hatalarını burada MERKEZİ olarak
+  // yakalamak en güvenilir nokta.
+  const _dosyaBoyutMB=(blob&&blob.size?(blob.size/1024/1024).toFixed(1):'?');
+  let _lastProgTs=Date.now(),_stallWarned=false;
+  const _stallTimer=setInterval(function(){
+    if(Date.now()-_lastProgTs>10000&&!_stallWarned){
+      _stallWarned=true;
+      if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Yükleme donmuş görünüyor (10sn ilerleme yok)',{
+        yol:path,boyutMB:_dosyaBoyutMB,tur:contentType,cevrimici:navigator.onLine
+      },15000);
+    }
+  },2000);
   if(xhr.upload&&onProgress){
     xhr.upload.onprogress=function(e){
+      _lastProgTs=Date.now();_stallWarned=false;
       if(e.lengthComputable)onProgress(e.loaded,e.total);
     };
   }
   xhr.onload=function(){
+    clearInterval(_stallTimer);
     if(xhr.status>=200&&xhr.status<300){
       const publicUrl=SUPABASE_URL+'/storage/v1/object/public/'+SUPABASE_VIDEO_BUCKET+'/'+path;
       callback(null,publicUrl);
     }else{
       let msg='Yükleme başarısız (HTTP '+xhr.status+')';
       try{const parsed=JSON.parse(xhr.responseText);if(parsed&&parsed.message)msg=parsed.message;}catch(err){DiagSil('_supabaseXhrUpload',err);}
+      if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Yükleme sunucu hatasıyla reddetti',{
+        yol:path,boyutMB:_dosyaBoyutMB,tur:contentType,httpDurum:xhr.status,mesaj:msg
+      },3000);
       callback(new Error(msg));
     }
   };
-  xhr.onerror=function(){callback(new Error('bağlantı hatası, internet bağlantınızı kontrol edin'));};
+  xhr.onerror=function(){
+    clearInterval(_stallTimer);
+    if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Yükleme bağlantı hatasıyla başarısız oldu',{
+      yol:path,boyutMB:_dosyaBoyutMB,tur:contentType,cevrimici:navigator.onLine
+    },3000);
+    callback(new Error('bağlantı hatası, internet bağlantınızı kontrol edin'));
+  };
   xhr.send(blob);
 }
 // Bir yükleme ilerleme satırının HTML'ini üretir - dönen benzersiz uploadId ile
@@ -4522,6 +4553,15 @@ const DEFAULT_EVENT_EMOJIS={
 // TÜM sohbet yeniden çizim tetikleyicilerinde (canlı dinleyiciler DAHİL, sadece tek bir
 // eylemde değil) kullanılır - böylece DOM, dokunuş tamamen sonuçlanmadan ASLA değişmez.
 let _chatRenderSafeTimer=null;
+// HATA DÜZELTMESİ (kullanıcı bildirdi: "video yüklerken yine sohbetten atıyor" - AYNI kök
+// sebep _ptPlayingVideoKey ile): Bir fotoğraf/video yüklemesi sürerken (özellikle Genel
+// Sohbet'te canlı mesaj akışı yüzünden) otomatik bir yeniden çizim tetiklenirse, composer
+// (mesaj kutusu + ilerleme çubuğu + seçili dosya input'u) SIFIRDAN yeniden kuruluyordu - bu
+// hem ilerleme çubuğunu/kalan süreyi anında kaybettiriyor HEM DE kullanıcıya "sohbetten
+// atılmış" gibi hissettiren ani bir sıçrama/kesintiye yol açıyordu. Artık bir yükleme
+// başladığında bu sayaç artırılır, bitince (başarı/hata fark etmeksizin) azaltılır - sayaç
+// sıfırdan büyükken otomatik yeniden çizimler, oynayan bir video varken olduğu gibi atlanır.
+window._ptActiveUploads=0;
 function scheduleChatRenderSafely(){
   clearTimeout(_chatRenderSafeTimer);
   _chatRenderSafeTimer=setTimeout(()=>{
@@ -4530,12 +4570,13 @@ function scheduleChatRenderSafely(){
     // Göster" placeholder'ına dönüp aniden kapanırdı. Video bitince/duraklatılınca
     // (bkz. playPtLazyVideo) bayrak temizlenir, normal güncellemeler kaldığı yerden devam eder.
     if(window._ptPlayingVideoKey)return;
+    if(window._ptActiveUploads>0)return;
     // HATA DÜZELTMESİ (KESİN KÖK SEBEP - bkz. renderTab'daki AYNI mekanizma): Kullanıcının
     // parmağı HÂLÂ ekrandaysa (bir dokunuş sürüyorsa), bu render HEMEN çalıştırılmaz -
     // parmak kalkana (touchend/touchcancel) kadar ertelenir. Aksi halde, tam parmak
     // kalkarken (touchend → sentetik click arasındaki kritik pencerede) DOM değişip
     // ardından gelen click'in BAŞKA bir elemana (örn. GIF butonu) sızmasına yol açabilirdi.
-    if(_isUserTouching){_deferredRenderFns.push(()=>{if(!window._ptPlayingVideoKey)try{renderChatScreen();}catch(err){console.error('Sohbet ekranı yeniden çizim hatası:',err);}});return;}
+    if(_isUserTouching){_deferredRenderFns.push(()=>{if(!window._ptPlayingVideoKey&&!(window._ptActiveUploads>0))try{renderChatScreen();}catch(err){console.error('Sohbet ekranı yeniden çizim hatası:',err);}});return;}
     try{renderChatScreen();}
     catch(err){console.error('Sohbet ekranı yeniden çizim hatası:',err);}
   },350);
@@ -4546,7 +4587,8 @@ function scheduleChatRenderSafely(){
 // uğratmaz.
 function renderChatScreenSafe(){
   if(window._ptPlayingVideoKey)return;
-  if(_isUserTouching){_deferredRenderFns.push(()=>{if(!window._ptPlayingVideoKey)renderChatScreen();});return;}
+  if(window._ptActiveUploads>0)return;
+  if(_isUserTouching){_deferredRenderFns.push(()=>{if(!window._ptPlayingVideoKey&&!(window._ptActiveUploads>0))renderChatScreen();});return;}
   renderChatScreen();
 }
 function getEventEmoji(type){
@@ -10626,6 +10668,7 @@ function renderMdAnlatim(id,m,h,a){
         <input type="file" id="commentPhotoInp_${id}" accept="image/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentPhoto('${id}',this)"/>
         <button onclick="openVideoMenu('${id}')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:1rem;cursor:pointer">🎬</button>
         <input type="file" id="commentVideoInp_${id}" accept="video/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentVideo('${id}',this)"/>
+        <input type="file" id="commentVideoFileInp_${id}" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentVideo('${id}',this)"/>
         <button onclick="openGifPicker('${id}')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:.72rem;font-weight:900;color:var(--ac3);cursor:pointer">GIF</button>
         <div style="position:relative;flex:1">
           <div id="mentionBox_${id}" style="display:none;position:absolute;bottom:100%;left:0;right:0;margin-bottom:.3rem;background:var(--s2);border:1.5px solid var(--br);border-radius:11px;max-height:140px;overflow-y:auto;z-index:10"></div>
@@ -10660,6 +10703,14 @@ window.playPtLazyVideo=function(videoKey,placeholderEl){
   if(!videoData){showToast('❌ Video verisi bulunamadı');return;}
   const vidEl=document.createElement('video');
   vidEl.src=videoData;vidEl.controls=true;vidEl.autoplay=true;
+  // KULLANICI TALEBİ: "Kullanıcı oynatıcıdaki üç noktaya basıp videoyu indirebiliyor, sadece
+  // yöneticinin indirmeye açık olması lazım." - PT (bu dosya) SADECE normal kullanıcılar
+  // içindir, yönetici burada ASLA bulunmaz (bkz. _isDevAdmin tanımı - PT tarafında her zaman
+  // false döner, gerçek yönetici erişimi yalnızca admin.html'dedir). Bu yüzden PT'deki
+  // oynatıcıda "İndir" seçeneği tarayıcının yerleşik (üç nokta) menüsünden controlsList ile
+  // tamamen kaldırılır - admin.html'deki KENDİ oynatıcısı (bkz. o dosyada AYNI kod) BU
+  // KISITLAMAYI içermez, indirme orada serbest kalır.
+  vidEl.setAttribute('controlsList','nodownload');
   vidEl.style.cssText='max-width:100%;border-radius:9px;margin-top:.35rem;max-height:280px;display:block';
   // HATA DÜZELTMESİ (KESİN KÖK SEBEP BULUNDU - kullanıcı bildirdi: "mevcut video
   // oynatılırken emoji tepkisini verince video kapanıyor"): Bu <video> elemanı, doğrudan
@@ -11742,6 +11793,7 @@ function renderChatScreen(){
       <input type="file" id="commentPhotoInp_chat" accept="image/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentPhoto('chat',this)"/>
       <button tabindex="-1" onclick="openVideoMenu('chat')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:1rem;cursor:pointer">🎬</button>
       <input type="file" id="commentVideoInp_chat" accept="video/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentVideo('chat',this)"/>
+      <input type="file" id="commentVideoFileInp_chat" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentVideo('chat',this)"/>
       <button tabindex="-1" onclick="openGifPicker('chat')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:.72rem;font-weight:900;color:var(--ac3);cursor:pointer">GIF</button>
       <div style="position:relative;flex:1">
         <div id="mentionBox_chat" style="display:none;position:absolute;bottom:100%;left:0;right:0;margin-bottom:.3rem;background:var(--s2);border:1.5px solid var(--br);border-radius:11px;max-height:140px;overflow-y:auto;z-index:10"></div>
@@ -15114,7 +15166,8 @@ window.openVideoMenu=function(matchId){
       <div style="background:var(--s);border-radius:16px 16px 0 0;padding:1rem 1.1rem 1.4rem;width:100%;max-width:480px">
         <div style="width:34px;height:4px;background:var(--br);border-radius:3px;margin:0 auto .8rem"></div>
         <div style="font-size:.85rem;font-weight:900;margin-bottom:.7rem">🎬 Video Ekle</div>
-        <button data-vm-match="${escAttr(matchId)}" onclick="event.stopPropagation();document.getElementById('videoMenuOv_'+this.dataset.vmMatch).remove();document.getElementById('commentVideoInp_'+this.dataset.vmMatch).click()" style="width:100%;text-align:left;background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .8rem;font-size:.8rem;font-weight:700;color:var(--tx);cursor:pointer">📱 Galeriden Video Seç <span style="color:var(--mu);font-weight:500;font-size:.66rem">(max ${MAX_VIDEO_SECONDS}sn, ${MAX_VIDEO_MB}MB)</span></button>
+        <button data-vm-match="${escAttr(matchId)}" onclick="event.stopPropagation();document.getElementById('videoMenuOv_'+this.dataset.vmMatch).remove();document.getElementById('commentVideoInp_'+this.dataset.vmMatch).click()" style="width:100%;text-align:left;background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .8rem;font-size:.8rem;font-weight:700;color:var(--tx);cursor:pointer;margin-bottom:.5rem">📱 Galeriden Video Seç <span style="color:var(--mu);font-weight:500;font-size:.66rem">(max ${MAX_VIDEO_SECONDS}sn, ${MAX_VIDEO_MB}MB)</span></button>
+        <button data-vm-match="${escAttr(matchId)}" onclick="event.stopPropagation();document.getElementById('videoMenuOv_'+this.dataset.vmMatch).remove();document.getElementById('commentVideoFileInp_'+this.dataset.vmMatch).click()" style="width:100%;text-align:left;background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .8rem;font-size:.8rem;font-weight:700;color:var(--tx);cursor:pointer">📁 Dosya Yükle <span style="color:var(--mu);font-weight:500;font-size:.66rem">(cihazdaki Dosyalar'dan seç)</span></button>
       </div>
     </div>`
   );
@@ -15174,11 +15227,15 @@ window.handleCommentVideo=function(matchId,input){
   const toProcess=files.slice(0,remainingSlots);
   if(files.length>remainingSlots)showToast('⚠️ En fazla '+MAX_VIDEOS+' video eklenebilir, bazıları atlandı');
   if(!supabaseClient){
+    if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Video yükleme servisi kullanılamıyor (supabaseClient yok)',{matchId:matchId});
     showToast('❌ Video yükleme servisi şu an kullanılamıyor, sayfayı yenileyip tekrar deneyin');
     return;
   }
   toProcess.forEach(file=>{
-    if(!file.type||!file.type.startsWith('video/')){showToast('❌ '+file.name+' bir video dosyası değil');return;}
+    if(!file.type||!file.type.startsWith('video/')){
+      if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Desteklenmeyen video dosya türü reddedildi',{dosyaAdi:file.name,tur:file.type||'(boş)'},5000);
+      showToast('❌ '+file.name+' bir video dosyası değil');return;
+    }
     // KULLANICI TALEBİ: "Kullanıcı video yüklerken boyutunun büyüklüğü yüzünden
     // yükleyemiyor... kullanıcı hangi süre aralığının yükleneceğini seçtikten sonra video
     // yüklensin." - Dosya sınırı aşıyorsa artık DOĞRUDAN reddedilmiyor; kullanıcının
@@ -15199,7 +15256,12 @@ window.handleCommentVideo=function(matchId,input){
 function processAndUploadCommentVideo(matchId,file,knownDuration,displayName){
   const fileName=displayName||file.name||'video';
   function doProcess(duration){
-    const progBox=document.getElementById('videoPreview_'+matchId);
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "video yüklerken kalan zamanı göstermiyor" - AYNI
+    // kök sebep chatPhotoPreview'daki gibi): Genel Sohbet ekranı diğer yorum kutularından
+    // farklı olarak "videoPreview_chat" değil "chatVideoPreview" id'sini kullanıyor - bu
+    // yüzden Sohbet üzerinden eklenen video için ilerleme çubuğu/kalan-süre HİÇBİR ZAMAN
+    // görünmüyordu (kutu bulunamadığından sessizce atlanıyordu).
+    const progBox=document.getElementById(matchId==='chat'?'chatVideoPreview':'videoPreview_'+matchId);
     // KULLANICI TALEBİ: "Video yükleme çubuğu ekle, ne kadar sürede yükleneceğini
     // göstersin" - önceki belirsiz "kayıyor" animasyonu yerine GERÇEK yüzde + tahmini
     // kalan süre gösteren bir çubuk (bkz. renderUploadProgressRow/_supabaseXhrUpload).
@@ -15209,6 +15271,10 @@ function processAndUploadCommentVideo(matchId,file,knownDuration,displayName){
       progBox.innerHTML+=renderUploadProgressRow(uploadId,fileName);
     }
     const startTime=Date.now();
+    // HATA DÜZELTMESİ: bkz. scheduleChatRenderSafely - yükleme sürerken otomatik sohbet
+    // yeniden çizimleri bu sayaç sıfırdan büyük olduğu sürece atlanır, böylece yükleme
+    // devam ederken kullanıcı "sohbetten atılmış" gibi bir kesintiye uğramaz.
+    window._ptActiveUploads=(window._ptActiveUploads||0)+1;
     // KULLANICI TALEBİ: Dosya artık base64'e çevrilip Firebase'e YAZILMIYOR - doğrudan
     // Supabase Storage'a (gerçek bir dosya olarak) yükleniyor, sadece kısa bir HERKESE AÇIK
     // link Firebase'e kaydediliyor. Bu, önceki ~7MB/45sn sert sınırını kaldırır.
@@ -15218,6 +15284,7 @@ function processAndUploadCommentVideo(matchId,file,knownDuration,displayName){
     _supabaseXhrUpload(file,path,contentType,function(loaded,total){
       updateUploadProgressUI(uploadId,loaded,total,startTime);
     },function(err,publicUrl){
+      window._ptActiveUploads=Math.max(0,(window._ptActiveUploads||0)-1);
       if(err){
         console.error('Supabase video yükleme hatası:',err);
         showToast('❌ '+fileName+' yüklenemedi: '+(err.message||'bağlantı hatası'));
@@ -15438,7 +15505,8 @@ function trimVideoClientSide(file,startSec,endSec,onProgress,callback){
 }
 
 function renderPendingVideoPreview(matchId){
-  const prev=document.getElementById('videoPreview_'+matchId);
+  // HATA DÜZELTMESİ: bkz. processAndUploadCommentVideo - Sohbet ekranında kutu id'si farklı.
+  const prev=document.getElementById(matchId==='chat'?'chatVideoPreview':'videoPreview_'+matchId);
   if(!prev)return;
   const videos=_pendingVideo[matchId]||[];
   if(!Array.isArray(videos)||!videos.length){prev.style.display='none';prev.innerHTML='';return;}
@@ -15466,7 +15534,7 @@ window.removePendingVideo=function(matchId,index){
 
 window.clearCommentVideo=function(matchId){
   delete _pendingVideo[matchId];
-  const prev=document.getElementById('videoPreview_'+matchId);
+  const prev=document.getElementById(matchId==='chat'?'chatVideoPreview':'videoPreview_'+matchId);
   if(prev){prev.style.display='none';prev.innerHTML='';}
 };
 
@@ -15486,7 +15554,10 @@ window.handleCommentPhoto=function(matchId,input){
   if(remainingSlots<=0){showToast('❌ En fazla '+MAX_PHOTOS+' fotoğraf ekleyebilirsiniz');return;}
   const toProcess=files.slice(0,remainingSlots);
   if(files.length>remainingSlots)showToast('⚠️ En fazla '+MAX_PHOTOS+' fotoğraf eklenebilir, bazıları atlandı');
-  if(!supabaseClient){showToast('❌ Fotoğraf yükleme servisi şu an kullanılamıyor, sayfayı yenileyip tekrar deneyin');return;}
+  if(!supabaseClient){
+    if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Fotoğraf yükleme servisi kullanılamıyor (supabaseClient yok)',{matchId:matchId});
+    showToast('❌ Fotoğraf yükleme servisi şu an kullanılamıyor, sayfayı yenileyip tekrar deneyin');return;
+  }
   // KULLANICI TALEBİ: Supabase Storage'a geçiş - yorum/sohbet fotoğrafları artık base64
   // olarak Firebase Realtime Database'e YAZILMIYOR (bkz. handleCommentVideo ile AYNI desen),
   // önce Supabase Storage'a gerçek dosya olarak yükleniyor, Firebase'e sadece kısa bir
@@ -15494,7 +15565,10 @@ window.handleCommentPhoto=function(matchId,input){
   // takılma riskini de büyük ölçüde azaltır.
   const progBox=document.getElementById(matchId==='chat'?'chatPhotoPreview':'photoPreview_'+matchId);
   toProcess.forEach(file=>{
-    if(!file.type||!file.type.startsWith('image/')){showToast('❌ '+file.name+' bir resim dosyası değil, atlandı');return;}
+    if(!file.type||!file.type.startsWith('image/')){
+      if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Desteklenmeyen fotoğraf dosya türü reddedildi',{dosyaAdi:file.name,tur:file.type||'(boş)'},5000);
+      showToast('❌ '+file.name+' bir resim dosyası değil, atlandı');return;
+    }
     // KULLANICI TALEBİ: "Fotoğraf yükleme çubuğu ekle, ne kadar sürede yükleneceğini
     // göstersin" - önceki belirsiz "kayıyor" animasyonu yerine GERÇEK yüzde + tahmini
     // kalan süre gösteren bir çubuk (bkz. renderUploadProgressRow).
@@ -15504,9 +15578,14 @@ window.handleCommentPhoto=function(matchId,input){
       progBox.innerHTML+=renderUploadProgressRow(uploadId,file.name);
     }
     const startTime=Date.now();
+    // HATA DÜZELTMESİ: bkz. scheduleChatRenderSafely - yükleme sürerken otomatik sohbet
+    // yeniden çizimleri atlanır (video yüklemesindeki AYNI kesinti/atılma sorununun
+    // fotoğrafta da yaşanmaması için).
+    window._ptActiveUploads=(window._ptActiveUploads||0)+1;
     uploadImageToSupabase(file,'comments/'+(matchId||'genel'),{maxDim:900,quality:.78,onProgress:function(loaded,total){
       updateUploadProgressUI(uploadId,loaded,total,startTime);
     }},function(err,publicUrl){
+      window._ptActiveUploads=Math.max(0,(window._ptActiveUploads||0)-1);
       if(err){
         showToast('❌ '+file.name+' yüklenemedi: '+err.message);
         renderPendingPhotoPreview(matchId); // İlerleme kutusunu temizler.
@@ -17742,7 +17821,9 @@ window.voteMvp=function(matchId,player){
      [AĞ]      Firebase yazma hataları/zaman aşımları, bağlantı kopması, dinleyici hataları
      [VERİ]    Bozuk mesaj kaydı: ts yok, çift kimlik, kırık replyTo, dev boyutlu medya
      [DOM]     Sohbet listesinin DOM yükü (düğüm/resim sayısı) eşiği aşınca
-     [MEDYA]   Yüklenemeyen fotoğraf/GIF/video
+     [MEDYA]   Yüklenemeyen fotoğraf/GIF/video (görüntüleme aşaması - link kırık/erişilemez)
+     [DOSYA]   Fotoğraf/video YÜKLEME aşamasında başarısızlık (Supabase hatası, servis kapalı,
+               desteklenmeyen dosya türü, yükleme donması/ilerlemesiz kalma)
      [YAZIYOR] Yazıyor göstergesinin bayat kalması / DOM'dan silinmesi
    ═══════════════════════════════════════════════════════════════════════════════════════ */
 (function(){
@@ -17788,8 +17869,8 @@ window.voteMvp=function(matchId,player){
       catch(e){ /* kota dolduysa sessizce vazgeç - teşhis, uygulamayı asla bozmamalı */ }
     },800);
   }
-  var SEV={hata:3,kasma:2,kayma:2,emoji:2,render:1,ag:2,veri:1,dom:1,medya:1,yaziyor:1,bilgi:0};
-  var ICON={hata:'🛑',kasma:'🐌',kayma:'↕️',emoji:'😐',render:'🔁',ag:'📡',veri:'🧬',dom:'🌳',medya:'🖼️',yaziyor:'⌨️',bilgi:'ℹ️'};
+  var SEV={hata:3,kasma:2,kayma:2,emoji:2,render:1,ag:2,veri:1,dom:1,medya:1,yaziyor:1,dosya:2,bilgi:0};
+  var ICON={hata:'🛑',kasma:'🐌',kayma:'↕️',emoji:'😐',render:'🔁',ag:'📡',veri:'🧬',dom:'🌳',medya:'🖼️',yaziyor:'⌨️',dosya:'📁',bilgi:'ℹ️'};
 
   // Aynı sorunun saniyede onlarca kez kaydedilip paneli boğmasını engelleyen kısıtlayıcı.
   var _lastByKey={};
@@ -18444,7 +18525,7 @@ window.voteMvp=function(matchId,player){
     var f=window.PTChatDoctorFilter;
     var shown=LOGS.filter(function(l){return f==='all'||l.k===f;}).slice().reverse();
 
-    var chips=['all','hata','kasma','kayma','emoji','render','ag','veri','dom','medya','yaziyor'].map(function(k){
+    var chips=['all','hata','kasma','kayma','emoji','render','ag','veri','dom','medya','dosya','yaziyor'].map(function(k){
       var label=k==='all'?'Tümü ('+LOGS.length+')':(ICON[k]+' '+k+' ('+(counts[k]||0)+')');
       var on=f===k;
       return '<button data-ptdf="'+k+'" style="background:'+(on?'var(--ac)':'var(--s2)')+';color:'+(on?'#fff':'var(--mu)')+';border:1px solid '+(on?'var(--ac)':'var(--br)')+';border-radius:9px;padding:.25rem .5rem;font-size:.62rem;font-weight:800;cursor:pointer;margin:0 .25rem .25rem 0">'+esc(label)+'</button>';
