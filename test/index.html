@@ -1174,7 +1174,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-K';
+window.APP_BUILD='2026-08-14-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -3370,19 +3370,35 @@ function startPresenceTracking(){
   document.addEventListener('visibilitychange',()=>{
     if(document.visibilityState==='visible'){
       setVisitorOnline();
-      // KULLANICI TALEBİ (mobil tarayıcı davranışı): Sekme arka plana alındığında bazı
-      // mobil tarayıcılar Firebase WebSocket bağlantısını yavaşlatır/duraklatır - bu sırada
-      // gelen mesajlar "kuyrukta" kalıp sekme tekrar görünür olana kadar işlenmeyebilir
-      // ("çıktı girdi yapınca görünüyor" hissi). Sekme tekrar görünür olduğu an, açıksa
-      // Sohbet ekranı ZORLA tazelenir - hem doğrudan dinleyici yeniden kurulur hem de mevcut
-      // veriyle anında bir render yapılır, kullanıcı hiçbir gecikme hissetmez.
+      // HATA DÜZELTMESİ (kullanıcı bildirdi: "fotoğraf/video yüklerken sohbetten atılıyor" -
+      // teşhis raporuyla KANITLANDI: handleCommentVideo hatasız/hızlı çalışmış, hiçbir
+      // hata/kasma/ağ kaydı OLUŞMAMIŞ - yani sorun yükleme değil, BU işleyiciydi): Android'de
+      // galeri/"Dosya Yükle" seçicisini açmak da sekmeyi TAM OLARAK "arka plana" alır - bu
+      // yüzden kullanıcı HER fotoğraf/video seçtiğinde, seçiciden dönüşte bu kod aşağıdaki
+      // "sekme uzun süre arka plandaydı" senaryosunu sanıp sohbeti ANINDA sıfırdan kuruyordu -
+      // tam da dosya input'unun "change" olayı işlenmek ÜZEREYKEN. Sonuç: hiçbir hata
+      // fırlamıyor (data kaybolmuyor, bkz. renderChatScreen'in pending önizlemeleri
+      // yeniden uygulaması) ama ANİ tam ekran yeniden kuruluşu kullanıcıya "sohbetten
+      // atıldım" hissi veriyordu. ÇÖZÜM: Medya seçici açılırken (bkz. triggerMediaPicker)
+      // bir bayrak işaretlenir; buraya o bayrakla dönülürse zorlama render HEMEN
+      // çalıştırılmaz - dosya seçimi/yükleme akışının kendi haline bırakılması için kısa
+      // bir süre ertelenir, o sırada zaten aktif bir yükleme varsa (bkz.
+      // window._ptActiveUploads) renderChatScreenSafe kendi içinde bunu atlar.
+      const _returningFromPicker=!!window._ptMediaPickerActive;
+      window._ptMediaPickerActive=false;
       if(typeof _chatOpen!=='undefined'&&_chatOpen){
         if(typeof stopChatDirectListener==='function')stopChatDirectListener();
         if(typeof startChatDirectListener==='function')startChatDirectListener();
         if(_curLeagueId){
           firebase.database().ref('leagues/'+_curLeagueId+'/generalChat').once('value').then(snap=>{
             D.generalChat=snap.val()||{};
-            if(_chatOpen)renderChatScreenSafe();
+            if(!_chatOpen)return;
+            if(_returningFromPicker){
+              if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Medya seçiciden dönüş - zorlama render ertelendi',{not:'Bu, önceki "sohbetten atılma" hatasının düzeltmesidir'},2000);
+              setTimeout(()=>{if(_chatOpen)renderChatScreenSafe();},900);
+            }else{
+              renderChatScreenSafe();
+            }
           }).catch(()=>{});
         }
       }
@@ -15166,8 +15182,8 @@ window.openVideoMenu=function(matchId){
       <div style="background:var(--s);border-radius:16px 16px 0 0;padding:1rem 1.1rem 1.4rem;width:100%;max-width:480px">
         <div style="width:34px;height:4px;background:var(--br);border-radius:3px;margin:0 auto .8rem"></div>
         <div style="font-size:.85rem;font-weight:900;margin-bottom:.7rem">🎬 Video Ekle</div>
-        <button data-vm-match="${escAttr(matchId)}" onclick="event.stopPropagation();document.getElementById('videoMenuOv_'+this.dataset.vmMatch).remove();document.getElementById('commentVideoInp_'+this.dataset.vmMatch).click()" style="width:100%;text-align:left;background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .8rem;font-size:.8rem;font-weight:700;color:var(--tx);cursor:pointer;margin-bottom:.5rem">📱 Galeriden Video Seç <span style="color:var(--mu);font-weight:500;font-size:.66rem">(max ${MAX_VIDEO_SECONDS}sn, ${MAX_VIDEO_MB}MB)</span></button>
-        <button data-vm-match="${escAttr(matchId)}" onclick="event.stopPropagation();document.getElementById('videoMenuOv_'+this.dataset.vmMatch).remove();document.getElementById('commentVideoFileInp_'+this.dataset.vmMatch).click()" style="width:100%;text-align:left;background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .8rem;font-size:.8rem;font-weight:700;color:var(--tx);cursor:pointer">📁 Dosya Yükle <span style="color:var(--mu);font-weight:500;font-size:.66rem">(cihazdaki Dosyalar'dan seç)</span></button>
+        <button data-vm-match="${escAttr(matchId)}" onclick="event.stopPropagation();document.getElementById('videoMenuOv_'+this.dataset.vmMatch).remove();triggerMediaPicker('commentVideoInp_'+this.dataset.vmMatch)" style="width:100%;text-align:left;background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .8rem;font-size:.8rem;font-weight:700;color:var(--tx);cursor:pointer;margin-bottom:.5rem">📱 Galeriden Video Seç <span style="color:var(--mu);font-weight:500;font-size:.66rem">(max ${MAX_VIDEO_SECONDS}sn, ${MAX_VIDEO_MB}MB)</span></button>
+        <button data-vm-match="${escAttr(matchId)}" onclick="event.stopPropagation();document.getElementById('videoMenuOv_'+this.dataset.vmMatch).remove();triggerMediaPicker('commentVideoFileInp_'+this.dataset.vmMatch)" style="width:100%;text-align:left;background:var(--s2);border:1.5px solid var(--br);border-radius:11px;padding:.6rem .8rem;font-size:.8rem;font-weight:700;color:var(--tx);cursor:pointer">📁 Dosya Yükle <span style="color:var(--mu);font-weight:500;font-size:.66rem">(cihazdaki Dosyalar'dan seç)</span></button>
       </div>
     </div>`
   );
@@ -15539,9 +15555,17 @@ window.clearCommentVideo=function(matchId){
 };
 
 
+// KULLANICI TALEBİ (kök sebep düzeltmesi): bkz. visibilitychange dinleyicisi - galeri/dosya
+// seçicisi açılırken bu bayrak işaretlenir, dönüşte sohbetin ANINDA zorla yeniden
+// kurulmasını (ve "sohbetten atıldım" hissini) önlemek için kullanılır.
+window._ptMediaPickerActive=false;
+window.triggerMediaPicker=function(inputId){
+  window._ptMediaPickerActive=true;
+  const el=document.getElementById(inputId);
+  if(el)el.click();
+};
 window.triggerCommentPhoto=function(matchId){
-  const inp=document.getElementById('commentPhotoInp_'+matchId);
-  if(inp)inp.click();
+  triggerMediaPicker('commentPhotoInp_'+matchId);
 };
 
 window.handleCommentPhoto=function(matchId,input){
