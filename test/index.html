@@ -1174,7 +1174,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-14-B';
+window.APP_BUILD='2026-08-14-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -3393,9 +3393,28 @@ function startPresenceTracking(){
           firebase.database().ref('leagues/'+_curLeagueId+'/generalChat').once('value').then(snap=>{
             D.generalChat=snap.val()||{};
             if(!_chatOpen)return;
-            if(_returningFromPicker){
-              if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Medya seçiciden dönüş - zorlama render ertelendi',{not:'Bu, önceki "sohbetten atılma" hatasının düzeltmesidir'},2000);
-              setTimeout(()=>{if(_chatOpen)renderChatScreenSafe();},900);
+            // HATA DÜZELTMESİ (kullanıcı bildirdi: "video kırpıldıktan sonra sohbetten
+            // atıyor", TÜM cihaz/tarayıcılarda): Kırpma (trimVideoClientSide), video
+            // oynatma + MediaRecorder ile ana iş parçacığını saniyelerce (45sn'ye kadar)
+            // meşgul eden ağır bir işlemdir - bu sürede ekran kilidi, bildirim veya OS'in
+            // sekmeyi kısa süreliğine arka plana alması gibi HERHANGİ bir sebeple bir
+            // visibilitychange "titremesi" olursa, bu dinleyici SADECE galeri seçiciden
+            // dönüşü (_ptMediaPickerActive) kontrol ediyordu - aktif bir KIRPMA/YÜKLEME
+            // (window._ptActiveUploads) devam ediyor olmasına HİÇ bakmadan sohbeti ANINDA
+            // sıfırdan kuruyordu. Sonuç: kırpma bitip sohbete dönüldüğü an (ya da kırpma
+            // sürerken) tam bir sıfırlama oluyor, kullanıcı bunu "atılma" olarak
+            // yaşıyordu. ÇÖZÜM: artık aktif kırpma/yükleme sırasında da (galeri
+            // seçicisinden dönüşle AYNI şekilde) render ertelenir - kırpma/yükleme
+            // bitene kadar sohbet OLDUĞU GİBİ kalır.
+            const _busyWithMedia=_returningFromPicker||(window._ptActiveUploads>0);
+            if(_busyWithMedia){
+              if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Medya seçici/kırpma/yükleme sürerken görünürlük değişti - zorlama render ertelendi',{not:'Bu, "video kırpınca sohbetten atılma" hatasının düzeltmesidir',galeriDonusu:_returningFromPicker,aktifYukleme:window._ptActiveUploads||0},2000);
+              const _waitForMedia=function(){
+                if(!_chatOpen)return;
+                if(window._ptActiveUploads>0){setTimeout(_waitForMedia,300);return;}
+                renderChatScreenSafe();
+              };
+              setTimeout(_waitForMedia,900);
             }else{
               renderChatScreenSafe();
             }

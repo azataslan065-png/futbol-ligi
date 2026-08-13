@@ -1178,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-14-B';
+window.APP_BUILD='2026-08-14-C';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -13816,20 +13816,28 @@ function renderAdminChatBubble(c,isReply,repliesByParent){
     // gösteriliyor, kullanıcı tıklayınca video verisi window._adminVideoCache üzerinden
     // (HTML string'ine katılmadan) doğrudan bir <video> elemanına JS ile atanıyor.
     var videoKey=c.id+'_'+vIdx;
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "video indirdikten sonra video boyutunu
+    // göremiyor"): Video satırında boyut bilgisi HİÇ gösterilmiyordu. data: URL'lerde boyut
+    // (base64 gövdesinden) senkron/anında hesaplanabiliyor; Supabase linklerinde ise dosya
+    // uzaktadır - o durumda küçük bir HEAD isteğiyle Content-Length okunup satıra sonradan
+    // yazılır (indirmeyi beklemeye gerek kalmadan boyut önceden görünür).
+    var sizeSpanId='admVidSz_'+videoKey.replace(/[^a-zA-Z0-9_]/g,'');
     if(vd&&typeof vd==='object'&&vd.type==='file'){
       window._adminVideoCache=window._adminVideoCache||{};
       window._adminVideoCache[videoKey]=vd.data;
-      mediaHtml+='<div style="max-width:160px;margin-top:.3rem;display:flex;gap:.3rem">'
-        +'<div data-action="playvideo" data-videokey="'+videoKey+'" style="flex:1;background:rgba(0,0,0,.3);border-radius:8px;padding:.6rem;text-align:center;cursor:pointer;font-size:.68rem;font-weight:700">▶️ Videoyu Göster</div>'
+      mediaHtml+='<div style="max-width:160px;margin-top:.3rem;display:flex;gap:.3rem;align-items:center">'
+        +'<div data-action="playvideo" data-videokey="'+videoKey+'" style="flex:1;background:rgba(0,0,0,.3);border-radius:8px;padding:.6rem;text-align:center;cursor:pointer;font-size:.68rem;font-weight:700">▶️ Videoyu Göster <span id="'+sizeSpanId+'" style="color:var(--mu,#8888bb);font-weight:600"></span></div>'
         +'<button data-action="downloadvideo" data-videokey="'+videoKey+'" title="Videoyu indir" style="background:rgba(0,0,0,.3);border:none;border-radius:8px;padding:.6rem;color:#fff;cursor:pointer;font-size:.68rem">⬇️</button>'
         +'</div>';
+      admQueueVideoSizeLookup(sizeSpanId,vd.data);
     }else if(typeof vd==='string'){
       window._adminVideoCache=window._adminVideoCache||{};
       window._adminVideoCache[videoKey]=vd;
-      mediaHtml+='<div style="max-width:160px;margin-top:.3rem;display:flex;gap:.3rem">'
-        +'<div data-action="playvideo" data-videokey="'+videoKey+'" style="flex:1;background:rgba(0,0,0,.3);border-radius:8px;padding:.6rem;text-align:center;cursor:pointer;font-size:.68rem;font-weight:700">▶️ Videoyu Göster</div>'
+      mediaHtml+='<div style="max-width:160px;margin-top:.3rem;display:flex;gap:.3rem;align-items:center">'
+        +'<div data-action="playvideo" data-videokey="'+videoKey+'" style="flex:1;background:rgba(0,0,0,.3);border-radius:8px;padding:.6rem;text-align:center;cursor:pointer;font-size:.68rem;font-weight:700">▶️ Videoyu Göster <span id="'+sizeSpanId+'" style="color:var(--mu,#8888bb);font-weight:600"></span></div>'
         +'<button data-action="downloadvideo" data-videokey="'+videoKey+'" title="Videoyu indir" style="background:rgba(0,0,0,.3);border:none;border-radius:8px;padding:.6rem;color:#fff;cursor:pointer;font-size:.68rem">⬇️</button>'
         +'</div>';
+      admQueueVideoSizeLookup(sizeSpanId,vd);
     }
     // KULLANICI TALEBİ (onaylanan öneri #3): Puan Tablosu'nda kullanıcının eklediği
     // YouTube/Instagram/Facebook/X bağlantısı türündeki videolar önceden admin panelinde HİÇ
@@ -14180,6 +14188,43 @@ function adminCopyToClipboard(txt,okMsg){admGlobalCopyText(txt,okMsg);}
 // yakalayamıyordu - "hata vermiyor ama video da inmiyor" şikayetinin tam olarak sebebi bu.
 // ÇÖZÜM: dosya fetch ile blob olarak indirilip, AYNI ORİJİNDEN sayılan bir blob: bağlantısı
 // üzerinden indirme tetiklenir - bu yöntem kaynak orijininden ETKİLENMEZ.
+// HATA DÜZELTMESİ (kullanıcı bildirdi: "video indirdikten sonra video boyutunu göremiyor"):
+// İndirme öncesinde/sonrasında dosyanın kaç MB olduğuna dair HİÇBİR bilgi yönetici ekranında
+// gösterilmiyordu (fotoğraflarda da aynı durum vardı) - "⬇️ İndirme başlatıldı" mesajı boyut
+// içermiyordu ve tarayıcının kendi indirilenler listesi de admin panelinin (genelde tam
+// ekran/WebView olarak kullanılan) üzerinde her zaman görünür değil. Artık hem data: hem de
+// gerçek dosya bağlantısı (Supabase) durumunda, indirme TAMAMLANDIĞI anda gerçek boyut
+// hesaplanıp "⬇️ İndirildi (X.X MB)" şeklinde gösteriliyor.
+function admFormatBytesMB(bytes){
+  if(!bytes&&bytes!==0)return '';
+  return (bytes/1024/1024).toFixed(1)+' MB';
+}
+// Video satırındaki "(X.X MB)" etiketini doldurur. data: URL'lerde hemen (senkron), Supabase
+// gibi uzak linklerde ise küçük bir HEAD isteğiyle Content-Length okunarak DOM'a yazılır -
+// bu istek videoyu indirmez/oynatmaz, sadece boyutunu öğrenir. Element render sonrası henüz
+// DOM'a eklenmemiş olabileceğinden kısa bir gecikmeyle denenir.
+function admQueueVideoSizeLookup(spanId,url){
+  function writeSize(txt){
+    var el=document.getElementById(spanId);
+    if(el)el.textContent=txt?('('+txt+')'):'';
+  }
+  if(!url)return;
+  if(/^data:/i.test(url)){
+    try{
+      var b64=url.slice(url.indexOf(',')+1);
+      var padding=(b64.endsWith('==')?2:(b64.endsWith('=')?1:0));
+      var byteLen=Math.floor(b64.length*3/4)-padding;
+      setTimeout(function(){writeSize(admFormatBytesMB(byteLen));},0);
+    }catch(e){}
+    return;
+  }
+  setTimeout(function(){
+    fetch(url,{method:'HEAD'}).then(function(res){
+      var len=res.headers&&res.headers.get&&res.headers.get('content-length');
+      if(len)writeSize(admFormatBytesMB(Number(len)));
+    }).catch(function(){/* boyut alınamazsa sessizce atlanır - indirme/oynatma yine de çalışır */});
+  },0);
+}
 function adminDownloadDataUrl(url,filename){
   if(!url){toast('❌ İndirilecek dosya bulunamadı','er');return;}
   // data: linkleri zaten aynı belge içinde sayılır - eski basit yöntem bunlarda hâlâ çalışır.
@@ -14188,7 +14233,16 @@ function adminDownloadDataUrl(url,filename){
       var a=document.createElement('a');
       a.href=url;a.download=filename||'dosya';
       document.body.appendChild(a);a.click();a.remove();
-      toast('⬇️ İndirme başlatıldı');
+      // data: URL'nin base64 gövdesinden gerçek bayt boyutu hesaplanır (görüntü boyutu
+      // indirmeden önce zaten bellekte olduğu için ekstra bir istek gerekmez).
+      var sizeTxt='';
+      try{
+        var b64=url.slice(url.indexOf(',')+1);
+        var padding=(b64.endsWith('==')?2:(b64.endsWith('=')?1:0));
+        var byteLen=Math.floor(b64.length*3/4)-padding;
+        sizeTxt=' ('+admFormatBytesMB(byteLen)+')';
+      }catch(e2){}
+      toast('⬇️ İndirildi'+sizeTxt);
     }catch(e){
       if(window.DiagCore)DiagCore.kaydet('adm_moderation','hata','adminDownloadDataUrl() içinde istisna (data URL)',{mesaj:e&&e.message,dosya:filename});
       toast('❌ İndirilemedi: '+(e&&e.message?e.message:'hata'),'er');
@@ -14207,7 +14261,7 @@ function adminDownloadDataUrl(url,filename){
     // Bellek sızıntısı olmasın diye blob: linki bir süre sonra serbest bırakılır - hemen
     // bırakılmaz çünkü bazı tarayıcılarda indirme işlemi asenkron başlar.
     setTimeout(function(){URL.revokeObjectURL(blobUrl);},10000);
-    toast('⬇️ İndirme başlatıldı');
+    toast('⬇️ İndirildi ('+admFormatBytesMB(blob.size)+')');
   }).catch(function(e){
     // HATA YAKALAMA: bu indirme artık ağ/CORS/izin kaynaklı bir sorunla başarısız olursa
     // bir sonraki sefer 🩺 Hata Yakalama Kodları panelinden (adm_moderation modülü) görülsün.
