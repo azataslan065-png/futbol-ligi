@@ -1174,7 +1174,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-12-K';
+window.APP_BUILD='2026-08-12-L';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -12956,6 +12956,12 @@ window.closeSheet=function(e){
     window._diagScreen=null;
     if(_liveTimeInterval){clearInterval(_liveTimeInterval);_liveTimeInterval=null;_liveTimeEl=null;}
     if(_chatOpen){
+      // HATA YAKALAMA (kullanıcı bildirdi: "video yüklerken sohbetten atılıyordu" - kök sebep
+      // video kırpma ekranının yanlışlıkla bu genel kapatmayı tetiklemesiydi, artık düzeltildi -
+      // bkz. closeVideoTrimmerSheet). Bu TAM KAPATMA yolu ileride BAŞKA bir ekran tarafından da
+      // yanlışlıkla tetiklenirse (ör. yeni bir sheet, closeSheet()'i "sadece kendini kapat"
+      // niyetiyle çağırırsa) bir sonraki sefer TEŞHİS PANELİNDEN görülebilsin diye kaydedilir.
+      if(window.DiagCore)DiagCore.kaydet('pt_chat','uyari','Sohbet closeSheet() ile tamamen kapatıldı',{ekran:window._diagScreen||null});
       _chatOpen=false;
       // KULLANICI TALEBİ: Sohbet tamamen kapatılınca etiketli maç da sıfırlanır - bir
       // sonraki açılışta kalıntı/eski bir etiketle karşılaşılmaz.
@@ -15252,6 +15258,14 @@ window.openVideoTrimmer=function(matchId,file){
   const url=URL.createObjectURL(file);
   window._trimState={matchId:matchId,file:file,url:url};
   const sizeMB=(file.size/1024/1024).toFixed(1);
+  // HATA DÜZELTMESİ (kullanıcı bildirdi: "video kırparken video başlığı/mesajı giremiyorum"):
+  // Kırpma ekranı sohbetin/yorum kutusunun ÜSTÜNE açıldığı için, kullanıcı altta yazmaya
+  // başladığı mesajı (video başlığı/açıklaması) bu ekrandayken GÖREMİYOR ve DÜZENLEYEMİYORDU.
+  // Artık kırpma ekranının kendi içinde de aynı mesaj kutusuna bağlı bir başlık/açıklama alanı
+  // var: altta yazılmış bir taslak varsa buraya otomatik doldurulur, burada değiştirilirse
+  // gönderim sırasında altındaki mesaj kutusuna geri yazılır - metin hiçbir zaman kaybolmaz.
+  const composerInp=document.getElementById('commentInp_'+matchId);
+  const draftCaption=(composerInp&&composerInp.value)||'';
   const html=`<div class="sheet-handle"></div>
     <div style="font-size:.9rem;font-weight:900;margin-bottom:.5rem">✂️ Videoyu Kırp</div>
     <div style="font-size:.72rem;color:var(--mu);margin-bottom:.7rem;line-height:1.5">Bu video (${sizeMB}MB) izin verilen ${MAX_VIDEO_MB}MB sınırının üzerinde. Göndermek istediğiniz bölümü seçin - sistem geri kalanını otomatik olarak uygun boyuta küçültüp yükleyecek.</div>
@@ -15260,6 +15274,8 @@ window.openVideoTrimmer=function(matchId,file){
       <div style="flex:1"><span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Başlangıç (sn)</span><input type="number" id="trimStartInp" min="0" value="0" style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.4rem .5rem;color:var(--tx)"/></div>
       <div style="flex:1"><span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Bitiş (sn)</span><input type="number" id="trimEndInp" min="1" value="30" style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.4rem .5rem;color:var(--tx)"/></div>
     </div>
+    <span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Video başlığı / açıklaması (isteğe bağlı)</span>
+    <input type="text" id="trimCaptionInp" value="${draftCaption.replace(/"/g,'&quot;')}" placeholder="Videoyla birlikte gönderilecek mesaj..." style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.4rem .5rem;color:var(--tx);margin-bottom:.6rem;font-family:var(--font-family,'Outfit'),sans-serif"/>
     <div id="trimHint" style="font-size:.62rem;color:var(--mu);margin-bottom:.7rem">Video yükleniyor, süresi hesaplanıyor...</div>
     <div id="trimProgressArea"></div>
     <button id="trimConfirmBtn" onclick="confirmVideoTrim()" style="width:100%;background:linear-gradient(135deg,var(--ac),var(--ac2));border:none;border-radius:12px;padding:.65rem;color:#fff;font-size:.82rem;font-weight:800;cursor:pointer;margin-bottom:.4rem">✂️ Kırp ve Gönder</button>
@@ -15277,10 +15293,35 @@ window.openVideoTrimmer=function(matchId,file){
     if(hint)hint.textContent='Videonun toplam süresi: '+formatSecondsHuman(dur)+'. En fazla '+MAX_VIDEO_SECONDS+' saniyelik bir bölüm seçebilirsiniz.';
   };
 };
+// KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "video yüklerken sohbetten atılıyor, video
+// başlığı/mesajı giremiyorum"): Bu ekran (kırpma sayfası) sohbet İÇİNDEYKEN openSheet() ile
+// sohbetin ÜSTÜNE açılan geçici bir katmandı. Kapatırken önceden GENEL window.closeSheet()
+// çağrılıyordu - ama closeSheet() sadece bu üstteki katmanı gizlemekle KALMIYOR, "artık sohbet
+// tamamen kapatılıyor" varsayarak _chatOpen=false yapıp sohbet dinleyicisini DURDURUYOR ve
+// taslak metni SIFIRLIYORDU. Sonuç: kullanıcı videoyu kırpıp gönderdiği/iptal ettiği anda
+// sohbetten TAMAMEN atılmış gibi oluyordu ve altta kalan mesaj kutusuna (varsa yazdığı başlık/
+// açıklama metnine) bir daha erişemiyordu. ÇÖZÜM: kırpma katmanı kapanırken sadece KENDİ
+// üstteki katmanı gizlenir, altta açık olan sohbet (veya maç detayı) OLDUĞU GİBİ, dokunulmadan
+// kalır - closeSheet()'in "her şeyi kapat" mantığı burada ÇALIŞTIRILMAZ.
+function closeVideoTrimmerSheet(){
+  // Kırpma ekranındaki başlık/açıklama alanı, altta açık olan mesaj kutusuna geri yazılır -
+  // kapanış İPTAL veya BAŞARILI GÖNDERİM olsun fark etmez, kullanıcının yazdığı metin kaybolmaz.
+  var matchId=window._trimState&&window._trimState.matchId;
+  var capInp=document.getElementById('trimCaptionInp');
+  if(matchId&&capInp){
+    var composerInp=document.getElementById('commentInp_'+matchId);
+    if(composerInp)composerInp.value=capInp.value;
+  }
+  var wrap=document.getElementById('sheetWrap');
+  if(wrap)wrap.classList.remove('open');
+  var cc=document.getElementById('chatScreenContent');
+  var sc=document.getElementById('sheetContent');
+  if(_chatOpen&&cc){cc.style.display='block';if(sc)sc.style.display='none';}
+}
 window.cancelVideoTrim=function(){
+  closeVideoTrimmerSheet();
   if(window._trimState&&window._trimState.url)URL.revokeObjectURL(window._trimState.url);
   window._trimState=null;
-  closeSheet();
 };
 window.confirmVideoTrim=function(){
   if(!window._trimState)return;
@@ -15309,9 +15350,12 @@ window.confirmVideoTrim=function(){
       return;
     }
     const trimmedName=(file.name||'video').replace(/\.[^.]+$/,'')+'_kirpilmis.webm';
+    // KÖK SEBEP DÜZELTMESİ: closeVideoTrimmerSheet() ÖNCE çağrılır ki hem sohbet/yorum
+    // ekranı sağlıklı biçimde geri gelsin HEM DE trimCaptionInp'teki başlık/açıklama metni
+    // silinmeden (window._trimState temizlenmeden ÖNCE) altındaki mesaj kutusuna aktarılsın.
+    closeVideoTrimmerSheet();
     if(window._trimState&&window._trimState.url)URL.revokeObjectURL(window._trimState.url);
     window._trimState=null;
-    closeSheet();
     if(!_pendingVideo[matchId])_pendingVideo[matchId]=[];
     processAndUploadCommentVideo(matchId,trimmedBlob,Math.round(end-start),trimmedName);
   });
