@@ -1178,7 +1178,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-14-C';
+window.APP_BUILD='2026-08-14-D';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -10659,6 +10659,86 @@ function confirmAdminVideoTrim(){
 // Videonun seçilen [start,end] aralığını tarayıcı içinde yeniden kodlayıp küçültür - Puan
 // Tablosu'ndaki trimVideoClientSide ile AYNI yöntem (captureStream + düşürülmüş bit hızıyla
 // MediaRecorder). Tarayıcı desteklemiyorsa net bir hata ile geri döner.
+// HATA DÜZELTMESİ (kullanıcı bildirdi: "video indirdikten sonra videonun bitiş süresi
+// gösterilmiyor"): bkz. index.html'deki AYNI kök sebep düzeltmesi - MediaRecorder ile
+// kaydedilen webm dosyalarının konteynerinde gerçek bir süre bilgisi olmaz, video SONUNA
+// KADAR oynatılmadan süre görünmez. Kayıt bittiğinde EBML/Matroska "Segment > Info >
+// Duration" alanı GERÇEK ölçülen süreyle YERİNDE (dosyanın geri kalanına dokunmadan)
+// düzeltilir; beklenen yapı bulunamazsa dosyaya hiç dokunulmaz (bozulma riski yoktur).
+function admWebmReadElemId(bytes,pos){
+  var first=bytes[pos];
+  if(first===undefined)return null;
+  var len=first>=0x80?1:(first>=0x40?2:(first>=0x20?3:(first>=0x10?4:0)));
+  if(!len)return null;
+  var id=0;
+  for(var i=0;i<len;i++)id=id*256+bytes[pos+i];
+  return{id:id,len:len};
+}
+function admWebmReadSize(bytes,pos){
+  var first=bytes[pos];
+  if(first===undefined)return null;
+  var len=0,mask=0x80;
+  for(var l=1;l<=8;l++){if(first&mask){len=l;break;}mask>>=1;}
+  if(!len)return null;
+  var firstValMask=mask-1;
+  var isUnknown=(first&firstValMask)===firstValMask;
+  var value=first&firstValMask;
+  for(var i=1;i<len;i++){
+    var b=bytes[pos+i];
+    if(b!==0xFF)isUnknown=false;
+    value=value*256+b;
+  }
+  return{size:value,len:len,unknown:isUnknown};
+}
+function admWebmFindElement(bytes,start,end,targetId){
+  var pos=start;
+  while(pos<end){
+    var idInfo=admWebmReadElemId(bytes,pos);
+    if(!idInfo)return null;
+    var sizeInfo=admWebmReadSize(bytes,pos+idInfo.len);
+    if(!sizeInfo)return null;
+    var dataStart=pos+idInfo.len+sizeInfo.len;
+    var dataSize=sizeInfo.unknown?(end-dataStart):sizeInfo.size;
+    if(idInfo.id===targetId)return{dataStart:dataStart,dataSize:dataSize};
+    if(sizeInfo.unknown)return null;
+    pos=dataStart+sizeInfo.size;
+  }
+  return null;
+}
+function webmFixDurationInPlace(blob,durationMs,callback){
+  try{
+    var reader=new FileReader();
+    reader.onload=function(){
+      try{
+        var buf=reader.result;
+        var bytes=new Uint8Array(buf);
+        var ebmlEl=admWebmFindElement(bytes,0,bytes.length,0x1A45DFA3);
+        if(!ebmlEl){callback(blob);return;}
+        var afterHeader=ebmlEl.dataStart+ebmlEl.dataSize;
+        var segEl=admWebmFindElement(bytes,afterHeader,bytes.length,0x18538067);
+        if(!segEl){callback(blob);return;}
+        var infoEl=admWebmFindElement(bytes,segEl.dataStart,segEl.dataStart+segEl.dataSize,0x1549A966);
+        if(!infoEl){callback(blob);return;}
+        var durEl=admWebmFindElement(bytes,infoEl.dataStart,infoEl.dataStart+infoEl.dataSize,0x4489);
+        if(!durEl||durEl.dataSize!==8){callback(blob);return;}
+        var scaleEl=admWebmFindElement(bytes,infoEl.dataStart,infoEl.dataStart+infoEl.dataSize,0x2AD7B1);
+        var timecodeScale=1000000;
+        if(scaleEl&&scaleEl.dataSize>=1&&scaleEl.dataSize<=8){
+          var v=0;for(var i=0;i<scaleEl.dataSize;i++)v=v*256+bytes[scaleEl.dataStart+i];
+          if(v>0)timecodeScale=v;
+        }
+        var durationValue=(durationMs*1e6)/timecodeScale;
+        new DataView(buf,durEl.dataStart,8).setFloat64(0,durationValue,false);
+        callback(new Blob([buf],{type:blob.type||'video/webm'}));
+      }catch(e){
+        if(window.DiagCore)DiagCore.kaydet('adm_chat','hata','Webm süre düzeltme istisna attı (orijinal dosya kullanıldı)',{mesaj:e&&e.message});
+        callback(blob);
+      }
+    };
+    reader.onerror=function(){callback(blob);};
+    reader.readAsArrayBuffer(blob);
+  }catch(e){callback(blob);}
+}
 function trimAdminVideoClientSide(file,startSec,endSec,onProgress,callback){
   if(typeof MediaRecorder==='undefined'){callback(new Error('Tarayıcınız video kırpmayı desteklemiyor. Lütfen videoyu bilgisayarınızın kendi düzenleyicisiyle kısaltıp tekrar deneyin'));return;}
   var url=URL.createObjectURL(file);
@@ -10682,7 +10762,9 @@ function trimAdminVideoClientSide(file,startSec,endSec,onProgress,callback){
           if(settled)return;settled=true;
           URL.revokeObjectURL(url);
           video.pause();
-          callback(null,new Blob(chunks,{type:mimeType}));
+          var recordedBlob=new Blob(chunks,{type:mimeType});
+          var _recordedMs=Math.max(1,Math.round(duration*1000));
+          webmFixDurationInPlace(recordedBlob,_recordedMs,function(fixedBlob){callback(null,fixedBlob);});
         };
         recorder.onerror=function(e){fail('Kayıt sırasında hata: '+((e&&e.error&&e.error.message)||'bilinmeyen'));};
         video.play().catch(function(){});

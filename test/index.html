@@ -1174,7 +1174,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-14-C';
+window.APP_BUILD='2026-08-14-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -15495,6 +15495,93 @@ window.confirmVideoTrim=function(){
 // boyutunu (bit hızı düşürülerek) hem de süreyi (sadece seçilen aralık kaydedilerek) azaltır.
 // Tarayıcı captureStream/MediaRecorder'ı DESTEKLEMİYORSA (örn. çok eski bir tarayıcı) net bir
 // hata ile geri döner - sessizce takılıp kalmaz.
+// HATA DÜZELTMESİ (kullanıcı bildirdi: "video indirdikten sonra videonun bitiş süresi
+// gösterilmiyor"): MediaRecorder ile captureStream() üzerinden CANLI kaydedilen webm
+// dosyalarının, tarayıcının bu formatı yazma şekli GEREĞİ, konteyner meta verisinde GERÇEK
+// bir süre (Duration) bilgisi OLMAZ/yanlış olur (kayıt bir "akış" olarak başladığı için
+// toplam süre baştan bilinmez) - bu yüzden indirilen dosya bir video oynatıcıda açıldığında
+// süre "--:--" ya da boş görünür, sadece video SONUNA KADAR oynatılırsa gerçek süre ortaya
+// çıkar. Bu, bilinen ve dokümante edilmiş bir MediaRecorder/webm davranışıdır (bkz. W3C
+// mediacapture-record tartışmaları). ÇÖZÜM: kayıt bittiğinde, dosyanın EBML/Matroska
+// yapısındaki "Segment > Info > Duration" alanı GERÇEK ölçülen süreyle YERİNDE (dosyanın
+// GERİ KALANINA DOKUNMADAN, sadece 8 baytlık sayı alanı üzerine yazılarak) düzeltilir. Bu
+// alan beklenen konumda/boyutta BULUNAMAZSA dosyaya HİÇ dokunulmaz ve orijinal (süre bilgisi
+// eksik ama oynatılabilir) dosya olduğu gibi döndürülür - riskli bir "yeniden boyutlandırma"
+// asla denenmez, bu yüzden dosya bozulma riski YOKTUR.
+function admWebmReadElemId(bytes,pos){
+  var first=bytes[pos];
+  if(first===undefined)return null;
+  var len=first>=0x80?1:(first>=0x40?2:(first>=0x20?3:(first>=0x10?4:0)));
+  if(!len)return null;
+  var id=0;
+  for(var i=0;i<len;i++)id=id*256+bytes[pos+i];
+  return{id:id,len:len};
+}
+function admWebmReadSize(bytes,pos){
+  var first=bytes[pos];
+  if(first===undefined)return null;
+  var len=0,mask=0x80;
+  for(var l=1;l<=8;l++){if(first&mask){len=l;break;}mask>>=1;}
+  if(!len)return null;
+  var firstValMask=mask-1;
+  var isUnknown=(first&firstValMask)===firstValMask;
+  var value=first&firstValMask;
+  for(var i=1;i<len;i++){
+    var b=bytes[pos+i];
+    if(b!==0xFF)isUnknown=false;
+    value=value*256+b;
+  }
+  return{size:value,len:len,unknown:isUnknown};
+}
+function admWebmFindElement(bytes,start,end,targetId){
+  var pos=start;
+  while(pos<end){
+    var idInfo=admWebmReadElemId(bytes,pos);
+    if(!idInfo)return null;
+    var sizeInfo=admWebmReadSize(bytes,pos+idInfo.len);
+    if(!sizeInfo)return null;
+    var dataStart=pos+idInfo.len+sizeInfo.len;
+    var dataSize=sizeInfo.unknown?(end-dataStart):sizeInfo.size;
+    if(idInfo.id===targetId)return{dataStart:dataStart,dataSize:dataSize};
+    if(sizeInfo.unknown)return null; // bilinmeyen boyutlu bir ELEMENT hedef değilse güvenli biçimde daha ileri taranamaz
+    pos=dataStart+sizeInfo.size;
+  }
+  return null;
+}
+function webmFixDurationInPlace(blob,durationMs,callback){
+  try{
+    var reader=new FileReader();
+    reader.onload=function(){
+      try{
+        var buf=reader.result;
+        var bytes=new Uint8Array(buf);
+        var ebmlEl=admWebmFindElement(bytes,0,bytes.length,0x1A45DFA3); // EBML başlığı
+        if(!ebmlEl){callback(blob);return;}
+        var afterHeader=ebmlEl.dataStart+ebmlEl.dataSize;
+        var segEl=admWebmFindElement(bytes,afterHeader,bytes.length,0x18538067); // Segment
+        if(!segEl){callback(blob);return;}
+        var infoEl=admWebmFindElement(bytes,segEl.dataStart,segEl.dataStart+segEl.dataSize,0x1549A966); // Info
+        if(!infoEl){callback(blob);return;}
+        var durEl=admWebmFindElement(bytes,infoEl.dataStart,infoEl.dataStart+infoEl.dataSize,0x4489); // Duration
+        if(!durEl||durEl.dataSize!==8){callback(blob);return;} // beklenmedik yapı - dokunma
+        var scaleEl=admWebmFindElement(bytes,infoEl.dataStart,infoEl.dataStart+infoEl.dataSize,0x2AD7B1); // TimecodeScale
+        var timecodeScale=1000000; // Matroska varsayılanı: 1ms = 1.000.000 ns
+        if(scaleEl&&scaleEl.dataSize>=1&&scaleEl.dataSize<=8){
+          var v=0;for(var i=0;i<scaleEl.dataSize;i++)v=v*256+bytes[scaleEl.dataStart+i];
+          if(v>0)timecodeScale=v;
+        }
+        var durationValue=(durationMs*1e6)/timecodeScale;
+        new DataView(buf,durEl.dataStart,8).setFloat64(0,durationValue,false);
+        callback(new Blob([buf],{type:blob.type||'video/webm'}));
+      }catch(e){
+        if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Webm süre düzeltme istisna attı (orijinal dosya kullanıldı)',{mesaj:e&&e.message});
+        callback(blob);
+      }
+    };
+    reader.onerror=function(){callback(blob);};
+    reader.readAsArrayBuffer(blob);
+  }catch(e){callback(blob);}
+}
 function trimVideoClientSide(file,startSec,endSec,onProgress,callback){
   if(typeof MediaRecorder==='undefined'){callback(new Error('Tarayıcınız video kırpmayı desteklemiyor. Lütfen videoyu telefonunuzun kendi düzenleyicisiyle kısaltıp tekrar deneyin'));return;}
   const url=URL.createObjectURL(file);
@@ -15554,10 +15641,12 @@ function trimVideoClientSide(file,startSec,endSec,onProgress,callback){
         if(settled)return;settled=true;
         if(!chunks.length){callback(new Error('Video kırpılamadı, lütfen tekrar deneyin'));return;}
         const blob=new Blob(chunks,{type:recorder.mimeType||chosenMime||'video/webm'});
-        callback(null,blob);
+        const _recordedMs=Math.max(1,Date.now()-_recordStartTs);
+        webmFixDurationInPlace(blob,_recordedMs,function(fixedBlob){callback(null,fixedBlob);});
       };
       recorder.onerror=function(){fail('Video kırpma sırasında hata oluştu');};
       recorder.start(250);
+      const _recordStartTs=Date.now();
       video.play().catch(function(_e){DiagSil('trimVideoClientSide/play',_e);});
       const durationMs=Math.max(200,(endSec-startSec)*1000);
       progressTimer=setInterval(function(){
