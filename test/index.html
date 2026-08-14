@@ -1174,7 +1174,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-14-D';
+window.APP_BUILD='2026-08-14-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -15542,11 +15542,29 @@ function admWebmFindElement(bytes,start,end,targetId){
     if(!sizeInfo)return null;
     var dataStart=pos+idInfo.len+sizeInfo.len;
     var dataSize=sizeInfo.unknown?(end-dataStart):sizeInfo.size;
-    if(idInfo.id===targetId)return{dataStart:dataStart,dataSize:dataSize};
-    if(sizeInfo.unknown)return null; // bilinmeyen boyutlu bir ELEMENT hedef değilse güvenli biçimde daha ileri taranamaz
+    if(idInfo.id===targetId)return{dataStart:dataStart,dataSize:dataSize,elemStart:pos,sizeFieldStart:pos+idInfo.len,sizeFieldLen:sizeInfo.len,unknown:sizeInfo.unknown};
+    if(sizeInfo.unknown)return null; // bilinmeyen boyutlu ELEMENT hedef değilse güvenli biçimde daha ileri taranamaz
     pos=dataStart+sizeInfo.size;
   }
   return null;
+}
+function admWebmEncodeVintExact(value,len){
+  // 'value' değerini TAM OLARAK 'len' baytlık bir EBML VINT'e sığdırır - sığmazsa null döner
+  // (tüm-1'ler deseni "bilinmeyen boyut" için ayrıldığından üst sınır -2 ile hesaplanır).
+  if(len<1||len>8)return null;
+  var maxVal=Math.pow(2,7*len)-2;
+  if(value<0||value>maxVal)return null;
+  var marker=0x80>>(len-1);
+  var arr=new Array(len);
+  var v=value;
+  for(var i=len-1;i>=1;i--){arr[i]=v&0xFF; v=Math.floor(v/256);}
+  arr[0]=(v|marker)&0xFF;
+  return arr;
+}
+function admWebmDoubleToBytes(value){
+  var tmp=new ArrayBuffer(8);
+  new DataView(tmp).setFloat64(0,value,false);
+  return Array.from(new Uint8Array(tmp));
 }
 function webmFixDurationInPlace(blob,durationMs,callback){
   try{
@@ -15562,8 +15580,6 @@ function webmFixDurationInPlace(blob,durationMs,callback){
         if(!segEl){callback(blob);return;}
         var infoEl=admWebmFindElement(bytes,segEl.dataStart,segEl.dataStart+segEl.dataSize,0x1549A966); // Info
         if(!infoEl){callback(blob);return;}
-        var durEl=admWebmFindElement(bytes,infoEl.dataStart,infoEl.dataStart+infoEl.dataSize,0x4489); // Duration
-        if(!durEl||durEl.dataSize!==8){callback(blob);return;} // beklenmedik yapı - dokunma
         var scaleEl=admWebmFindElement(bytes,infoEl.dataStart,infoEl.dataStart+infoEl.dataSize,0x2AD7B1); // TimecodeScale
         var timecodeScale=1000000; // Matroska varsayılanı: 1ms = 1.000.000 ns
         if(scaleEl&&scaleEl.dataSize>=1&&scaleEl.dataSize<=8){
@@ -15571,8 +15587,65 @@ function webmFixDurationInPlace(blob,durationMs,callback){
           if(v>0)timecodeScale=v;
         }
         var durationValue=(durationMs*1e6)/timecodeScale;
-        new DataView(buf,durEl.dataStart,8).setFloat64(0,durationValue,false);
-        callback(new Blob([buf],{type:blob.type||'video/webm'}));
+        var durEl=admWebmFindElement(bytes,infoEl.dataStart,infoEl.dataStart+infoEl.dataSize,0x4489); // Duration (varsa)
+
+        if(durEl&&durEl.dataSize===8){
+          // DURUM A: Duration alanı zaten var (bazı tarayıcılar bir yer tutucuyla yazar) -
+          // yerinde 8 baytı değiştir, dosya boyutu hiç değişmez (sıfır bozulma riski).
+          var out1=buf.slice(0);
+          new DataView(out1,durEl.dataStart,8).setFloat64(0,durationValue,false);
+          callback(new Blob([out1],{type:blob.type||'video/webm'}));
+          return;
+        }
+
+        // DURUM B (GERÇEK BOZUK DOSYA ÜZERİNDE DOĞRULANDI - Chrome/Android WebView'in
+        // MediaRecorder çıktısı): Duration alanı Info bölümünde HİÇ YOK. Bu yüzden basit
+        // "yerinde değiştirme" hiçbir şeyi düzeltmiyordu (önceki düzeltme burada sessizce
+        // hiçbir şey yapmadan çıkıyordu - kullanıcı bildirimi bunu doğruladı). ÇÖZÜM: Info
+        // bölümünün SONUNA yeni bir Duration elemanı [ID(2 bayt)+Boyut(1 bayt)+Değer(8
+        // bayt)=11 bayt] EKLENİR, Info'nun boyut alanı güncellenir, ve (Segment "bilinmeyen
+        // boyut" değilse, ki canlı kayıtlarda hemen hemen HER ZAMAN öyledir) Segment'in
+        // boyut alanı da güncellenir. Video/ses verilerinin kendisine (Cluster'lara) HİÇ
+        // dokunulmaz, sadece başa 11 bayt eklenir.
+        var insertPos=infoEl.dataStart+infoEl.dataSize;
+        var newDurBytes=[0x44,0x89,0x88].concat(admWebmDoubleToBytes(durationValue));
+        var insertLen=newDurBytes.length;
+
+        var newInfoSize=infoEl.dataSize+insertLen;
+        var newInfoSizeBytes=admWebmEncodeVintExact(newInfoSize,infoEl.sizeFieldLen)
+          ||admWebmEncodeVintExact(newInfoSize,infoEl.sizeFieldLen+1)
+          ||admWebmEncodeVintExact(newInfoSize,infoEl.sizeFieldLen+2);
+        if(!newInfoSizeBytes){callback(blob);return;} // aşırı uç durum - dosyaya dokunma
+
+        var infoSizeWidthGrew=newInfoSizeBytes.length-infoEl.sizeFieldLen;
+        var segSizeBytes=null;
+        if(!segEl.unknown){
+          var newSegSize=segEl.dataSize+insertLen+infoSizeWidthGrew;
+          segSizeBytes=admWebmEncodeVintExact(newSegSize,segEl.sizeFieldLen)
+            ||admWebmEncodeVintExact(newSegSize,segEl.sizeFieldLen+1)
+            ||admWebmEncodeVintExact(newSegSize,segEl.sizeFieldLen+2);
+          if(!segSizeBytes){callback(blob);return;}
+        }
+
+        var srcBytes=new Uint8Array(buf);
+        var totalGrew=insertLen+infoSizeWidthGrew+(segSizeBytes?(segSizeBytes.length-segEl.sizeFieldLen):0);
+        var out=new Uint8Array(srcBytes.length+totalGrew);
+        var w=0;
+        function copyRange(fromIdx,toIdxExclusive){out.set(srcBytes.subarray(fromIdx,toIdxExclusive),w);w+=(toIdxExclusive-fromIdx);}
+        var cursor=0;
+        if(segSizeBytes){
+          copyRange(cursor,segEl.sizeFieldStart);
+          out.set(segSizeBytes,w);w+=segSizeBytes.length;
+          cursor=segEl.sizeFieldStart+segEl.sizeFieldLen;
+        }
+        copyRange(cursor,infoEl.sizeFieldStart);
+        out.set(newInfoSizeBytes,w);w+=newInfoSizeBytes.length;
+        cursor=infoEl.sizeFieldStart+infoEl.sizeFieldLen;
+        copyRange(cursor,insertPos);
+        out.set(newDurBytes,w);w+=newDurBytes.length;
+        cursor=insertPos;
+        copyRange(cursor,srcBytes.length);
+        callback(new Blob([out.buffer],{type:blob.type||'video/webm'}));
       }catch(e){
         if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Webm süre düzeltme istisna attı (orijinal dosya kullanıldı)',{mesaj:e&&e.message});
         callback(blob);
