@@ -663,6 +663,10 @@ body.ticker-on{--ticker-h:38px}
    içindeki iframe/video, konteyneri eksiksiz kaplayacak şekilde yeniden boyutlanır. */
 #videoPlayerBox:fullscreen,#videoPlayerBox:-webkit-full-screen{display:flex;align-items:center;justify-content:center;background:#000;border-radius:0}
 #videoPlayerBox:fullscreen video,#videoPlayerBox:fullscreen iframe,#videoPlayerBox:-webkit-full-screen video,#videoPlayerBox:-webkit-full-screen iframe{width:100%;height:100%;aspect-ratio:auto;border-radius:0}
+/* KULLANICI TALEBİ: harici platforma (TOD/tabii/GAIN vb.) yönlendirilirken "uygulamadan
+   çıkılıyor" hissi yerine kısa bir geçiş animasyonu gösterilsin - bkz. buildExternalWatchLoadingHtml. */
+@keyframes ptExtSpin{to{transform:rotate(360deg)}}
+.pt-ext-spin{width:34px;height:34px;border-radius:50%;border:3px solid var(--br2);border-top-color:var(--ac);animation:ptExtSpin .7s linear infinite;margin:0 auto}
 /* KULLANICI TALEBİ: Tüm menülerde tutarlı "◀ Geri" butonu. PTSheetNav, menü içeriği her
    yazıldığında bu butonu görünür içerik düğümünün İLK çocuğu olarak enjekte eder (innerHTML
    değişince kaybolmaması için yeniden eklenir). Sticky konumla menü kaydırılırken de sol üstte
@@ -1184,7 +1188,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-B';
+window.APP_BUILD='2026-08-15-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -15357,10 +15361,25 @@ function processAndUploadCommentVideo(matchId,file,knownDuration,displayName){
   if(knownDuration){doProcess(knownDuration);return;}
   const vid=document.createElement('video');
   vid.preload='metadata';
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "180 saniye ve 50 MB sınırını aşan videoyu
+  // düzenlerken video başlığı giremiyor"): handleCommentVideo SADECE dosya BOYUTUNU
+  // (MAX_VIDEO_MB) kontrol edip kırpma ekranını (openVideoTrimmer) SADECE boyut aşımında
+  // açıyordu. SÜRE sınırını aşan ama boyutu 50MB'ın ALTINDA olan bir video bu yüzden hiç
+  // kırpma ekranına yönlendirilmiyordu - burada sadece bir hata mesajı gösterilip video
+  // doğrudan REDDEDİLİYORDU. Kırpma ekranı, başlık/açıklama kutusunu (trimCaptionInp) İÇEREN
+  // TEK ekran olduğundan, kullanıcının video için bir başlık girebileceği hiçbir yer
+  // kalmıyordu - "video başlığı giremiyorum" şikayetinin kök sebebi buydu. Aynı zamanda bu
+  // ret, video kırpma/yükleme sırasında sohbeti "meşgul" işaretleyen _ptActiveUploads
+  // korumasından da GEÇMİYORDU (hiç kırpma/yükleme başlamadığı için), yani kullanıcı hem
+  // düzenleyemiyor hem de galeri seçiciden dönüş anındaki render'a karşı korumasız kalıyordu.
+  // ÇÖZÜM: süre sınırı aşıldığında da (boyut aşımıyla AYNI şekilde) kırpma ekranı açılır -
+  // böylece kullanıcı hem bölüm seçebilir hem başlık girebilir, hem de yükleme AYNI korumalı
+  // akıştan (openVideoTrimmer → confirmVideoTrim → _ptActiveUploads) geçer.
   vid.onloadedmetadata=function(){
     URL.revokeObjectURL(vid.src);
     if(vid.duration>MAX_VIDEO_SECONDS){
-      showToast('❌ '+fileName+' en fazla '+MAX_VIDEO_SECONDS+' saniye olabilir');
+      const overSizeToo=file.size>MAX_VIDEO_MB*1024*1024;
+      openVideoTrimmer(matchId,file,overSizeToo?'both':'duration',vid.duration);
       return;
     }
     doProcess(vid.duration);
@@ -15379,11 +15398,19 @@ function formatSecondsHuman(sec){
 // göndermek istediğini (başlangıç/bitiş saniyesi) seçer, "Kırp ve Gönder"e basınca seçilen
 // bölüm SADECE TARAYICI İÇİNDE (herhangi bir sunucuya yüklemeden) yeniden kodlanıp küçültülür
 // (bkz. trimVideoClientSide) ve sonuç izin verilen boyutun içindeyse otomatik yüklenir.
-window.openVideoTrimmer=function(matchId,file){
+// KULLANICI TALEBİ (daha fazla düzenleme detayı): Kırpma ekranı artık videonun SINIRI NEDEN
+// aştığını (boyut mu, süre mi, ikisi birden mi) doğru şekilde açıklıyor - reason parametresi
+// bunun için eklendi. Önceden mesaj HER ZAMAN "boyut sınırının üzerinde" diyordu; sadece süre
+// aşan (boyutu 50MB altında olan) bir video için bu YANLIŞ/kafa karıştırıcıydı. knownDuration
+// parametresi, süre zaten ölçülmüşse (bkz. processAndUploadCommentVideo) videoyu tekrar
+// baştan ölçmeden ekranı anında doğru bilgiyle açabilmek için kullanılır.
+window.openVideoTrimmer=function(matchId,file,reason,knownDuration){
   window._diagScreen='pt_media';
   const url=URL.createObjectURL(file);
   window._trimState={matchId:matchId,file:file,url:url};
   const sizeMB=(file.size/1024/1024).toFixed(1);
+  const overSize=file.size>MAX_VIDEO_MB*1024*1024;
+  if(!reason)reason=overSize?'size':'duration';
   // HATA DÜZELTMESİ (kullanıcı bildirdi: "video kırparken video başlığı/mesajı giremiyorum"):
   // Kırpma ekranı sohbetin/yorum kutusunun ÜSTÜNE açıldığı için, kullanıcı altta yazmaya
   // başladığı mesajı (video başlığı/açıklaması) bu ekrandayken GÖREMİYOR ve DÜZENLEYEMİYORDU.
@@ -15392,21 +15419,28 @@ window.openVideoTrimmer=function(matchId,file){
   // gönderim sırasında altındaki mesaj kutusuna geri yazılır - metin hiçbir zaman kaybolmaz.
   const composerInp=document.getElementById('commentInp_'+matchId);
   const draftCaption=(composerInp&&composerInp.value)||'';
+  const reasonMsg=reason==='duration'
+    ?('Bu video izin verilen '+MAX_VIDEO_SECONDS+' saniyelik süre sınırının üzerinde'+(knownDuration?' (toplam '+formatSecondsHuman(knownDuration)+')':'')+' - boyutu ('+sizeMB+'MB) sınır içinde. Göndermek istediğiniz bölümü seçin, sistem seçilen bölümü otomatik yükleyecek.')
+    :reason==='both'
+    ?('Bu video hem '+MAX_VIDEO_MB+'MB boyut ('+sizeMB+'MB) hem de '+MAX_VIDEO_SECONDS+' saniye süre sınırının üzerinde. Göndermek istediğiniz bölümü seçin - sistem geri kalanını otomatik olarak uygun boyuta küçültüp yükleyecek.')
+    :('Bu video ('+sizeMB+'MB) izin verilen '+MAX_VIDEO_MB+'MB sınırının üzerinde. Göndermek istediğiniz bölümü seçin - sistem geri kalanını otomatik olarak uygun boyuta küçültüp yükleyecek.');
   const html=`<div class="sheet-handle"></div>
     <div style="font-size:.9rem;font-weight:900;margin-bottom:.5rem">✂️ Videoyu Kırp</div>
-    <div style="font-size:.72rem;color:var(--mu);margin-bottom:.7rem;line-height:1.5">Bu video (${sizeMB}MB) izin verilen ${MAX_VIDEO_MB}MB sınırının üzerinde. Göndermek istediğiniz bölümü seçin - sistem geri kalanını otomatik olarak uygun boyuta küçültüp yükleyecek.</div>
+    <div id="trimReasonMsg" style="font-size:.72rem;color:var(--mu);margin-bottom:.7rem;line-height:1.5">${reasonMsg}</div>
     <video id="trimVideoPreview" src="${url}" controls playsinline muted style="width:100%;border-radius:10px;margin-bottom:.6rem;background:#000;max-height:220px"></video>
     <div style="display:flex;gap:.5rem;margin-bottom:.4rem">
-      <div style="flex:1"><span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Başlangıç (sn)</span><input type="number" id="trimStartInp" min="0" value="0" style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.4rem .5rem;color:var(--tx)"/></div>
-      <div style="flex:1"><span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Bitiş (sn)</span><input type="number" id="trimEndInp" min="1" value="30" style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.4rem .5rem;color:var(--tx)"/></div>
+      <div style="flex:1"><span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Başlangıç (sn)</span><input type="number" id="trimStartInp" min="0" value="0" oninput="updateTrimRangeHint()" style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.4rem .5rem;color:var(--tx)"/></div>
+      <div style="flex:1"><span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Bitiş (sn)</span><input type="number" id="trimEndInp" min="1" value="30" oninput="updateTrimRangeHint()" style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.4rem .5rem;color:var(--tx)"/></div>
     </div>
+    <div id="trimRangeHint" style="font-size:.62rem;font-weight:700;margin-bottom:.5rem"></div>
     <span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Video başlığı / açıklaması (isteğe bağlı)</span>
     <input type="text" id="trimCaptionInp" value="${draftCaption.replace(/"/g,'&quot;')}" placeholder="Videoyla birlikte gönderilecek mesaj..." style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.4rem .5rem;color:var(--tx);margin-bottom:.6rem;font-family:var(--font-family,'Outfit'),sans-serif"/>
-    <div id="trimHint" style="font-size:.62rem;color:var(--mu);margin-bottom:.7rem">Video yükleniyor, süresi hesaplanıyor...</div>
+    <div id="trimHint" style="font-size:.62rem;color:var(--mu);margin-bottom:.7rem">${knownDuration?('Videonun toplam süresi: '+formatSecondsHuman(knownDuration)+'. En fazla '+MAX_VIDEO_SECONDS+' saniyelik bir bölüm seçebilirsiniz.'):'Video yükleniyor, süresi hesaplanıyor...'}</div>
     <div id="trimProgressArea"></div>
     <button id="trimConfirmBtn" onclick="confirmVideoTrim()" style="width:100%;background:linear-gradient(135deg,var(--ac),var(--ac2));border:none;border-radius:12px;padding:.65rem;color:#fff;font-size:.82rem;font-weight:800;cursor:pointer;margin-bottom:.4rem">✂️ Kırp ve Gönder</button>
     <button onclick="cancelVideoTrim()" style="width:100%;background:none;border:none;color:var(--mu);font-size:.72rem;padding:.4rem;cursor:pointer">İptal</button>`;
   openSheet('',html);
+  updateTrimRangeHint();
   const vidEl=document.getElementById('trimVideoPreview');
   if(vidEl)vidEl.onloadedmetadata=function(){
     const dur=vidEl.duration||0;
@@ -15417,7 +15451,31 @@ window.openVideoTrimmer=function(matchId,file){
     if(endInp){endInp.max=String(Math.ceil(dur));endInp.value=String(Math.max(1,Math.round(suggestedEnd)));}
     const hint=document.getElementById('trimHint');
     if(hint)hint.textContent='Videonun toplam süresi: '+formatSecondsHuman(dur)+'. En fazla '+MAX_VIDEO_SECONDS+' saniyelik bir bölüm seçebilirsiniz.';
+    updateTrimRangeHint();
   };
+};
+// KULLANICI TALEBİ (daha fazla düzenleme detayı): Kullanıcı başlangıç/bitiş saniyelerini
+// değiştirdikçe, seçtiği bölümün kaç saniye olacağını ve izin verilen sınıra göre durumunu
+// (uygun / sınırın üzerinde, otomatik kısaltılacak) ANINDA gösterir - önceden bu bilgi sadece
+// "Kırp ve Gönder"e basıldıktan SONRA (confirmVideoTrim içinde) ortaya çıkıyordu.
+window.updateTrimRangeHint=function(){
+  const startInp=document.getElementById('trimStartInp');
+  const endInp=document.getElementById('trimEndInp');
+  const rangeHint=document.getElementById('trimRangeHint');
+  if(!startInp||!endInp||!rangeHint)return;
+  const start=Number(startInp.value)||0;
+  const end=Number(endInp.value)||0;
+  const len=end-start;
+  if(len<=0){
+    rangeHint.style.color='#ef4444';
+    rangeHint.textContent='⚠️ Bitiş süresi başlangıçtan büyük olmalı';
+  }else if(len>MAX_VIDEO_SECONDS){
+    rangeHint.style.color='#f59e0b';
+    rangeHint.textContent='⚠️ Seçili bölüm: '+formatSecondsHuman(len)+' - en fazla '+MAX_VIDEO_SECONDS+' saniye gönderileceği için otomatik kısaltılacak';
+  }else{
+    rangeHint.style.color='var(--mu)';
+    rangeHint.textContent='✅ Seçili bölüm: '+formatSecondsHuman(len);
+  }
 };
 // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "video yüklerken sohbetten atılıyor, video
 // başlığı/mesajı giremiyorum"): Bu ekran (kırpma sayfası) sohbet İÇİNDEYKEN openSheet() ile
@@ -17245,32 +17303,73 @@ function renderVideoScreenList(){
     }).join('')}`;
   document.getElementById('sheetContent').innerHTML=html;
 }
+// GÜVENLİK SIKILAŞTIRMASI (KULLANICI TALEBİ: "Admin herhangi bir siteden yayın eklediğinde
+// siteden içerik de görünüyor, bunu önle"): Önceki isEmbeddableVideoUrl/buildVideoEmbedHtml
+// linkin GERÇEK ana makinesine (hostname) hiç BAKMIYORDU - sadece dizgenin İÇİNDE HERHANGİ
+// BİR YERDE "youtube.com/watch?v=..." veya "twitch.tv/kanal" alt dizgesi geçip geçmediğini
+// kontrol ediyordu. Bu, pratikte istismar edilebilir DEĞİLDİ (embed her zaman youtube.com/
+// player.twitch.tv'nin KENDİ resmi adresinden, sadece ayıklanan video/kanal kimliğiyle yeniden
+// kuruluyordu, orijinal URL asla doğrudan bir iframe'e verilmiyordu) ama denetim SAĞLAM bir
+// temele (gerçek alan adı) oturmuyordu - örn. "herhangi-site.com/youtube.com/watch?v=xxxx"
+// gibi bir link de yanlışlıkla "embeddable" sayılabiliyordu. Artık gerçek ana makine,
+// tarayıcının KENDİ URL ayrıştırıcısıyla (new URL()) okunup SADECE bilinen youtube/twitch
+// alan adlarıyla (ve onların alt alan adlarıyla, taklit alan adları HARİÇ - örn.
+// "youtube.com.kotu-site.com" burada eşleşmez) karşılaştırılıyor. Bu sayede "herhangi bir
+// siteden" eklenen bir yayın linki, o site GERÇEKTEN youtube.com/twitch.tv/doğrudan bir video
+// dosyası olmadığı sürece ASLA gömülü oynatılmaya çalışılmaz - buildExternalWatchCardHtml
+// üzerinden, kullanıcının kendi onayıyla YENİ SEKMEDE açılır ve uygulamanın İÇİNE o sitenin
+// hiçbir içeriği (menüsü, reklamı, başka bir sayfası) sızmaz.
+function getUrlHostname(url){
+  try{
+    return new URL(url,location.href).hostname.toLowerCase();
+  }catch(e){
+    return '';
+  }
+}
+function isKnownVideoHost(hostname,bases){
+  if(!hostname)return false;
+  return bases.some(function(base){return hostname===base||hostname.endsWith('.'+base);});
+}
 // Bir video/canlı yayın linkinin, tarayıcıda GÖMÜLÜ (iframe/video) olarak güvenle
 // oynatılabilecek BİLİNEN bir platformdan (YouTube, Twitch, doğrudan video dosyası)
 // geldiğini kontrol eder. Bunların dışındaki HER link (TOD, tabii, GAIN ve benzeri
-// yayın platformları dahil) embeddable SAYILMAZ - bkz. buildExternalWatchCardHtml.
+// yayın platformları dahil - GERÇEK ana makinesi ne olursa olsun) embeddable SAYILMAZ -
+// bkz. buildExternalWatchCardHtml.
 function isEmbeddableVideoUrl(url){
   if(!url)return false;
-  if(/(?:youtube\.com\/(?:watch\?v=|live\/|shorts\/|embed\/)|youtu\.be\/)[A-Za-z0-9_-]{6,}/.test(url))return true;
-  if(/twitch\.tv\/(?:videos\/\d+|[A-Za-z0-9_]+(?:$|[/?]))/.test(url))return true;
-  if(/\.(mp4|webm|ogg|m3u8)(\?|$)/i.test(url))return true;
+  const host=getUrlHostname(url);
+  if(isKnownVideoHost(host,['youtube.com','youtube-nocookie.com','youtu.be'])){
+    return /(?:watch\?v=|\/live\/|\/shorts\/|\/embed\/)[A-Za-z0-9_-]{6,}/.test(url)||/youtu\.be\/[A-Za-z0-9_-]{6,}/.test(url);
+  }
+  if(isKnownVideoHost(host,['twitch.tv'])){
+    return /twitch\.tv\/(?:videos\/\d+|[A-Za-z0-9_]+(?:$|[/?]))/.test(url);
+  }
+  if(/\.(mp4|webm|ogg|m3u8)(\?|$)/i.test(url))return true; // Doğrudan video dosyası - platformdan bağımsız, dosya uzantısı yeterli.
   return false;
 }
 // Bir video/canlı yayın linkini platformuna göre GÖMÜLÜ (embed) oynatıcıya çevirir.
 // Kullanıcı linkin kendisini hiç görmez - sadece bu fonksiyonun ürettiği oynatıcıyı görür.
-// SADECE isEmbeddableVideoUrl() TRUE dönen linkler için çağrılır (bkz. openVideoWatch).
+// SADECE isEmbeddableVideoUrl() TRUE dönen (yani gerçek ana makinesi bilinen bir video
+// platformu olan) linkler için çağrılır (bkz. openVideoWatch) - iframe/video src'si HER ZAMAN
+// bu fonksiyonun KENDİ ürettiği resmi platform adresinden kurulur, orijinal URL asla doğrudan
+// bir iframe'e verilmez.
 function buildVideoEmbedHtml(url){
   try{
-    const yt=url.match(/(?:youtube\.com\/(?:watch\?v=|live\/|shorts\/|embed\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/);
-    if(yt){
-      return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+    const host=getUrlHostname(url);
+    if(isKnownVideoHost(host,['youtube.com','youtube-nocookie.com','youtu.be'])){
+      const yt=url.match(/(?:watch\?v=|\/live\/|\/shorts\/|\/embed\/)([A-Za-z0-9_-]{6,})/)||url.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
+      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      return '';
     }
-    const twMatch=url.match(/twitch\.tv\/videos\/(\d+)/);
-    const twChannel=url.match(/twitch\.tv\/([A-Za-z0-9_]+)(?:$|[/?])/);
-    if(twMatch||twChannel){
-      const parent=location.hostname||'localhost';
-      const src=twMatch?`https://player.twitch.tv/?video=${twMatch[1]}&parent=${parent}&autoplay=true`:`https://player.twitch.tv/?channel=${twChannel[1]}&parent=${parent}&autoplay=true`;
-      return `<iframe src="${src}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
+    if(isKnownVideoHost(host,['twitch.tv'])){
+      const twMatch=url.match(/twitch\.tv\/videos\/(\d+)/);
+      const twChannel=url.match(/twitch\.tv\/([A-Za-z0-9_]+)(?:$|[/?])/);
+      if(twMatch||twChannel){
+        const parent=location.hostname||'localhost';
+        const src=twMatch?`https://player.twitch.tv/?video=${twMatch[1]}&parent=${parent}&autoplay=true`:`https://player.twitch.tv/?channel=${twChannel[1]}&parent=${parent}&autoplay=true`;
+        return `<iframe src="${src}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
+      }
+      return '';
     }
     if(/\.(mp4|webm|ogg|m3u8)(\?|$)/i.test(url)){
       return `<video id="ptVideoEl" src="${url}" controls autoplay playsinline style="width:100%;border-radius:14px;background:#000"></video>`;
@@ -17293,13 +17392,36 @@ function buildVideoEmbedHtml(url){
 // (gerekiyorsa) normal şekilde çalışır, 2) tarayıcı o oturumu/çerezi hatırladığından giriş
 // sadece İLK seferde istenir, 3) yeni sekme doğrudan yöneticinin verdiği linke gittiği
 // için kullanıcı o video/yayın DIŞINDA platformdan başka hiçbir şey görmez.
+// ÖNCEKİ SÜRÜMDE burada anında window.open() tetikleniyordu - bu, sekme değişimi
+// kullanıcıya "uygulamadan aniden atıldı" gibi hissettirebiliyordu. KULLANICI TALEBİ:
+// uygulamadan çıkılmadan ÖNCE kısa bir geçiş ekranı (dönen ikon + "yönlendiriliyorsunuz"
+// mesajı) gösterilsin ki geçiş ani değil, uygulamanın kendi akışının bir parçası gibi
+// hissettirsin. Sekmenin gerçekten açılması hâlâ kaçınılmaz (bkz. yukarıdaki not - platform
+// tarafındaki X-Frame-Options kısıtlaması istemci tarafı kodla aşılamaz), ama geçiş artık
+// yumuşatılmış oluyor.
 window.openExternalVideoLink=function(videoId){
   const v=(D.videoLinks||[]).find(function(x){return x.id===videoId;});
   if(!v||!v.url){showToast('❌ Video bulunamadı');return;}
+  const card=document.getElementById('extWatchCard_'+videoId);
+  if(card&&!card.dataset.opening){
+    card.dataset.opening='1';
+    card.innerHTML=buildExternalWatchLoadingHtml(v.isLive);
+  }
+  // Sekme açma çağrısı KULLANICI TIKLAMASININ hemen ardından, aynı senkron akışta kalacak
+  // şekilde (setTimeout içine ALINMADAN) yapılır - tarayıcıların "kullanıcı etkileşimi
+  // olmadan açılan pencere/sekme" engelleyicileri (popup blocker) tetiklenmesin diye.
+  // Geçiş animasyonu bu yüzden window.open'dan SONRA, kullanıcı zaten yeni sekmeye
+  // geçerken görülür - eski sekmeye dönüldüğünde de kısa süre görünür kalır.
   window.open(v.url,'_blank','noopener');
 };
+function buildExternalWatchLoadingHtml(isLive){
+  return `<div style="text-align:center;padding:2.2rem 1.2rem">
+    <div class="pt-ext-spin" style="margin-bottom:1rem"></div>
+    <div style="font-size:.8rem;color:var(--mu);line-height:1.6">${isLive?'Canlı yayına':'Videoya'} yönlendiriliyorsunuz…</div>
+  </div>`;
+}
 function buildExternalWatchCardHtml(videoId,isLive){
-  return `<div style="text-align:center;padding:2.2rem 1.2rem;background:var(--s2);border-radius:14px">
+  return `<div id="extWatchCard_${videoId}" style="text-align:center;padding:2.2rem 1.2rem;background:var(--s2);border-radius:14px">
     <div style="font-size:2.2rem;margin-bottom:.7rem">${isLive?'🔴':'🎬'}</div>
     <div style="font-size:.8rem;color:var(--mu);line-height:1.6;margin-bottom:1.1rem">Bu yayın kendi platformunda açılır.${isLive?' Giriş isterse (yalnızca ilk seferde) platformun kendi giriş ekranından oturum açabilirsiniz - bir daha sormaz.':''}</div>
     <button onclick="openExternalVideoLink('${videoId}')" style="background:linear-gradient(135deg,var(--ac),var(--ac2));border:none;border-radius:12px;padding:.75rem 1.4rem;color:#fff;font-size:.82rem;font-weight:800;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif;box-shadow:0 6px 20px var(--glow)">▶️ Yayını Aç</button>
@@ -19143,7 +19265,7 @@ window.voteMvp=function(matchId,player){
 
   var APP='pt';                 // 'pt' (Puan Tablosu) | 'adm' (Admin Paneli)
   var APP_LABEL='Puan Tablosu';
-  var MODULES=[{"id": "pt_nav", "label": "🧭 Gezinme & Sekmeler", "desc": "Sekme geçişleri, alt menü, arama, sayfa açma/kapama", "fns": ["switchTab", "renderTab", "switchTabById", "openSheet", "closeSheet", "renderMainNav", "toggleSearch", "doSearch", "openSeasonMenu", "openPastSeasons", "openLeagueSwitcher", "selectLeagueFromSwitcher", "openSettings", "openMyProfile", "withHScrollPreserved", "openVideoScreen", "renderVideoScreenList", "openVideoWatch", "updateVideoLinkBadge", "buildVideoEmbedHtml", "isEmbeddableVideoUrl", "buildExternalWatchCardHtml", "openExternalVideoLink", "togglePtVideoFullscreen"]}, {"id": "pt_standings", "label": "📊 Puan Durumu", "desc": "Puan tablosu çizimi, hafta/saha filtresi, simülatör, PDF", "fns": ["renderStandings", "setStandingsWeek", "setStandingsVenue", "adaptStandingsColumnScale", "applyStandingsAlign", "applyStandingsGap", "applyStandingsColumnScale", "printStandingsPdf", "openStandingsSimulator", "setSimScore", "exitStandingsSimulator", "viewPastSeasonStandings", "renderSimModeBar", "getSimMergedMatches", "renderGroupView", "openScenarioScreen", "renderScenarioSheet", "toggleScenarioTeam", "scenarioSelectAll", "isStandingsPanelVisible", "scheduleStandingsAdaptAndDiagnose"]}, {"id": "pt_fixture", "label": "📅 Fikstür & Sonuçlar", "desc": "Fikstür/sonuç listeleri, hafta seçici, tarih filtresi", "fns": ["renderFixture", "renderResults", "setResultsWeek", "setResultsQuickFilter", "openResultsWeekPicker", "openWeekPicker", "renderDateStrip", "setDateFilter", "openDatePickerSheet", "getWeekList", "setSearchFilter", "highlightMatch", "toggleMatchReminder", "isMatchReminderSet", "getMatchReminders", "shareMatch"]}, {"id": "pt_matchdetail", "label": "⚽ Maç Detayı", "desc": "Maç detay ekranı ve tüm sekmeleri (anlatım, kadro, istatistik)", "fns": ["showMatchDetail", "renderMatchDetailContent", "switchMdTab", "renderMdAnlatim", "renderMdDetay", "renderMdIstatistik", "renderMdKadro", "renderMdKarne", "renderMdKarsi", "toggleMdLiveTable", "showArchivedMatchDetailFull", "showPastLeagueMatchDetailFull", "renderMvpSection", "voteMvp", "voteBestMatch", "submitScorePrediction", "renderScorePredictionHtml", "setKarneFilter", "renderSquad", "selSqTeam"]}, {"id": "pt_teamdetail", "label": "🛡️ Takım Detayı", "desc": "Takım sayfası, kadro, taraftar duvarı, kupa vitrini", "fns": ["showTeamDetail", "renderTeamDetailContent", "switchTdTab", "renderTdFanWall", "renderTdInfo", "renderTdPlayers", "renderTdSquad", "postFanWallMessage", "deleteFanWallMessage", "saveFanWallEdit", "openTdChampViewer", "getClubTrophies", "clubTrophyCaseHtml", "startTeamDetailDirectListener", "stopTeamDetailDirectListener", "showPlayerDetail"]}, {"id": "pt_stats", "label": "📈 İstatistikler & Karşılaştırma", "desc": "İstatistik sekmesi, oyuncu/takım karşılaştırma, analiz, form", "fns": ["renderStats", "showStatTab", "openStatCategoryView", "renderCompare", "setCmp", "setCmpMode", "setCmpPlayer", "setCmpTeamFilter", "renderPlayerCompare", "getPlayerCompareStats", "renderAnalysis", "renderForm", "playerRadarSvg", "openCmpPickerPopup", "openCmpTeamFilterPicker", "selectCmpFromPopup", "filterCmpPopupRows", "getAllPlayersForCompare", "getAllPlayersFlat"]}, {"id": "pt_fantasy", "label": "🎽 Fantezi Takım", "desc": "Fantezi kadro kurma, oyuncu seçimi, puanlama", "fns": ["renderFantasy", "toggleFantasyPlayer", "saveFantasyTeam", "resetFantasyTeam", "calcFantasyPoints", "openFantasyPicker", "renderFantasyPickerContent", "setFormation"]}, {"id": "pt_live", "label": "🔴 Canlı Alt Şerit", "desc": "Canlı skor şeridi, gol kutlaması, sesli anlatım, olay sesleri", "fns": ["renderLiveTicker", "scrollToLive", "toggleLiveTicker", "toggleLiveTable", "checkFavTeamLiveStart", "showFavTeamLiveBanner", "showGoalCelebration", "announceEvent", "playEventSound", "checkLiveVoiceAnnouncements", "checkFavTeamGoalCelebration", "checkFavTeamMatchEnded", "getPrimaryLiveMatch",  "previewEventSound", "testVoiceAnnouncer", "toggleVoiceAnnouncer", "setTickerAnimForContent", "applyTickerSpeed", "checkStaleLiveMatches"]}, {"id": "pt_chat", "label": "💬 Sohbet", "desc": "Sohbet ekranı, mesaj gönderme, tepkiler, yanıtlar, yazıyor göstergesi", "fns": ["openChatScreen", "renderChatScreen", "renderChatComments", "renderOne", "sendChatMessage", "sendGeneralChatMessage", "sendComment", "toggleReaction", "setReplyTarget", "clearReplyTarget", "jumpToChatMessage", "handleChatBubbleClick", "deleteComment", "togglePinComment", "saveEditedComment", "markMessagesSeenByMe", "loadOlderChatMessages", "loadPastSeasonComments", "openChatMatchPicker", "selectChatMatchTag", "broadcastTyping", "applyTypingIndicatorToDOM", "updateChatUnreadBadge", "markChatAsRead", "showReactorListPopup", "showSeenByPopup"]}, {"id": "pt_notifications", "label": "🔔 Bildirimler", "desc": "Bildirim merkezi, tercihler, hatırlatıcılar, kilometre taşları", "fns": ["addNotification", "openNotificationCenter", "renderNotifListItems", "updateNotifUnreadBadge", "checkMilestones", "checkUpcomingMatchReminder", "checkSubscribedMatchEvents", "toggleNotifyPref", "toggleNotifTypePref", "openNotifManage", "clearNotificationHistory", "checkWeeklySummaryNotification", "getNotifPrefs", "getNotificationHistory", "filterNotificationList", "showInAppNotifBanner", "checkTeamNotifyBroadcast", "checkDevReplyNotify", "checkPollResultBroadcast", "checkPremiumCodeNotifications", "checkFavTeamFanWallPosts", "isQuietHoursActive", "saveQuietHours", "toggleQuietHours"]}, {"id": "pt_premium", "label": "💎 Premium & Mağaza", "desc": "Premium erişim, kod kullanma, puan mağazası, deneme süreleri", "fns": ["hasPremiumAccess", "requestPremiumAccess", "sendPremiumAccessRequest", "requestGenericPremiumAccess", "redeemPremiumCode", "redeemGenericPremiumCode", "openPremiumCodeRedeem", "openGenericPremiumCodeRedeem", "buyPremiumWithPoints", "openPointsShop", "revalidateAllPremiumAccessNow", "revalidateFontFamilyAccess", "revalidateReactionPackAccess", "startFontTrial", "startReactionPackTrial", "startPaletteTrial", "endFontTrial", "endReactionPackTrial", "endPaletteTrial", "isEmojiLockedForViewer", "isFontPremium", "isReactionPackPremium", "getPremiumPointsPrice", "getActivePremiumCodes", "cleanupTrialChatArtifacts", "refreshPremiumScreensLive", "updateLivePremiumCountdowns", "getLoyaltyLevel"]}, {"id": "pt_theme", "label": "🎨 Tema & Görünüm", "desc": "Tema/palet/yazı tipi uygulama, kart stili, otomatik karanlık mod", "fns": ["applyTheme", "setPalette", "applyBgTheme", "applyFontFamily", "setFontFamily", "applyCardStyle", "applyNumberSize", "buildTheme", "setReactionPack", "applyAutoDarkModeIfNeeded", "toggleAutoDarkMode", "saveAutoDarkHours", "applySparkleLayer", "applyStatColors", "openFontGroupPopup", "openPaletteGroupPopup", "openReactionPackGroupPopup", "selectCustomThemeFromGroup", "selectPaletteFromGroup", "getFontCssAndEnsureLoaded", "loadGoogleFontIfNeeded", "toggleBgPaletteSync", "suggestPaletteForColor", "renderTeamColorThemeSuggestion", "applySuggestedTeamTheme"]}, {"id": "pt_login", "label": "🚪 Giriş Ekranı", "desc": "Giriş akışı, lig seçici, şifre alanı, mod seçimi, giriş ekranı teması ve düzeni", "fns": ["applyLoginScreenTheme", "applyLoginLayoutBlock", "populateLoginLeagueSel", "onLoginLeagueChange", "showLoginPasswordField", "renderModeOptions", "selectMode", "backToModeScreen", "backToLogin", "toggleLoginUpdates", "cancelRememberedAutoLogin", "openForgotPasswordForm", "renderTempPasswordHint", "doEnter", "doEnterAfterPasswordCheck", "loadProfileAndEnter", "getHashLeagueId", "handleHash"]}, {"id": "pt_auth", "label": "🔐 Giriş & Profil", "desc": "Giriş akışı, şifre işlemleri, profil kaydı, oturum takibi", "fns": ["doLogoutPt", "saveNewPassword", "openPasswordManager", "registerVisitor", "startPresenceTracking", "setVisitorOnline", "setVisitorOffline", "syncProfileToFirebase", "saveSettName", "saveSettFavTeam", "previewProfileAvatar", "handleAvatarUpload"]}, {"id": "pt_media", "label": "🖼️ Medya & Yükleme", "desc": "Fotoğraf/video/GIF yükleme, video kırpma, Supabase aktarımı", "fns": ["uploadImageToSupabase", "uploadVideoToSupabase", "processAndUploadCommentVideo", "trimVideoClientSide", "openVideoTrimmer", "confirmVideoTrim", "cancelVideoTrim", "searchGifs", "searchGifsDebounced", "openGifPicker", "selectGif", "handleCommentPhoto", "handleCommentVideo", "triggerCommentPhoto", "openVideoMenu", "promptVideoLink", "setVideoLink", "parseVideoUrl", "renderCommentMedia", "renderCommentVideo", "playPtLazyVideo", "openImagePreviewOv", "openImageViewerFullscreen", "updateUploadProgressUI", "_supabaseXhrUpload", "_processLogoImg"]}, {"id": "pt_cards", "label": "🖼️ Kart Oluşturma & Paylaşım", "desc": "Maç/profil/sezon kartı üretimi ve paylaşımı", "fns": ["generateMatchSummaryCard", "downloadMyProfileCard", "downloadSeasonSummaryCard", "downloadFavTeamSummaryCard", "downloadSeasonWrapCard", "shareCardImage", "renderStandingsPreviewCard", "confirmDownloadMatchCard", "confirmDownloadMyProfileCard", "confirmDownloadSeasonCard", "confirmDownloadFavTeamCard", "shareAppLink"]}, {"id": "pt_data", "label": "📡 Veri & Bağlantı", "desc": "Firebase dinleyicileri, lig yükleme, önbellek, senkronizasyon", "fns": ["listenToLeague", "startMatchesDirectListener", "stopMatchesDirectListener", "startChatDirectListener", "stopChatDirectListener", "clearLocalCache", "getEffectiveMatches", "getAllCommentsFlat", "getVersions", "init"]}, {"id": "pt_feedback", "label": "📮 Geri Bildirim & Şikayet", "desc": "Geri bildirim formu, içerik şikayeti", "fns": ["openFeedbackForm", "submitFeedback", "handleFeedbackPhoto", "handleFeedbackVideo", "renderFeedbackMediaPreview", "reportContent"]}, {"id": "pt_maintenance", "label": "🚧 Bakım Modu", "desc": "Bakım ekranı, zamanlanmış bakım geçişleri, izinli kullanıcılar", "fns": ["isMaintenanceCurrentlyActive", "showMaintenanceScreen", "hideMaintenanceScreen", "checkMaintenanceScheduleTransition", "isUserAllowedDuringMaintenance", "returnToLoginFromMaintenance", "scheduleMaintenanceBoundaryCheck"]}, {"id": "pt_polls", "label": "🗳️ Anketler & Tahminler", "desc": "Anket oylama, MVP/maç oylaması, skor tahmini", "fns": ["votePoll", "pollNotificationHtml", "savePersonalNote", "renderPersonalNoteSection", "categorizeNote"]}, {"id": "pt_ui", "label": "📐 Yerleşim, Sıkışma & Titreme", "desc": "Yazı kesilmesi/sıkışması, okunamayacak küçük yazı, sayfa yatay taşması, küçük dokunma hedefi, ekran titremesi ve içerik zıplaması", "fns": []}, {"id": "pt_silent", "label": "🕳️ Sessizce Yutulan Hatalar", "desc": "Kodun görmezden geldiği (boş yakalama bloğuna düşen) hataların tamamı - hangi fonksiyonda, hangi sebeple", "fns": []}];
+  var MODULES=[{"id": "pt_nav", "label": "🧭 Gezinme & Sekmeler", "desc": "Sekme geçişleri, alt menü, arama, sayfa açma/kapama", "fns": ["switchTab", "renderTab", "switchTabById", "openSheet", "closeSheet", "renderMainNav", "toggleSearch", "doSearch", "openSeasonMenu", "openPastSeasons", "openLeagueSwitcher", "selectLeagueFromSwitcher", "openSettings", "openMyProfile", "withHScrollPreserved", "openVideoScreen", "renderVideoScreenList", "openVideoWatch", "updateVideoLinkBadge", "buildVideoEmbedHtml", "isEmbeddableVideoUrl", "buildExternalWatchCardHtml", "buildExternalWatchLoadingHtml", "openExternalVideoLink", "togglePtVideoFullscreen"]}, {"id": "pt_standings", "label": "📊 Puan Durumu", "desc": "Puan tablosu çizimi, hafta/saha filtresi, simülatör, PDF", "fns": ["renderStandings", "setStandingsWeek", "setStandingsVenue", "adaptStandingsColumnScale", "applyStandingsAlign", "applyStandingsGap", "applyStandingsColumnScale", "printStandingsPdf", "openStandingsSimulator", "setSimScore", "exitStandingsSimulator", "viewPastSeasonStandings", "renderSimModeBar", "getSimMergedMatches", "renderGroupView", "openScenarioScreen", "renderScenarioSheet", "toggleScenarioTeam", "scenarioSelectAll", "isStandingsPanelVisible", "scheduleStandingsAdaptAndDiagnose"]}, {"id": "pt_fixture", "label": "📅 Fikstür & Sonuçlar", "desc": "Fikstür/sonuç listeleri, hafta seçici, tarih filtresi", "fns": ["renderFixture", "renderResults", "setResultsWeek", "setResultsQuickFilter", "openResultsWeekPicker", "openWeekPicker", "renderDateStrip", "setDateFilter", "openDatePickerSheet", "getWeekList", "setSearchFilter", "highlightMatch", "toggleMatchReminder", "isMatchReminderSet", "getMatchReminders", "shareMatch"]}, {"id": "pt_matchdetail", "label": "⚽ Maç Detayı", "desc": "Maç detay ekranı ve tüm sekmeleri (anlatım, kadro, istatistik)", "fns": ["showMatchDetail", "renderMatchDetailContent", "switchMdTab", "renderMdAnlatim", "renderMdDetay", "renderMdIstatistik", "renderMdKadro", "renderMdKarne", "renderMdKarsi", "toggleMdLiveTable", "showArchivedMatchDetailFull", "showPastLeagueMatchDetailFull", "renderMvpSection", "voteMvp", "voteBestMatch", "submitScorePrediction", "renderScorePredictionHtml", "setKarneFilter", "renderSquad", "selSqTeam"]}, {"id": "pt_teamdetail", "label": "🛡️ Takım Detayı", "desc": "Takım sayfası, kadro, taraftar duvarı, kupa vitrini", "fns": ["showTeamDetail", "renderTeamDetailContent", "switchTdTab", "renderTdFanWall", "renderTdInfo", "renderTdPlayers", "renderTdSquad", "postFanWallMessage", "deleteFanWallMessage", "saveFanWallEdit", "openTdChampViewer", "getClubTrophies", "clubTrophyCaseHtml", "startTeamDetailDirectListener", "stopTeamDetailDirectListener", "showPlayerDetail"]}, {"id": "pt_stats", "label": "📈 İstatistikler & Karşılaştırma", "desc": "İstatistik sekmesi, oyuncu/takım karşılaştırma, analiz, form", "fns": ["renderStats", "showStatTab", "openStatCategoryView", "renderCompare", "setCmp", "setCmpMode", "setCmpPlayer", "setCmpTeamFilter", "renderPlayerCompare", "getPlayerCompareStats", "renderAnalysis", "renderForm", "playerRadarSvg", "openCmpPickerPopup", "openCmpTeamFilterPicker", "selectCmpFromPopup", "filterCmpPopupRows", "getAllPlayersForCompare", "getAllPlayersFlat"]}, {"id": "pt_fantasy", "label": "🎽 Fantezi Takım", "desc": "Fantezi kadro kurma, oyuncu seçimi, puanlama", "fns": ["renderFantasy", "toggleFantasyPlayer", "saveFantasyTeam", "resetFantasyTeam", "calcFantasyPoints", "openFantasyPicker", "renderFantasyPickerContent", "setFormation"]}, {"id": "pt_live", "label": "🔴 Canlı Alt Şerit", "desc": "Canlı skor şeridi, gol kutlaması, sesli anlatım, olay sesleri", "fns": ["renderLiveTicker", "scrollToLive", "toggleLiveTicker", "toggleLiveTable", "checkFavTeamLiveStart", "showFavTeamLiveBanner", "showGoalCelebration", "announceEvent", "playEventSound", "checkLiveVoiceAnnouncements", "checkFavTeamGoalCelebration", "checkFavTeamMatchEnded", "getPrimaryLiveMatch",  "previewEventSound", "testVoiceAnnouncer", "toggleVoiceAnnouncer", "setTickerAnimForContent", "applyTickerSpeed", "checkStaleLiveMatches"]}, {"id": "pt_chat", "label": "💬 Sohbet", "desc": "Sohbet ekranı, mesaj gönderme, tepkiler, yanıtlar, yazıyor göstergesi", "fns": ["openChatScreen", "renderChatScreen", "renderChatComments", "renderOne", "sendChatMessage", "sendGeneralChatMessage", "sendComment", "toggleReaction", "setReplyTarget", "clearReplyTarget", "jumpToChatMessage", "handleChatBubbleClick", "deleteComment", "togglePinComment", "saveEditedComment", "markMessagesSeenByMe", "loadOlderChatMessages", "loadPastSeasonComments", "openChatMatchPicker", "selectChatMatchTag", "broadcastTyping", "applyTypingIndicatorToDOM", "updateChatUnreadBadge", "markChatAsRead", "showReactorListPopup", "showSeenByPopup"]}, {"id": "pt_notifications", "label": "🔔 Bildirimler", "desc": "Bildirim merkezi, tercihler, hatırlatıcılar, kilometre taşları", "fns": ["addNotification", "openNotificationCenter", "renderNotifListItems", "updateNotifUnreadBadge", "checkMilestones", "checkUpcomingMatchReminder", "checkSubscribedMatchEvents", "toggleNotifyPref", "toggleNotifTypePref", "openNotifManage", "clearNotificationHistory", "checkWeeklySummaryNotification", "getNotifPrefs", "getNotificationHistory", "filterNotificationList", "showInAppNotifBanner", "checkTeamNotifyBroadcast", "checkDevReplyNotify", "checkPollResultBroadcast", "checkPremiumCodeNotifications", "checkFavTeamFanWallPosts", "isQuietHoursActive", "saveQuietHours", "toggleQuietHours"]}, {"id": "pt_premium", "label": "💎 Premium & Mağaza", "desc": "Premium erişim, kod kullanma, puan mağazası, deneme süreleri", "fns": ["hasPremiumAccess", "requestPremiumAccess", "sendPremiumAccessRequest", "requestGenericPremiumAccess", "redeemPremiumCode", "redeemGenericPremiumCode", "openPremiumCodeRedeem", "openGenericPremiumCodeRedeem", "buyPremiumWithPoints", "openPointsShop", "revalidateAllPremiumAccessNow", "revalidateFontFamilyAccess", "revalidateReactionPackAccess", "startFontTrial", "startReactionPackTrial", "startPaletteTrial", "endFontTrial", "endReactionPackTrial", "endPaletteTrial", "isEmojiLockedForViewer", "isFontPremium", "isReactionPackPremium", "getPremiumPointsPrice", "getActivePremiumCodes", "cleanupTrialChatArtifacts", "refreshPremiumScreensLive", "updateLivePremiumCountdowns", "getLoyaltyLevel"]}, {"id": "pt_theme", "label": "🎨 Tema & Görünüm", "desc": "Tema/palet/yazı tipi uygulama, kart stili, otomatik karanlık mod", "fns": ["applyTheme", "setPalette", "applyBgTheme", "applyFontFamily", "setFontFamily", "applyCardStyle", "applyNumberSize", "buildTheme", "setReactionPack", "applyAutoDarkModeIfNeeded", "toggleAutoDarkMode", "saveAutoDarkHours", "applySparkleLayer", "applyStatColors", "openFontGroupPopup", "openPaletteGroupPopup", "openReactionPackGroupPopup", "selectCustomThemeFromGroup", "selectPaletteFromGroup", "getFontCssAndEnsureLoaded", "loadGoogleFontIfNeeded", "toggleBgPaletteSync", "suggestPaletteForColor", "renderTeamColorThemeSuggestion", "applySuggestedTeamTheme"]}, {"id": "pt_login", "label": "🚪 Giriş Ekranı", "desc": "Giriş akışı, lig seçici, şifre alanı, mod seçimi, giriş ekranı teması ve düzeni", "fns": ["applyLoginScreenTheme", "applyLoginLayoutBlock", "populateLoginLeagueSel", "onLoginLeagueChange", "showLoginPasswordField", "renderModeOptions", "selectMode", "backToModeScreen", "backToLogin", "toggleLoginUpdates", "cancelRememberedAutoLogin", "openForgotPasswordForm", "renderTempPasswordHint", "doEnter", "doEnterAfterPasswordCheck", "loadProfileAndEnter", "getHashLeagueId", "handleHash"]}, {"id": "pt_auth", "label": "🔐 Giriş & Profil", "desc": "Giriş akışı, şifre işlemleri, profil kaydı, oturum takibi", "fns": ["doLogoutPt", "saveNewPassword", "openPasswordManager", "registerVisitor", "startPresenceTracking", "setVisitorOnline", "setVisitorOffline", "syncProfileToFirebase", "saveSettName", "saveSettFavTeam", "previewProfileAvatar", "handleAvatarUpload"]}, {"id": "pt_media", "label": "🖼️ Medya & Yükleme", "desc": "Fotoğraf/video/GIF yükleme, video kırpma, Supabase aktarımı", "fns": ["uploadImageToSupabase", "uploadVideoToSupabase", "processAndUploadCommentVideo", "trimVideoClientSide", "openVideoTrimmer", "updateTrimRangeHint", "confirmVideoTrim", "cancelVideoTrim", "searchGifs", "searchGifsDebounced", "openGifPicker", "selectGif", "handleCommentPhoto", "handleCommentVideo", "triggerCommentPhoto", "openVideoMenu", "promptVideoLink", "setVideoLink", "parseVideoUrl", "renderCommentMedia", "renderCommentVideo", "playPtLazyVideo", "openImagePreviewOv", "openImageViewerFullscreen", "updateUploadProgressUI", "_supabaseXhrUpload", "_processLogoImg", "getUrlHostname", "isKnownVideoHost", "isEmbeddableVideoUrl", "buildVideoEmbedHtml"]}, {"id": "pt_cards", "label": "🖼️ Kart Oluşturma & Paylaşım", "desc": "Maç/profil/sezon kartı üretimi ve paylaşımı", "fns": ["generateMatchSummaryCard", "downloadMyProfileCard", "downloadSeasonSummaryCard", "downloadFavTeamSummaryCard", "downloadSeasonWrapCard", "shareCardImage", "renderStandingsPreviewCard", "confirmDownloadMatchCard", "confirmDownloadMyProfileCard", "confirmDownloadSeasonCard", "confirmDownloadFavTeamCard", "shareAppLink"]}, {"id": "pt_data", "label": "📡 Veri & Bağlantı", "desc": "Firebase dinleyicileri, lig yükleme, önbellek, senkronizasyon", "fns": ["listenToLeague", "startMatchesDirectListener", "stopMatchesDirectListener", "startChatDirectListener", "stopChatDirectListener", "clearLocalCache", "getEffectiveMatches", "getAllCommentsFlat", "getVersions", "init"]}, {"id": "pt_feedback", "label": "📮 Geri Bildirim & Şikayet", "desc": "Geri bildirim formu, içerik şikayeti", "fns": ["openFeedbackForm", "submitFeedback", "handleFeedbackPhoto", "handleFeedbackVideo", "renderFeedbackMediaPreview", "reportContent"]}, {"id": "pt_maintenance", "label": "🚧 Bakım Modu", "desc": "Bakım ekranı, zamanlanmış bakım geçişleri, izinli kullanıcılar", "fns": ["isMaintenanceCurrentlyActive", "showMaintenanceScreen", "hideMaintenanceScreen", "checkMaintenanceScheduleTransition", "isUserAllowedDuringMaintenance", "returnToLoginFromMaintenance", "scheduleMaintenanceBoundaryCheck"]}, {"id": "pt_polls", "label": "🗳️ Anketler & Tahminler", "desc": "Anket oylama, MVP/maç oylaması, skor tahmini", "fns": ["votePoll", "pollNotificationHtml", "savePersonalNote", "renderPersonalNoteSection", "categorizeNote"]}, {"id": "pt_ui", "label": "📐 Yerleşim, Sıkışma & Titreme", "desc": "Yazı kesilmesi/sıkışması, okunamayacak küçük yazı, sayfa yatay taşması, küçük dokunma hedefi, ekran titremesi ve içerik zıplaması", "fns": []}, {"id": "pt_silent", "label": "🕳️ Sessizce Yutulan Hatalar", "desc": "Kodun görmezden geldiği (boş yakalama bloğuna düşen) hataların tamamı - hangi fonksiyonda, hangi sebeple", "fns": []}];
 
   var SLOW_MS=250;                   // bir fonksiyon bu süreyi aşarsa "yavaş" kaydı
   var MAX_LOCAL=200;                 // cihazda tutulan en fazla kayıt
