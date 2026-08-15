@@ -1188,7 +1188,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-P';
+window.APP_BUILD='2026-08-15-R';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -4468,6 +4468,16 @@ window._simMode=false;
   const sc=document.getElementById('sheetContent');
   if(!sc||typeof MutationObserver==='undefined')return;
   new MutationObserver(()=>{
+    // KÖK SEBEP DÜZELTMESİ (kullanıcı ekran görüntüsüyle bildirdi: kırpma "%100" bitiyor ama
+    // "Kırpılıyor..." ekranı kapanmıyor, sohbete dönülmüyor): Bu gözlemci, sheetContent GİZLİ
+    // iken ona yapılan HERHANGİ bir çocuk-düğüm değişikliğinde onu ZORLA geri açıp sohbeti
+    // gizliyor. Kırpma bitince sohbete dönerken sheetContent bilerek gizleniyor; hemen
+    // ardından geri butonu temizliği gibi ufacık bir DOM dokunuşu bile bu gözlemciyi
+    // tetikleyip KAPATTIĞIMIZ kırpma ekranını ANINDA geri açıyordu - kullanıcının gördüğü
+    // "donuk ekran" tam olarak buydu (video aslında yüklenmiş ve gönderime hazır oluyordu,
+    // sadece üzerinde kapanmamış kırpma katmanı duruyordu). Artık programlı geri dönüşler
+    // sırasında bu bayrakla gözlemci kısa süreliğine susturulur.
+    if(window._ptSuppressSheetObserver)return;
     if(sc.style.display==='none'){
       sc.style.display='block';
       const cc=document.getElementById('chatScreenContent');
@@ -13169,10 +13179,12 @@ window.PTSheetNav=(function(){
     // bir adım olarak kalmaz (önceden kalıyordu: kırpma ekranından sonra bir kez "geri"ye
     // basmak, kullanıcıyı görünürde hiçbir şey değişmeden bir adım harcatıyordu).
     dismissTop:function(){
+      // ÖNEMLİ: Bu fonksiyon DOM'a KESİNLİKLE DOKUNMAZ (injectBtn ÇAĞIRMAZ). Gizli
+      // sheetContent üzerindeki en küçük çocuk-düğüm değişikliği bile yukarıdaki
+      // MutationObserver'ı tetikleyip kapatılan katmanı geri açıyor - bkz. o gözlemcideki not.
       if(stack.length===0){current=null;return;}
       var prev=stack.pop();
       current={key:prev.key,snap:prev};
-      injectBtn();
     },
     reset:function(){
       stack=[];current=null;
@@ -15703,25 +15715,54 @@ function closeVideoTrimmerSheet(){
   // açık bırakmak yetmez, maç detayı içeriği yeniden çizilmelidir. Yoksa kullanıcı kırpma
   // bittiğinde maç detayı yerine kırpma ekranının kalıntısıyla baş başa kalırdı.
   var macAltta=!chatAltta&&(typeof _mdMatchId!=='undefined'&&!!_mdMatchId);
+  // Geri dönüş SÜRESİNCE sheetContent gözlemcisi susturulur - aksi halde gizlediğimiz kırpma
+  // katmanı, bu sırada oluşan herhangi bir DOM dokunuşuyla ANINDA geri açılıyordu (kullanıcının
+  // gördüğü "donuk ekran"ın sebebi buydu). Bayrak, gözlemci geri çağrıları (mikro görev)
+  // işlendikten SONRA temizlenir.
+  window._ptSuppressSheetObserver=true;
+  try{
+    if(chatAltta){
+      cc.style.display='block';if(sc)sc.style.display='none';
+      window._ptLastRenderTs=Date.now();
+    }else if(macAltta){
+      if(cc)cc.style.display='none';
+      if(sc)sc.style.display='block';
+      try{if(typeof renderMatchDetailContent==='function')renderMatchDetailContent();}
+      catch(err){console.error('Maç detayı geri yükleme hatası:',err);}
+      window._ptLastRenderTs=Date.now();
+    }
+    // Perde kararı EN SONA bırakılır (yukarıdaki display değişikliklerinden sonra), böylece
+    // görünür hale gelen katman zaten doğru olan katmandır - bir kare bile yanlış içerik yanıp
+    // sönmez.
+    if(wrap){
+      if(chatAltta||macAltta)wrap.classList.add('open');
+      else wrap.classList.remove('open');
+    }
+    // Kırpma katmanı geri yığınında hayalet bir adım bırakmasın (bkz. PTSheetNav.dismissTop).
+    if(window.PTSheetNav&&typeof PTSheetNav.dismissTop==='function')PTSheetNav.dismissTop();
+  }finally{
+    setTimeout(function(){window._ptSuppressSheetObserver=false;},0);
+  }
+  // SON GÜVENCE: Herhangi bir sebeple (başka bir kod yolu, gecikmeli bir gözlemci vb.) kırpma
+  // katmanı yine de görünür kalırsa, kısa aralıklarla birkaç kez doğru duruma zorlanır -
+  // kullanıcı ASLA kapanmayan bir "Kırpılıyor..." ekranıyla baş başa kalmaz.
   if(chatAltta){
-    cc.style.display='block';if(sc)sc.style.display='none';
-    window._ptLastRenderTs=Date.now();
-  }else if(macAltta){
-    if(cc)cc.style.display='none';
-    if(sc)sc.style.display='block';
-    try{if(typeof renderMatchDetailContent==='function')renderMatchDetailContent();}
-    catch(err){console.error('Maç detayı geri yükleme hatası:',err);}
-    window._ptLastRenderTs=Date.now();
+    var _dogrulamaSayaci=0;
+    var _dogrula=setInterval(function(){
+      _dogrulamaSayaci++;
+      var _cc=document.getElementById('chatScreenContent');
+      var _sc=document.getElementById('sheetContent');
+      var _wrap=document.getElementById('sheetWrap');
+      if(!_chatOpen||_dogrulamaSayaci>10){clearInterval(_dogrula);return;}
+      if(_sc&&_sc.style.display!=='none'&&_sc.querySelector('#trimConfirmBtn')){
+        window._ptSuppressSheetObserver=true;
+        _sc.style.display='none';
+        if(_cc)_cc.style.display='block';
+        if(_wrap)_wrap.classList.add('open');
+        setTimeout(function(){window._ptSuppressSheetObserver=false;},0);
+      }
+    },200);
   }
-  // Perde kararı EN SONA bırakılır (yukarıdaki display değişikliklerinden sonra), böylece
-  // görünür hale gelen katman zaten doğru olan katmandır - bir kare bile yanlış içerik yanıp
-  // sönmez.
-  if(wrap){
-    if(chatAltta||macAltta)wrap.classList.add('open');
-    else wrap.classList.remove('open');
-  }
-  // Kırpma katmanı geri yığınında hayalet bir adım bırakmasın (bkz. PTSheetNav.dismissTop).
-  if(window.PTSheetNav&&typeof PTSheetNav.dismissTop==='function')PTSheetNav.dismissTop();
 }
 window.cancelVideoTrim=function(){
   closeVideoTrimmerSheet();
@@ -15786,6 +15827,12 @@ window.confirmVideoTrim=function(){
   const _trimFailsafe=setTimeout(function(){
     if(_trimCounterCleared)return;_trimCounterCleared=true;
     window._ptActiveUploads=Math.max(0,(window._ptActiveUploads||0)-1);
+    // KULLANICI DENEYİMİ DÜZELTMESİ: Güvenlik ağı devreye girdiğinde önceden SADECE sayaç
+    // düşürülüyordu - ekranda "⏳ Kırpılıyor..." yazısı ve kilitli buton sonsuza kadar kalıyor,
+    // kullanıcı gerçekten takılmış bir ekranla baş başa bırakılıyordu. Artık buton geri açılır
+    // ve durum açıkça bildirilir; kullanıcı daha kısa bir bölüm seçip tekrar deneyebilir.
+    if(confirmBtn){confirmBtn.disabled=false;confirmBtn.textContent='✂️ Kırp ve Gönder';}
+    if(progArea)progArea.innerHTML='<div style="font-size:.62rem;color:#f59e0b;margin-bottom:.5rem">⚠️ Kırpma beklenenden uzun sürdü. Daha kısa bir bölüm seçip tekrar deneyebilirsiniz.</div>';
     if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Video kırpma güvenlik ağı erken tetiklendi (kırpma beklenenden uzun sürdü veya takıldı)',{secilenSureSn:Math.round(end-start),beklenenMs:_trimFailsafeMs});
   },_trimFailsafeMs);
   if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Video kırpma başladı',{
