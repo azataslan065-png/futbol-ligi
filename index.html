@@ -1275,7 +1275,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-V';
+window.APP_BUILD='2026-08-15-Y';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18543,18 +18543,24 @@ window.PTPlayer=(function(){
   }
 
   // ── Denetimlerin otomatik gizlenmesi ──
-  function showControls(kalici){
+  // KULLANICI TALEBİ: "Oynatıcı hemen kayboluyor - kullanıcı ekrana tıklayınca çıksın, tekrar
+  // tıklayınca kaybolsun." Denetimler ARTIK KENDİLİĞİNDEN GİZLENMİYOR; görünürlüğü YALNIZCA
+  // kullanıcının dokunuşu belirler (bkz. toggleControls). Bu fonksiyon sadece "göster" der ve
+  // hiçbir zamanlayıcı kurmaz - önceki sürümdeki 3 saniyelik otomatik gizleme kaldırıldı.
+  function showControls(){
     if(!S)return;
     var ov=el('ptpOv');
     if(ov)ov.classList.remove('ptp-hide');
-    clearTimeout(S.hideT);
-    if(kalici)return;
-    if(S.video.paused)return; // duraklatılmışken denetimler açık kalır
-    S.hideT=setTimeout(function(){
-      if(!S)return;
-      var o=el('ptpOv');
-      if(o&&!S.panelOpen&&!S.video.paused)o.classList.add('ptp-hide');
-    },3200);
+  }
+  function toggleControls(){
+    if(!S)return;
+    var ov=el('ptpOv');
+    if(!ov)return;
+    if(ov.classList.contains('ptp-hide')){ov.classList.remove('ptp-hide');return;}
+    // Ayar paneli açıkken ilk dokunuş paneli kapatır, denetimler ekranda kalır - kullanıcı
+    // paneli kapatmak isterken oynatıcının tamamının kaybolması şaşırtıcı olurdu.
+    if(S.panelOpen){closePanel();return;}
+    ov.classList.add('ptp-hide');
   }
   function showToastMsg(txt){
     var t=el('ptpToast');
@@ -18576,7 +18582,7 @@ window.PTPlayer=(function(){
     if(!S)return;
     S.video.pause();
     try{S.video.currentTime=0;}catch(e){}
-    showControls(true);
+    showControls();
   }
   function seekBy(sn){
     if(!S)return;
@@ -18802,7 +18808,7 @@ window.PTPlayer=(function(){
     p.className='ptp-panel';p.id='ptpPanel';p.innerHTML=h;
     S.root.appendChild(p);
     if(tab==='info')updateInfo();
-    showControls(true);
+    showControls();
 
     p.addEventListener('click',function(e){
       var b=e.target.closest('.ptp-opt');
@@ -18874,6 +18880,7 @@ window.PTPlayer=(function(){
       return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
     }
     stage.addEventListener('touchstart',function(e){
+      if(S)S.touchKullanildi=true; // dokunmatik cihazda 'click' yolu devre dışı kalır
       if(S&&S.locked)return;
       if(e.touches.length===2){mode='pinch';pinchBase=dist(e);baseVal=S.zoom;return;}
       t0=Date.now();
@@ -18928,17 +18935,20 @@ window.PTPlayer=(function(){
       }
       lastTap=now;lastX=x;
       setTimeout(function(){
-        if(Date.now()-lastTap>=310){
-          // Tek dokunma: denetimleri göster/gizle
-          var ov=el('ptpOv');
-          if(!ov)return;
-          if(ov.classList.contains('ptp-hide'))showControls();
-          else ov.classList.add('ptp-hide');
-        }
+        // Tek dokunma: denetimleri aç/kapat. Gecikme, bunun bir ÇİFT dokunuşun ilk yarısı
+        // olmadığından emin olmak içindir (çift dokunuş sarma yapar, denetimi değiştirmez).
+        if(Date.now()-lastTap>=310)toggleControls();
       },320);
     },{passive:true});
     // Fare/masaüstü
-    stage.addEventListener('click',function(){if(!S||S.locked)return;showControls();});
+    // Masaüstü/fare: tıklama da aç/kapat yapar (dokunmatikte bu olay touchend'den sonra
+    // tetiklenmediği için çift işlem oluşmaz).
+    stage.addEventListener('click',function(e){
+      if(!S||S.locked)return;
+      if(e.target.closest('.ptp-btn,.ptp-panel,input'))return;
+      if(S.touchKullanildi)return;
+      toggleControls();
+    });
     stage.addEventListener('dblclick',function(){if(!S||S.locked)return;toggleFullscreen();});
   }
 
@@ -19084,7 +19094,7 @@ window.PTPlayer=(function(){
     });
     video.addEventListener('canplay',function(){var sp=el('ptpSpin');if(sp)sp.style.display='none';});
     video.addEventListener('play',syncUI);
-    video.addEventListener('pause',function(){syncUI();showControls(true);wakeLock(false);});
+    video.addEventListener('pause',function(){syncUI();showControls();wakeLock(false);});
     video.addEventListener('volumechange',syncUI);
     video.addEventListener('ratechange',function(){
       var b=el('ptpSpeed');if(b)b.textContent=(Math.round(video.playbackRate*100)/100)+'x';
