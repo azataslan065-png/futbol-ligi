@@ -1188,7 +1188,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-F';
+window.APP_BUILD='2026-08-15-H';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -15550,11 +15550,18 @@ window.confirmVideoTrim=function(){
   // meşgul olduğu için kırpma TAM BİTTİĞİ ANDA (kullanıcının "video düzenlemesi bittikten
   // sonra" olarak yaşadığı o an) aniden ve toplu şekilde çalışıyor, tam da bu yüzden "sohbetten
   // atılma" hissi kırpma bittikten HEMEN SONRA ortaya çıkıyordu. ÇÖZÜM: güvenlik ağı artık
-  // SABİT değil, seçilen bölümün GERÇEK süresine göre hesaplanıyor (bölüm uzunluğu + 30sn
+  // SABİT değil, seçilen bölümün GERÇEK süresine göre hesaplanıyor (bölüm uzunluğu + 60sn
   // pay) - böylece normal koşullarda ASLA kırpma bitmeden erken tetiklenmez, yine de gerçek
   // bir donma/askıda kalma durumunda makul bir sürede devreye girer.
+  // GÜNCELLEME (kullanıcı bildirdi: "sorun hâlâ devam ediyor"): Kayıt bitiminden SONRA da
+  // ayrı bir adım var - webmFixDurationInPlace (bkz. trimVideoClientSide/recorder.onstop),
+  // dosyayı bayt bayt tarayıp/yeniden yazan SENKRON bir son işleme adımı. Bu adımın süresi
+  // ÖLÇÜLMÜYORDU ve payın (30sn) içine dahil edilmemişti - büyük/uzun kırpımlarda bu adım
+  // beklenenden uzun sürerse güvenlik ağı YİNE erken tetiklenebiliyordu. Pay 60sn'ye
+  // çıkarıldı VE bu adım artık ayrı ölçülüp kaydediliyor (bkz. az yukarıdaki not) - bir
+  // sonraki oluşumda hangi aşamanın asıl darboğaz olduğu kayıtlardan NET görülebilecek.
   let _trimCounterCleared=false;
-  const _trimFailsafeMs=Math.max(90000,Math.round((end-start)*1000)+30000);
+  const _trimFailsafeMs=Math.max(90000,Math.round((end-start)*1000)+60000);
   const _trimFailsafe=setTimeout(function(){
     if(_trimCounterCleared)return;_trimCounterCleared=true;
     window._ptActiveUploads=Math.max(0,(window._ptActiveUploads||0)-1);
@@ -15820,7 +15827,24 @@ function trimVideoClientSide(file,startSec,endSec,onProgress,callback){
         if(!chunks.length){callback(new Error('Video kırpılamadı, lütfen tekrar deneyin'));return;}
         const blob=new Blob(chunks,{type:recorder.mimeType||chosenMime||'video/webm'});
         const _recordedMs=Math.max(1,Date.now()-_recordStartTs);
-        webmFixDurationInPlace(blob,_recordedMs,function(fixedBlob){callback(null,fixedBlob);});
+        // TEŞHİS EKLENTİSİ (kullanıcı bildirdi: "sohbetten atılma sorunu hâlâ devam ediyor" -
+        // önceki düzeltme, güvenlik ağı süresini kayıt (gerçek zamanlı oynatma) süresine göre
+        // ayarlamıştı, ama kayıt BİTTİKTEN SONRA da bir adım daha var: webmFixDurationInPlace
+        // (kaydedilen dosyanın EBML/Matroska süre alanını düzeltme). Bu adım ana iş
+        // parçacığında SENKRON çalışır (dosyayı bayt bayt tarar/yeniden yazar) - eğer bu adım
+        // beklenenden UZUN sürüyorsa (örn. büyük/uzun bir kırpımda), "kırpma bitti" ile
+        // "gerçekten her şey bitti" arasında ÖLÇÜLMEMİŞ bir boşluk oluşur ve güvenlik ağı
+        // hesaplamasını (bkz. confirmVideoTrim._trimFailsafeMs) YETERSİZ bırakabilir. Bu iki
+        // aşama artık AYRI AYRI ölçülüp kaydediliyor - bir sonraki oluşumda 🩺 Hata Yakalama
+        // Kodları raporunda hangi aşamanın uzun sürdüğü NET olarak görülebilecek.
+        const _webmFixT0=Date.now();
+        webmFixDurationInPlace(blob,_recordedMs,function(fixedBlob){
+          const _webmFixMs=Date.now()-_webmFixT0;
+          if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Video kırpma aşama süreleri',{
+            kayitMs:_recordedMs,webmDuzeltmeMs:_webmFixMs,sonucBoyutMB:(fixedBlob.size/1024/1024).toFixed(1)
+          },1000);
+          callback(null,fixedBlob);
+        });
       };
       recorder.onerror=function(){fail('Video kırpma sırasında hata oluştu');};
       recorder.start(250);
