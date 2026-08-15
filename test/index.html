@@ -1188,7 +1188,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-M';
+window.APP_BUILD='2026-08-15-P';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -1442,6 +1442,30 @@ function _supabaseXhrUpload(blob,path,contentType,onProgress,callback){
   // ortak yükleme fonksiyonu olduğundan, tüm yükleme hatalarını burada MERKEZİ olarak
   // yakalamak en güvenilir nokta.
   const _dosyaBoyutMB=(blob&&blob.size?(blob.size/1024/1024).toFixed(1):'?');
+  const _publicUrl=SUPABASE_URL+'/storage/v1/object/public/'+SUPABASE_VIDEO_BUCKET+'/'+path;
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "dosya %99'da takılı kalıyor"): Bir XHR
+  // yüklemesinde çubuk, dosyanın BAYTLARI karşıya gönderilirken ilerler - son bayt gidince
+  // ilerleme olayları BİTER ve istek, sunucunun (Supabase'in dosyayı yazıp) yanıt vermesini
+  // beklemeye geçer. Bu bekleme aşamasında ekranda hiçbir şey değişmediği için çubuk son
+  // değerinde (tipik olarak %99) DONMUŞ görünüyordu; üstelik mobil bağlantılarda bu yanıt
+  // bazen HİÇ ulaşmıyor (istek sonsuza kadar açık kalıyor) - dosya sunucuya YAZILMIŞ olsa
+  // bile arayüz asla tamamlanmıyordu. Aşağıdaki üç önlem bunu çözer:
+  //   1) Baytlar bitince kullanıcıya "sunucuya kaydediliyor" aşaması AÇIKÇA gösterilir.
+  //   2) Yanıt makul sürede gelmezse, dosyanın herkese açık adresi HEAD isteğiyle kontrol
+  //      edilir - dosya ORADAYSA yükleme BAŞARILI sayılır (kayıp yanıt yüzünden kullanıcı
+  //      bekletilmez).
+  //   3) Hiçbir şekilde sonuçlanmazsa istek kapatılır ve NET bir hata verilir - artık
+  //      sessizce sonsuza kadar donuk kalmaz.
+  let _settled=false;
+  let _serverWaitTimer=null,_hardTimeoutTimer=null;
+  function _finish(err,url){
+    if(_settled)return;
+    _settled=true;
+    clearInterval(_stallTimer);
+    clearTimeout(_serverWaitTimer);
+    clearTimeout(_hardTimeoutTimer);
+    callback(err,url);
+  }
   let _lastProgTs=Date.now(),_stallWarned=false;
   const _stallTimer=setInterval(function(){
     if(Date.now()-_lastProgTs>10000&&!_stallWarned){
@@ -1457,26 +1481,64 @@ function _supabaseXhrUpload(blob,path,contentType,onProgress,callback){
       if(e.lengthComputable)onProgress(e.loaded,e.total);
     };
   }
+  if(xhr.upload){
+    // Tüm baytlar gönderildi - artık SUNUCU YANITI bekleniyor.
+    xhr.upload.onloadend=function(){
+      _lastProgTs=Date.now();_stallWarned=false;
+      if(onProgress&&!_settled){try{onProgress(blob?blob.size:0,blob?blob.size:0,true);}catch(err){DiagSil('_supabaseXhrUpload',err);}}
+      // 45 saniye içinde yanıt gelmezse dosyanın gerçekten yüklenip yüklenmediğini doğrula.
+      _serverWaitTimer=setTimeout(function _dogrula(){
+        if(_settled)return;
+        fetch(_publicUrl,{method:'HEAD',cache:'no-store'}).then(function(r){
+          if(_settled)return;
+          if(r&&r.ok){
+            if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Sunucu yanıtı gelmedi ama dosya sunucuda DOĞRULANDI - yükleme başarılı sayıldı',{
+              yol:path,boyutMB:_dosyaBoyutMB
+            },3000);
+            try{xhr.abort();}catch(err){DiagSil('_supabaseXhrUpload',err);}
+            _finish(null,_publicUrl);
+          }else{
+            _serverWaitTimer=setTimeout(_dogrula,15000);
+          }
+        }).catch(function(){
+          if(!_settled)_serverWaitTimer=setTimeout(_dogrula,15000);
+        });
+      },45000);
+      // Son güvenlik ağı: 4 dakika sonra hâlâ sonuçlanmadıysa istek kapatılır ve net bir
+      // hata verilir - kullanıcı donmuş bir çubukla baş başa bırakılmaz.
+      _hardTimeoutTimer=setTimeout(function(){
+        if(_settled)return;
+        if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Sunucu yanıtı hiç gelmedi - yükleme zaman aşımına uğradı',{
+          yol:path,boyutMB:_dosyaBoyutMB,cevrimici:navigator.onLine
+        });
+        try{xhr.abort();}catch(err){DiagSil('_supabaseXhrUpload',err);}
+        _finish(new Error('sunucu yanıt vermedi, lütfen tekrar deneyin'));
+      },240000);
+    };
+  }
   xhr.onload=function(){
-    clearInterval(_stallTimer);
     if(xhr.status>=200&&xhr.status<300){
-      const publicUrl=SUPABASE_URL+'/storage/v1/object/public/'+SUPABASE_VIDEO_BUCKET+'/'+path;
-      callback(null,publicUrl);
+      _finish(null,_publicUrl);
     }else{
       let msg='Yükleme başarısız (HTTP '+xhr.status+')';
       try{const parsed=JSON.parse(xhr.responseText);if(parsed&&parsed.message)msg=parsed.message;}catch(err){DiagSil('_supabaseXhrUpload',err);}
       if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Yükleme sunucu hatasıyla reddetti',{
         yol:path,boyutMB:_dosyaBoyutMB,tur:contentType,httpDurum:xhr.status,mesaj:msg
       },3000);
-      callback(new Error(msg));
+      _finish(new Error(msg));
     }
   };
+  xhr.onabort=function(){
+    // İptal, yukarıdaki doğrulama/zaman aşımı yollarından geliyorsa _settled zaten true'dur
+    // ve bu işleyici hiçbir şey yapmaz (çift callback ÇAĞRILMAZ).
+    if(_settled)return;
+    _finish(new Error('yükleme iptal edildi'));
+  };
   xhr.onerror=function(){
-    clearInterval(_stallTimer);
     if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Yükleme bağlantı hatasıyla başarısız oldu',{
       yol:path,boyutMB:_dosyaBoyutMB,tur:contentType,cevrimici:navigator.onLine
     },3000);
-    callback(new Error('bağlantı hatası, internet bağlantınızı kontrol edin'));
+    _finish(new Error('bağlantı hatası, internet bağlantınızı kontrol edin'));
   };
   xhr.send(blob);
 }
@@ -1496,13 +1558,22 @@ function renderUploadProgressRow(uploadId,fileName){
 }
 // Bir yüklemenin ilerleme çubuğunu (yüzde/bar genişliği/tahmini kalan süre) günceller.
 // startTime, o yüklemenin başladığı Date.now() değeridir - hız (bayt/sn) buradan hesaplanır.
-function updateUploadProgressUI(uploadId,loaded,total,startTime){
-  const pct=total?Math.min(100,Math.round(loaded/total*100)):0;
+function updateUploadProgressUI(uploadId,loaded,total,startTime,serverPhase){
   const pctEl=document.getElementById('uploadPct_'+uploadId);
-  if(pctEl)pctEl.textContent=pct+'%';
   const barEl=document.getElementById('uploadBar_'+uploadId);
-  if(barEl)barEl.style.width=pct+'%';
   const etaEl=document.getElementById('uploadEta_'+uploadId);
+  // KÖK SEBEP DÜZELTMESİ ("%99'da takılı kalıyor"): Baytlar bittiğinde (serverPhase) çubuk
+  // artık son ilerleme değerinde DONMUŞ gibi durmaz - %100'e tamamlanır ve altında yükleme
+  // aşamasının DEĞİŞTİĞİ (artık sunucu yanıtı bekleniyor) açıkça yazar.
+  if(serverPhase){
+    if(pctEl)pctEl.textContent='100%';
+    if(barEl)barEl.style.width='100%';
+    if(etaEl)etaEl.textContent='Sunucuya kaydediliyor, lütfen bekleyin...';
+    return;
+  }
+  const pct=total?Math.min(100,Math.round(loaded/total*100)):0;
+  if(pctEl)pctEl.textContent=pct+'%';
+  if(barEl)barEl.style.width=pct+'%';
   if(etaEl){
     const elapsedSec=(Date.now()-startTime)/1000;
     // İlk anlarda (çok az veri aktarılmışken) hız tahmini güvenilir olmadığından kısa bir
@@ -1519,8 +1590,38 @@ function updateUploadProgressUI(uploadId,loaded,total,startTime){
   }
 }
 function removeUploadProgressRow(uploadId){
-  const row=document.getElementById('uploadRow_'+uploadId);
-  if(row)row.remove();
+  // Aynı kimlikli satır (ör. ekranın gizli bir kopyasında) birden fazla yerde bulunabildiği
+  // için getElementById değil, TÜM eşleşmeler temizlenir - böylece ekranda "donmuş" bir
+  // ilerleme satırı ASLA geride kalmaz.
+  document.querySelectorAll('[id="uploadRow_'+uploadId+'"]').forEach(function(row){row.remove();});
+}
+// KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "dosya %99'da takılı kalıyor, sohbetten çıkıp
+// girince gönderime hazır oluyor"): Yükleme bittiğinde önizleme SADECE TEK bir
+// getElementById denemesiyle tazeleniyordu. O an önizleme kutusu canlı DOM'da değilse (ekran
+// yeniden kuruluyor, kırpma katmanı kapanıyor veya sohbet anlık görüntüden geri yükleniyor
+// olabilir) bu tek deneme SESSİZCE başarısız oluyor, ilerleme satırı son değerinde ekranda
+// kalıyor ve dosya composer'da hiç görünmüyordu. Kullanıcının sohbetten çıkıp girmesi işe
+// yarıyordu çünkü renderChatScreen HER çalıştığında pending önizlemeleri baştan uyguluyor -
+// yani veri kaybolmuyor, SADECE ekrana yansımıyordu. Artık tazeleme ısrarcı: kutu DOM'a
+// gelene kadar kısa aralıklarla tekrar denenir, gelmezse sohbet ekranı güvenli şekilde
+// yeniden çizdirilir.
+function syncPendingMediaPreviews(matchId,tries){
+  tries=tries||0;
+  const vBox=document.getElementById(matchId==='chat'?'chatVideoPreview':'videoPreview_'+matchId);
+  const pBox=document.getElementById(matchId==='chat'?'chatPhotoPreview':'photoPreview_'+matchId);
+  if(vBox||pBox){
+    try{
+      if(typeof renderPendingVideoPreview==='function')renderPendingVideoPreview(matchId);
+      if(typeof renderPendingPhotoPreview==='function')renderPendingPhotoPreview(matchId);
+    }catch(err){console.error('Önizleme tazeleme hatası:',err);}
+    // Kısa bir süre sonra bir kez daha uygulanır: tam bu sırada gecikmeli bir yeniden çizim
+    // devreye girerse önizleme yine de yerini korur.
+    if(tries<2)setTimeout(function(){syncPendingMediaPreviews(matchId,tries+1);},400);
+    return;
+  }
+  if(tries<20){setTimeout(function(){syncPendingMediaPreviews(matchId,tries+1);},250);return;}
+  if(matchId==='chat'&&typeof _chatOpen!=='undefined'&&_chatOpen&&typeof renderChatScreenSafe==='function')renderChatScreenSafe();
+  else if(typeof renderMatchDetailContent==='function'&&typeof _mdMatchId!=='undefined'&&_mdMatchId===matchId)renderMatchDetailContent();
 }
 // KULLANICI TALEBİ: Supabase Storage - GÖRSELLER için ortak yükleme yardımcı fonksiyonu.
 // Video akışıyla (handleCommentVideo) BİREBİR AYNI desen: dosya Supabase Storage'a GERÇEK
@@ -15403,18 +15504,23 @@ function processAndUploadCommentVideo(matchId,file,knownDuration,displayName){
     const contentType=file.type||'video/webm';
     const safeExt=((contentType.split('/')[1]||'mp4').split(';')[0]).replace(/[^a-zA-Z0-9]/g,'').slice(0,6)||'mp4';
     const path=(matchId||'genel')+'/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+safeExt;
-    _supabaseXhrUpload(file,path,contentType,function(loaded,total){
-      updateUploadProgressUI(uploadId,loaded,total,startTime);
+    _supabaseXhrUpload(file,path,contentType,function(loaded,total,serverPhase){
+      updateUploadProgressUI(uploadId,loaded,total,startTime,serverPhase);
     },function(err,publicUrl){
       window._ptActiveUploads=Math.max(0,(window._ptActiveUploads||0)-1);
+      // İlerleme satırı HER durumda (başarı da dahil) kaldırılır - önceden sadece hatada
+      // kaldırılıyor, başarıda ise önizlemenin innerHTML'i baştan yazmasına GÜVENİLİYORDU;
+      // o yazma herhangi bir sebeple gerçekleşmezse satır ekranda donuk kalıyordu.
+      removeUploadProgressRow(uploadId);
       if(err){
         console.error('Supabase video yükleme hatası:',err);
         showToast('❌ '+fileName+' yüklenemedi: '+(err.message||'bağlantı hatası'));
-        removeUploadProgressRow(uploadId);
+        syncPendingMediaPreviews(matchId);
         return;
       }
+      if(!Array.isArray(_pendingVideo[matchId]))_pendingVideo[matchId]=[];
       _pendingVideo[matchId].push({type:'file',data:publicUrl,duration:Math.round(duration||0)});
-      renderPendingVideoPreview(matchId);
+      syncPendingMediaPreviews(matchId);
     });
   }
   if(knownDuration){doProcess(knownDuration);return;}
@@ -16017,13 +16123,22 @@ function renderPendingVideoPreview(matchId){
   // HATA DÜZELTMESİ: bkz. processAndUploadCommentVideo - Sohbet ekranında kutu id'si farklı.
   const prev=document.getElementById(matchId==='chat'?'chatVideoPreview':'videoPreview_'+matchId);
   if(!prev)return;
+  // HATA DÜZELTMESİ (aynı anda birden fazla dosya yüklenirken "biri takılı kalıyor"): Bu
+  // fonksiyon kutunun TÜM içeriğini baştan yazdığı için, biri tamamlandığında DİĞERLERİNİN
+  // ilerleme satırları da siliniyordu - kalan yüklemeler görünürde "kayboluyor/donuyor",
+  // kullanıcı bunu takılma olarak algılıyordu. Süren yüklemelerin satırları artık korunur.
+  const surenSatirlar=Array.prototype.map.call(prev.querySelectorAll('[id^="uploadRow_"]'),function(n){return n.outerHTML;}).join('');
   const videos=_pendingVideo[matchId]||[];
-  if(!Array.isArray(videos)||!videos.length){prev.style.display='none';prev.innerHTML='';return;}
+  if(!Array.isArray(videos)||!videos.length){
+    if(!surenSatirlar){prev.style.display='none';prev.innerHTML='';return;}
+    prev.style.display='flex';prev.style.flexWrap='wrap';prev.style.gap='.4rem';
+    prev.innerHTML=surenSatirlar;return;
+  }
   prev.style.display='flex';
   prev.style.flexWrap='wrap';
   prev.style.gap='.4rem';
   const platformIcons={instagram:'📷',facebook:'👍',x:'✕',youtube:'▶️'};
-  prev.innerHTML=videos.map((v,i)=>{
+  prev.innerHTML=surenSatirlar+videos.map((v,i)=>{
     // HATA DÜZELTMESİ (kullanıcı bildirdi: "video seçiliyor ama görmüyor"): Video etiketinde
     // önceden onerror işleyicisi YOKTU - Supabase linki HERHANGİ bir sebeple (bucket public
     // değilse, CORS sorunu vb.) erişilemez olursa, video SESSİZCE boş/kırık görünüyordu,
@@ -16099,17 +16214,19 @@ window.handleCommentPhoto=function(matchId,input){
     // yeniden çizimleri atlanır (video yüklemesindeki AYNI kesinti/atılma sorununun
     // fotoğrafta da yaşanmaması için).
     window._ptActiveUploads=(window._ptActiveUploads||0)+1;
-    uploadImageToSupabase(file,'comments/'+(matchId||'genel'),{maxDim:900,quality:.78,onProgress:function(loaded,total){
-      updateUploadProgressUI(uploadId,loaded,total,startTime);
+    uploadImageToSupabase(file,'comments/'+(matchId||'genel'),{maxDim:900,quality:.78,onProgress:function(loaded,total,serverPhase){
+      updateUploadProgressUI(uploadId,loaded,total,startTime,serverPhase);
     }},function(err,publicUrl){
       window._ptActiveUploads=Math.max(0,(window._ptActiveUploads||0)-1);
+      removeUploadProgressRow(uploadId);
       if(err){
         showToast('❌ '+file.name+' yüklenemedi: '+err.message);
-        renderPendingPhotoPreview(matchId); // İlerleme kutusunu temizler.
+        syncPendingMediaPreviews(matchId);
         return;
       }
+      if(!Array.isArray(_pendingPhoto[matchId]))_pendingPhoto[matchId]=[];
       _pendingPhoto[matchId].push(publicUrl);
-      renderPendingPhotoPreview(matchId);
+      syncPendingMediaPreviews(matchId);
     });
   });
 };
@@ -16121,11 +16238,17 @@ function renderPendingPhotoPreview(matchId){
   const prev=document.getElementById(matchId==='chat'?'chatPhotoPreview':'photoPreview_'+matchId);
   if(!prev)return;
   const photos=_pendingPhoto[matchId]||[];
-  if(!photos.length){prev.style.display='none';prev.innerHTML='';return;}
+  // bkz. renderPendingVideoPreview - süren yüklemelerin ilerleme satırları korunur.
+  const surenSatirlar=Array.prototype.map.call(prev.querySelectorAll('[id^="uploadRow_"]'),function(n){return n.outerHTML;}).join('');
+  if(!photos.length){
+    if(!surenSatirlar){prev.style.display='none';prev.innerHTML='';return;}
+    prev.style.display='flex';prev.style.flexWrap='wrap';prev.style.gap='.4rem';
+    prev.innerHTML=surenSatirlar;return;
+  }
   prev.style.display='flex';
   prev.style.flexWrap='wrap';
   prev.style.gap='.4rem';
-  prev.innerHTML=photos.map((dataUrl,i)=>
+  prev.innerHTML=surenSatirlar+photos.map((dataUrl,i)=>
     `<div style="position:relative;display:inline-block"><img src="${dataUrl}" style="height:70px;width:70px;object-fit:cover;border-radius:9px"/><button onclick="removePendingPhoto('${matchId}',${i})" style="position:absolute;top:-6px;right:-6px;background:#ef4444;border:2px solid var(--s);border-radius:50%;width:20px;height:20px;color:#fff;font-size:.65rem;cursor:pointer">✕</button></div>`
   ).join('');
 }
