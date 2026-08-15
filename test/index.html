@@ -1188,7 +1188,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-E';
+window.APP_BUILD='2026-08-15-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -15534,12 +15534,32 @@ window.confirmVideoTrim=function(){
   // GÜVENLİK AĞI: Kullanıcı kırpma sürerken "İptal"e basarsa (bkz. cancelVideoTrim) devam
   // eden trimVideoClientSide işlemi hâlâ arka planda çalışır ama tamamlanınca bu geri
   // çağrının içindeki azaltma satırı tetiklenmeyebileceği ihtimaline karşı - sayaç sonsuza
-  // dek yüksek kalıp sohbeti kilitlemesin diye 90sn sonra otomatik güvenli sıfırlama.
+  // dek yüksek kalıp sohbeti kilitlemesin diye otomatik güvenli sıfırlama.
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "180 saniye ve 50 MB sınırını aşan bir videoyu
+  // düzenlerken, video düzenlemesi bittikten sonra sohbetten atılıyor"): trimVideoClientSide
+  // videoyu GERÇEK ZAMANLI oynatıp captureStream+MediaRecorder ile kaydeder - yani seçilen
+  // [başlangıç,bitiş] aralığı N saniyeyse, kırpma da YAKLAŞIK N GERÇEK SANİYE sürer (bkz. o
+  // fonksiyondaki durationMs=(endSec-startSec)*1000). Bu güvenlik ağı önceden SABİT 90
+  // saniyeydi - ama seçilebilecek aralık MAX_VIDEO_SECONDS (180sn) kadar UZUN olabiliyor.
+  // Süre sınırını aşan (>180sn) videolar artık AÇIKÇA kırpma ekranına yönlendirildiği için
+  // (bkz. processAndUploadCommentVideo), kullanıcılar sınıra yakın UZUN bir bölüm seçmeye
+  // önceden olduğundan ÇOK DAHA SIK yöneliyor. 90sn'den uzun süren bir kırpmada bu güvenlik
+  // ağı, kırpma HÂLÂ (ana iş parçacığını meşgul ederek) DEVAM EDERKEN _ptActiveUploads'ı
+  // ERKEN sıfırlıyor, bu da render korumalarının kırpmanın bittiğini SANIP tam bir sohbet
+  // yeniden çizimini SIRAYA koymasına yol açıyordu - bu render, ana iş parçacığı kırpmayla
+  // meşgul olduğu için kırpma TAM BİTTİĞİ ANDA (kullanıcının "video düzenlemesi bittikten
+  // sonra" olarak yaşadığı o an) aniden ve toplu şekilde çalışıyor, tam da bu yüzden "sohbetten
+  // atılma" hissi kırpma bittikten HEMEN SONRA ortaya çıkıyordu. ÇÖZÜM: güvenlik ağı artık
+  // SABİT değil, seçilen bölümün GERÇEK süresine göre hesaplanıyor (bölüm uzunluğu + 30sn
+  // pay) - böylece normal koşullarda ASLA kırpma bitmeden erken tetiklenmez, yine de gerçek
+  // bir donma/askıda kalma durumunda makul bir sürede devreye girer.
   let _trimCounterCleared=false;
+  const _trimFailsafeMs=Math.max(90000,Math.round((end-start)*1000)+30000);
   const _trimFailsafe=setTimeout(function(){
     if(_trimCounterCleared)return;_trimCounterCleared=true;
     window._ptActiveUploads=Math.max(0,(window._ptActiveUploads||0)-1);
-  },90000);
+    if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Video kırpma güvenlik ağı erken tetiklendi (kırpma beklenenden uzun sürdü veya takıldı)',{secilenSureSn:Math.round(end-start),beklenenMs:_trimFailsafeMs});
+  },_trimFailsafeMs);
   if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Video kırpma başladı',{
     matchId:matchId,baslangic:start,bitis:end,orijinalBoyutMB:(file.size/1024/1024).toFixed(1)
   },1000);
@@ -17331,10 +17351,20 @@ function isKnownVideoHost(hostname,bases){
   return bases.some(function(base){return hostname===base||hostname.endsWith('.'+base);});
 }
 // Bir video/canlı yayın linkinin, tarayıcıda GÖMÜLÜ (iframe/video) olarak güvenle
-// oynatılabilecek BİLİNEN bir platformdan (YouTube, Twitch, doğrudan video dosyası)
-// geldiğini kontrol eder. Bunların dışındaki HER link (TOD, tabii, GAIN ve benzeri
-// yayın platformları dahil - GERÇEK ana makinesi ne olursa olsun) embeddable SAYILMAZ -
-// bkz. buildExternalWatchCardHtml.
+// oynatılabilecek BİLİNEN bir platformdan geldiğini kontrol eder. KULLANICI TALEBİ ("Admin
+// herhangi bir sitede video eklediğinde, canlı dahil, sadece ilgili video görünecek"):
+// desteklenen platform listesi YouTube/Twitch'in yanına Vimeo, Dailymotion, Facebook
+// (canlı yayın dahil - resmi video eklentisi hem VOD hem canlıyı destekler), Instagram
+// (gönderi/Reels, canlı yayın sonrası genelde Reels olarak paylaşılır) ve X/Twitter ile
+// genişletildi - bunların HER BİRİ o platformun KENDİ resmi/genel-kullanıma-açık gömme
+// mekanizmasını kullanır, hiçbiri sitenin diğer sayfalarını/menüsünü/akışını GÖSTERMEZ,
+// SADECE ilgili video/gönderi görünür. Bunların dışındaki HER link (TOD, tabii, GAIN ve
+// login gerektiren/iframe'i engelleyen benzeri yayın platformları dahil - GERÇEK ana
+// makinesi ne olursa olsun) embeddable SAYILMAZ - bkz. buildExternalWatchCardHtml. Bu,
+// teknik bir sınırdır: bu platformlar kendi sunucularında X-Frame-Options/CSP ile
+// başka bir sitenin İÇİNE gömülmeyi ENGELLER, istemci tarafı kodla AŞILAMAZ - bu yüzden
+// onlar için "sadece video görünsün" vaadi, gömmeyi ZORLAMAK yerine YENİ SEKMEDE (site
+// bizim uygulamamızın İÇİNE hiç girmeden) açmakla karşılanır.
 function isEmbeddableVideoUrl(url){
   if(!url)return false;
   const host=getUrlHostname(url);
@@ -17344,6 +17374,21 @@ function isEmbeddableVideoUrl(url){
   if(isKnownVideoHost(host,['twitch.tv'])){
     return /twitch\.tv\/(?:videos\/\d+|[A-Za-z0-9_]+(?:$|[/?]))/.test(url);
   }
+  if(isKnownVideoHost(host,['vimeo.com','player.vimeo.com'])){
+    return /vimeo\.com\/(?:.*\/)?(?:event\/)?\d{6,}/.test(url);
+  }
+  if(isKnownVideoHost(host,['dailymotion.com','dai.ly'])){
+    return /dailymotion\.com\/video\/[A-Za-z0-9]+/.test(url)||/dai\.ly\/[A-Za-z0-9]+/.test(url);
+  }
+  if(isKnownVideoHost(host,['facebook.com','fb.watch'])){
+    return true; // Facebook'un resmi video eklentisi (plugins/video.php) her facebook video/canlı yayın linkini kabul eder - kimlik ayıklamaya gerek yok.
+  }
+  if(isKnownVideoHost(host,['instagram.com'])){
+    return /instagram\.com\/(?:p|reel|tv)\/[A-Za-z0-9_-]+/.test(url);
+  }
+  if(isKnownVideoHost(host,['twitter.com','x.com'])){
+    return /\/status\/\d+/.test(url);
+  }
   if(/\.(mp4|webm|ogg|m3u8)(\?|$)/i.test(url))return true; // Doğrudan video dosyası - platformdan bağımsız, dosya uzantısı yeterli.
   return false;
 }
@@ -17352,7 +17397,8 @@ function isEmbeddableVideoUrl(url){
 // SADECE isEmbeddableVideoUrl() TRUE dönen (yani gerçek ana makinesi bilinen bir video
 // platformu olan) linkler için çağrılır (bkz. openVideoWatch) - iframe/video src'si HER ZAMAN
 // bu fonksiyonun KENDİ ürettiği resmi platform adresinden kurulur, orijinal URL asla doğrudan
-// bir iframe'e verilmez.
+// bir iframe'e verilmez (Facebook eklentisi hariç - onda da iframe HER ZAMAN facebook.com'un
+// KENDİ plugin sayfasına gider, orijinal link sadece bir PARAMETRE olarak taşınır).
 function buildVideoEmbedHtml(url){
   try{
     const host=getUrlHostname(url);
@@ -17369,6 +17415,29 @@ function buildVideoEmbedHtml(url){
         const src=twMatch?`https://player.twitch.tv/?video=${twMatch[1]}&parent=${parent}&autoplay=true`:`https://player.twitch.tv/?channel=${twChannel[1]}&parent=${parent}&autoplay=true`;
         return `<iframe src="${src}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
       }
+      return '';
+    }
+    if(isKnownVideoHost(host,['vimeo.com','player.vimeo.com'])){
+      const vm=url.match(/vimeo\.com\/(?:.*\/)?(?:event\/)?(\d{6,})/);
+      if(vm)return `<iframe src="https://player.vimeo.com/video/${vm[1]}?autoplay=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen;picture-in-picture" allowfullscreen></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['dailymotion.com','dai.ly'])){
+      const dm=url.match(/dailymotion\.com\/video\/([A-Za-z0-9]+)/)||url.match(/dai\.ly\/([A-Za-z0-9]+)/);
+      if(dm)return `<iframe src="https://www.dailymotion.com/embed/video/${dm[1]}?autoplay=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['facebook.com','fb.watch'])){
+      return `<iframe src="https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false&autoplay=true" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+    }
+    if(isKnownVideoHost(host,['instagram.com'])){
+      const ig=url.match(/instagram\.com\/(p|reel|tv)\/([A-Za-z0-9_-]+)/);
+      if(ig)return `<iframe src="https://www.instagram.com/${ig[1]}/${ig[2]}/embed" style="width:100%;aspect-ratio:9/16;max-height:70vh;border:none;border-radius:14px;background:#000" allow="autoplay;encrypted-media" allowfullscreen></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['twitter.com','x.com'])){
+      const tw=url.match(/\/status\/(\d+)/);
+      if(tw)return `<iframe src="https://platform.twitter.com/embed/Tweet.html?id=${tw[1]}&theme=dark" style="width:100%;min-height:400px;border:none;border-radius:14px" allow="autoplay;encrypted-media"></iframe>`;
       return '';
     }
     if(/\.(mp4|webm|ogg|m3u8)(\?|$)/i.test(url)){
