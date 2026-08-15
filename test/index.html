@@ -13061,6 +13061,18 @@ window.PTSheetNav=(function(){
       if(host)host.scrollTop=0;
       injectBtn();
     },
+    // KÖK SEBEP DÜZELTMESİ (bkz. closeVideoTrimmerSheet): Video kırpma gibi GEÇİCİ bir üst
+    // katman, altındaki ekranı (sohbet/maç detayı) DOM'da olduğu gibi bırakarak kapatıldığında
+    // çağrılır. back() gibi DOM'a DOKUNMAZ - sadece yığındaki en üst kaydı geri alıp "current"i
+    // bir önceki menüye döndürür. Böylece kapanmış olan geçici katman, geri yığınında HAYALET
+    // bir adım olarak kalmaz (önceden kalıyordu: kırpma ekranından sonra bir kez "geri"ye
+    // basmak, kullanıcıyı görünürde hiçbir şey değişmeden bir adım harcatıyordu).
+    dismissTop:function(){
+      if(stack.length===0){current=null;return;}
+      var prev=stack.pop();
+      current={key:prev.key,snap:prev};
+      injectBtn();
+    },
     reset:function(){
       stack=[];current=null;
       // Kalıntı geri butonlarını temizle. NOT: sheetContent GİZLİYSE (sohbet modu) ona
@@ -15542,9 +15554,28 @@ function closeVideoTrimmerSheet(){
   if(matchId&&capInp){
     var composerInp=document.getElementById('commentInp_'+matchId);
     if(composerInp)composerInp.value=capInp.value;
+    // EK GÜVENCE: Sohbette mesaj kutusu, bir yeniden çizimde SIFIRDAN kurulabilir - metni
+    // sadece DOM'a yazmak yeterli değil, taslak değişkenine de yazılır ki hiçbir senaryoda
+    // kullanıcının yazdığı video başlığı kaybolmasın.
+    if(matchId==='chat')window._chatDraftText=capInp.value;
   }
+  // KESİN KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "sınırın üzerindeki fotoğrafı/videoyu
+  // düzenliyor, düzenleme bitince DİREKT sohbetten atıyor"):
+  //   #chatScreenContent, #sheetContent ile AYNI perdenin (#sheetWrap) İÇİNDE duruyor
+  //   (bkz. HTML: <div id="sheetWrap"> → #sheetContent + #chatScreenContent).
+  //   CSS'te .sheet-wrap{opacity:0;pointer-events:none} ve SADECE .sheet-wrap.open sınıfı
+  //   onu görünür/tıklanabilir yapıyor. Aşağıdaki satır ise KOŞULSUZ olarak 'open' sınıfını
+  //   KALDIRIYORDU - yani kırpma ekranı kapanırken, ALTINDAKİ SOHBET DE (aynı perdenin içinde
+  //   olduğu için) saydamlaşıp tıklanamaz hale geliyor, kullanıcı ana ekrana düşüyordu.
+  //   Hemen ardından gelen "cc.style.display='block'" satırı bunu KURTARMIYOR: sohbet düğümü
+  //   display olarak geri geliyor ama perde kapalı olduğu için EKRANDA GÖRÜNMÜYOR. Üstelik
+  //   _chatOpen hâlâ true kaldığı için sohbet "açık" sanılıyor (dinleyiciler çalışmaya devam
+  //   ediyor, yükleme görünmeyen bir kutuya devam ediyor) - bu yüzden sorun, önceki tüm
+  //   render/görünürlük korumaları (_ptActiveUploads vb.) DOĞRU çalışsa bile aynen sürüyordu.
+  // ÇÖZÜM: Perde SADECE altında gerçekten hiçbir ekran kalmadıysa kapatılır. Sohbet veya maç
+  // detayı açık kaldıysa perde AÇIK bırakılır (gerekirse yeniden açılır) ve sadece kırpma
+  // katmanı gizlenir.
   var wrap=document.getElementById('sheetWrap');
-  if(wrap)wrap.classList.remove('open');
   var cc=document.getElementById('chatScreenContent');
   var sc=document.getElementById('sheetContent');
   // TEŞHİS DÜZELTMESİ (kullanıcı bildirdi: "sohbetten atılma sorunu hâlâ devam ediyor" -
@@ -15560,10 +15591,31 @@ function closeVideoTrimmerSheet(){
   // kaynaklanıyordu - saf bir display değişimiydi, renderChatScreen() çağrılmamıştı. ÇÖZÜM:
   // bu an da bir "render" olarak damgalanır - böylece teşhis paneli artık bu ZARARSIZ geçişi
   // "geç yüklenen medya" gibi YANLIŞ raporlamaz, gerçek sıçramalar hâlâ yakalanmaya devam eder.
-  if(_chatOpen&&cc){
+  var chatAltta=!!(_chatOpen&&cc);
+  // Kırpma ekranı bir MAÇIN yorum kutusundan açıldıysa, openSheet() #sheetContent'in içeriğini
+  // (yani maç detayını) kırpma arayüzüyle ÜZERİNE YAZMIŞ olur - o yüzden burada sadece perdeyi
+  // açık bırakmak yetmez, maç detayı içeriği yeniden çizilmelidir. Yoksa kullanıcı kırpma
+  // bittiğinde maç detayı yerine kırpma ekranının kalıntısıyla baş başa kalırdı.
+  var macAltta=!chatAltta&&(typeof _mdMatchId!=='undefined'&&!!_mdMatchId);
+  if(chatAltta){
     cc.style.display='block';if(sc)sc.style.display='none';
     window._ptLastRenderTs=Date.now();
+  }else if(macAltta){
+    if(cc)cc.style.display='none';
+    if(sc)sc.style.display='block';
+    try{if(typeof renderMatchDetailContent==='function')renderMatchDetailContent();}
+    catch(err){console.error('Maç detayı geri yükleme hatası:',err);}
+    window._ptLastRenderTs=Date.now();
   }
+  // Perde kararı EN SONA bırakılır (yukarıdaki display değişikliklerinden sonra), böylece
+  // görünür hale gelen katman zaten doğru olan katmandır - bir kare bile yanlış içerik yanıp
+  // sönmez.
+  if(wrap){
+    if(chatAltta||macAltta)wrap.classList.add('open');
+    else wrap.classList.remove('open');
+  }
+  // Kırpma katmanı geri yığınında hayalet bir adım bırakmasın (bkz. PTSheetNav.dismissTop).
+  if(window.PTSheetNav&&typeof PTSheetNav.dismissTop==='function')PTSheetNav.dismissTop();
 }
 window.cancelVideoTrim=function(){
   closeVideoTrimmerSheet();
