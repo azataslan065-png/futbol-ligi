@@ -1202,7 +1202,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-S';
+window.APP_BUILD='2026-08-15-T';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5790,22 +5790,88 @@ function renderVideoLinkAdmin(){
       +'<input value="'+(v.title||'').replace(/"/g,'&quot;')+'" placeholder="Başlık (kullanıcı bunu görecek)" oninput="setVideoLinkField('+i+',\'title\',this.value)" style="flex:1;font-size:.74rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif"/>'
       +'<button onclick="removeVideoLink('+i+')" style="flex-shrink:0;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:.3rem .6rem;font-size:.7rem;font-weight:700;cursor:pointer">✕</button>'
       +'</div>'
-      +'<input value="'+(v.url||'').replace(/"/g,'&quot;')+'" placeholder="https://youtube.com/... , https://twitch.tv/... , vimeo/dailymotion/facebook/instagram/x veya doğrudan video linki" oninput="setVideoLinkField('+i+',\'url\',this.value)" style="width:100%;font-size:.7rem;padding:.35rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;margin-bottom:.4rem"/>'
+      +'<input value="'+(v.url||'').replace(/"/g,'&quot;')+'" placeholder="YouTube/Twitch/Kick/Vimeo/Dailymotion/Facebook/Instagram/X/TikTok/Rumble/Streamable linki, gömme (embed) adresi, &lt;iframe&gt; kodu veya doğrudan video/m3u8 linki" oninput="setVideoLinkField('+i+',\'url\',this.value)" style="width:100%;font-size:.7rem;padding:.35rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;margin-bottom:.4rem"/>'
       +'<label style="display:flex;align-items:center;gap:.4rem;font-size:.68rem;color:var(--mu);cursor:pointer">'
       +'<input type="checkbox" '+(v.isLive?'checked':'')+' onchange="setVideoLinkField('+i+',\'isLive\',this.checked)" style="width:15px;height:15px;cursor:pointer"/>'
       +'🔴 Bu bir canlı yayın (📡 TV sekmesinde, "CANLI" rozetiyle gösterilir - işaretsiz bırakılırsa 🎬 Video sekmesinde gösterilir)'
       +'</label>'
+      +'<div id="vlCheck_'+i+'" style="font-size:.62rem;line-height:1.5;margin-top:.4rem;color:var(--mu)"></div>'
       +'</div>';
   }).join('');
+  links.forEach(function(_,i){updateVideoLinkCheck(i);});
 }
 function setVideoLinkField(i,field,val){
   if(!window._editVideoLinks||!window._editVideoLinks[i])return;
   window._editVideoLinks[i][field]=val;
+  if(field==='url')updateVideoLinkCheck(i);
 }
+// ── LİNK DENETİMİ ──
+// KULLANICI TALEBİ: "Admin canlı yayın linki veya video linki eklediğinde SADECE ilgili video
+// görünecek, site içeriği değil." Puan Tablosu tarafı artık bunu GARANTİ ediyor: videoyu
+// izole edemediği linkleri uygulamanın içine GÖMMÜYOR, yeni sekmede açıyor. Ancak admin'in
+// bunu KAYDETMEDEN ÖNCE bilmesi gerekir - aksi halde "linki ekledim ama gömülü oynamıyor"
+// sürprizi yaşanır. Bu yüzden link yazılırken anında hangi davranışın geçerli olacağı
+// gösterilir ve mümkünse daha iyi bir link önerilir.
+function admVideoLinkCozumle(raw){
+  var s=String(raw||'').trim();
+  var ifr=s.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+  if(ifr)s=ifr[1];
+  s=s.replace(/&amp;/g,'&').trim();
+  if(/^\/\//.test(s))s='https:'+s;
+  if(!s)return {durum:'bos'};
+  if(!/^https?:\/\//i.test(s))return {durum:'gecersiz',url:s};
+  var host='';
+  try{host=new URL(s).hostname.toLowerCase();}catch(e){return {durum:'gecersiz',url:s};}
+  function ana(list){return list.some(function(b){return host===b||host.endsWith('.'+b);});}
+  var platform=null;
+  if(ana(['youtube.com','youtu.be','youtube-nocookie.com'])){
+    if(/(?:watch\?v=|\/live\/|\/shorts\/|\/embed\/)[A-Za-z0-9_-]{6,}/.test(s)||/youtu\.be\/[A-Za-z0-9_-]{6,}/.test(s))platform='YouTube';
+    else return {durum:'eksik',url:s,ipucu:'YouTube linki bir video/canlı yayın adresi olmalı (ör. .../watch?v=... veya .../live/...). Kanal ana sayfası gömülemez.'};
+  }
+  else if(ana(['twitch.tv'])&&/twitch\.tv\/(?:videos\/\d+|[A-Za-z0-9_]+(?:$|[/?]))/.test(s))platform='Twitch';
+  else if(ana(['vimeo.com','player.vimeo.com'])&&/\d{6,}/.test(s))platform='Vimeo';
+  else if(ana(['dailymotion.com','dai.ly']))platform='Dailymotion';
+  else if(ana(['facebook.com','fb.watch']))platform='Facebook';
+  else if(ana(['instagram.com'])&&/\/(p|reel|tv)\//.test(s))platform='Instagram';
+  else if(ana(['twitter.com','x.com'])&&/\/status\/\d+/.test(s))platform='X (Twitter)';
+  else if(ana(['kick.com']))platform='Kick';
+  else if(ana(['rumble.com'])&&/\/embed\//.test(s))platform='Rumble';
+  else if(ana(['rumble.com']))return {durum:'eksik',url:s,ipucu:'Rumble için videonun GÖMME (embed) adresini kullanın - video sayfasındaki "Embed" düğmesinden alınır.'};
+  else if(ana(['streamable.com']))platform='Streamable';
+  else if(ana(['tiktok.com'])&&/\/video\/\d{6,}/.test(s))platform='TikTok';
+  else if(ana(['ok.ru','odnoklassniki.ru'])&&/\/video\/\d+/.test(s))platform='OK.ru';
+  if(platform)return {durum:'video',url:s,platform:platform};
+  if(/\.(m3u8|mpd)(\?|#|$)/i.test(s))return {durum:'video',url:s,platform:'Canlı yayın akışı (HLS/DASH)'};
+  if(/\.(mp4|webm|ogg|ogv|m4v|mov)(\?|#|$)/i.test(s))return {durum:'video',url:s,platform:'Doğrudan video dosyası'};
+  var path='';
+  try{var u=new URL(s);path=u.pathname+u.search;}catch(e){path=s;}
+  if(/^player\.|^embed\./i.test(host)||/\/embed(?:\/|\?|$)/i.test(path)||/\/player(?:\/|\?|$)/i.test(path)||/\/iframe(?:\/|\?|$)/i.test(path))
+    return {durum:'video',url:s,platform:'Oynatıcı (embed) sayfası'};
+  return {durum:'harici',url:s,host:host};
+}
+window.admVideoLinkCozumle=admVideoLinkCozumle;
+function updateVideoLinkCheck(i){
+  var el=qs('vlCheck_'+i);
+  if(!el)return;
+  var v=window._editVideoLinks&&window._editVideoLinks[i];
+  var r=admVideoLinkCozumle(v&&v.url);
+  if(r.durum==='bos'){el.style.color='var(--mu)';el.innerHTML='Link girilmedi';return;}
+  if(r.durum==='gecersiz'){el.style.color='#f87171';el.innerHTML='❌ Geçersiz adres - https:// ile başlayan tam bir link yapıştırın';return;}
+  if(r.durum==='eksik'){el.style.color='#f59e0b';el.innerHTML='⚠️ '+r.ipucu;return;}
+  if(r.durum==='video'){el.style.color='#34d399';el.innerHTML='✅ '+r.platform+' - uygulamada SADECE video görünecek (site içeriği görünmez)';return;}
+  el.style.color='#f59e0b';
+  el.innerHTML='⚠️ Bu adresten videoyu ayıklayamıyoruz ('+r.host+'). Sitenin tamamını uygulamanın içinde göstermemek için bu link gömülmez; kullanıcı "▶️ Yayını Aç" düğmesiyle yayını yeni sekmede açar.<br>Gömülü oynatmak isterseniz: sayfadaki videonun <b>gömme (embed) adresini</b> ya da <b>&lt;iframe&gt; kodunu</b> buraya yapıştırın - ikisini de kabul ediyoruz.';
+}
+window.updateVideoLinkCheck=updateVideoLinkCheck;
 function removeVideoLink(i){window._editVideoLinks.splice(i,1);renderVideoLinkAdmin();}
 function saveVideoLinkSettings(){
   var links=(window._editVideoLinks||[]).slice();
   if(links.some(function(v){return !v.title.trim()||!v.url.trim();})){toast('❌ Tüm linkler için başlık ve link girin (veya eksik olanı kaldırın)','er');return;}
+  // Gömme kodu / protokolsüz adres girildiyse KAYDEDİLİRKEN temiz adrese indirgenir - böylece
+  // Puan Tablosu tarafı her zaman düzgün bir adresle çalışır.
+  links.forEach(function(v){var r=admVideoLinkCozumle(v.url);if(r.url)v.url=r.url;});
+  var haricilar=links.filter(function(v){return admVideoLinkCozumle(v.url).durum==='harici';});
+  if(haricilar.length&&!confirm(haricilar.length+' link için videoyu ayıklayamıyoruz. Bu linkler uygulamanın içine GÖMÜLMEYECEK (site içeriği görünmesin diye), kullanıcı yayını yeni sekmede açacak.\n\nYine de kaydedilsin mi?'))return;
   S.videoLinks=links;
   logAction('📺 Video/Canlı yayın ayarları güncellendi ('+S.videoLinks.length+' link)');
   save().then(function(){toast('✅ Video ayarları kaydedildi');});

@@ -1188,7 +1188,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-S';
+window.APP_BUILD='2026-08-15-T';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -17917,6 +17917,46 @@ function isKnownVideoHost(hostname,bases){
 // başka bir sitenin İÇİNE gömülmeyi ENGELLER, istemci tarafı kodla AŞILAMAZ - bu yüzden
 // onlar için "sadece video görünsün" vaadi, gömmeyi ZORLAMAK yerine YENİ SEKMEDE (site
 // bizim uygulamamızın İÇİNE hiç girmeden) açmakla karşılanır.
+// KULLANICI TALEBİ: "Admin canlı yayın linki veya video linki eklediğinde SADECE ilgili video
+// görünecek, site içeriği değil." Bu üç parçalı bir çözüm gerektirir:
+//   1) Admin ne yapıştırırsa yapıştırsın (ham link, gömme kodu, protokolsüz //adres) önce
+//      TEMİZ bir adrese indirgenir - bkz. ptExtractVideoUrl.
+//   2) Adres, ilgili platformun KENDİ resmi oynatıcı adresine çevrilir - o oynatıcı sayfası
+//      zaten sadece videoyu içerir, sitenin menüsü/akışı/reklamı YOKTUR.
+//   3) Hiçbiri olmuyorsa site ARTIK gömülmez (önceden ham URL bir iframe'e veriliyor ve
+//      sitenin TAMAMI - menüler, öneri listeleri, reklamlar - uygulamanın içinde görünüyordu,
+//      şikayet edilen davranış tam olarak buydu). Bunun yerine "Yayını Aç" kartı gösterilir
+//      ve site uygulamanın İÇİNE hiç girmeden yeni sekmede açılır.
+function ptExtractVideoUrl(raw){
+  if(!raw)return '';
+  let s=String(raw).trim();
+  // Admin bir <iframe ...> gömme kodu yapıştırdıysa içindeki adres alınır - böylece gömme
+  // kodu vermek de desteklenmiş olur (bu kodlar zaten SADECE oynatıcıyı gösterir).
+  const ifr=s.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+  if(ifr)s=ifr[1];
+  s=s.replace(/&amp;/g,'&').trim();
+  if(/^\/\//.test(s))s='https:'+s;
+  return s;
+}
+window.ptExtractVideoUrl=ptExtractVideoUrl;
+// Adresin KENDİSİ zaten bir oynatıcı/gömme sayfası mı? (ör. .../embed/xyz, player.site.com/…)
+// Böyle sayfalar tanım gereği sadece videoyu içerir - bunları gömmek "site içeriği" göstermez.
+function ptIsPlayerOnlyUrl(url){
+  if(!url)return false;
+  const host=getUrlHostname(url);
+  let path='';
+  try{const u=new URL(url,location.href);path=u.pathname+u.search;}catch(e){path=url;}
+  if(/^player\.|^embed\./i.test(host))return true;
+  return /\/embed(?:\/|\?|$)/i.test(path)||/\/player(?:\/|\?|$)/i.test(path)||/\/iframe(?:\/|\?|$)/i.test(path)||/[?&](?:embed|player)=(?:1|true|yes)/i.test(path);
+}
+window.ptIsPlayerOnlyUrl=ptIsPlayerOnlyUrl;
+// Doğrudan medya dosyası mı? (m3u8/mpd = canlı yayın akışı - bunlar da <video> ile oynatılır)
+function ptIsDirectMediaUrl(url){
+  return /\.(mp4|webm|ogg|ogv|m4v|mov)(\?|#|$)/i.test(url||'')||ptIsStreamUrl(url);
+}
+function ptIsStreamUrl(url){
+  return /\.(m3u8|mpd)(\?|#|$)/i.test(url||'');
+}
 function isEmbeddableVideoUrl(url){
   if(!url)return false;
   const host=getUrlHostname(url);
@@ -17941,7 +17981,24 @@ function isEmbeddableVideoUrl(url){
   if(isKnownVideoHost(host,['twitter.com','x.com'])){
     return /\/status\/\d+/.test(url);
   }
-  if(/\.(mp4|webm|ogg|m3u8)(\?|$)/i.test(url))return true; // Doğrudan video dosyası - platformdan bağımsız, dosya uzantısı yeterli.
+  // KULLANICI TALEBİ: Aşağıdaki platformların HEPSİ resmi, SADECE OYNATICI içeren bir gömme
+  // adresi sunar - listeye eklendiler ki bu linkler de "site içeriği" olmadan açılsın.
+  if(isKnownVideoHost(host,['kick.com'])){
+    return /kick\.com\/(?:video\/)?[A-Za-z0-9_-]+/.test(url);
+  }
+  if(isKnownVideoHost(host,['rumble.com'])){
+    return /rumble\.com\/(?:embed\/)?[A-Za-z0-9._-]+/.test(url);
+  }
+  if(isKnownVideoHost(host,['streamable.com'])){
+    return /streamable\.com\/(?:e\/)?[A-Za-z0-9]+/.test(url);
+  }
+  if(isKnownVideoHost(host,['tiktok.com'])){
+    return /\/video\/(\d{6,})/.test(url);
+  }
+  if(isKnownVideoHost(host,['ok.ru','odnoklassniki.ru'])){
+    return /\/video\/(\d+)/.test(url);
+  }
+  if(ptIsDirectMediaUrl(url))return true; // Doğrudan video/akış dosyası - platformdan bağımsız.
   return false;
 }
 // Bir video/canlı yayın linkini platformuna göre GÖMÜLÜ (embed) oynatıcıya çevirir.
@@ -17992,8 +18049,39 @@ function buildVideoEmbedHtml(url){
       if(tw)return `<iframe src="https://platform.twitter.com/embed/Tweet.html?id=${tw[1]}&theme=dark" style="width:100%;min-height:400px;border:none;border-radius:14px" allow="autoplay;encrypted-media"></iframe>`;
       return '';
     }
-    if(/\.(mp4|webm|ogg|m3u8)(\?|$)/i.test(url)){
-      return `<video id="ptVideoEl" src="${url}" controls autoplay playsinline style="width:100%;border-radius:14px;background:#000"></video>`;
+    if(isKnownVideoHost(host,['kick.com'])){
+      const kv=url.match(/kick\.com\/video\/([A-Za-z0-9-]+)/);
+      const kc=url.match(/kick\.com\/([A-Za-z0-9_-]+)(?:$|[/?])/);
+      if(kv)return `<iframe src="https://player.kick.com/video/${kv[1]}?autoplay=true" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
+      if(kc)return `<iframe src="https://player.kick.com/${kc[1]}?autoplay=true" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['rumble.com'])){
+      const rm=url.match(/rumble\.com\/embed\/([A-Za-z0-9._-]+)/);
+      if(rm)return `<iframe src="https://rumble.com/embed/${rm[1]}/?pub=4" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
+      return ''; // Gömme kimliği olmayan Rumble sayfası - site gömülmez, harici açılır.
+    }
+    if(isKnownVideoHost(host,['streamable.com'])){
+      const sm=url.match(/streamable\.com\/(?:e\/)?([A-Za-z0-9]+)/);
+      if(sm)return `<iframe src="https://streamable.com/e/${sm[1]}?autoplay=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['tiktok.com'])){
+      const tk=url.match(/\/video\/(\d{6,})/);
+      if(tk)return `<iframe src="https://www.tiktok.com/embed/v2/${tk[1]}" style="width:100%;aspect-ratio:9/16;max-height:70vh;border:none;border-radius:14px;background:#000" allow="autoplay;encrypted-media;fullscreen" allowfullscreen></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['ok.ru','odnoklassniki.ru'])){
+      const ok=url.match(/\/video\/(\d+)/);
+      if(ok)return `<iframe src="https://ok.ru/videoembed/${ok[1]}?autoplay=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
+      return '';
+    }
+    if(ptIsDirectMediaUrl(url)){
+      // Canlı yayın akışları (m3u8/mpd) bazı tarayıcılarda yerleşik desteklenmez - bu durumda
+      // ptAttachStreamPlayer devreye girip akışı çözer. Her iki durumda da ekranda SADECE
+      // oynatıcı vardır, hiçbir site içeriği yoktur.
+      if(ptIsStreamUrl(url))window._ptPendingStreamUrl=url;
+      return `<video id="ptVideoEl" src="${ptIsStreamUrl(url)?'':url}" controls autoplay playsinline style="width:100%;border-radius:14px;background:#000"></video>`;
     }
     return '';
   }catch(e){
@@ -18060,8 +18148,52 @@ function buildExternalWatchCardHtml(videoId,isLive){
 // user-activation) - bu, sandbox'sız bir iframe'de mümkün olan en tehlikeli senaryodur
 // (sessiz sayfa ele geçirme/yönlendirme). referrerpolicy=no-referrer, bizim site adresimizin
 // üçüncü taraf platforma sızmasını önler.
+// KULLANICI TALEBİ ("sadece ilgili video görünecek, site içeriği değil"): Bu fonksiyon ARTIK
+// yalnızca adresin KENDİSİ bir oynatıcı/gömme sayfası olduğunda (bkz. ptIsPlayerOnlyUrl)
+// kullanılır. Önceden whitelist DIŞINDAKİ HER link ham hâliyle bir iframe'e veriliyordu -
+// platform engellemediyse videonun yanında sitenin menüsü, öneri listesi ve reklamları da
+// uygulamanın içinde görünüyordu; şikayet edilen davranış buydu. Artık böyle linkler gömülmez,
+// "Yayını Aç" kartıyla yeni sekmede açılır ve sitenin hiçbir içeriği uygulamaya girmez.
+// GÜVENLİK: sandbox, gömülü sayfanın ana pencereyi kullanıcı etkileşimi OLMADAN başka bir
+// adrese yönlendirmesini engeller; referrerpolicy=no-referrer site adresimizin sızmasını önler.
 function buildGenericIframeEmbedHtml(url){
   return `<iframe src="${url}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px;background:#000" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen referrerpolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox allow-forms allow-top-navigation-by-user-activation"></iframe>`;
+}
+// Canlı yayın akışlarını (m3u8/mpd) oynatır. Safari/iOS bunları yerleşik destekler; diğer
+// tarayıcılarda hls.js tarayıcı içinde çözer. Ekranda yine SADECE oynatıcı vardır.
+function ptAttachStreamPlayer(){
+  const url=window._ptPendingStreamUrl;
+  window._ptPendingStreamUrl=null;
+  if(!url)return;
+  const vid=document.getElementById('ptVideoEl');
+  if(!vid)return;
+  if(vid.canPlayType('application/vnd.apple.mpegurl')){
+    vid.src=url;
+    vid.play().catch(function(){});
+    return;
+  }
+  if(window.Hls&&window.Hls.isSupported()){_ptHlsBagla(vid,url);return;}
+  const s=document.createElement('script');
+  s.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js';
+  s.onload=function(){
+    if(window.Hls&&window.Hls.isSupported())_ptHlsBagla(vid,url);
+    else{vid.src=url;vid.play().catch(function(){});}
+  };
+  s.onerror=function(){vid.src=url;vid.play().catch(function(){});};
+  document.head.appendChild(s);
+}
+function _ptHlsBagla(vid,url){
+  try{
+    if(window._ptHls){try{window._ptHls.destroy();}catch(e){DiagSil('ptAttachStreamPlayer',e);}}
+    const hls=new window.Hls({lowLatencyMode:true});
+    window._ptHls=hls;
+    hls.loadSource(url);
+    hls.attachMedia(vid);
+    hls.on(window.Hls.Events.MANIFEST_PARSED,function(){vid.play().catch(function(){});});
+  }catch(e){
+    DiagSil('ptAttachStreamPlayer',e);
+    vid.src=url;vid.play().catch(function(){});
+  }
 }
 // KULLANICI TALEBİ: Oynatıcıya tam ekran modu. Fullscreen API #videoPlayerBox konteynerine
 // uygulanır (bkz. yukarıdaki CSS) - iOS Safari konteyner tam ekranını desteklemediğinden,
@@ -18088,7 +18220,9 @@ window.openVideoWatch=function(videoId){
   const v=(D.videoLinks||[]).find(function(x){return x.id===videoId;});
   if(!v){showToast('❌ Video bulunamadı');return;}
   const liveTag=v.isLive?'<span style="background:#ef4444;color:#fff;font-size:.6rem;font-weight:800;padding:.15rem .5rem;border-radius:7px;margin-left:.5rem;vertical-align:middle">🔴 CANLI</span>':'';
-  const url=v.url||'';
+  // Admin ham link, gömme kodu veya protokolsüz adres girmiş olabilir - hepsi tek bir temiz
+  // adrese indirgenir (bkz. ptExtractVideoUrl).
+  const url=ptExtractVideoUrl(v.url||'');
   const embeddable=isEmbeddableVideoUrl(url);
   // KULLANICI TALEBİ (B seçeneği): whitelist'teki (YouTube/Twitch/Vimeo/Dailymotion/
   // Facebook/Instagram/X/doğrudan dosya) linkler ÖNCEDEN OLDUĞU GİBİ temiz, resmi embed
@@ -18101,10 +18235,13 @@ window.openVideoWatch=function(videoId){
     const known=buildVideoEmbedHtml(url);
     if(known){playerHtml=known;isIframeLike=true;}
     else{playerHtml=buildExternalWatchCardHtml(videoId,v.isLive);}
-  }else if(/^https?:\/\//i.test(url)){
+  }else if(/^https?:\/\//i.test(url)&&ptIsPlayerOnlyUrl(url)){
+    // Adresin KENDİSİ bir oynatıcı/gömme sayfası - içinde site menüsü/akışı yoktur, gömülebilir.
     playerHtml=buildGenericIframeEmbedHtml(url);
     isIframeLike=true;showFallbackHint=true;
   }else{
+    // KULLANICI TALEBİ: Videoyu izole edemediğimiz linkler ARTIK gömülmez - sitenin tamamını
+    // uygulamanın içinde göstermektense, yayın yeni sekmede kendi platformunda açılır.
     playerHtml=buildExternalWatchCardHtml(videoId,v.isLive);
   }
   const fsBtn=isIframeLike?`<button onclick="togglePtVideoFullscreen()" title="Tam Ekran" aria-label="Tam Ekran" style="position:absolute;top:.5rem;right:.5rem;z-index:5;background:rgba(0,0,0,.55);border:none;border-radius:8px;width:32px;height:32px;color:#fff;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center">⛶</button>`:'';
@@ -18116,6 +18253,8 @@ window.openVideoWatch=function(videoId){
     <div style="font-size:.88rem;font-weight:900;margin-bottom:.7rem">${(v.title||'İsimsiz Video').replace(/</g,'&lt;')}${liveTag}</div>
     <div id="videoPlayerBox" style="position:relative;border-radius:14px;overflow:hidden">${playerHtml}${fsBtn}</div>${fallbackHint}`;
   document.getElementById('sheetContent').innerHTML=html;
+  // Canlı yayın akışı (m3u8/mpd) varsa oynatıcı DOM'a girdikten sonra bağlanır.
+  ptAttachStreamPlayer();
   if(window.PTSheetNav)PTSheetNav.mark('videoWatch_'+videoId);
   document.getElementById('sheetWrap').classList.add('open');
 };
