@@ -1188,7 +1188,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-R';
+window.APP_BUILD='2026-08-15-S';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -1632,49 +1632,132 @@ function syncPendingMediaPreviews(matchId,tries){
 // options: {maxDim (varsayılan 1000px, en uzun kenar), quality (varsayılan .8), squareSize
 // (verilirse kare kırpma yapılır, avatar gibi), maxMB (varsayılan 10), onProgress(loaded,total)}
 // callback(err, publicUrl) şeklinde çağrılır - hem başarı hem hata TEK yoldan bildirilir.
+// ── FOTOĞRAF SINIRLARI (tek merkez) ──
+// KULLANICI TALEBİ: "Maksimum fotoğraf yükleme bilgisini kullanıcıya ve admine göster."
+// Sınırlar artık koda dağılmış sabitler değil; buradan okunur ve arayüzde de BURADAN
+// üretilen metinle gösterilir - bir yerde değişince her yerde tutarlı kalır.
+const PT_MAX_PHOTOS=6;          // Bir mesaja eklenebilecek fotoğraf adedi
+const PT_MAX_PHOTO_MB=15;       // Tek fotoğrafın ham dosya boyutu sınırı
+const PT_PHOTO_HARD_MB=60;      // Bu boyutun üstü cihaz belleğini kilitleyebilir - kesin ret
+window.PT_MAX_PHOTOS=PT_MAX_PHOTOS;
+window.PT_MAX_PHOTO_MB=PT_MAX_PHOTO_MB;
+function ptPhotoLimitText(){
+  return 'En fazla '+PT_MAX_PHOTOS+' fotoğraf · tek dosya en fazla '+PT_MAX_PHOTO_MB+'MB (daha büyükse düzenleme ekranı açılır) · HEIC/HEIF dahil tüm formatlar';
+}
+window.ptPhotoLimitText=ptPhotoLimitText;
+
+// ── HEIC/HEIF DESTEĞİ ──
+// KULLANICI BİLDİRDİ (ekran görüntüsü): "1000165091.heic yüklenemedi: HEIC/HEIF formatında,
+// desteklenmiyor." - HEIC, iPhone'ların VARSAYILAN fotoğraf formatı; yani kullanıcı hiçbir
+// ayar değiştirmeden çektiği fotoğrafı gönderemiyordu. Önceki davranış dosyayı UZANTIDAN
+// tanıyıp PEŞİNEN reddetmekti; oysa bazı tarayıcılar (Safari ve yeni Chrome sürümleri) HEIC'i
+// zaten açabiliyor, açamayanlar için de tarayıcı içinde çalışan bir dönüştürücü var. Artık
+// sıra şu: (1) tarayıcı kendisi açsın, (2) açamazsa heic2any ile JPEG'e çevirip aç, (3) o da
+// olmazsa NET bir hata ver. Yani reddetme artık İLK değil SON çare.
+function ptEnsureHeicLib(cb){
+  if(window.heic2any){cb(null);return;}
+  if(window._ptHeicLibLoading){window._ptHeicLibWaiters=(window._ptHeicLibWaiters||[]).concat(cb);return;}
+  window._ptHeicLibLoading=true;window._ptHeicLibWaiters=[cb];
+  const s=document.createElement('script');
+  s.src='https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+  s.onload=function(){
+    window._ptHeicLibLoading=false;
+    (window._ptHeicLibWaiters||[]).forEach(function(f){try{f(window.heic2any?null:new Error('dönüştürücü yüklenemedi'));}catch(e){DiagSil('ptEnsureHeicLib',e);}});
+    window._ptHeicLibWaiters=[];
+  };
+  s.onerror=function(){
+    window._ptHeicLibLoading=false;
+    (window._ptHeicLibWaiters||[]).forEach(function(f){try{f(new Error('dönüştürücü indirilemedi (internet bağlantınızı kontrol edin)'));}catch(e){DiagSil('ptEnsureHeicLib',e);}});
+    window._ptHeicLibWaiters=[];
+  };
+  document.head.appendChild(s);
+}
+// Bir görsel dosyasını (HEIC/HEIF dahil) çözüp yüklenmiş bir <img> döndürür.
+// callback(err, img, kullanilanBlob)
+function ptDecodeImageFile(file,callback){
+  let settled=false;
+  function bitir(err,img,blob){if(settled)return;settled=true;callback(err,img,blob);}
+  function yukle(blob,sonAsama){
+    const url=URL.createObjectURL(blob);
+    const img=new Image();
+    img.onload=function(){URL.revokeObjectURL(url);bitir(null,img,blob);};
+    img.onerror=function(){
+      URL.revokeObjectURL(url);
+      if(sonAsama){bitir(new Error((file.name||'Fotoğraf')+' açılamadı. Dosya bozuk olabilir veya desteklenmeyen bir format'));return;}
+      // Tarayıcı açamadı - HEIC/HEIF dönüştürücüsünü dene.
+      if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Tarayıcı görseli açamadı, HEIC dönüştürücüsü deneniyor',{dosyaAdi:file.name,tur:file.type||'(boş)'},5000);
+      ptEnsureHeicLib(function(libErr){
+        if(libErr){bitir(new Error((file.name||'Fotoğraf')+' bu tarayıcıda açılamadı ('+libErr.message+')'));return;}
+        window.heic2any({blob:file,toType:'image/jpeg',quality:.9})
+          .then(function(out){yukle(Array.isArray(out)?out[0]:out,true);})
+          .catch(function(){bitir(new Error((file.name||'Fotoğraf')+' dönüştürülemedi, lütfen JPEG/PNG olarak tekrar deneyin'));});
+      });
+    };
+    img.src=url;
+  }
+  // Uzantısı/türü zaten HEIC ise, bazı tarayıcılarda <img> SESSİZCE boş bir görsel
+  // yüklediğinden (hata bile vermeden) doğrudan dönüştürücüye gidilir.
+  const heicMi=/\.(heic|heif)$/i.test(file.name||'')||file.type==='image/heic'||file.type==='image/heif';
+  if(heicMi&&!window._ptHeicNativeOk){
+    ptEnsureHeicLib(function(libErr){
+      if(libErr){yukle(file,false);return;} // dönüştürücü yoksa yine de tarayıcıyı dene
+      window.heic2any({blob:file,toType:'image/jpeg',quality:.9})
+        .then(function(out){yukle(Array.isArray(out)?out[0]:out,true);})
+        .catch(function(){yukle(file,false);});
+    });
+    return;
+  }
+  yukle(file,false);
+}
+window.ptDecodeImageFile=ptDecodeImageFile;
 function uploadImageToSupabase(file,folder,options,callback){
   options=options||{};
   if(!supabaseClient){callback(new Error('Yükleme servisi şu an kullanılamıyor, sayfayı yenileyip tekrar deneyin'));return;}
-  if(!file||!file.type||!file.type.startsWith('image/')){callback(new Error(file&&file.name?file.name+' bir resim dosyası değil':'Geçerli bir görsel seçilmedi'));return;}
-  const maxMB=options.maxMB||10;
-  if(file.size>maxMB*1024*1024){callback(new Error(file.name+' '+maxMB+'MB üstü'));return;}
-  // HEIC/HEIF (iPhone varsayılan formatı) çoğu tarayıcıda <img>/<canvas> ile decode edilemez.
-  const isHeic=/\.(heic|heif)$/i.test(file.name)||file.type==='image/heic'||file.type==='image/heif';
-  if(isHeic){callback(new Error(file.name+' HEIC/HEIF formatında, desteklenmiyor. JPEG/PNG olarak tekrar deneyin'));return;}
-  const reader=new FileReader();
-  reader.onload=function(e){
-    const img=new Image();
-    img.onload=function(){
-      const maxDim=options.maxDim||1000;
-      const quality=options.quality||.8;
-      const squareSize=options.squareSize;
-      const canvas=document.createElement('canvas');
-      const ctx=canvas.getContext('2d');
-      if(squareSize){
-        canvas.width=squareSize;canvas.height=squareSize;
-        const scale=Math.max(squareSize/img.width,squareSize/img.height);
-        const w=img.width*scale,h=img.height*scale;
-        ctx.drawImage(img,(squareSize-w)/2,(squareSize-h)/2,w,h);
-      }else{
-        const scale=Math.min(1,maxDim/Math.max(img.width,img.height));
-        canvas.width=Math.max(1,Math.round(img.width*scale));
-        canvas.height=Math.max(1,Math.round(img.height*scale));
-        ctx.drawImage(img,0,0,canvas.width,canvas.height);
-      }
+  if(!file||!file.type||!file.type.startsWith('image/')){
+    // HEIC bazı cihazlarda BOŞ bir MIME türüyle gelir - uzantıya da bakılır, aksi halde
+    // iPhone fotoğrafları "resim değil" diye reddediliyordu.
+    const uzantiGorsel=/\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test((file&&file.name)||'');
+    if(!uzantiGorsel){callback(new Error(file&&file.name?file.name+' bir resim dosyası değil':'Geçerli bir görsel seçilmedi'));return;}
+  }
+  // KULLANICI TALEBİ: Ham dosya boyutu artık PEŞİNEN reddedilmiyor - görsel zaten canvas ile
+  // küçültülüp yeniden kodlandığı için ÖNEMLİ olan SONUÇ boyutudur. Sadece cihaz belleğini
+  // kilitleyecek kadar devasa dosyalar (bkz. PT_PHOTO_HARD_MB) reddedilir.
+  if(file.size>PT_PHOTO_HARD_MB*1024*1024){callback(new Error((file.name||'Fotoğraf')+' çok büyük ('+(file.size/1024/1024).toFixed(1)+'MB) - en fazla '+PT_PHOTO_HARD_MB+'MB'));return;}
+  ptDecodeImageFile(file,function(decErr,img){
+    if(decErr){callback(decErr);return;}
+    const maxDim=options.maxDim||1000;
+    const quality=options.quality||.8;
+    const squareSize=options.squareSize;
+    const canvas=document.createElement('canvas');
+    const ctx=canvas.getContext('2d');
+    if(squareSize){
+      canvas.width=squareSize;canvas.height=squareSize;
+      const scale=Math.max(squareSize/img.width,squareSize/img.height);
+      const w=img.width*scale,h=img.height*scale;
+      ctx.drawImage(img,(squareSize-w)/2,(squareSize-h)/2,w,h);
+    }else{
+      const scale=Math.min(1,maxDim/Math.max(img.width,img.height));
+      canvas.width=Math.max(1,Math.round(img.width*scale));
+      canvas.height=Math.max(1,Math.round(img.height*scale));
+      ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    }
+    const maxMB=options.maxMB||10;
+    // Sonuç hâlâ sınırın üstündeyse kalite kademeli düşürülerek tekrar denenir - kullanıcıya
+    // "çok büyük" deyip vazgeçmek yerine sistem kendi çözer.
+    function kodla(q,deneme){
       canvas.toBlob(function(blob){
-        if(!blob){callback(new Error(file.name+' işlenemedi'));return;}
+        if(!blob){callback(new Error((file.name||'Fotoğraf')+' işlenemedi'));return;}
+        if(blob.size>maxMB*1024*1024&&deneme<3){kodla(Math.max(.4,q-.18),deneme+1);return;}
+        if(blob.size>maxMB*1024*1024){callback(new Error((file.name||'Fotoğraf')+' küçültüldükten sonra bile '+maxMB+'MB sınırının üstünde'));return;}
         const path=(folder||'genel')+'/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.jpg';
         _supabaseXhrUpload(blob,path,'image/jpeg',options.onProgress,function(err,publicUrl){
           if(err){console.error('Supabase görsel yükleme hatası:',err);callback(new Error(err.message||'bağlantı hatası'));return;}
           callback(null,publicUrl);
         });
-      },'image/jpeg',quality);
-    };
-    img.onerror=function(){callback(new Error(file.name+' okunamadı. Dosya bozuk olabilir veya desteklenmeyen bir format'));};
-    img.src=e.target.result;
-  };
-  reader.onerror=function(){callback(new Error('Dosya okunamadı, lütfen başka bir görsel deneyin'));};
-  reader.readAsDataURL(file);
+      },'image/jpeg',q);
+    }
+    kodla(quality,0);
+  });
 }
 // KULLANICI TALEBİ: Supabase Storage - VİDEOLAR için ortak yükleme yardımcı fonksiyonu.
 // handleCommentVideo'daki BİREBİR AYNI desen ortak bir yere taşındı ki geri bildirim,
@@ -10839,10 +10922,11 @@ function renderMdAnlatim(id,m,h,a){
       <div id="photoPreview_${id}" style="display:none;margin-bottom:.4rem"></div>
       <div id="videoPreview_${id}" style="display:none;margin-bottom:.4rem"></div>
       <div id="typingIndicator_match_${id}" style="display:none;font-size:.66rem;color:var(--mu);font-style:italic;margin-bottom:.3rem;padding-left:.2rem"></div>
+      <div style="font-size:.58rem;color:var(--mu);margin-bottom:.35rem;padding-left:.2rem;line-height:1.45">📷 ${escHtml(ptPhotoLimitText())}<br>🎬 En fazla 6 video · tek dosya en fazla ${MAX_VIDEO_MB}MB / ${MAX_VIDEO_SECONDS}sn (aşarsa kırpma ekranı açılır)</div>
       ${_isMuted?`<div style="background:rgba(239,68,68,.12);border:1.5px solid rgba(239,68,68,.35);border-radius:11px;padding:.6rem .7rem;text-align:center;font-size:.74rem;font-weight:700;color:#f87171">🔇 Bir yönetici tarafından susturuldunuz, yorum gönderemezsiniz</div>`:`
       <div style="display:flex;gap:.4rem;align-items:flex-end">
         <button onclick="triggerCommentPhoto('${id}')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:1rem;cursor:pointer">📷</button>
-        <input type="file" id="commentPhotoInp_${id}" accept="image/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentPhoto('${id}',this)"/>
+        <input type="file" id="commentPhotoInp_${id}" accept="image/*,.heic,.heif" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentPhoto('${id}',this)"/>
         <button onclick="openVideoMenu('${id}')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:1rem;cursor:pointer">🎬</button>
         <input type="file" id="commentVideoInp_${id}" accept="video/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentVideo('${id}',this)"/>
         <button onclick="openGifPicker('${id}')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:.72rem;font-weight:900;color:var(--ac3);cursor:pointer">GIF</button>
@@ -11971,10 +12055,13 @@ function renderChatScreen(){
     </button>
     <input type="hidden" id="chatMatchTag" value="${escAttr(_chatTaggedMatchId)}"/>
     <div id="typingIndicator_chat" style="display:none;font-size:.66rem;color:var(--mu);font-style:italic;margin-bottom:.3rem;padding-left:.2rem"></div>
+    <!-- KULLANICI TALEBİ: "Maksimum fotoğraf yükleme bilgisini kullanıcıya göster." Sınırlar
+         artık gizli değil; mesaj kutusunun hemen üstünde her zaman görünür. -->
+    <div style="font-size:.58rem;color:var(--mu);margin-bottom:.35rem;padding-left:.2rem;line-height:1.45">📷 ${escHtml(ptPhotoLimitText())}<br>🎬 En fazla 6 video · tek dosya en fazla ${MAX_VIDEO_MB}MB / ${MAX_VIDEO_SECONDS}sn (aşarsa kırpma ekranı açılır)</div>
     ${_isMuted?`<div style="background:rgba(239,68,68,.12);border:1.5px solid rgba(239,68,68,.35);border-radius:11px;padding:.6rem .7rem;text-align:center;font-size:.74rem;font-weight:700;color:#f87171">🔇 Bir yönetici tarafından susturuldunuz, mesaj gönderemezsiniz</div>`:`
     <div style="display:flex;gap:.4rem;align-items:flex-end">
       <button tabindex="-1" onclick="triggerCommentPhoto('chat')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:1rem;cursor:pointer">📷</button>
-      <input type="file" id="commentPhotoInp_chat" accept="image/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentPhoto('chat',this)"/>
+      <input type="file" id="commentPhotoInp_chat" accept="image/*,.heic,.heif" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentPhoto('chat',this)"/>
       <button tabindex="-1" onclick="openVideoMenu('chat')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:1rem;cursor:pointer">🎬</button>
       <input type="file" id="commentVideoInp_chat" accept="video/*" multiple style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleCommentVideo('chat',this)"/>
       <button tabindex="-1" onclick="openGifPicker('chat')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:11px;width:38px;height:38px;flex-shrink:0;font-size:.72rem;font-weight:900;color:var(--ac3);cursor:pointer">GIF</button>
@@ -14449,7 +14536,7 @@ window.openFeedbackForm=function(){
       <button onclick="document.getElementById('fbPhotoInp').click()" style="flex:1;background:var(--s2);border:1.5px solid var(--br);border-radius:10px;padding:.5rem;font-size:.72rem;color:var(--tx);cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">📷 Fotoğraf Ekle</button>
       <button onclick="document.getElementById('fbVideoInp').click()" style="flex:1;background:var(--s2);border:1.5px solid var(--br);border-radius:10px;padding:.5rem;font-size:.72rem;color:var(--tx);cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">🎬 Video Ekle</button>
     </div>
-    <input type="file" id="fbPhotoInp" accept="image/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleFeedbackPhoto(this)"/>
+    <input type="file" id="fbPhotoInp" accept="image/*,.heic,.heif" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleFeedbackPhoto(this)"/>
     <input type="file" id="fbVideoInp" accept="video/*" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none" onchange="handleFeedbackVideo(this)"/>
     <div id="fbMediaPreview" style="margin-bottom:.6rem"></div>
     <button onclick="submitFeedback()" style="width:100%;background:linear-gradient(135deg,#7c3aed,#d4af37);border:none;border-radius:12px;padding:.65rem;color:#fff;font-size:.82rem;font-weight:800;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">Gönder</button>
@@ -15754,7 +15841,7 @@ function closeVideoTrimmerSheet(){
       var _sc=document.getElementById('sheetContent');
       var _wrap=document.getElementById('sheetWrap');
       if(!_chatOpen||_dogrulamaSayaci>10){clearInterval(_dogrula);return;}
-      if(_sc&&_sc.style.display!=='none'&&_sc.querySelector('#trimConfirmBtn')){
+      if(_sc&&_sc.style.display!=='none'&&(_sc.querySelector('#trimConfirmBtn')||_sc.querySelector('#photoEditConfirmBtn'))){
         window._ptSuppressSheetObserver=true;
         _sc.style.display='none';
         if(_cc)_cc.style.display='block';
@@ -16228,7 +16315,7 @@ window.handleCommentPhoto=function(matchId,input){
   if(!files.length)return;
   input.value='';
   if(!_pendingPhoto[matchId])_pendingPhoto[matchId]=[];
-  const MAX_PHOTOS=6;
+  const MAX_PHOTOS=PT_MAX_PHOTOS;
   const remainingSlots=MAX_PHOTOS-_pendingPhoto[matchId].length;
   if(remainingSlots<=0){showToast('❌ En fazla '+MAX_PHOTOS+' fotoğraf ekleyebilirsiniz');return;}
   const toProcess=files.slice(0,remainingSlots);
@@ -16244,37 +16331,165 @@ window.handleCommentPhoto=function(matchId,input){
   // takılma riskini de büyük ölçüde azaltır.
   const progBox=document.getElementById(matchId==='chat'?'chatPhotoPreview':'photoPreview_'+matchId);
   toProcess.forEach(file=>{
-    if(!file.type||!file.type.startsWith('image/')){
+    const uzantiGorsel=/\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(file.name||'');
+    if((!file.type||!file.type.startsWith('image/'))&&!uzantiGorsel){
       if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Desteklenmeyen fotoğraf dosya türü reddedildi',{dosyaAdi:file.name,tur:file.type||'(boş)'},5000);
       showToast('❌ '+file.name+' bir resim dosyası değil, atlandı');return;
     }
-    // KULLANICI TALEBİ: "Fotoğraf yükleme çubuğu ekle, ne kadar sürede yükleneceğini
-    // göstersin" - önceki belirsiz "kayıyor" animasyonu yerine GERÇEK yüzde + tahmini
-    // kalan süre gösteren bir çubuk (bkz. renderUploadProgressRow).
-    const uploadId='p'+Date.now()+Math.random().toString(36).slice(2,6);
-    if(progBox){
-      progBox.style.display='flex';progBox.style.flexWrap='wrap';progBox.style.gap='.4rem';
-      progBox.innerHTML+=renderUploadProgressRow(uploadId,file.name);
+    // KULLANICI TALEBİ: "Sınırın üzerinde fotoğrafı hem admin hem de kullanıcı
+    // düzenleyebilir." - Sınırı aşan fotoğraf artık REDDEDİLMİYOR; videodaki kırpma ekranıyla
+    // aynı mantıkta bir DÜZENLEME ekranı açılır (boyut/kalite seçimi + canlı tahmini sonuç).
+    if(file.size>PT_MAX_PHOTO_MB*1024*1024){
+      openPhotoEditor(matchId,file);
+      return;
     }
-    const startTime=Date.now();
-    // HATA DÜZELTMESİ: bkz. scheduleChatRenderSafely - yükleme sürerken otomatik sohbet
-    // yeniden çizimleri atlanır (video yüklemesindeki AYNI kesinti/atılma sorununun
-    // fotoğrafta da yaşanmaması için).
-    window._ptActiveUploads=(window._ptActiveUploads||0)+1;
-    uploadImageToSupabase(file,'comments/'+(matchId||'genel'),{maxDim:900,quality:.78,onProgress:function(loaded,total,serverPhase){
-      updateUploadProgressUI(uploadId,loaded,total,startTime,serverPhase);
-    }},function(err,publicUrl){
-      window._ptActiveUploads=Math.max(0,(window._ptActiveUploads||0)-1);
-      removeUploadProgressRow(uploadId);
-      if(err){
-        showToast('❌ '+file.name+' yüklenemedi: '+err.message);
-        syncPendingMediaPreviews(matchId);
-        return;
-      }
+    processAndUploadCommentPhoto(matchId,file);
+  });
+};
+// Tek bir fotoğrafı (doğrudan seçilen VEYA düzenleme ekranından çıkan küçültülmüş hâli)
+// ilerleme çubuğuyla birlikte yükler - iki yol da AYNI fonksiyonu paylaşır.
+function processAndUploadCommentPhoto(matchId,file,displayName){
+  const adi=displayName||file.name||'fotograf.jpg';
+  const progBox=document.getElementById(matchId==='chat'?'chatPhotoPreview':'photoPreview_'+matchId);
+  const uploadId='p'+Date.now()+Math.random().toString(36).slice(2,6);
+  if(progBox){
+    progBox.style.display='flex';progBox.style.flexWrap='wrap';progBox.style.gap='.4rem';
+    progBox.innerHTML+=renderUploadProgressRow(uploadId,adi);
+  }
+  const startTime=Date.now();
+  // HATA DÜZELTMESİ: bkz. scheduleChatRenderSafely - yükleme sürerken otomatik sohbet
+  // yeniden çizimleri atlanır.
+  window._ptActiveUploads=(window._ptActiveUploads||0)+1;
+  uploadImageToSupabase(file,'comments/'+(matchId||'genel'),{maxDim:900,quality:.78,onProgress:function(loaded,total,serverPhase){
+    updateUploadProgressUI(uploadId,loaded,total,startTime,serverPhase);
+  }},function(err,publicUrl){
+    window._ptActiveUploads=Math.max(0,(window._ptActiveUploads||0)-1);
+    removeUploadProgressRow(uploadId);
+    if(err){
+      showToast('❌ '+adi+' yüklenemedi: '+err.message);
+      syncPendingMediaPreviews(matchId);
+      return;
+    }
       if(!Array.isArray(_pendingPhoto[matchId]))_pendingPhoto[matchId]=[];
       _pendingPhoto[matchId].push(publicUrl);
       syncPendingMediaPreviews(matchId);
-    });
+  });
+}
+
+// ── SINIR ÜSTÜ FOTOĞRAF DÜZENLEME EKRANI ──
+// KULLANICI TALEBİ: "Sınırın üzerinde fotoğrafı hem admin hem de kullanıcı düzenleyebilir."
+// Video kırpma ekranıyla AYNI desen: dosya reddedilmez, kullanıcı sonucu kendisi ayarlar.
+// Burada ayar "hangi bölüm" değil "hangi çözünürlük/kalite" - fotoğrafta anlamlı olan budur.
+// Seçim değiştikçe tahmini SONUÇ boyutu canlı hesaplanır (gerçek kodlama yapılarak), böylece
+// kullanıcı göndermeden önce ne kadar küçüleceğini GÖRÜR.
+window._photoEditState=null;
+window.openPhotoEditor=function(matchId,file){
+  window._diagScreen='pt_media';
+  const sizeMB=(file.size/1024/1024).toFixed(1);
+  window._photoEditState={matchId:matchId,file:file,img:null,maxDim:1600,quality:.8};
+  const composerInp=document.getElementById('commentInp_'+matchId);
+  const draftCaption=(composerInp&&composerInp.value)||'';
+  const html=`<div class="sheet-handle"></div>
+    <div style="font-size:.9rem;font-weight:900;margin-bottom:.5rem">🖼️ Fotoğrafı Düzenle</div>
+    <div style="font-size:.72rem;color:var(--mu);margin-bottom:.7rem;line-height:1.5">Bu fotoğraf (${sizeMB}MB) izin verilen ${PT_MAX_PHOTO_MB}MB sınırının üzerinde. Aşağıdan çözünürlük ve kaliteyi seçin - sistem seçtiğiniz ayarla küçültüp gönderecek.</div>
+    <div id="photoEditPreviewBox" style="width:100%;min-height:120px;border-radius:10px;background:var(--s2);display:flex;align-items:center;justify-content:center;margin-bottom:.6rem;overflow:hidden">
+      <span style="font-size:.7rem;color:var(--mu)">⏳ Fotoğraf açılıyor...</span>
+    </div>
+    <span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Çözünürlük (en uzun kenar)</span>
+    <select id="photoEditDim" onchange="updatePhotoEditEstimate()" style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.45rem .5rem;color:var(--tx);margin-bottom:.5rem;font-family:var(--font-family,Outfit),sans-serif">
+      <option value="2000">Yüksek - 2000px</option>
+      <option value="1600" selected>İyi - 1600px (önerilen)</option>
+      <option value="1200">Orta - 1200px</option>
+      <option value="900">Küçük - 900px</option>
+    </select>
+    <span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Kalite</span>
+    <select id="photoEditQuality" onchange="updatePhotoEditEstimate()" style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.45rem .5rem;color:var(--tx);margin-bottom:.5rem;font-family:var(--font-family,Outfit),sans-serif">
+      <option value="0.9">Çok iyi</option>
+      <option value="0.8" selected>İyi (önerilen)</option>
+      <option value="0.65">Orta</option>
+      <option value="0.5">Düşük (en küçük dosya)</option>
+    </select>
+    <div id="photoEditEstimate" style="font-size:.66rem;font-weight:700;color:var(--mu);margin-bottom:.6rem">Tahmini boyut hesaplanıyor...</div>
+    <span class="lbl" style="font-size:.62rem;color:var(--mu);display:block;margin-bottom:.2rem">Fotoğraf başlığı / açıklaması (isteğe bağlı)</span>
+    <input type="text" id="photoEditCaptionInp" value="${draftCaption.replace(/"/g,'&quot;')}" placeholder="Fotoğrafla birlikte gönderilecek mesaj..." style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.4rem .5rem;color:var(--tx);margin-bottom:.6rem;font-family:var(--font-family,Outfit),sans-serif"/>
+    <div style="font-size:.6rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">ℹ️ ${ptPhotoLimitText()}</div>
+    <button id="photoEditConfirmBtn" onclick="confirmPhotoEdit()" style="width:100%;background:linear-gradient(135deg,var(--ac),var(--ac2));border:none;border-radius:12px;padding:.65rem;color:#fff;font-size:.82rem;font-weight:800;cursor:pointer;margin-bottom:.4rem">🖼️ Küçült ve Ekle</button>
+    <button onclick="cancelPhotoEdit()" style="width:100%;background:none;border:none;color:var(--mu);font-size:.72rem;padding:.4rem;cursor:pointer">İptal</button>`;
+  openSheet('',html);
+  ptDecodeImageFile(file,function(err,img){
+    const box=document.getElementById('photoEditPreviewBox');
+    if(err){
+      if(box)box.innerHTML='<span style="font-size:.7rem;color:#f87171;padding:.8rem;text-align:center">⚠️ '+escHtml(err.message)+'</span>';
+      const btn=document.getElementById('photoEditConfirmBtn');
+      if(btn){btn.disabled=true;btn.style.opacity='.5';}
+      return;
+    }
+    if(!window._photoEditState)return;
+    window._photoEditState.img=img;
+    if(box)box.innerHTML='<img src="'+img.src+'" style="max-width:100%;max-height:220px;object-fit:contain;border-radius:10px"/>';
+    updatePhotoEditEstimate();
+  });
+};
+function _photoEditToBlob(cb){
+  const st=window._photoEditState;
+  if(!st||!st.img){cb(null);return;}
+  const maxDim=Number((document.getElementById('photoEditDim')||{}).value)||1600;
+  const quality=Number((document.getElementById('photoEditQuality')||{}).value)||.8;
+  const img=st.img;
+  const scale=Math.min(1,maxDim/Math.max(img.width,img.height));
+  const canvas=document.createElement('canvas');
+  canvas.width=Math.max(1,Math.round(img.width*scale));
+  canvas.height=Math.max(1,Math.round(img.height*scale));
+  canvas.getContext('2d').drawImage(img,0,0,canvas.width,canvas.height);
+  canvas.toBlob(function(blob){cb(blob,canvas.width,canvas.height);},'image/jpeg',quality);
+}
+window.updatePhotoEditEstimate=function(){
+  const el=document.getElementById('photoEditEstimate');
+  if(!el)return;
+  el.textContent='Tahmini boyut hesaplanıyor...';
+  _photoEditToBlob(function(blob,w,h){
+    if(!blob){el.textContent='Tahmini boyut hesaplanamadı';return;}
+    const mb=blob.size/1024/1024;
+    const uygun=mb<=PT_MAX_PHOTO_MB;
+    el.style.color=uygun?'var(--mu)':'#f59e0b';
+    el.textContent=(uygun?'✅ ':'⚠️ ')+'Sonuç: ~'+(mb<1?(Math.round(blob.size/1024)+' KB'):(mb.toFixed(1)+' MB'))+' · '+w+'×'+h+'px'+(uygun?'':' - hâlâ sınırın üstünde, daha düşük bir ayar seçin');
+  });
+};
+window.cancelPhotoEdit=function(){
+  closeVideoTrimmerSheet();
+  window._photoEditState=null;
+};
+window.confirmPhotoEdit=function(){
+  const st=window._photoEditState;
+  if(!st||!st.img){showToast('❌ Fotoğraf henüz hazır değil, birkaç saniye bekleyin');return;}
+  const btn=document.getElementById('photoEditConfirmBtn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Küçültülüyor...';}
+  _photoEditToBlob(function(blob){
+    if(!blob){
+      showToast('❌ Fotoğraf işlenemedi, farklı bir ayar deneyin');
+      if(btn){btn.disabled=false;btn.textContent='🖼️ Küçült ve Ekle';}
+      return;
+    }
+    if(blob.size>PT_MAX_PHOTO_MB*1024*1024){
+      showToast('❌ Sonuç hâlâ '+PT_MAX_PHOTO_MB+'MB üstünde - daha düşük çözünürlük/kalite seçin');
+      if(btn){btn.disabled=false;btn.textContent='🖼️ Küçült ve Ekle';}
+      return;
+    }
+    const matchId=st.matchId;
+    const adi=(st.file.name||'fotograf').replace(/\.[^.]+$/,'')+'_kucultuldu.jpg';
+    // Başlık metni, kapatma sırasında alttaki mesaj kutusuna geri yazılır (bkz.
+    // closeVideoTrimmerSheet - aynı ortak kapatma yolu kullanılıyor).
+    const capInp=document.getElementById('photoEditCaptionInp');
+    const trimCapShim=document.getElementById('trimCaptionInp');
+    if(capInp&&!trimCapShim){
+      const composerInp=document.getElementById('commentInp_'+matchId);
+      if(composerInp)composerInp.value=capInp.value;
+      if(matchId==='chat')window._chatDraftText=capInp.value;
+    }
+    closeVideoTrimmerSheet();
+    window._photoEditState=null;
+    if(!Array.isArray(_pendingPhoto[matchId]))_pendingPhoto[matchId]=[];
+    processAndUploadCommentPhoto(matchId,blob,adi);
   });
 };
 
@@ -17923,7 +18138,7 @@ window.openSettings=function(){
         <div id="settAvatarPreview" style="width:72px;height:72px;border-radius:50%;background:var(--s2);border:2.5px solid var(--ac);display:flex;align-items:center;justify-content:center;font-size:1.8rem;overflow:hidden">${_userAvatar?`<img src="${_userAvatar}" style="width:100%;height:100%;object-fit:cover"/>`:'👤'}</div>
         <div style="position:absolute;bottom:0;right:0;width:24px;height:24px;border-radius:50%;background:var(--ac);border:2px solid var(--s);display:flex;align-items:center;justify-content:center;font-size:.7rem">📷</div>
       </div>
-      <input type="file" id="avatarFileInp" accept="image/*" style="display:none" onchange="handleAvatarUpload(this)"/>
+      <input type="file" id="avatarFileInp" accept="image/*,.heic,.heif" style="display:none" onchange="handleAvatarUpload(this)"/>
       <div style="font-size:.62rem;color:var(--mu);margin-top:.35rem">Profil fotoğrafına tıkla, değiştir</div>
     </div>
 
