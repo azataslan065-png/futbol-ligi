@@ -1188,7 +1188,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-K';
+window.APP_BUILD='2026-08-15-L';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -13081,6 +13081,24 @@ window.PTSheetNav=(function(){
 // aynen geri yükler.
 window.closeSheet=function(e){
   if(!e||e.target&&e.target.id==='sheetWrap'){
+    // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "video düzenleyip gönderdikten sonra sohbet
+    // ekranı tamamen kapanıp ana ekrana düşüyorum" - 🩺 raporuyla DOĞRULANDI: önceki bir
+    // oturumda TAM OLARAK "Sohbet closeSheet() ile tamamen kapatıldı" kaydı YAKALANMIŞTI):
+    // Video kırpma GERÇEK ZAMANLI çalıştığı için 45-60+ saniye sürebiliyor - bu sürede
+    // telefon ekranının kilitlenip açılması, tarayıcının arka plana alınıp geri gelmesi gibi
+    // olaylar beklenmedik bir popstate/geri-tuşu davranışı tetikleyebiliyor (bkz.
+    // DeviceBack.handleBack). O an PTSheetNav yığını boş görünüyorsa (ör. mikro-görev henüz
+    // tamamlanmadıysa), bu fonksiyonun aşağıdaki GENEL "HER ŞEYİ KAPAT" yolu çalışıp sohbeti
+    // TAMAMEN kapatıyordu - tam da "ana ekrana düşme" şikayetiyle örtüşüyor. ÇÖZÜM: video
+    // kırpma/yükleme aktifken (window._ptActiveUploads>0) bu tam kapatma yolu TAMAMEN
+    // ENGELLENİR - kritik bir medya işlemi sürerken kullanıcı ne arka plana alınma ne de
+    // yanlışlıkla tetiklenen bir geri olayıyla sohbetten atılabilir; işlem bitene kadar sheet
+    // olduğu gibi kalır.
+    if(window._ptActiveUploads>0){
+      if(window.DiagCore)DiagCore.kaydet('pt_chat','uyari','closeSheet() video kırpma/yükleme sürerken ENGELLENDİ',{ekran:window._diagScreen||null});
+      if(typeof showToast==='function')showToast('⏳ Video işleniyor, lütfen bekleyin...');
+      return;
+    }
     document.getElementById('sheetWrap').classList.remove('open');
     // HATA DÜZELTMESİ: Maç etiketi seçici / video menüsü artık document.body'ye ekleniyor
     // (sheetContent'e eklemek sohbet ekranını gizliyordu - bkz. openChatMatchPicker).
@@ -13093,6 +13111,11 @@ window.closeSheet=function(e){
     // HATA DÜZELTMESİ (kapsamlı hata yakalama taraması): sheet kapanırken hangi özelliğin
     // açık olduğunu izleyen _diagScreen de temizlenir - yoksa DiagHUD, sheet kapandıktan
     // SONRA bile bir önceki (artık kapalı) modülü "aktif ekran" sanmaya devam ederdi.
+    // TEŞHİS DÜZELTMESİ (kullanıcı bildirdi: rapor hep "ekran: null" gösteriyordu): Değer
+    // aşağıdaki kayıt satırından ÖNCE burada temizleniyordu, bu yüzden kayıt HER ZAMAN null
+    // görüyordu - hangi ekranın açıkken kapandığı asla bilinemiyordu. Artık kayıttan ÖNCEKİ
+    // gerçek değer ayrı bir değişkende saklanıp log'a O yazılıyor.
+    var _oncekiDiagScreen=window._diagScreen;
     window._diagScreen=null;
     if(_liveTimeInterval){clearInterval(_liveTimeInterval);_liveTimeInterval=null;_liveTimeEl=null;}
     if(_chatOpen){
@@ -13101,7 +13124,7 @@ window.closeSheet=function(e){
       // bkz. closeVideoTrimmerSheet). Bu TAM KAPATMA yolu ileride BAŞKA bir ekran tarafından da
       // yanlışlıkla tetiklenirse (ör. yeni bir sheet, closeSheet()'i "sadece kendini kapat"
       // niyetiyle çağırırsa) bir sonraki sefer TEŞHİS PANELİNDEN görülebilsin diye kaydedilir.
-      if(window.DiagCore)DiagCore.kaydet('pt_chat','uyari','Sohbet closeSheet() ile tamamen kapatıldı',{ekran:window._diagScreen||null});
+      if(window.DiagCore)DiagCore.kaydet('pt_chat','uyari','Sohbet closeSheet() ile tamamen kapatıldı',{ekran:_oncekiDiagScreen||null});
       _chatOpen=false;
       // KULLANICI TALEBİ: Sohbet tamamen kapatılınca etiketli maç da sıfırlanır - bir
       // sonraki açılışta kalıntı/eski bir etiketle karşılaşılmaz.
