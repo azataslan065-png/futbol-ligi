@@ -960,18 +960,12 @@ body.ptp-fs-active{overflow:hidden}
    tıklanamaz olur - kilit açma düğmesi o sırada da erişilebilir kalmalı), bu yüzden .ptp-top
    içine TAŞINAMAZ - bunun yerine üst çubuğun ALTINA, onunla asla çakışmayacak bir konuma
    indirildi. */
-/* KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "kullanıcı ekrana tıklayıp denetimleri kapatınca
-   kilit ikonu gösterilmeye devam ediyor"): Kilit düğmesi BİLEREK .ptp-ov'nin (denetim
-   katmanı) DIŞINDA tutulur - kilitliyken .ptp-ov tamamen gizlenir/tıklanamaz olur, açma
-   düğmesi o sırada da erişilebilir kalmalı. Ama bu, KİLİTLİ OLMADIĞI durumda da bir sorun
-   yaratıyordu: kullanıcı ekrana dokunup denetimleri (oynat/duraklat, ilerleme çubuğu vb.)
-   TEMİZ bir görünüm için gizlediğinde, kilit ikonu .ptp-ov'ye AİT OLMADIĞINDAN o da
-   gizlenmiyor, video üzerinde tek başına asılı kalıyordu. Artık kilit ikonu da (KİLİTLİ
-   DEĞİLKEN) denetimlerle AYNI göster/gizle durumunu takip eder - .ptp.ptp-locked kuralı ise
-   kilitliyken bunu EZER, o zaman ikon her koşulda görünür/tıklanabilir kalmaya devam eder. */
+/* KULLANICI TALEBİ (kilitliyken kilit ikonu HER ZAMAN görünürdü - "dikkat dağıtıyor"):
+   Artık kilitliyken de aynı göster/gizle mantığı geçerli - ikon .ptp-hide sınıfına göre
+   görünür/gizlenir, kilitli OLMASI onu zorla görünür yapmaz. Görünürlüğü tek dokunuşla
+   (bkz. bindGestures'daki S.locked dalı) kullanıcı kontrol eder. */
 .ptp-lockbar{position:absolute;top:3.4rem;right:.5rem;z-index:9;opacity:1;pointer-events:auto;transition:opacity .25s ease}
 .ptp-lockbar.ptp-hide{opacity:0;pointer-events:none}
-.ptp.ptp-locked .ptp-lockbar{opacity:1;pointer-events:auto}
 .ptp-locked .ptp-ov{opacity:0;pointer-events:none}
 /* Altyazı görünümü kullanıcı ayarlarına göre */
 .ptp-video::cue{background:rgba(0,0,0,.72);color:#fff;font-size:100%}
@@ -1343,7 +1337,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-16-I';
+window.APP_BUILD='2026-08-16-J';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18769,6 +18763,15 @@ window.PTPlayer=(function(){
     ov.classList.add('ptp-hide');
     if(lb)lb.classList.add('ptp-hide');
   }
+  // KULLANICI TALEBİ ("kilit aktifken aynı mantık - dokununca görünsün, tekrar tıklayınca
+  // kaybolsun"): Kilitliyken .ptp-ov zaten tamamen gizli/tıklanamaz - tek dokunuşla değişen
+  // TEK şey kilit ikonunun kendi görünürlüğü. Otomatik gizleme ZAMANLAYICISI KASITLI OLARAK
+  // yok (bkz. showControls üstündeki not - uygulama genelinde tek dokunuşla kontrol edilir).
+  function toggleLockbarVisibility(){
+    if(!S)return;
+    var lb=S.root&&S.root.querySelector('.ptp-lockbar');
+    if(lb)lb.classList.toggle('ptp-hide');
+  }
   function showToastMsg(txt,ms){
     var t=el('ptpToast');
     if(!t)return;
@@ -19208,7 +19211,11 @@ window.PTPlayer=(function(){
       // sistemine hiç girmiyor - o elemanların KENDİ tıklama işleyicileri normal çalışır.
       if(e.target.closest('.ptp-btn,.ptp-panel,input,select'))return;
       if(S)S.touchKullanildi=true; // dokunmatik cihazda 'click' yolu devre dışı kalır
-      if(S&&S.locked)return;
+      // KULLANICI TALEBİ (kilitliyken kilit ikonu HER ZAMAN görünürdü - "dikkat dağıtıyor"):
+      // Kilitliyken jestler (zoom/parlaklık/ses/sarma vb.) hâlâ ÇALIŞMAZ - sadece dokunuş
+      // SÜRESİ ölçülür (t0), touchend'de bunun gerçek bir "dokunuş" mu yoksa uzun basış mı
+      // olduğuna bakılıp SADECE kilit ikonunun görünürlüğü aç/kapat edilir.
+      if(S&&S.locked){t0=Date.now();return;}
       if(e.touches.length===2){mode='pinch';pinchBase=dist(e);baseVal=S.zoom;return;}
       t0=Date.now();
       startY=e.touches[0].clientY;startX=e.touches[0].clientX;
@@ -19247,7 +19254,15 @@ window.PTPlayer=(function(){
       if(e.target.closest('.ptp-btn,.ptp-panel,input,select'))return;
       if(!S)return;
       if(mode){mode=null;return;}
-      if(S.locked)return;
+      // KULLANICI TALEBİ ("kilit aktifleştirildiğinde aynı mantık dokununca görünsün, tekrar
+      // tıklayınca kaybolsun - dikkat dağıtıyor"): Kilitliyken önceden kilit ikonu HER ZAMAN
+      // görünürdü - uzun izlemede rahatsız edici bulundu. Artık kilitliyken de tek dokunuş
+      // SADECE kilit ikonunun görünürlüğünü aç/kapat eder - diğer jestler (sarma, oynat/
+      // duraklat vb.) kilitliyken hâlâ ÇALIŞMAZ, bu kasıtlı ve korunuyor.
+      if(S.locked){
+        if(Date.now()-t0<=320)toggleLockbarVisibility();
+        return;
+      }
       if(Date.now()-t0>320)return; // uzun basış - dokunma sayılmaz
       var now=Date.now();
       var x=(e.changedTouches[0]||{}).clientX||0;
@@ -19273,9 +19288,10 @@ window.PTPlayer=(function(){
     // Masaüstü/fare: tıklama da aç/kapat yapar (dokunmatikte bu olay touchend'den sonra
     // tetiklenmediği için çift işlem oluşmaz).
     stage.addEventListener('click',function(e){
-      if(!S||S.locked)return;
+      if(!S)return;
       if(e.target.closest('.ptp-btn,.ptp-panel,input'))return;
       if(S.touchKullanildi)return;
+      if(S.locked){toggleLockbarVisibility();return;}
       toggleControls();
     });
     stage.addEventListener('dblclick',function(){if(!S||S.locked)return;toggleFullscreen();});
