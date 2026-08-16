@@ -832,6 +832,119 @@ div.md-logo{background:rgba(255,255,255,.06);border-radius:8px;display:flex;alig
 .lc-halftime{background:linear-gradient(180deg,#1a1a28,#0a0a14)}
 @keyframes notifSlideIn{from{transform:translateY(-20px);opacity:0}to{transform:translateY(0);opacity:1}}
 @keyframes sbUploadPulse{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}
+/* ── ÖZEL VİDEO OYNATICI (PTPlayer) ──
+   KULLANICI TALEBİ: "Canlı yayın ve video için kendi oynatıcımızı tasarlayacağız."
+   Oynatıcı, TEK bir <video> etiketini sarar ve tüm denetimleri kendisi çizer. Böylece hem
+   yüklenen videolar (mp4) hem canlı yayın akışları (m3u8) AYNI arayüzle oynar. YouTube gibi
+   iframe platformlarında bu oynatıcı KULLANILMAZ - orada oynatıcı karşı platforma aittir ve
+   dışarıdan kontrol edilemez (tarayıcı güvenliği). */
+.ptp{position:relative;width:100%;background:#000;border-radius:14px;overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:none}
+/* KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "yatay/dikey mod, tam ekran - bunları göremedim"):
+   Tam ekran artık tarayıcının NATIVE Fullscreen API'sini (requestFullscreen) HİÇ kullanmıyor -
+   bkz. toggleFullscreen() içindeki uzun açıklama. Bunun yerine .ptp-fs sınıfı SAF CSS ile
+   TÜM görünür alanı (position:fixed;inset:0) kaplar. Bu sayede: (1) iOS Safari'de video
+   NATIVE oynatıcıya düşmez, bizim ÖZEL arayüzümüz (hız/kalite/altyazı/jestler) tam ekranda da
+   ÇALIŞMAYA DEVAM EDER, (2) cihaz döndürüldüğünde JS'ten TETİKLENEBİLİR (native API bunu
+   kullanıcı jesti dışında ÇAĞRILAMAZ diye engeller) - bkz. bindOrientation().
+*/
+.ptp.ptp-fs{position:fixed;inset:0;z-index:99999;width:100vw;height:100vh;border-radius:0}
+body.ptp-fs-active{overflow:hidden}
+.ptp-stage{position:relative;width:100%;aspect-ratio:16/9;overflow:hidden;display:flex;align-items:center;justify-content:center;background:#000}
+/* HATA DÜZELTMESİ (kullanıcı talebi: "yatay mod, dikey mod izlenebilsin"): Kutu ÖNCEDEN her
+   video için SABİT 16:9 (yatay) oranındaydı - dikey çekilmiş bir yayın/video (ör. telefonla
+   dikey kaydedilmiş bir canlı yayın) bu geniş kutunun ORTASINDA ince bir şerit halinde
+   görünüyor, ekranın büyük bölümü boşa gidiyordu. Artık videonun GERÇEK yönü (bkz.
+   loadedmetadata - videoWidth/videoHeight karşılaştırması) algılanıp .ptp-portrait sınıfı
+   eklendiğinde kutu dikey videoya uygun bir orana geçiyor - hem yatay hem dikey içerik ekranı
+   verimli kullanıyor. Tam ekranda (.ptp-fs) bu kural zaten devre dışı kalır (height:100%,
+   aspect-ratio:auto) - video object-fit:contain ile mevcut alana SIĞDIRILIR, hangi yönde
+   olursa olsun.
+*/
+.ptp-stage.ptp-portrait{aspect-ratio:9/16;max-height:75vh}
+.ptp.ptp-fs .ptp-stage{height:100%;aspect-ratio:auto;max-height:none}
+.ptp-video{width:100%;height:100%;display:block;transition:filter .15s ease}
+/* Görüntü oranı seçenekleri: object-fit ile, videoyu bozmadan. */
+.ptp-video[data-fit="contain"]{object-fit:contain}
+.ptp-video[data-fit="cover"]{object-fit:cover}
+.ptp-video[data-fit="fill"]{object-fit:fill}
+.ptp-ov{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;
+  background:linear-gradient(to bottom,rgba(0,0,0,.55) 0%,rgba(0,0,0,0) 22%,rgba(0,0,0,0) 62%,rgba(0,0,0,.72) 100%);
+  opacity:1;transition:opacity .25s ease}
+.ptp-ov.ptp-hide{opacity:0;pointer-events:none}
+.ptp-top{display:flex;align-items:center;gap:.4rem;padding:.5rem .6rem}
+.ptp-title{flex:1;min-width:0;color:#fff;font-size:.76rem;font-weight:800;text-shadow:0 1px 3px rgba(0,0,0,.8);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ptp-live{background:#ef4444;color:#fff;font-size:.55rem;font-weight:900;padding:.12rem .38rem;border-radius:5px;flex-shrink:0}
+.ptp-live.ptp-behind{background:#64748b}
+.ptp-btn{background:rgba(0,0,0,.42);border:none;border-radius:9px;min-width:34px;height:34px;color:#fff;font-size:.9rem;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;padding:0 .35rem;line-height:1}
+.ptp-btn:active{background:rgba(255,255,255,.22)}
+.ptp-btn[disabled]{opacity:.35}
+.ptp-mid{display:flex;align-items:center;justify-content:center;gap:1.3rem}
+.ptp-mid .ptp-btn{width:48px;height:48px;min-width:48px;font-size:1.15rem;background:rgba(0,0,0,.5)}
+.ptp-mid .ptp-play{width:60px;height:60px;min-width:60px;font-size:1.5rem}
+.ptp-bot{padding:.35rem .6rem .5rem}
+.ptp-times{display:flex;align-items:center;gap:.5rem;color:#fff;font-size:.62rem;font-weight:700;
+  text-shadow:0 1px 2px rgba(0,0,0,.9);margin-bottom:.15rem}
+.ptp-times .ptp-sp{flex:1}
+.ptp-seekwrap{position:relative;height:22px;display:flex;align-items:center}
+.ptp-buf{position:absolute;left:0;height:4px;border-radius:3px;background:rgba(255,255,255,.32);pointer-events:none}
+.ptp-seek{position:relative;width:100%;-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;
+  background:rgba(255,255,255,.22);outline:none;margin:0}
+.ptp-seek::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--ac,#7c3aed);
+  border:2px solid #fff;cursor:pointer}
+.ptp-seek::-moz-range-thumb{width:13px;height:13px;border-radius:50%;background:var(--ac,#7c3aed);border:2px solid #fff;cursor:pointer}
+.ptp-seek[disabled]{opacity:.4}
+.ptp-row{display:flex;align-items:center;gap:.3rem;margin-top:.25rem;flex-wrap:nowrap;overflow-x:auto;
+  scrollbar-width:none;-ms-overflow-style:none}
+.ptp-row::-webkit-scrollbar{display:none}
+.ptp-vol{width:64px;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;background:rgba(255,255,255,.3);outline:none;flex-shrink:0}
+.ptp-vol::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;border-radius:50%;background:#fff;cursor:pointer}
+.ptp-vol::-moz-range-thumb{width:11px;height:11px;border-radius:50%;background:#fff;border:none;cursor:pointer}
+/* Ortada beliren geçici bilgi balonu (çift dokunuşla sarma, ses, parlaklık) */
+.ptp-toast{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,.72);color:#fff;
+  padding:.5rem .8rem;border-radius:11px;font-size:.8rem;font-weight:800;pointer-events:none;opacity:0;
+  transition:opacity .18s ease;white-space:nowrap;z-index:6}
+.ptp-toast.ptp-on{opacity:1}
+.ptp-spin{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;
+  border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:ptpSpin .8s linear infinite;z-index:5}
+@keyframes ptpSpin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+/* Hata / bilgi katmanı */
+.ptp-err{position:absolute;inset:0;background:rgba(0,0,0,.86);color:#fff;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;padding:1.1rem;gap:.7rem;z-index:7}
+.ptp-err-t{font-size:.82rem;font-weight:800}
+.ptp-err-d{font-size:.7rem;color:#cbd5e1;line-height:1.55;max-width:340px}
+/* KULLANICI TALEBİ (onaylanan öneri): Video (canlı olmayan) bittiğinde sıradaki yayına
+   ÖNCEDEN sessizce/görünmeden 1.2sn içinde atlanıyordu - kullanıcı ne olduğunu anlayamıyor,
+   iptal edemiyordu. Artık bu geçiş görünür bir geri sayım + iptal seçeneğiyle yapılıyor. */
+.ptp-next{position:absolute;inset:0;background:rgba(0,0,0,.86);color:#fff;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;text-align:center;padding:1.1rem;gap:.9rem;z-index:7}
+.ptp-next-t{font-size:.78rem;color:#e2e8f0;line-height:1.6}
+/* Ayar paneli */
+.ptp-panel{position:absolute;right:.5rem;bottom:3.6rem;background:rgba(15,23,42,.97);border:1px solid rgba(255,255,255,.14);
+  border-radius:12px;padding:.5rem;min-width:196px;max-width:min(86%,300px);max-height:66%;overflow-y:auto;z-index:8;
+  box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.ptp-panel h4{margin:.25rem 0 .3rem;font-size:.62rem;color:#94a3b8;font-weight:800;letter-spacing:.02em}
+.ptp-opt{display:flex;align-items:center;gap:.45rem;width:100%;background:none;border:none;color:#e2e8f0;font-size:.74rem;
+  padding:.4rem .45rem;border-radius:8px;cursor:pointer;text-align:left;font-family:inherit}
+.ptp-opt:active{background:rgba(255,255,255,.1)}
+.ptp-opt.ptp-sel{background:rgba(124,58,237,.3);font-weight:800}
+.ptp-opt .ptp-ck{width:14px;flex-shrink:0}
+.ptp-slide{display:flex;align-items:center;gap:.45rem;padding:.3rem .45rem}
+.ptp-slide label{font-size:.68rem;color:#cbd5e1;width:66px;flex-shrink:0}
+.ptp-slide input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:3px;border-radius:3px;
+  background:rgba(255,255,255,.3);outline:none}
+.ptp-slide input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--ac,#7c3aed);border:1.5px solid #fff}
+.ptp-slide span{font-size:.62rem;color:#94a3b8;width:36px;text-align:right;flex-shrink:0}
+/* Ekran kilidi */
+.ptp-lockbar{position:absolute;top:.5rem;right:.5rem;z-index:9}
+.ptp-locked .ptp-ov{opacity:0;pointer-events:none}
+/* Altyazı görünümü kullanıcı ayarlarına göre */
+.ptp-video::cue{background:rgba(0,0,0,.72);color:#fff;font-size:100%}
+/* Bilgi tablosu */
+.ptp-info{display:grid;grid-template-columns:auto 1fr;gap:.15rem .5rem;font-size:.66rem;color:#cbd5e1;padding:.3rem .45rem}
+.ptp-info b{color:#94a3b8;font-weight:700}
+
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js" onerror="window._fbLoadFailed=true"></script>
@@ -1002,7 +1115,7 @@ window.addEventListener('DOMContentLoaded',function(){
          aktifken sayfa otomatik olarak eski hesaba giriş yapmaya çalışır; bu bağlantı SADECE
          bu durumda görünür ve kullanıcının otomatik girişi iptal edip TEMİZ bir giriş
          ekranından (farklı bir isimle) devam etmesini sağlar. -->
-    <button type="button" id="switchAccountLink" onclick="cancelRememberedAutoLogin()" style="display:none;background:none;border:none;color:var(--ac3);font-size:.68rem;font-weight:700;text-decoration:underline;cursor:pointer;margin-top:.4rem;padding:0;text-align:left">👤 Farklı bir hesapla giriş yap</button>
+    <button type="button" id="switchAccountLink" onclick="cancelRememberedAutoLogin()" style="display:none;background:none;border:none;color:var(--ac3);font-size:.68rem;font-weight:700;text-decoration:underline;cursor:pointer;margin-top:.4rem;padding:.35rem 0;min-height:32px;text-align:left">👤 Farklı bir hesapla giriş yap</button>
     <!-- KULLANICI TALEBİ: Kullanıcı Giriş Şifresi Sistemi - bir isimle ilk kez giriş
          yapılıyorsa şifre oluşturma istenir, sonraki girişlerde bu şifre istenir. Bu alan
          normalde gizli, doEnter() ilgili ismin şifresi olduğunu tespit edince gösterilir. -->
@@ -1017,7 +1130,7 @@ window.addEventListener('DOMContentLoaded',function(){
         </div>
       </div>
       <div id="loginPwHint" style="font-size:.66rem;color:var(--mu);margin-top:.3rem;text-align:center"></div>
-      <button type="button" onclick="openForgotPasswordForm()" style="background:none;border:none;color:var(--ac3);font-size:.68rem;font-weight:700;cursor:pointer;width:100%;margin-top:.4rem;text-align:center">🔑 Şifremi Unuttum</button>
+      <button type="button" onclick="openForgotPasswordForm()" style="background:none;border:none;color:var(--ac3);font-size:.68rem;font-weight:700;cursor:pointer;width:100%;margin-top:.4rem;padding:.35rem 0;min-height:32px;text-align:center">🔑 Şifremi Unuttum</button>
     </div>
     <button class="login-btn" onclick="doEnter()">Giriş Yap →</button>
     <p class="login-err" id="nameErr"></p>
@@ -1096,7 +1209,7 @@ window.addEventListener('DOMContentLoaded',function(){
 
 <!-- SEARCH -->
 <div id="searchBar">
-  <input id="searchInp" placeholder="Takım, oyuncu veya lig ara..." oninput="doSearch()" autocomplete="off"/>
+  <input id="searchInp" placeholder="Takım, oyuncu, lig veya ayar ara..." oninput="doSearch()" autocomplete="off"/>
   <div id="searchFilters" style="display:flex;gap:.35rem;padding:.4rem .85rem 0;flex-wrap:wrap">
     <button class="search-filter-btn active" data-f="all" onclick="setSearchFilter('all')" style="background:var(--ac);border:1.5px solid var(--ac);border-radius:14px;padding:.2rem .6rem;font-size:.66rem;font-weight:700;color:#fff;cursor:pointer">🔍 Tümü</button>
     <button class="search-filter-btn" data-f="team" onclick="setSearchFilter('team')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:14px;padding:.2rem .6rem;font-size:.66rem;font-weight:700;color:var(--mu);cursor:pointer">⚽ Takım</button>
@@ -1104,6 +1217,14 @@ window.addEventListener('DOMContentLoaded',function(){
     <button class="search-filter-btn" data-f="league" onclick="setSearchFilter('league')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:14px;padding:.2rem .6rem;font-size:.66rem;font-weight:700;color:var(--mu);cursor:pointer">🏆 Lig</button>
     <button class="search-filter-btn" data-f="referee" onclick="setSearchFilter('referee')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:14px;padding:.2rem .6rem;font-size:.66rem;font-weight:700;color:var(--mu);cursor:pointer">⚖️ Hakem</button>
     <button class="search-filter-btn" data-f="sponsor" onclick="setSearchFilter('sponsor')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:14px;padding:.2rem .6rem;font-size:.66rem;font-weight:700;color:var(--mu);cursor:pointer">📢 Sponsor</button>
+    <!-- KULLANICI TALEBİ ("arama çubuğu uygulamadaki tüm ayarları kapsayacak şekilde
+         genişletilsin"): Arama ÖNCEDEN sadece futbol verisini (takım/oyuncu/lig/hakem/
+         sponsor) kapsıyordu - uygulamanın 24 AYAR bölümünden (Bildirimler, Tema, Şifre,
+         Sessiz Saatler vb.) hiçbiri aranamıyordu. Bu yeni filtre + aşağıdaki doSearch()
+         eklentisi, admin'in bölüm sıralaması için ZATEN VAR OLAN SETTINGS_SECTION_IDS/
+         SETTINGS_SECTION_LABELS kataloğunu YENİDEN KULLANIR - ayarlar listesi tek bir
+         yerden (openSettings) geldiği için asla birbirinden kopmaz. -->
+    <button class="search-filter-btn" data-f="setting" onclick="setSearchFilter('setting')" style="background:var(--s2);border:1.5px solid var(--br);border-radius:14px;padding:.2rem .6rem;font-size:.66rem;font-weight:700;color:var(--mu);cursor:pointer">⚙️ Ayar</button>
   </div>
   <div id="searchRes"></div>
 </div>
@@ -1188,7 +1309,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-15-U';
+window.APP_BUILD='2026-08-16-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -6482,11 +6603,17 @@ function renderStandings(){
     // arası hizalama tutarsızlığına da yol açabilirdi). Artık bu durumda da "–" (tire)
     // gösteriliyor, tıpkı "sıralaması değişmedi" durumundaki gibi - yeni bir sezonda henüz
     // hiçbir değişiklik olmadığını doğru şekilde ifade eder.
-    if(prevPos==null)return `<span class="rank-arrow-wrap" style="font-size:.5rem;color:var(--mu);font-weight:700;line-height:1;${aStyle}" title="Henüz karşılaştırılacak önceki bir sıralama yok">–</span>`;
+    // HATA DÜZELTMESİ (🩺 Yerleşim/Sıkışma taraması: "Yazı okunamayacak kadar küçüldü · 7.4px
+    // (eşik 9px) · ▲1/▼1"): .rank-arrow-wrap sınıfının kendisi 9px minimum garantiliyordu
+    // (font-size:max(9px,.62rem)) ama BURADAKİ satır-içi style'lar (.46rem≈7.4px, .5rem=8px)
+    // CSS özgüllüğü GEREĞİ o garantiyi EZİYORDU - okunamayacak kadar küçük bir yazı ortaya
+    // çıkıyordu. Dört durumun tamamı artık 9px'in üzerinde (.58rem≈9.3px) - küçük ekranlarda
+    // hâlâ kompakt ama okunabilir.
+    if(prevPos==null)return `<span class="rank-arrow-wrap" style="font-size:.58rem;color:var(--mu);font-weight:700;line-height:1;${aStyle}" title="Henüz karşılaştırılacak önceki bir sıralama yok">–</span>`;
     const delta=prevPos-pos; // pozitif: yukarı çıktı
-    if(delta>0)return `<span class="rank-arrow-wrap" style="font-size:.46rem;color:#4ade80;font-weight:900;line-height:1;${aStyle}" title="Son haftadan bu yana ${delta} sıra yükseldi">▲${delta}</span>`;
-    if(delta<0)return `<span class="rank-arrow-wrap" style="font-size:.46rem;color:#f87171;font-weight:900;line-height:1;${aStyle}" title="Son haftadan bu yana ${-delta} sıra düştü">▼${-delta}</span>`;
-    return `<span class="rank-arrow-wrap" style="font-size:.5rem;color:var(--mu);font-weight:700;line-height:1;${aStyle}" title="Son haftadan bu yana sıralaması değişmedi">–</span>`;
+    if(delta>0)return `<span class="rank-arrow-wrap" style="font-size:.58rem;color:#4ade80;font-weight:900;line-height:1;${aStyle}" title="Son haftadan bu yana ${delta} sıra yükseldi">▲${delta}</span>`;
+    if(delta<0)return `<span class="rank-arrow-wrap" style="font-size:.58rem;color:#f87171;font-weight:900;line-height:1;${aStyle}" title="Son haftadan bu yana ${-delta} sıra düştü">▼${-delta}</span>`;
+    return `<span class="rank-arrow-wrap" style="font-size:.58rem;color:var(--mu);font-weight:700;line-height:1;${aStyle}" title="Son haftadan bu yana sıralaması değişmedi">–</span>`;
   }
   stData.forEach((t,i)=>{
     const pos=i+1;
@@ -13311,6 +13438,10 @@ window.closeSheet=function(e){
       if(typeof showToast==='function')showToast('⏳ Video işleniyor, lütfen bekleyin...');
       return;
     }
+    // Oynatıcı açıksa temiz kapatılır: yayın bağlantısı kesilir, ekranı açık tutma bırakılır,
+    // izleme konumu kaydedilir. Aksi halde ekran kapansa bile yayın arka planda veri çekmeye
+    // devam ederdi (pil ve mobil veri israfı).
+    if(window.PTPlayer&&PTPlayer.isActive())PTPlayer.destroy();
     document.getElementById('sheetWrap').classList.remove('open');
     // HATA DÜZELTMESİ: Maç etiketi seçici / video menüsü artık document.body'ye ekleniyor
     // (sheetContent'e eklemek sohbet ekranını gizliyordu - bkz. openChatMatchPicker).
@@ -14317,6 +14448,7 @@ window.doSearch=function(){
   const showLeagues=_searchFilter==='all'||_searchFilter==='league';
   const showReferees=_searchFilter==='all'||_searchFilter==='referee';
   const showSponsors=_searchFilter==='all'||_searchFilter==='sponsor';
+  const showSettings=_searchFilter==='all'||_searchFilter==='setting';
   const teams=showTeams?Object.values(D.teams||{}).filter(t=>t.name.toLowerCase().includes(q)):[];
   const players=[];
   if(showPlayers){
@@ -14327,16 +14459,57 @@ window.doSearch=function(){
   const refereeNames=showReferees?[...new Set(Object.values(D.matches||{}).filter(m=>m.referee).map(m=>m.referee.trim()))].filter(r=>r.toLowerCase().includes(q)):[];
   // KULLANICI TALEBİ: Global Arama sponsor isimlerini de kapsayacak şekilde genişletildi.
   const sponsorMatches=showSponsors?(D.sponsors||[]).filter(sp=>sp.type==='text'?(sp.text||'').toLowerCase().includes(q):false):[];
+  // KULLANICI TALEBİ ("arama tüm ayarları kapsasın"): SETTINGS_SECTION_LABELS zaten
+  // openSettings()'in bölüm sıralaması için var olan TEK doğruluk kaynağı - burada TEKRAR
+  // yazmak yerine aynı katalog filtrelenir, böylece ileride yeni bir ayar eklenirse arama
+  // OTOMATİK olarak onu da kapsar.
+  const settingMatches=showSettings?SETTINGS_SECTION_IDS.filter(id=>(SETTINGS_SECTION_LABELS[id]||'').toLowerCase().includes(q)):[];
   const PC={'KL':'#f59e0b','STP1':'#60a5fa','STP2':'#60a5fa','SĞB':'#60a5fa','SLB':'#60a5fa','GÖ':'#34d399','DOS':'#34d399','OOS':'#34d399','SĞK':'#a78bfa','SLK':'#a78bfa','SF':'#f87171','GF':'#f87171'};
   let html='';
   if(leagues.length){html+='<div style="font-size:.62rem;font-weight:700;color:var(--mu2);margin-bottom:.28rem;text-transform:uppercase">🏆 Ligler</div>';html+=leagues.map(([id,meta])=>`<div onclick="document.getElementById('searchBar').style.display='none';selectLeagueFromSwitcher('${id}')" style="display:flex;align-items:center;gap:.5rem;padding:.38rem .5rem;background:var(--s);border:1px solid var(--br);border-radius:10px;margin-bottom:.25rem;cursor:pointer"><span style="font-size:.9rem">🏆</span><span style="font-size:.8rem;font-weight:700">${highlightMatch(meta.name||'Lig',qRaw)}</span>${meta.status==='finished'?'<span style="font-size:.58rem;color:var(--mu);margin-left:auto">Bitti</span>':''}</div>`).join('');}
   if(refereeNames.length){html+='<div style="font-size:.62rem;font-weight:700;color:var(--mu2);margin-bottom:.28rem;text-transform:uppercase">⚖️ Hakemler</div>';html+=refereeNames.map(name=>`<div onclick="document.getElementById('searchBar').style.display='none';switchTab('stats',document.querySelector('.ni'));window._statTab='referees';setTimeout(()=>showStatTab('referees'),50);" style="display:flex;align-items:center;gap:.5rem;padding:.38rem .5rem;background:var(--s);border:1px solid var(--br);border-radius:10px;margin-bottom:.25rem;cursor:pointer"><span style="font-size:.9rem">⚖️</span><span style="font-size:.8rem;font-weight:700">${highlightMatch(name,qRaw)}</span></div>`).join('');}
   if(sponsorMatches.length){html+='<div style="font-size:.62rem;font-weight:700;color:var(--mu2);margin-bottom:.28rem;text-transform:uppercase">📢 Sponsorlar</div>';html+=sponsorMatches.map(sp=>`<div onclick="document.getElementById('searchBar').style.display='none';switchTab('standings',document.querySelector('.ni'));" style="display:flex;align-items:center;gap:.5rem;padding:.38rem .5rem;background:var(--s);border:1px solid var(--br);border-radius:10px;margin-bottom:.25rem;cursor:pointer"><span style="font-size:.9rem">📢</span><span style="font-size:.8rem;font-weight:700">${highlightMatch(sp.text,qRaw)}</span></div>`).join('');}
+  // KULLANICI TALEBİ ("arama çubuğu uygulamadaki tüm ayarları kapsayacak şekilde
+  // genişletilsin"): Ayarlar kategorisi, admin'in bölüm sıralaması için ZATEN VAR OLAN
+  // SETTINGS_SECTION_LABELS kataloğunu yeniden kullanır - yeni bir ayar eklendiğinde bu
+  // liste otomatik güncel kalır.
+  if(settingMatches.length){html+='<div style="font-size:.62rem;font-weight:700;color:var(--mu2);margin-bottom:.28rem;text-transform:uppercase">⚙️ Ayarlar</div>';html+=settingMatches.map(id=>{const lbl=SETTINGS_SECTION_LABELS[id]||id;const emoji=lbl.split(' ')[0];const text=lbl.slice(emoji.length+1);return`<div onclick="document.getElementById('searchBar').style.display='none';jumpToSettingsSection('${id}')" style="display:flex;align-items:center;gap:.5rem;padding:.38rem .5rem;background:var(--s);border:1px solid var(--br);border-radius:10px;margin-bottom:.25rem;cursor:pointer"><span style="font-size:.9rem">${emoji}</span><span style="font-size:.8rem;font-weight:700">${highlightMatch(text,qRaw)}</span></div>`;}).join('');}
   if(teams.length){html+='<div style="font-size:.62rem;font-weight:700;color:var(--mu2);margin-bottom:.28rem;text-transform:uppercase">⚽ Takımlar</div>';html+=teams.map(t=>`<div onclick="switchTab('standings',document.querySelector('.ni'));document.getElementById('searchBar').style.display='none';showTeamDetail('${t.id}')" style="display:flex;align-items:center;gap:.5rem;padding:.38rem .5rem;background:var(--s);border:1px solid var(--br);border-radius:10px;margin-bottom:.25rem;cursor:pointer">${t.logo?`<img src="${t.logo}" style="width:26px;height:26px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:'<span style="font-size:.9rem">⚽</span>'}<span style="font-size:.8rem;font-weight:700">${highlightMatch(t.name,qRaw)}</span></div>`).join('');}
   if(players.length){html+='<div style="font-size:.62rem;font-weight:700;color:var(--mu2);margin:.4rem 0 .28rem;text-transform:uppercase">🏃 Oyuncular</div>';html+=players.slice(0,8).map(p=>{const c=PC[p.position]||'var(--br)';return`<div onclick="document.getElementById('searchBar').style.display='none';showPlayerDetail('${p.teamId}','${p.pSection}',${p.pIdx})" style="cursor:pointer;display:flex;align-items:center;gap:.5rem;padding:.38rem .5rem;background:var(--s);border:1px solid var(--br);border-radius:10px;margin-bottom:.25rem">${p.photo?`<img src="${p.photo}" style="width:28px;height:28px;border-radius:50%;object-fit:cover"/>`:'<span style="font-size:1rem">👤</span>'}<div style="flex:1"><div style="font-size:.76rem;font-weight:700">${highlightMatch(p.name,qRaw)}</div><div style="font-size:.58rem;color:var(--mu)">${p.teamName}${p.position?` · <span style="color:${c}">${p.position}</span>`:''}</div></div></div>`;}).join('');}
-  if(!teams.length&&!players.length&&!leagues.length&&!refereeNames.length&&!sponsorMatches.length)html='<div style="font-size:.75rem;color:var(--mu)">Sonuç bulunamadı</div>';
+  if(!teams.length&&!players.length&&!leagues.length&&!refereeNames.length&&!sponsorMatches.length&&!settingMatches.length)html='<div style="font-size:.75rem;color:var(--mu)">Sonuç bulunamadı</div>';
   res.innerHTML=html;
 };
+// KULLANICI TALEBİ ("arama tüm ayarları kapsasın, bulunca oraya götürsün"): Ayarlar ekranı
+// açılır, ilgili bölüm ekrana kaydırılıp kısa süreliğine vurgulanır. Bölümün konumu, admin
+// bölüm sırasını DEĞİŞTİRMİŞ olsa bile DOM'da o an gerçekten NEREDE olduğu bulunarak tespit
+// edilir - reorderSettingsSections() sırayı çalışma zamanında değiştirdiğinden sabit bir
+// konum VARSAYILAMAZ, her seferinde yeniden aranır.
+window.jumpToSettingsSection=function(id){
+  openSettings();
+  setTimeout(function(){scrollToSettingsSection(id);},90); // Ayarlar HTML'i yazıldıktan hemen sonraki tick'te DOM hazır olur.
+};
+function scrollToSettingsSection(id){
+  var container=document.getElementById('sheetContent');
+  if(!container)return;
+  var walker=document.createTreeWalker(container,NodeFilter.SHOW_COMMENT);
+  var node;
+  while((node=walker.nextNode())){
+    if(node.nodeValue.trim()==='SEC:'+id){
+      var label=node.nextElementSibling; // Yorumdan hemen sonraki eleman - bölümün başlık etiketi.
+      if(!label)return;
+      label.scrollIntoView({behavior:'smooth',block:'start'});
+      var card=label.nextElementSibling; // Etiketin altındaki asıl ayar kartı - vurgulanan budur.
+      if(card){
+        var prevOutline=card.style.outline,prevOffset=card.style.outlineOffset;
+        card.style.transition='outline-color .3s';
+        card.style.outline='2.5px solid var(--ac)';
+        card.style.outlineOffset='2px';
+        setTimeout(function(){card.style.outline=prevOutline;card.style.outlineOffset=prevOffset;},1600);
+      }
+      return;
+    }
+  }
+}
 
 // UPDATES
 // (Eski openUpdates/closeUpdates fonksiyonları kaldırıldı - hiç çağrılmıyordu, bkz. yukarıdaki not)
@@ -18226,6 +18399,1035 @@ window.togglePtVideoFullscreen=function(){
     }
   }catch(e){DiagSil('togglePtVideoFullscreen',e);}
 };
+// ══════════════════════════════════════════════════════════════════════════
+// ÖZEL VİDEO OYNATICI (PTPlayer)
+// KULLANICI TALEBİ: "Canlı yayın ve video için kendi video oynatıcımızı tasarlayacağız.
+// Bu özelliklerden hangileri işe yararsa ekle. Canlı ve video modunda stabil çalışsın."
+//
+// KAPSAM KARARI - neden bazı istekler BURADA YOK:
+//   • İndir / paylaş / bağlantıyı kopyala: Bu uygulamanın TASARIM İLKESİ, kullanıcının yayın
+//     adresini HİÇ görmemesi (bkz. video yönetimi notları). Bu düğmeler o ilkeyi bozardı.
+//   • Beğen/yorum/görüntülenme/favori/geçmiş paylaşımı: Sunucu tarafı veri modeli gerektirir
+//     (Firebase şeması + yazma kuralları). İzleme konumu/yüzdesi gibi KİŞİSEL veriler ise
+//     cihazda tutulabildiği için EKLENDİ.
+//   • Chromecast / DLNA: Google Cast SDK ve ağ keşfi gerektirir, tarayıcıdan yapılamaz.
+//     AirPlay iOS'ta yerleşik olduğu için EKLENDİ (yalnızca desteklendiğinde görünür).
+//   • HDR / Dolby Vision / Dolby Atmos: Bunlar akışın ve cihazın özelliğidir; içerik ve ekran
+//     destekliyorsa tarayıcı bunu KENDİLİĞİNDEN uygular, açılıp kapatılacak bir ayar değildir.
+//   • Çevrimdışı izleme / indirme: Yayın hakları ve depolama sınırları nedeniyle uygun değil.
+//   • Yapay zekâ özet/çeviri/sahne arama: Videonun sunucuda çözümlenmesini gerektirir; tarayıcı
+//     içinde canlı yayına uygulanamaz.
+//   • Reklamsız mod: Bu uygulama zaten reklam göstermiyor.
+// ══════════════════════════════════════════════════════════════════════════
+window.PTPlayer=(function(){
+  var S=null; // aktif oynatıcı durumu
+
+  // ── Kalıcı kullanıcı tercihleri ──
+  function prefs(){
+    try{return JSON.parse(localStorage.getItem('pt_playerPrefs')||'{}')||{};}catch(e){return {};}
+  }
+  function setPref(k,v){
+    try{var p=prefs();p[k]=v;localStorage.setItem('pt_playerPrefs',JSON.stringify(p));}catch(e){}
+  }
+  function pref(k,def){var v=prefs()[k];return v===undefined?def:v;}
+  // İzleme konumu (video başına) - "kaldığın yerden devam" için.
+  function posKey(id){return 'pt_vpos_'+id;}
+  function savePos(id,t,d){
+    if(!id||!isFinite(t)||!isFinite(d)||d<60)return; // çok kısa videolarda anlamsız
+    try{localStorage.setItem(posKey(id),JSON.stringify({t:Math.floor(t),d:Math.floor(d),ts:Date.now()}));}catch(e){}
+  }
+  function loadPos(id){
+    try{var r=JSON.parse(localStorage.getItem(posKey(id))||'null');return r&&isFinite(r.t)?r:null;}catch(e){return null;}
+  }
+
+  function fmt(sec){
+    if(!isFinite(sec)||sec<0)sec=0;
+    var s=Math.floor(sec%60),m=Math.floor(sec/60)%60,h=Math.floor(sec/3600);
+    var p=function(n){return n<10?'0'+n:''+n;};
+    return h>0?(h+':'+p(m)+':'+p(s)):(m+':'+p(s));
+  }
+  function el(id){return S&&S.root?S.root.querySelector('#'+id):null;}
+
+  // ── HLS (canlı yayın) motoru ──
+  function loadHlsLib(cb){
+    if(window.Hls){cb(!!window.Hls.isSupported());return;}
+    var s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js';
+    s.onload=function(){cb(!!(window.Hls&&window.Hls.isSupported()));};
+    s.onerror=function(){cb(false);};
+    document.head.appendChild(s);
+  }
+  function attachSource(){
+    var v=S.video,url=S.url;
+    var hlsMi=/\.(m3u8)(\?|#|$)/i.test(url);
+    if(!hlsMi){v.src=url;tryPlay();return;}
+    // Safari/iOS HLS'i YERLEŞİK destekler - hls.js'e hiç gerek yok ve CORS de gerektirmez.
+    if(v.canPlayType('application/vnd.apple.mpegurl')){v.src=url;tryPlay();return;}
+    loadHlsLib(function(ok){
+      if(!S)return;
+      if(!ok){v.src=url;tryPlay();return;}
+      try{
+        if(S.hls){try{S.hls.destroy();}catch(e){}}
+        var hls=new window.Hls({
+          lowLatencyMode:true,
+          // Canlı yayında kısa kesintilerden sonra kendi kendine toparlanma:
+          liveSyncDurationCount:3,
+          manifestLoadingMaxRetry:4,
+          levelLoadingMaxRetry:4,
+          fragLoadingMaxRetry:6
+        });
+        S.hls=hls;
+        hls.loadSource(url);
+        hls.attachMedia(v);
+        hls.on(window.Hls.Events.MANIFEST_PARSED,function(){
+          S.levels=hls.levels||[];
+          applyPreferredQuality();
+          buildPanelIfOpen();
+          tryPlay();
+        });
+        hls.on(window.Hls.Events.LEVEL_SWITCHED,function(){buildPanelIfOpen();updateInfo();});
+        // KARARLILIK: Canlı yayında ağ/parça hataları kaçınılmazdır. Ölümcül olmayanlar
+        // yok sayılır; ölümcül olanlarda ÖNCE toparlanma denenir, üst üste başarısız olursa
+        // kaynak baştan bağlanır. Kullanıcıya hata ancak gerçekten çaresiz kalındığında
+        // gösterilir - aksi halde her ufak kesintide ekrana hata basılırdı.
+        hls.on(window.Hls.Events.ERROR,function(_e,data){
+          if(!S)return;
+          if(!data||!data.fatal)return;
+          S.recoverCount=(S.recoverCount||0)+1;
+          if(data.type===window.Hls.ErrorTypes.NETWORK_ERROR&&S.recoverCount<6){
+            // KULLANICI TALEBİ (onaylanan öneri): Cihaz TAMAMEN çevrimdışıysa (uçak modu, tünel
+            // vb.) önceki kod yine de "Bağlantı yeniden kuruluyor…" deyip hls.startLoad()
+            // çağırmaya devam ediyordu - bu denemeler bağlantı gelene kadar BOŞUNA tekrarlanıp
+            // recoverCount'u tüketiyor, sonunda kullanıcıya "yayına ulaşılamıyor" hatası
+            // gösterilebiliyordu, oysa sorun geçiciydi. Artık gerçekten çevrimdışıyken deneme
+            // YAPILMAZ (recoverCount da harcanmaz) - bunun yerine TEK SEFERLİK bir 'online'
+            // dinleyicisi kurulur, bağlantı geri gelince otomatik olarak baştan bağlanılır.
+            if(!navigator.onLine){
+              showToastMsg('📡 İnternet bağlantınız yok');
+              if(!S.offlineHandler){
+                S.offlineHandler=function(){
+                  if(!S)return;
+                  window.removeEventListener('online',S.offlineHandler);
+                  S.offlineHandler=null;
+                  showToastMsg('📡 Bağlantı geri geldi, devam ediliyor…');
+                  try{hls.startLoad();}catch(e){}
+                };
+                window.addEventListener('online',S.offlineHandler);
+              }
+              return;
+            }
+            showToastMsg('Bağlantı yeniden kuruluyor…');
+            try{hls.startLoad();}catch(e){}
+            return;
+          }
+          if(data.type===window.Hls.ErrorTypes.MEDIA_ERROR&&S.recoverCount<6){
+            try{hls.recoverMediaError();}catch(e){}
+            return;
+          }
+          if(S.recoverCount<9){
+            setTimeout(function(){if(S)attachSource();},2500);
+            return;
+          }
+          fail('Yayına ulaşılamıyor','Yayın kaynağı şu anda yanıt vermiyor ya da bu tarayıcıdan erişime izin vermiyor. Yayıncının sitesinden izlemeyi deneyebilirsiniz.');
+        });
+      }catch(e){v.src=url;tryPlay();}
+    });
+  }
+  function tryPlay(){
+    if(!S)return;
+    var p=S.video.play();
+    if(p&&p.catch)p.catch(function(){
+      // Otomatik oynatma engellendi (tarayıcı politikası) - sessize alıp bir kez daha denenir,
+      // yine olmazsa kullanıcı oynat düğmesine basar. Hata GÖSTERİLMEZ, bu normal bir durumdur.
+      if(!S)return;
+      if(!S.video.muted&&pref('autoplay',true)){S.video.muted=true;syncUI();S.video.play().catch(function(){});}
+    });
+  }
+  function fail(baslik,aciklama){
+    if(!S)return;
+    var box=el('ptpErr');
+    if(!box)return;
+    box.style.display='flex';
+    box.querySelector('.ptp-err-t').textContent='⚠️ '+baslik;
+    box.querySelector('.ptp-err-d').textContent=aciklama;
+  }
+  // KULLANICI TALEBİ (onaylanan öneri): Hata mesajı "yayıncının sitesinden izleyebilirsiniz"
+  // diye YAZIYORDU ama bunu yapacak tıklanabilir hiçbir yol YOKTU - kullanıcı adresi
+  // bilmediğinden (bilerek gizleniyor - bkz. dosya başındaki tasarım ilkesi notu) hiçbir şey
+  // yapamıyordu. Artık hata ekranında "🔗 Kaynakta Aç" düğmesi var; orijinal adresi yeni
+  // sekmede açar - tıpkı gömülemeyen yayın linklerinde zaten kullanılan "sitede açın" yedek
+  // deseniyle TUTARLI.
+  function openSource(){
+    if(!S||!S.url)return;
+    window.open(S.url,'_blank','noopener');
+  }
+
+  // ── Kalite ──
+  function applyPreferredQuality(){
+    if(!S||!S.hls)return;
+    var want=pref('quality','auto');
+    if(pref('dataSaver',false)){
+      // Veri tasarrufu: 480p ve altındaki en yüksek seviye seçilir.
+      var best=-1;
+      (S.levels||[]).forEach(function(L,i){if(L.height<=480&&(best<0||L.height>S.levels[best].height))best=i;});
+      S.hls.currentLevel=best;
+      return;
+    }
+    if(want==='auto'){S.hls.currentLevel=-1;return;}
+    var idx=-1;
+    (S.levels||[]).forEach(function(L,i){if(String(L.height)===String(want))idx=i;});
+    S.hls.currentLevel=idx;
+  }
+
+  // ── Görüntü filtreleri / dönüşüm ──
+  function applyVisual(){
+    if(!S)return;
+    var v=S.video;
+    v.style.filter='brightness('+S.brightness+') contrast('+S.contrast+') saturate('+S.saturation+')';
+    v.style.transform='rotate('+S.rotate+'deg) scale('+S.zoom+')';
+    v.setAttribute('data-fit',S.fit);
+    var fb=el('ptpFit');
+    if(fb)fb.textContent=({contain:'⬜',cover:'✂️',fill:'↔️'})[S.fit]||'⬜';
+  }
+  // KULLANICI TALEBİ ("ekrana sığdır, genişlet, sığdırmak için kırp seçeneklerini ekle"):
+  // Ana kontrol satırındaki tek düğmeyle üç ekran modu arasında SIRAYLA geçiş yapılır - panel
+  // açmaya gerek yok. Panelin KENDİSİ açıksa (kullanıcı 🖼 Görüntü sekmesindeyse) oradaki
+  // seçili işaret de senkron kalsın diye panel yeniden çizilir.
+  function cycleFit(){
+    if(!S)return;
+    var order=['contain','cover','fill'];
+    var i=order.indexOf(S.fit);
+    S.fit=order[(i+1)%order.length];
+    applyVisual();
+    var labels={contain:'📐 Ekrana Sığdır',cover:'✂️ Sığdırmak İçin Kırp',fill:'↔️ Genişlet'};
+    showToastMsg(labels[S.fit]);
+    if(S.panelOpen&&S.panelTab==='image')openPanel('image');
+  }
+  function applyCueStyle(){
+    if(!S)return;
+    var id='ptpCueStyle';
+    var st=document.getElementById(id);
+    if(!st){st=document.createElement('style');st.id=id;document.head.appendChild(st);}
+    st.textContent='.ptp-video::cue{font-size:'+pref('cueSize',100)+'%;color:'+pref('cueColor','#ffffff')+
+      ';background:'+pref('cueBg','rgba(0,0,0,0.72)')+'}';
+  }
+
+  // ── Arayüz senkronizasyonu ──
+  function syncUI(){
+    if(!S)return;
+    var v=S.video;
+    var pb=el('ptpPlay');if(pb)pb.textContent=v.paused?'▶️':'⏸️';
+    var mb=el('ptpMute');
+    if(mb)mb.textContent=(v.muted||v.volume===0)?'🔇':(v.volume<.5?'🔉':'🔊');
+    var vs=el('ptpVol');if(vs&&document.activeElement!==vs)vs.value=v.muted?0:Math.round(v.volume*100);
+    updateTimes();
+  }
+  function updateTimes(){
+    if(!S)return;
+    var v=S.video,d=v.duration,t=v.currentTime;
+    var canli=S.isLive||!isFinite(d)||d===Infinity;
+    var cur=el('ptpCur'),rem=el('ptpRem'),tot=el('ptpTot'),sk=el('ptpSeek'),buf=el('ptpBuf');
+    if(canli){
+      if(cur)cur.textContent='CANLI';
+      if(rem)rem.textContent='';
+      if(tot)tot.textContent='';
+      if(sk){sk.disabled=true;sk.value=100;}
+      // Canlıdan ne kadar geride kalındığı - kullanıcı duraklatıp devam edince oluşur.
+      var lb=el('ptpLive');
+      if(lb&&S.hls&&S.hls.liveSyncPosition!=null&&isFinite(t)){
+        var geri=S.hls.liveSyncPosition-t;
+        if(geri>12){lb.textContent='⏱ '+Math.round(geri)+'sn geride';lb.classList.add('ptp-behind');}
+        else{lb.textContent='🔴 CANLI';lb.classList.remove('ptp-behind');}
+      }
+      return;
+    }
+    if(cur)cur.textContent=fmt(t);
+    if(rem)rem.textContent='-'+fmt(Math.max(0,d-t));
+    if(tot)tot.textContent=fmt(d);
+    if(sk&&!S.seeking){sk.disabled=false;sk.value=d?(t/d*100):0;}
+    if(buf&&d){
+      try{
+        var e2=v.buffered.length?v.buffered.end(v.buffered.length-1):0;
+        buf.style.width=Math.min(100,e2/d*100)+'%';
+      }catch(e){}
+    }
+  }
+  function updateInfo(){
+    var box=el('ptpInfoBox');
+    if(!box||!S)return;
+    var v=S.video;
+    var lvl=(S.hls&&S.hls.currentLevel>=0&&S.levels[S.hls.currentLevel])||null;
+    var cozunurluk=(v.videoWidth&&v.videoHeight)?(v.videoWidth+'×'+v.videoHeight):'—';
+    var bit=lvl&&lvl.bitrate?(Math.round(lvl.bitrate/1000)+' kbps'):'—';
+    var fps=lvl&&lvl.frameRate?Math.round(lvl.frameRate)+' fps':'—';
+    var tampon='—';
+    try{if(v.buffered.length)tampon=Math.max(0,Math.round(v.buffered.end(v.buffered.length-1)-v.currentTime))+' sn';}catch(e){}
+    box.innerHTML='<b>Başlık</b><span>'+(S.title||'—').replace(/</g,'&lt;')+'</span>'
+      +'<b>Tür</b><span>'+(S.isLive?'Canlı yayın':'Video')+'</span>'
+      +'<b>Çözünürlük</b><span>'+cozunurluk+'</span>'
+      +'<b>Bit hızı</b><span>'+bit+'</span>'
+      +'<b>Kare hızı</b><span>'+fps+'</span>'
+      +'<b>Tampon</b><span>'+tampon+'</span>'
+      +(S.isLive?'':'<b>Süre</b><span>'+(isFinite(v.duration)?fmt(v.duration):'—')+'</span>');
+  }
+
+  // ── Denetimlerin otomatik gizlenmesi ──
+  // KULLANICI TALEBİ: "Oynatıcı hemen kayboluyor - kullanıcı ekrana tıklayınca çıksın, tekrar
+  // tıklayınca kaybolsun." Denetimler ARTIK KENDİLİĞİNDEN GİZLENMİYOR; görünürlüğü YALNIZCA
+  // kullanıcının dokunuşu belirler (bkz. toggleControls). Bu fonksiyon sadece "göster" der ve
+  // hiçbir zamanlayıcı kurmaz - önceki sürümdeki 3 saniyelik otomatik gizleme kaldırıldı.
+  function showControls(){
+    if(!S)return;
+    var ov=el('ptpOv');
+    if(ov)ov.classList.remove('ptp-hide');
+  }
+  function toggleControls(){
+    if(!S)return;
+    var ov=el('ptpOv');
+    if(!ov)return;
+    if(ov.classList.contains('ptp-hide')){ov.classList.remove('ptp-hide');return;}
+    // Ayar paneli açıkken ilk dokunuş paneli kapatır, denetimler ekranda kalır - kullanıcı
+    // paneli kapatmak isterken oynatıcının tamamının kaybolması şaşırtıcı olurdu.
+    if(S.panelOpen){closePanel();return;}
+    ov.classList.add('ptp-hide');
+  }
+  function showToastMsg(txt,ms){
+    var t=el('ptpToast');
+    if(!t)return;
+    t.textContent=txt;
+    t.classList.add('ptp-on');
+    clearTimeout(S.toastT);
+    S.toastT=setTimeout(function(){if(t)t.classList.remove('ptp-on');},ms||900);
+  }
+
+  // ── Genel eylemler ──
+  function togglePlay(){
+    if(!S)return;
+    if(S.video.paused){S.video.play().catch(function(){});}
+    else S.video.pause();
+    showControls();
+  }
+  function stop(){
+    if(!S)return;
+    S.video.pause();
+    try{S.video.currentTime=0;}catch(e){}
+    showControls();
+  }
+  function seekBy(sn){
+    if(!S)return;
+    var v=S.video;
+    if(S.isLive&&!isFinite(v.duration)){
+      // Canlı yayında ileri sarma yoktur; geri sarma tampon kadar mümkündür.
+      if(sn>0){showToastMsg('Canlı yayında ileri sarılamaz');return;}
+    }
+    try{v.currentTime=Math.max(0,v.currentTime+sn);}catch(e){}
+    showToastMsg((sn>0?'⏩ +':'⏪ ')+Math.abs(sn)+' sn');
+    showControls();
+  }
+  function goLive(){
+    if(!S||!S.hls)return;
+    try{S.video.currentTime=S.hls.liveSyncPosition||S.video.duration;S.video.play();}catch(e){}
+    showToastMsg('🔴 Canlıya dönüldü');
+  }
+  function setVolume(p){
+    if(!S)return;
+    p=Math.max(0,Math.min(100,p));
+    S.video.muted=p===0;
+    S.video.volume=p/100;
+    setPref('volume',p);
+    syncUI();
+  }
+  function toggleMute(){
+    if(!S)return;
+    S.video.muted=!S.video.muted;
+    if(!S.video.muted&&S.video.volume===0)S.video.volume=.5;
+    syncUI();showControls();
+  }
+  function setSpeed(r){
+    if(!S)return;
+    S.video.playbackRate=r;
+    setPref('speed',r);
+    showToastMsg('⚡ '+r+'x');
+    buildPanelIfOpen();
+  }
+
+  // ── Tam ekran / PiP / yön ──
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "yatay/dikey mod, tam ekran, tam ekrana sığdır -
+  // bunları göremedim"): Önceki uygulama tarayıcının NATIVE Fullscreen API'sine dayanıyordu.
+  // Bunun İKİ ciddi kısıtı vardı: (1) iOS Safari (ve iOS'taki TÜM tarayıcılar - Chrome/Firefox
+  // dahil, hepsi Apple'ın WebKit motorunu kullanmak ZORUNDA) container'lara requestFullscreen
+  // vermez - kod bu yüzden video.webkitEnterFullscreen()'e düşüyordu, bu da bizim ÖZEL
+  // arayüzümüzü (hız, kalite, altyazı, jestler) TAMAMEN devre dışı bırakıp iOS'un KENDİ çıplak
+  // video oynatıcısına geçiyordu - kullanıcı "tam ekran" dediğinde tüm bu özellikleri
+  // KAYBEDİYORDU. (2) requestFullscreen() tarayıcı güvenliği gereği yalnızca DOĞRUDAN bir
+  // kullanıcı jestinden (tıklama/dokunma) çağrılabilir - cihaz döndürüldüğünde (orientationchange)
+  // programatik olarak ÇAĞRILAMAZ, bu yüzden "telefonu yatay çevirince otomatik tam ekrana
+  // geç" davranışı native API ile MÜMKÜN DEĞİLDİ. ÇÖZÜM: Artık tam ekran, tarayıcının izin
+  // sistemine hiç girmeyen SAF CSS ile yapılıyor (.ptp-fs sınıfı artık position:fixed;inset:0
+  // ile TÜM ekranı kaplıyor - bkz. CSS). Bu hem iOS'ta ÖZEL arayüzü KORUR hem de aşağıdaki
+  // bindOrientation() içinde cihaz döndürüldüğünde tetiklenebilir - hiçbir jest kısıtı yok.
+  function toggleFullscreen(){
+    if(!S)return;
+    var root=S.root;
+    if(!root.classList.contains('ptp-fs')){
+      root.classList.add('ptp-fs');
+      document.body.classList.add('ptp-fs-active');
+      showControls();
+      // Yatay/dik: Tam ekranda cihaz yönü kilitlenebiliyorsa videonun oranına göre seçilir.
+      // (Bu, döndürmeyle TETİKLENEN tam ekranda gereksiz - kullanıcı zaten o yöne döndürdü -
+      // ama fsFromRotate BAYRAĞI YOKSA (düğmeyle manuel açıldıysa) burada denenir.)
+      if(!S.fsFromRotate){
+        try{
+          if(screen.orientation&&screen.orientation.lock&&pref('autoRotate',true)){
+            var yatay=S.video.videoWidth>=S.video.videoHeight;
+            screen.orientation.lock(yatay?'landscape':'portrait').catch(function(){});
+          }
+        }catch(e){}
+      }
+    }else{
+      root.classList.remove('ptp-fs');
+      document.body.classList.remove('ptp-fs-active');
+      S.fsFromRotate=false;
+      try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
+    }
+  }
+  // KULLANICI TALEBİ ("Yatay mod, dikey mod izlenebilsin, video izlemede ise tam ekran, tam
+  // ekrana sığdır"): Telefon video izlerken YATAYA çevrildiğinde oynatıcı KENDİLİĞİNDEN tam
+  // ekrana geçer ve videoyu mevcut alana sığdırır (object-fit:contain zaten aktif); DİKEYE
+  // geri dönülünce - EĞER tam ekrana döndürmeyle girildiyse (kullanıcı ⛶ düğmesiyle kendisi
+  // AÇMADIYSA) otomatik olarak çıkar. matchMedia hem eski 'orientationchange' olayından daha
+  // güvenilir hem de masaüstünde pencere yeniden boyutlandırmada da doğru çalışır.
+  function bindOrientation(){
+    if(!S||S.orientMq)return;
+    // ÖNEMLİ: Bu özellik SADECE dokunmatik (mobil/tablet) cihazlarda anlamlıdır - "cihaz
+    // döndürme" kavramı masaüstünde YOKTUR, ve masaüstü pencereleri zaten çoğunlukla
+    // "yatay" (geniş) olduğundan bu kontrol olmadan HER video açılışında masaüstünde de
+    // yanlışlıkla tam ekrana geçilirdi.
+    try{if(!window.matchMedia('(pointer: coarse)').matches)return;}catch(e){return;}
+    var mq=window.matchMedia('(orientation: landscape)');
+    var handler=function(){
+      if(!S)return;
+      var isFs=S.root.classList.contains('ptp-fs');
+      if(mq.matches&&!isFs){
+        S.fsFromRotate=true;
+        toggleFullscreen();
+      }else if(!mq.matches&&isFs&&S.fsFromRotate){
+        toggleFullscreen();
+      }
+    };
+    S.orientMq=mq;S.orientHandler=handler;
+    if(mq.addEventListener)mq.addEventListener('change',handler);
+    else if(mq.addListener)mq.addListener(handler); // eski Safari
+    // Oynatıcı AÇILDIĞI anda telefon zaten yataysa (kullanıcı yayını yatay tutarken açtıysa)
+    // döndürme olayı hiç ateşlenmeyeceğinden burada BİR KEZ hemen kontrol edilir.
+    if(mq.matches)handler();
+  }
+  function unbindOrientation(){
+    if(!S||!S.orientMq)return;
+    if(S.orientMq.removeEventListener)S.orientMq.removeEventListener('change',S.orientHandler);
+    else if(S.orientMq.removeListener)S.orientMq.removeListener(S.orientHandler);
+    S.orientMq=null;S.orientHandler=null;
+  }
+  function togglePip(){
+    if(!S)return;
+    try{
+      if(document.pictureInPictureElement)document.exitPictureInPicture();
+      else if(S.video.requestPictureInPicture)S.video.requestPictureInPicture();
+      else showToastMsg('Bu tarayıcı küçük pencereyi desteklemiyor');
+    }catch(e){showToastMsg('Küçük pencere açılamadı');}
+  }
+  function rotate(){
+    if(!S)return;
+    S.rotate=(S.rotate+90)%360;
+    applyVisual();
+    showToastMsg('🔄 '+S.rotate+'°');
+    buildPanelIfOpen();
+  }
+
+  // ── Ekran kilidi (yanlış dokunmayı engeller) ──
+  function toggleLock(){
+    if(!S)return;
+    S.locked=!S.locked;
+    S.root.classList.toggle('ptp-locked',S.locked);
+    var b=el('ptpLockBtn');
+    if(b)b.textContent=S.locked?'🔒':'🔓';
+    showToastMsg(S.locked?'🔒 Ekran kilitlendi':'🔓 Kilit açıldı');
+  }
+
+  // ── Uyku zamanlayıcısı ──
+  function setSleep(dk){
+    if(!S)return;
+    clearTimeout(S.sleepT);
+    S.sleepMin=dk;
+    if(!dk){showToastMsg('Uyku zamanlayıcısı kapatıldı');buildPanelIfOpen();return;}
+    S.sleepT=setTimeout(function(){
+      if(!S)return;
+      S.video.pause();
+      showToastMsg('⏰ Uyku zamanlayıcısı: durduruldu');
+    },dk*60000);
+    showToastMsg('⏰ '+dk+' dk sonra duracak');
+    buildPanelIfOpen();
+  }
+
+  // ── Ekranı açık tutma (canlı yayın izlerken ekran sönmesin) ──
+  function wakeLock(ac){
+    try{
+      if(ac&&navigator.wakeLock&&!S.wl){
+        navigator.wakeLock.request('screen').then(function(w){if(S)S.wl=w;}).catch(function(){});
+      }else if(!ac&&S&&S.wl){S.wl.release().catch(function(){});S.wl=null;}
+    }catch(e){}
+  }
+
+  // ── Oynatma listesi (admin'in eklediği aynı türdeki yayınlar) ──
+  function playlist(){
+    var all=(window.D&&D.videoLinks)||[];
+    return all.filter(function(x){return !!x.isLive===!!S.isLive;});
+  }
+  function jump(delta){
+    var list=playlist();
+    var i=list.findIndex(function(x){return x.id===S.videoId;});
+    if(i<0)return;
+    var n=i+delta;
+    if(n<0||n>=list.length){showToastMsg(delta>0?'Son yayın':'İlk yayın');return;}
+    if(typeof window.openVideoWatch==='function')window.openVideoWatch(list[n].id);
+  }
+  // KULLANICI TALEBİ (onaylanan öneri): Görünür, iptal edilebilir "sıradaki yayın" geçişi.
+  function startNextCountdown(nextItem){
+    if(!S||!nextItem)return;
+    var box=el('ptpNext'),txt=el('ptpNextT');
+    if(!box||!txt)return;
+    var kalan=5;
+    box.style.display='flex';
+    function guncelle(){txt.textContent='Sıradaki: '+(nextItem.title||'İsimsiz yayın')+' · '+kalan+' sn içinde başlıyor';}
+    guncelle();
+    S.nextT=setInterval(function(){
+      kalan--;
+      if(kalan<=0){cancelNext();if(typeof window.openVideoWatch==='function')window.openVideoWatch(nextItem.id);return;}
+      guncelle();
+    },1000);
+  }
+  function playNextNow(){
+    if(!S)return;
+    var list=playlist();
+    var i=list.findIndex(function(x){return x.id===S.videoId;});
+    clearInterval(S.nextT);S.nextT=null;
+    if(i>=0&&i<list.length-1&&typeof window.openVideoWatch==='function')window.openVideoWatch(list[i+1].id);
+  }
+  function cancelNext(){
+    if(!S)return;
+    clearInterval(S.nextT);S.nextT=null;
+    var box=el('ptpNext');if(box)box.style.display='none';
+  }
+
+  // ── Ayar paneli ──
+  function buildPanelIfOpen(){if(S&&S.panelOpen)openPanel(S.panelTab,true);}
+  function closePanel(){
+    var p=el('ptpPanel');
+    if(p)p.remove();
+    if(S){S.panelOpen=false;}
+  }
+  function openPanel(tab,yeniden){
+    if(!S)return;
+    tab=tab||'main';
+    closePanel();
+    S.panelOpen=true;S.panelTab=tab;
+    var v=S.video;
+    var h='';
+    function opt(label,secili,eylem){
+      return '<button class="ptp-opt'+(secili?' ptp-sel':'')+'" data-act="'+eylem+'"><span class="ptp-ck">'+(secili?'✓':'')+'</span>'+label+'</button>';
+    }
+    function slider(id,label,min,max,step,val,birim){
+      return '<div class="ptp-slide"><label>'+label+'</label><input type="range" id="'+id+'" min="'+min+'" max="'+max+'" step="'+step+'" value="'+val+'"/><span id="'+id+'V">'+val+birim+'</span></div>';
+    }
+    if(tab==='main'){
+      h+='<h4>AYARLAR</h4>';
+      h+=opt('⚡ Oynatma hızı · '+v.playbackRate+'x',false,'tab:speed');
+      if(S.levels&&S.levels.length)h+=opt('🎚 Kalite · '+(pref('quality','auto')==='auto'?'Otomatik':pref('quality')+'p'),false,'tab:quality');
+      h+=opt('🖼 Görüntü',false,'tab:image');
+      if(v.textTracks&&v.textTracks.length)h+=opt('💬 Altyazı',false,'tab:cc');
+      h+=opt('⏱ Sarma adımı · '+pref('skip',10)+' sn',false,'tab:skip');
+      h+=opt('⏰ Uyku zamanlayıcısı'+(S.sleepMin?' · '+S.sleepMin+' dk':''),false,'tab:sleep');
+      h+=opt('🔁 Döngü (loop)',v.loop,'toggle:loop');
+      h+=opt('▶️ Otomatik oynat',pref('autoplay',true),'toggle:autoplay');
+      h+=opt('📉 Veri tasarrufu',pref('dataSaver',false),'toggle:saver');
+      h+=opt('🔄 Tam ekranda yön çevir',pref('autoRotate',true),'toggle:rot');
+      h+=opt('ℹ️ Video bilgileri',false,'tab:info');
+    }else if(tab==='speed'){
+      h+='<h4>◀ OYNATMA HIZI</h4>';
+      [0.25,0.5,0.75,1,1.25,1.5,1.75,2].forEach(function(r){h+=opt(r+'x',v.playbackRate===r,'speed:'+r);});
+      h+=slider('ptpSpdC','Özel',25,300,5,Math.round(v.playbackRate*100),'%');
+      h+=opt('◀ Geri',false,'tab:main');
+    }else if(tab==='quality'){
+      h+='<h4>◀ KALİTE</h4>';
+      var akt=pref('quality','auto');
+      h+=opt('Otomatik'+(S.hls&&S.hls.currentLevel>=0&&S.levels[S.hls.currentLevel]?' ('+S.levels[S.hls.currentLevel].height+'p)':''),akt==='auto','q:auto');
+      var gorulen={};
+      (S.levels||[]).slice().sort(function(a,b){return b.height-a.height;}).forEach(function(L){
+        if(!L.height||gorulen[L.height])return;
+        gorulen[L.height]=1;
+        var ad=L.height>=2160?'2160p 4K':L.height>=1440?'1440p 2K':L.height>=1080?'1080p Full HD':L.height>=720?'720p HD':L.height+'p';
+        h+=opt(ad,String(akt)===String(L.height),'q:'+L.height);
+      });
+      h+=opt('◀ Geri',false,'tab:main');
+    }else if(tab==='image'){
+      h+='<h4>◀ GÖRÜNTÜ</h4>';
+      h+=opt('📐 Ekrana Sığdır',S.fit==='contain','fit:contain');
+      h+=opt('✂️ Sığdırmak İçin Kırp',S.fit==='cover','fit:cover');
+      h+=opt('↔️ Genişlet',S.fit==='fill','fit:fill');
+      h+=opt('🔄 Döndür · '+S.rotate+'°',false,'rotate');
+      h+=slider('ptpZoom','Yakınlaştır',100,300,5,Math.round(S.zoom*100),'%');
+      h+=slider('ptpBri','Parlaklık',40,200,5,Math.round(S.brightness*100),'%');
+      h+=slider('ptpCon','Kontrast',40,200,5,Math.round(S.contrast*100),'%');
+      h+=slider('ptpSat','Doygunluk',0,250,5,Math.round(S.saturation*100),'%');
+      h+=opt('↺ Sıfırla',false,'visreset');
+      h+=opt('◀ Geri',false,'tab:main');
+    }else if(tab==='cc'){
+      h+='<h4>◀ ALTYAZI</h4>';
+      var tt=v.textTracks;
+      var acikVar=false;
+      for(var i=0;i<tt.length;i++)if(tt[i].mode==='showing')acikVar=true;
+      h+=opt('Kapalı',!acikVar,'cc:-1');
+      for(var j=0;j<tt.length;j++){
+        h+=opt((tt[j].label||tt[j].language||('Altyazı '+(j+1))),tt[j].mode==='showing','cc:'+j);
+      }
+      h+=slider('ptpCueSz','Yazı boyutu',70,220,5,pref('cueSize',100),'%');
+      h+='<div class="ptp-slide"><label>Yazı rengi</label><input type="color" id="ptpCueCol" value="'+pref('cueColor','#ffffff')+'" style="flex:1;height:26px;background:none;border:none"/></div>';
+      h+=opt('Arka plan: Siyah',pref('cueBg','rgba(0,0,0,0.72)')==='rgba(0,0,0,0.72)','ccbg:rgba(0,0,0,0.72)');
+      h+=opt('Arka plan: Yok',pref('cueBg','rgba(0,0,0,0.72)')==='transparent','ccbg:transparent');
+      h+=slider('ptpCueSync','Senkron',-10,10,.5,S.cueSync,'sn');
+      h+=opt('◀ Geri',false,'tab:main');
+    }else if(tab==='skip'){
+      h+='<h4>◀ SARMA ADIMI</h4>';
+      [5,10,15,30].forEach(function(n){h+=opt(n+' saniye',Number(pref('skip',10))===n,'skip:'+n);});
+      h+=opt('◀ Geri',false,'tab:main');
+    }else if(tab==='sleep'){
+      h+='<h4>◀ UYKU ZAMANLAYICISI</h4>';
+      h+=opt('Kapalı',!S.sleepMin,'sleep:0');
+      [15,30,45,60,90].forEach(function(n){h+=opt(n+' dakika',S.sleepMin===n,'sleep:'+n);});
+      h+=opt('◀ Geri',false,'tab:main');
+    }else if(tab==='info'){
+      h+='<h4>◀ VİDEO BİLGİLERİ</h4><div class="ptp-info" id="ptpInfoBox"></div>';
+      h+=opt('◀ Geri',false,'tab:main');
+    }
+    var p=document.createElement('div');
+    p.className='ptp-panel';p.id='ptpPanel';p.innerHTML=h;
+    S.root.appendChild(p);
+    if(tab==='info')updateInfo();
+    showControls();
+
+    p.addEventListener('click',function(e){
+      var b=e.target.closest('.ptp-opt');
+      if(!b)return;
+      e.stopPropagation();
+      var a=b.getAttribute('data-act')||'';
+      if(a.indexOf('tab:')===0){openPanel(a.slice(4));return;}
+      if(a.indexOf('speed:')===0){setSpeed(Number(a.slice(6)));return;}
+      if(a.indexOf('q:')===0){
+        var q=a.slice(2);setPref('quality',q);setPref('dataSaver',false);applyPreferredQuality();
+        showToastMsg('Kalite: '+(q==='auto'?'Otomatik':q+'p'));openPanel('quality');return;
+      }
+      if(a.indexOf('fit:')===0){S.fit=a.slice(4);applyVisual();openPanel('image');return;}
+      if(a==='rotate'){rotate();return;}
+      if(a==='visreset'){S.zoom=1;S.brightness=1;S.contrast=1;S.saturation=1;S.rotate=0;S.fit='contain';applyVisual();openPanel('image');return;}
+      if(a.indexOf('cc:')===0){
+        var idx=Number(a.slice(3));
+        for(var k=0;k<S.video.textTracks.length;k++)S.video.textTracks[k].mode=(k===idx?'showing':'disabled');
+        openPanel('cc');return;
+      }
+      if(a.indexOf('ccbg:')===0){setPref('cueBg',a.slice(5));applyCueStyle();openPanel('cc');return;}
+      if(a.indexOf('skip:')===0){setPref('skip',Number(a.slice(5)));openPanel('skip');return;}
+      if(a.indexOf('sleep:')===0){setSleep(Number(a.slice(6)));return;}
+      if(a==='toggle:loop'){S.video.loop=!S.video.loop;setPref('loop',S.video.loop);openPanel('main');return;}
+      if(a==='toggle:autoplay'){setPref('autoplay',!pref('autoplay',true));openPanel('main');return;}
+      if(a==='toggle:saver'){var d=!pref('dataSaver',false);setPref('dataSaver',d);applyPreferredQuality();showToastMsg(d?'📉 Veri tasarrufu açık':'Veri tasarrufu kapalı');openPanel('main');return;}
+      if(a==='toggle:rot'){setPref('autoRotate',!pref('autoRotate',true));openPanel('main');return;}
+    });
+    // Kaydırıcılar
+    function bind(id,fn){
+      var s=p.querySelector('#'+id);
+      if(!s)return;
+      s.addEventListener('input',function(){
+        var lab=p.querySelector('#'+id+'V');
+        fn(Number(s.value),lab);
+      });
+      s.addEventListener('click',function(e){e.stopPropagation();});
+    }
+    bind('ptpZoom',function(n,l){S.zoom=n/100;applyVisual();if(l)l.textContent=n+'%';});
+    bind('ptpBri',function(n,l){S.brightness=n/100;applyVisual();if(l)l.textContent=n+'%';});
+    bind('ptpCon',function(n,l){S.contrast=n/100;applyVisual();if(l)l.textContent=n+'%';});
+    bind('ptpSat',function(n,l){S.saturation=n/100;applyVisual();if(l)l.textContent=n+'%';});
+    bind('ptpSpdC',function(n,l){S.video.playbackRate=n/100;setPref('speed',n/100);if(l)l.textContent=n+'%';});
+    bind('ptpCueSz',function(n,l){setPref('cueSize',n);applyCueStyle();if(l)l.textContent=n+'%';});
+    bind('ptpCueSync',function(n,l){
+      S.cueSync=n;if(l)l.textContent=n+'sn';
+      // Altyazı senkronu: gösterilen izin tüm cue zamanları kaydırılır.
+      try{
+        for(var k=0;k<S.video.textTracks.length;k++){
+          var tr=S.video.textTracks[k];
+          if(tr.mode!=='showing'||!tr.cues)continue;
+          if(!tr._ptBase){tr._ptBase=[];for(var c=0;c<tr.cues.length;c++)tr._ptBase.push([tr.cues[c].startTime,tr.cues[c].endTime]);}
+          for(var c2=0;c2<tr.cues.length;c2++){
+            tr.cues[c2].startTime=Math.max(0,tr._ptBase[c2][0]+n);
+            tr.cues[c2].endTime=Math.max(.1,tr._ptBase[c2][1]+n);
+          }
+        }
+      }catch(e){}
+    });
+    var col=p.querySelector('#ptpCueCol');
+    if(col)col.addEventListener('input',function(){setPref('cueColor',col.value);applyCueStyle();});
+  }
+
+  // ── Dokunma hareketleri ──
+  function bindGestures(stage){
+    var t0=0,lastTap=0,lastX=0,startY=0,startX=0,mode=null,baseVal=0,pinchBase=0;
+    function dist(e){
+      var a=e.touches[0],b=e.touches[1];
+      return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY);
+    }
+    stage.addEventListener('touchstart',function(e){
+      // HATA DÜZELTMESİ (kullanıcı bildirdi: "hızı açtığında seçimini yapmadan kapanıyor"):
+      // KÖK SEBEP - .ptp-ov içindeki TÜM düğmeler (⚙️ Ayarlar dahil) #ptpStage'in İÇİNDEDİR,
+      // bu yüzden onlara dokunmak bu jest dinleyicilerini de tetikliyordu. Fare/click
+      // dinleyicisinde (aşağıda) buton/panel/input hedefleri zaten HARİÇ TUTULUYORDU ama AYNI
+      // hariç tutma dokunmatik (touch) dinleyicilerinde EKSİKTİ. Sonuç: kullanıcı ⚙️'ye
+      // dokunup paneli AÇTIĞINDA, bu dokunuş AYNI ZAMANDA "tek dokunma → kontrolleri kapat/aç"
+      // jestine de sayılıyordu - 320ms sonra bu jest devreye girip "panel açıkken ilk dokunuş
+      // paneli kapatır" kuralı gereği paneli HEMEN kapatıyordu; kullanıcı bir seçenek
+      // seçmeye FIRSAT BULAMADAN. Artık buton/panel/input üzerindeki dokunuşlar bu jest
+      // sistemine hiç girmiyor - o elemanların KENDİ tıklama işleyicileri normal çalışır.
+      if(e.target.closest('.ptp-btn,.ptp-panel,input,select'))return;
+      if(S)S.touchKullanildi=true; // dokunmatik cihazda 'click' yolu devre dışı kalır
+      if(S&&S.locked)return;
+      if(e.touches.length===2){mode='pinch';pinchBase=dist(e);baseVal=S.zoom;return;}
+      t0=Date.now();
+      startY=e.touches[0].clientY;startX=e.touches[0].clientX;
+      mode=null;
+    },{passive:true});
+    stage.addEventListener('touchmove',function(e){
+      if(e.target.closest('.ptp-btn,.ptp-panel,input,select'))return;
+      if(!S||S.locked)return;
+      if(mode==='pinch'&&e.touches.length===2){
+        var r=dist(e)/(pinchBase||1);
+        S.zoom=Math.max(1,Math.min(3,baseVal*r));
+        applyVisual();
+        showToastMsg('🔍 '+Math.round(S.zoom*100)+'%');
+        return;
+      }
+      if(e.touches.length!==1)return;
+      var dy=startY-e.touches[0].clientY;
+      var dx=e.touches[0].clientX-startX;
+      if(!mode&&Math.abs(dy)>18&&Math.abs(dy)>Math.abs(dx)){
+        // Sol yarı: parlaklık · Sağ yarı: ses (yaygın mobil oynatıcı düzeni)
+        var r2=stage.getBoundingClientRect();
+        mode=(startX-r2.left)<r2.width/2?'bright':'vol';
+        baseVal=mode==='bright'?S.brightness*100:(S.video.muted?0:S.video.volume*100);
+      }
+      if(mode==='bright'){
+        var nb=Math.max(30,Math.min(200,baseVal+dy/2));
+        S.brightness=nb/100;applyVisual();
+        showToastMsg('☀️ '+Math.round(nb)+'%');
+      }else if(mode==='vol'){
+        var nv=Math.max(0,Math.min(100,baseVal+dy/2));
+        setVolume(nv);
+        showToastMsg('🔊 '+Math.round(nv)+'%');
+      }
+    },{passive:true});
+    stage.addEventListener('touchend',function(e){
+      if(e.target.closest('.ptp-btn,.ptp-panel,input,select'))return;
+      if(!S)return;
+      if(mode){mode=null;return;}
+      if(S.locked)return;
+      if(Date.now()-t0>320)return; // uzun basış - dokunma sayılmaz
+      var now=Date.now();
+      var x=(e.changedTouches[0]||{}).clientX||0;
+      var r=stage.getBoundingClientRect();
+      if(now-lastTap<320&&Math.abs(x-lastX)<80){
+        // Çift dokunma: sol = geri sar, sağ = ileri sar, orta = oynat/duraklat
+        var oran=(x-r.left)/r.width;
+        var adim=Number(pref('skip',10));
+        if(oran<0.35)seekBy(-adim);
+        else if(oran>0.65)seekBy(adim);
+        else togglePlay();
+        lastTap=0;
+        return;
+      }
+      lastTap=now;lastX=x;
+      setTimeout(function(){
+        // Tek dokunma: denetimleri aç/kapat. Gecikme, bunun bir ÇİFT dokunuşun ilk yarısı
+        // olmadığından emin olmak içindir (çift dokunuş sarma yapar, denetimi değiştirmez).
+        if(Date.now()-lastTap>=310)toggleControls();
+      },320);
+    },{passive:true});
+    // Fare/masaüstü
+    // Masaüstü/fare: tıklama da aç/kapat yapar (dokunmatikte bu olay touchend'den sonra
+    // tetiklenmediği için çift işlem oluşmaz).
+    stage.addEventListener('click',function(e){
+      if(!S||S.locked)return;
+      if(e.target.closest('.ptp-btn,.ptp-panel,input'))return;
+      if(S.touchKullanildi)return;
+      toggleControls();
+    });
+    stage.addEventListener('dblclick',function(){if(!S||S.locked)return;toggleFullscreen();});
+  }
+
+  // ── Klavye (masaüstü) ──
+  function onKey(e){
+    if(!S||S.locked)return;
+    var tag=(e.target&&e.target.tagName||'').toLowerCase();
+    if(tag==='input'||tag==='textarea'||tag==='select')return;
+    var adim=Number(pref('skip',10));
+    if(e.key===' '||e.key==='k'){e.preventDefault();togglePlay();}
+    else if(e.key==='ArrowLeft'){seekBy(-adim);}
+    else if(e.key==='ArrowRight'){seekBy(adim);}
+    else if(e.key==='ArrowUp'){setVolume((S.video.muted?0:S.video.volume*100)+10);showToastMsg('🔊 '+Math.round(S.video.volume*100)+'%');}
+    else if(e.key==='ArrowDown'){setVolume((S.video.muted?0:S.video.volume*100)-10);showToastMsg('🔊 '+Math.round(S.video.volume*100)+'%');}
+    else if(e.key==='m'){toggleMute();}
+    else if(e.key==='f'){toggleFullscreen();}
+    // HATA DÜZELTMESİ: Tam ekran artık NATIVE Fullscreen API kullanmadığından (bkz.
+    // toggleFullscreen), tarayıcının kendi "Esc ile tam ekrandan çık" davranışı bizim
+    // .ptp-fs'imiz için ARTIK ÇALIŞMAZ - burada AÇIKÇA ele alınması gerekiyor.
+    else if(e.key==='Escape'&&S.panelOpen){closePanel();}
+    else if(e.key==='Escape'&&S.root.classList.contains('ptp-fs')){toggleFullscreen();}
+  }
+
+  // ── Kurulum ──
+  function mount(hostId,opt){
+    destroy();
+    var host=document.getElementById(hostId);
+    if(!host)return;
+    var canli=!!opt.isLive;
+    var list=((window.D&&D.videoLinks)||[]).filter(function(x){return !!x.isLive===canli;});
+    var idx=list.findIndex(function(x){return x.id===opt.videoId;});
+    var airplayVar=!!(window.WebKitPlaybackTargetAvailabilityEvent);
+
+    host.innerHTML=
+      '<div class="ptp" id="ptpRoot">'
+      +'<div class="ptp-stage" id="ptpStage">'
+        +'<video class="ptp-video" id="ptpVideo" playsinline webkit-playsinline preload="metadata" '
+          +'crossorigin="anonymous" data-fit="contain" '+(airplayVar?'x-webkit-airplay="allow" ':'')+'></video>'
+        +'<div class="ptp-spin" id="ptpSpin"></div>'
+        +'<div class="ptp-toast" id="ptpToast"></div>'
+        +'<div class="ptp-err" id="ptpErr" style="display:none">'
+          +'<div class="ptp-err-t"></div><div class="ptp-err-d"></div>'
+          +'<div style="display:flex;gap:.5rem">'
+          +'<button class="ptp-btn" style="width:auto;padding:0 .8rem;background:var(--ac,#7c3aed)" onclick="PTPlayer.retry()">↻ Tekrar dene</button>'
+          +'<button class="ptp-btn" id="ptpErrOpen" style="width:auto;padding:0 .8rem;background:rgba(255,255,255,.15)" onclick="PTPlayer.openSource()">🔗 Kaynakta Aç</button>'
+          +'</div>'
+        +'</div>'
+        +'<div class="ptp-next" id="ptpNext" style="display:none">'
+          +'<div class="ptp-next-t" id="ptpNextT"></div>'
+          +'<div style="display:flex;gap:.5rem">'
+          +'<button class="ptp-btn" style="width:auto;padding:0 .9rem;background:var(--ac,#7c3aed)" onclick="PTPlayer.playNextNow()">▶️ Şimdi İzle</button>'
+          +'<button class="ptp-btn" style="width:auto;padding:0 .9rem;background:rgba(255,255,255,.15)" onclick="PTPlayer.cancelNext()">✕ İptal</button>'
+          +'</div>'
+        +'</div>'
+        +'<div class="ptp-lockbar"><button class="ptp-btn" id="ptpLockBtn" title="Ekran kilidi">🔓</button></div>'
+        +'<div class="ptp-ov" id="ptpOv">'
+          +'<div class="ptp-top">'
+            +(canli?'<span class="ptp-live" id="ptpLive">🔴 CANLI</span>':'')
+            +'<div class="ptp-title">'+(opt.title||'').replace(/</g,'&lt;')+'</div>'
+            +'<button class="ptp-btn" id="ptpPip" title="Küçük pencere">🗗</button>'
+            +'<button class="ptp-btn" id="ptpSet" title="Ayarlar">⚙️</button>'
+          +'</div>'
+          +'<div class="ptp-mid">'
+            +'<button class="ptp-btn" id="ptpBack" title="Geri sar">⏪</button>'
+            +'<button class="ptp-btn ptp-play" id="ptpPlay" title="Oynat/Duraklat">▶️</button>'
+            +'<button class="ptp-btn" id="ptpFwd" title="İleri sar">⏩</button>'
+          +'</div>'
+          +'<div class="ptp-bot">'
+            +'<div class="ptp-times"><span id="ptpCur">0:00</span><span class="ptp-sp"></span>'
+              +'<span id="ptpRem"></span><span id="ptpTot"></span></div>'
+            +'<div class="ptp-seekwrap"><div class="ptp-buf" id="ptpBuf" style="width:0"></div>'
+              +'<input type="range" class="ptp-seek" id="ptpSeek" min="0" max="100" step="0.1" value="0"/></div>'
+            +'<div class="ptp-row">'
+              +'<button class="ptp-btn" id="ptpPrev" title="Önceki"'+(idx<=0?' disabled':'')+'>⏮️</button>'
+              +'<button class="ptp-btn" id="ptpStop" title="Durdur">⏹️</button>'
+              +'<button class="ptp-btn" id="ptpNext" title="Sonraki"'+(idx<0||idx>=list.length-1?' disabled':'')+'>⏭️</button>'
+              +'<button class="ptp-btn" id="ptpMute" title="Ses">🔊</button>'
+              +'<input type="range" class="ptp-vol" id="ptpVol" min="0" max="100" value="100"/>'
+              +(canli?'<button class="ptp-btn" id="ptpGoLive" title="Canlıya dön" style="width:auto;padding:0 .5rem;font-size:.62rem;font-weight:800">CANLIYA DÖN</button>':'')
+              +'<button class="ptp-btn" id="ptpSpeed" title="Hız" style="width:auto;padding:0 .5rem;font-size:.66rem;font-weight:800">1x</button>'
+              // KULLANICI TALEBİ ("ekrana sığdır, genişlet, sığdırmak için kırp seçeneklerini
+              // ekle"): Bu üç ekran modu ZATEN vardı (bkz. openPanel 'image' sekmesi:
+              // fit:contain/fill/cover) ama sadece ⚙️ → 🖼 Görüntü alt menüsünde, iki dokunuş
+              // gerisinde saklıydı. Artık ana kontrol satırında TEK dokunuşla döngüsel olarak
+              // değiştirilebilen doğrudan bir düğme var - panel navigasyonuna hiç gerek yok,
+              // bu yüzden panel kararlılığından TAMAMEN bağımsız, en sağlam erişim yolu.
+              +'<button class="ptp-btn" id="ptpFit" title="Ekran Modu" onclick="PTPlayer.cycleFit()">⬜</button>'
+              +'<button class="ptp-btn" id="ptpFs" title="Tam ekran">⛶</button>'
+            +'</div>'
+          +'</div>'
+        +'</div>'
+      +'</div>';
+
+    var root=host.querySelector('#ptpRoot');
+    var video=host.querySelector('#ptpVideo');
+    S={
+      root:root,video:video,url:opt.url,title:opt.title||'',isLive:canli,videoId:opt.videoId,
+      hls:null,levels:[],zoom:1,brightness:1,contrast:1,saturation:1,rotate:0,fit:'contain',
+      cueSync:0,locked:false,panelOpen:false,panelTab:'main',sleepMin:0,recoverCount:0
+    };
+
+    // Kayıtlı tercihler
+    video.volume=Math.max(0,Math.min(1,Number(pref('volume',100))/100));
+    video.muted=video.volume===0;
+    video.loop=!!pref('loop',false);
+    video.playbackRate=canli?1:Number(pref('speed',1)); // canlıda hız daima 1x'ten başlar
+    applyVisual();applyCueStyle();
+
+    // Düğmeler
+    function on(id,fn){var b=host.querySelector('#'+id);if(b)b.addEventListener('click',function(e){e.stopPropagation();fn();});}
+    on('ptpPlay',togglePlay);
+    on('ptpStop',stop);
+    on('ptpBack',function(){seekBy(-Number(pref('skip',10)));});
+    on('ptpFwd',function(){seekBy(Number(pref('skip',10)));});
+    on('ptpPrev',function(){jump(-1);});
+    on('ptpNext',function(){jump(1);});
+    on('ptpMute',toggleMute);
+    on('ptpFs',toggleFullscreen);
+    on('ptpPip',togglePip);
+    on('ptpGoLive',goLive);
+    on('ptpLockBtn',toggleLock);
+    on('ptpSet',function(){if(S.panelOpen)closePanel();else openPanel('main');});
+    on('ptpSpeed',function(){openPanel('speed');});
+
+    var vol=host.querySelector('#ptpVol');
+    vol.addEventListener('input',function(e){e.stopPropagation();setVolume(Number(vol.value));});
+    var seek=host.querySelector('#ptpSeek');
+    seek.addEventListener('input',function(e){
+      e.stopPropagation();
+      S.seeking=true;
+      var d=video.duration;
+      if(isFinite(d)){
+        var t=d*Number(seek.value)/100;
+        var cur=el('ptpCur');if(cur)cur.textContent=fmt(t);
+      }
+    });
+    seek.addEventListener('change',function(e){
+      e.stopPropagation();
+      var d=video.duration;
+      if(isFinite(d)){try{video.currentTime=d*Number(seek.value)/100;}catch(err){}}
+      S.seeking=false;
+      showControls();
+    });
+
+    // KULLANICI TALEBİ ("yatay mod, dikey mod izlenebilsin") + HATA DÜZELTMESİ (ekran
+    // görüntüsüyle bildirilen bozuk yerleşim): loadedmetadata anında bazı akışlarda (özellikle
+    // HLS) videoWidth/videoHeight henüz GÜVENİLİR olmayabilir (geçici/küçük bir değer
+    // taşıyabilir) - bu, YATAY bir yayının yanlışlıkla dikey sanılıp kutunun devasa boş alan
+    // bırakacak şekilde daraltılmasına yol açabiliyordu. Artık: (1) çok küçük (<64px) boyutlar
+    // GÜVENİLMEZ sayılıp yoksayılıyor, (2) sadece loadedmetadata değil, videonun gerçek
+    // boyutu her DEĞİŞTİĞİNDE (bkz. 'resize' olayı - kalite değişince de tetiklenir) yeniden
+    // değerlendiriliyor.
+    function syncStageAspect(){
+      if(!S||!S.root)return;
+      var vw=video.videoWidth,vh=video.videoHeight;
+      if(!vw||!vh||vw<64||vh<64)return;
+      var stage=S.root.querySelector('.ptp-stage');
+      if(stage)stage.classList.toggle('ptp-portrait',vh>vw);
+    }
+    video.addEventListener('resize',syncStageAspect);
+    // Video olayları
+    video.addEventListener('loadedmetadata',function(){
+      var sp=el('ptpSpin');if(sp)sp.style.display='none';
+      syncStageAspect();
+      // Kaldığı yerden devam (yalnızca kayıtlı video, canlıda anlamsız)
+      if(!canli){
+        var p=loadPos(opt.videoId);
+        if(p&&p.t>10&&isFinite(video.duration)&&p.t<video.duration-15){
+          try{video.currentTime=p.t;}catch(e){}
+          showToastMsg('▶ '+fmt(p.t)+' konumundan devam');
+        }
+      }
+      syncUI();updateInfo();
+    });
+    video.addEventListener('waiting',function(){
+      var sp=el('ptpSpin');if(sp)sp.style.display='block';
+      // KULLANICI TALEBİ (onaylanan öneri): Bağlantı sık sık arabelleğe düşüyorsa (kısa sürede
+      // tekrar tekrar 'waiting') ve Veri Tasarrufu zaten kapalıysa, kullanıcıya BİR KEZ
+      // (oturum başına) bunu açması önerilir. Otomatik AÇILMAZ - tercih kullanıcıya bırakılır,
+      // sadece dikkat çekilir (bkz. dosya başındaki "tercihler kullanıcıya ait" ilkesi).
+      if(!canli||pref('dataSaver',false)||S.saverOnerildi)return;
+      var now=Date.now();
+      S.bufEvents=(S.bufEvents||[]).filter(function(t){return now-t<45000;});
+      S.bufEvents.push(now);
+      if(S.bufEvents.length>=3){
+        S.saverOnerildi=true;
+        showToastMsg('🐢 Bağlantı yavaş görünüyor - ⚙️ Ayarlar\'dan Veri Tasarrufu\'nu açabilirsiniz',3500);
+      }
+    });
+    video.addEventListener('playing',function(){
+      var sp=el('ptpSpin');if(sp)sp.style.display='none';
+      S.recoverCount=0;
+      wakeLock(true);
+      showControls();
+    });
+    video.addEventListener('canplay',function(){var sp=el('ptpSpin');if(sp)sp.style.display='none';});
+    video.addEventListener('play',syncUI);
+    video.addEventListener('pause',function(){syncUI();showControls();wakeLock(false);});
+    video.addEventListener('volumechange',syncUI);
+    video.addEventListener('ratechange',function(){
+      var b=el('ptpSpeed');if(b)b.textContent=(Math.round(video.playbackRate*100)/100)+'x';
+    });
+    video.addEventListener('timeupdate',function(){
+      updateTimes();
+      if(!canli){
+        S.tick=(S.tick||0)+1;
+        if(S.tick%8===0)savePos(opt.videoId,video.currentTime,video.duration); // ~4 saniyede bir
+      }
+    });
+    video.addEventListener('progress',updateTimes);
+    video.addEventListener('ended',function(){
+      if(!canli){
+        try{localStorage.setItem(posKey(opt.videoId),JSON.stringify({t:0,d:Math.floor(video.duration||0),done:1,ts:Date.now()}));}catch(e){}
+      }
+      syncUI();
+      // KULLANICI TALEBİ (onaylanan öneri): "Sıradaki yayına ÖNCEDEN sessizce/görünmeden
+      // atlanıyordu" - artık görünür bir geri sayım kutusu (bkz. .ptp-next) gösterilir,
+      // kullanıcı isterse hemen izleyebilir ya da iptal edip mevcut ekranda kalabilir.
+      if(!video.loop&&pref('autoplay',true)&&idx>=0&&idx<list.length-1)startNextCountdown(list[idx+1]);
+    });
+    video.addEventListener('error',function(){
+      if(!S)return;
+      if(/\.m3u8/i.test(S.url)&&S.hls)return; // hls.js kendi hata yolunu işletir
+      fail('Video açılamadı','Bu yayın kaynağı yanıt vermiyor veya bu tarayıcıdan erişime izin vermiyor.');
+    });
+    video.addEventListener('enterpictureinpicture',function(){showToastMsg('🗗 Küçük pencere');});
+
+    document.addEventListener('keydown',onKey);
+    bindOrientation();
+
+    bindGestures(host.querySelector('#ptpStage'));
+    attachSource();
+    syncUI();
+    var sb=el('ptpSpeed');if(sb)sb.textContent=video.playbackRate+'x';
+    showControls();
+  }
+  function retry(){
+    if(!S)return;
+    var box=el('ptpErr');if(box)box.style.display='none';
+    S.recoverCount=0;
+    var sp=el('ptpSpin');if(sp)sp.style.display='block';
+    attachSource();
+  }
+  function destroy(){
+    if(!S)return;
+    try{
+      if(!S.isLive&&S.video)savePos(S.videoId,S.video.currentTime,S.video.duration);
+      clearTimeout(S.hideT);clearTimeout(S.toastT);clearTimeout(S.sleepT);clearInterval(S.nextT);
+      if(S.offlineHandler){window.removeEventListener('online',S.offlineHandler);S.offlineHandler=null;}
+      wakeLock(false);
+      unbindOrientation();
+      document.body.classList.remove('ptp-fs-active');
+      if(S.hls){S.hls.destroy();}
+      if(S.video){S.video.pause();S.video.removeAttribute('src');S.video.load();}
+    }catch(e){}
+    document.removeEventListener('keydown',onKey);
+    S=null;
+  }
+  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,isActive:function(){return !!S;}};
+})();
+
 window.openVideoWatch=function(videoId){
   const v=(D.videoLinks||[]).find(function(x){return x.id===videoId;});
   if(!v){showToast('❌ Video bulunamadı');return;}
@@ -18240,8 +19442,15 @@ window.openVideoWatch=function(videoId){
   // sekmeye atlamak yerine önce genel bir iframe ile gömülü oynatma DENER (bkz.
   // buildGenericIframeEmbedHtml) - "sitede açın" yedek bağlantısı HER ZAMAN altta görünür
   // durur, çünkü embed'in engellenip engellenmediği kod içinden tespit edilemez.
-  let playerHtml,isIframeLike=false,showFallbackHint=false;
-  if(embeddable){
+  let playerHtml,isIframeLike=false,showFallbackHint=false,ozelOynatici=false;
+  // KULLANICI TALEBİ: Doğrudan medya (mp4) ve canlı yayın akışları (m3u8/mpd) artık ÇIPLAK bir
+  // <video> etiketiyle değil, uygulamanın KENDİ oynatıcısıyla (bkz. PTPlayer) açılır. YouTube
+  // gibi iframe platformlarında bu mümkün DEĞİLDİR - orada oynatıcı karşı platforma aittir ve
+  // tarayıcı güvenliği gereği dışarıdan kontrol edilemez, o yüzden onlar eskisi gibi kalır.
+  if(ptIsDirectMediaUrl(url)){
+    playerHtml='<div id="ptPlayerHost"></div>';
+    ozelOynatici=true;
+  }else if(embeddable){
     const known=buildVideoEmbedHtml(url);
     if(known){playerHtml=known;isIframeLike=true;}
     else{playerHtml=buildExternalWatchCardHtml(videoId,v.isLive);}
@@ -18259,12 +19468,21 @@ window.openVideoWatch=function(videoId){
   // (bkz. CSS: #videoPlayerBox:fullscreen iframe) sadece iframe genişler, bu küçük metin
   // tam ekran görünümüne karışmaz.
   const fallbackHint=showFallbackHint?`<div style="text-align:center;padding:.5rem .3rem 0;font-size:.66rem;color:var(--mu)">Görüntü yüklenmiyorsa <a href="#" onclick="event.preventDefault();openExternalVideoLink('${videoId}')" style="color:var(--ac3,var(--ac));font-weight:700;text-decoration:underline">sitede açın</a></div>`:'';
+  // HATA DÜZELTMESİ (kullanıcı ekran görüntüsüyle bildirdi: üstte devasa boş alan + "CANLI
+  // TRT1" yazısı İKİ KEZ görünüyordu): PTPlayer'ın KENDİ başlık çubuğu (.ptp-top içinde
+  // başlık + 🔴 CANLI rozeti) zaten var - bu sarmalayıcı ÖNCEDEN AYRICA kendi başlık
+  // div'ini de çiziyordu, ikisi ÜST ÜSTE biniyordu. Özel oynatıcı (PTPlayer) kullanılan
+  // durumda bu dış başlık artık HİÇ render edilmiyor - başlık/CANLI rozeti alanının TEK
+  // sahibi PTPlayer oluyor.
+  const baslikHtml=ozelOynatici?'':`<div style="font-size:.88rem;font-weight:900;margin-bottom:.7rem">${(v.title||'İsimsiz Video').replace(/</g,'&lt;')}${liveTag}</div>`;
   const html=`<div class="sheet-handle"></div>
-    <div style="font-size:.88rem;font-weight:900;margin-bottom:.7rem">${(v.title||'İsimsiz Video').replace(/</g,'&lt;')}${liveTag}</div>
+    ${baslikHtml}
     <div id="videoPlayerBox" style="position:relative;border-radius:14px;overflow:hidden">${playerHtml}${fsBtn}</div>${fallbackHint}`;
   document.getElementById('sheetContent').innerHTML=html;
-  // Canlı yayın akışı (m3u8/mpd) varsa oynatıcı DOM'a girdikten sonra bağlanır.
-  ptAttachStreamPlayer();
+  // Özel oynatıcı, DOM hazır olduktan SONRA kurulur (kendi <video> etiketini kendisi yaratır).
+  if(ozelOynatici&&window.PTPlayer){
+    PTPlayer.mount('ptPlayerHost',{url:url,title:v.title||'',isLive:!!v.isLive,videoId:videoId});
+  }
   if(window.PTSheetNav)PTSheetNav.mark('videoWatch_'+videoId);
   document.getElementById('sheetWrap').classList.add('open');
 };
@@ -21762,7 +22980,7 @@ window.voteMvp=function(matchId,player){
     var cap=buyuk?20:17;
     var rozet=s.errs?s.errs:(s.slow?s.slow:0);
     var baloncuk=rozet?('<span style="position:absolute;top:-5px;right:-6px;min-width:14px;height:14px;padding:0 3px;'
-      +'background:'+(s.errs?'#ef4444':'#f59e0b')+';color:#fff;border:1.5px solid #11131a;border-radius:9px;'
+      +'background:'+(s.errs?'#ef4444':'#b45309')+';color:#fff;border:1.5px solid #11131a;border-radius:9px;'
       +'font-size:.48rem;font-weight:900;line-height:11px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.5)">'
       +(rozet>99?'99+':rozet)+'</span>'):'';
     return '<span style="position:relative;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;'
