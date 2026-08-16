@@ -1332,7 +1332,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-16-F';
+window.APP_BUILD='2026-08-16-G';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18839,7 +18839,21 @@ window.PTPlayer=(function(){
       // Yatay/dik: Tam ekranda cihaz yönü kilitlenebiliyorsa videonun oranına göre seçilir.
       // (Bu, döndürmeyle TETİKLENEN tam ekranda gereksiz - kullanıcı zaten o yöne döndürdü -
       // ama fsFromRotate BAYRAĞI YOKSA (düğmeyle manuel açıldıysa) burada denenir.)
+      // KULLANICI TALEBİ ("tam ekrandayken site bilgileri görünmesin"): Saf CSS tam ekran
+      // tarayıcının KENDİ adres çubuğunu/menüsünü GİZLEYEMEZ - bunu SADECE native
+      // Fullscreen API yapabilir. Ama native API SADECE gerçek bir kullanıcı jestinden
+      // (buraya tıklama/dokunma) çağrılabilir - döndürmeyle TETİKLENEN tam ekranda
+      // (fsFromRotate=true) kullanılamaz (bkz. yukarıdaki uzun not). Bu yüzden: kullanıcı ⛶
+      // düğmesine/tuşuna BİZZAT bastığında (fsFromRotate YOKSA) native API de AYRICA
+      // denenir - Android Chrome gibi çoğu tarayıcıda adres çubuğu GERÇEKTEN gizlenir. iOS
+      // Safari'de veya döndürmeyle tetiklenmişse sessizce başarısız olur/denenmez - CSS
+      // tabanlı tam ekran YİNE DE tam olarak çalışmaya devam eder, hiçbir işlevsellik
+      // kaybolmaz, sadece o durumlarda adres çubuğu görünür kalır (kaçınılmaz).
       if(!S.fsFromRotate){
+        try{
+          var req=root.requestFullscreen||root.webkitRequestFullscreen;
+          if(req)req.call(root).catch(function(){});
+        }catch(e){}
         try{
           if(screen.orientation&&screen.orientation.lock&&pref('autoRotate',true)){
             var yatay=S.video.videoWidth>=S.video.videoHeight;
@@ -18849,6 +18863,25 @@ window.PTPlayer=(function(){
       }
     }else{
       root.classList.remove('ptp-fs');
+      document.body.classList.remove('ptp-fs-active');
+      S.fsFromRotate=false;
+      // Native tam ekran da BİZ tetiklemişsek (yukarıdaki dal), burada da temiz çıkılır.
+      try{
+        var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
+        if(fsEl){var ex=document.exitFullscreen||document.webkitExitFullscreen;if(ex)ex.call(document).catch(function(){});}
+      }catch(e){}
+      try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
+    }
+  }
+  // GÜVENLİK AĞI: Native tam ekrandan BEKLENMEDİK şekilde çıkılırsa (ör. Android geri tuşu/
+  // jesti, ya da kullanıcı tarayıcının KENDİ "tam ekrandan çık" ipucuna dokunursa), CSS
+  // tabanlı .ptp-fs de senkron kalsın diye birlikte temizlenir - aksi halde adres çubuğu geri
+  // gelir ama bizim arayüzümüz hâlâ "tam ekranda" sanıp yanlış boyutlanmaya devam edebilirdi.
+  function onNativeFsChange(){
+    if(!S)return;
+    var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
+    if(!fsEl&&S.root.classList.contains('ptp-fs')){
+      S.root.classList.remove('ptp-fs');
       document.body.classList.remove('ptp-fs-active');
       S.fsFromRotate=false;
       try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
@@ -19460,6 +19493,8 @@ window.PTPlayer=(function(){
     video.addEventListener('enterpictureinpicture',function(){showToastMsg('🗗 Küçük pencere');});
 
     document.addEventListener('keydown',onKey);
+    document.addEventListener('fullscreenchange',onNativeFsChange);
+    document.addEventListener('webkitfullscreenchange',onNativeFsChange);
     bindOrientation();
 
     bindGestures(host.querySelector('#ptpStage'));
@@ -19484,10 +19519,21 @@ window.PTPlayer=(function(){
       wakeLock(false);
       unbindOrientation();
       document.body.classList.remove('ptp-fs-active');
+      // Kapatılırken hâlâ native tam ekrandaysak (kullanıcı sheet'i tam ekran video izlerken
+      // kapattıysa) düzgünce çıkılır - aksi halde tarayıcı "tam ekranda" takılı kalabilir.
+      try{
+        var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
+        if(fsEl&&S.root&&(fsEl===S.root||S.root.contains(fsEl))){
+          var ex=document.exitFullscreen||document.webkitExitFullscreen;
+          if(ex)ex.call(document).catch(function(){});
+        }
+      }catch(e){}
       if(S.hls){S.hls.destroy();}
       if(S.video){S.video.pause();S.video.removeAttribute('src');S.video.load();}
     }catch(e){}
     document.removeEventListener('keydown',onKey);
+    document.removeEventListener('fullscreenchange',onNativeFsChange);
+    document.removeEventListener('webkitfullscreenchange',onNativeFsChange);
     S=null;
   }
   // KULLANICI TALEBİ (arama motoru "TV veri tasarrufu modu"nu bulamıyordu): Bu fonksiyon
