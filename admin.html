@@ -1234,7 +1234,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-17-C';
+window.APP_BUILD='2026-08-17-D';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -14721,7 +14721,7 @@ function renderAdminChatBubble(c,isReply,repliesByParent){
   var reactHtml=allReactedEmojis.map(function(emo){
     var cnt=reactionCounts[emo]||0;
     var active=myAdminReaction===emo;
-    return '<button data-action="react" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" data-emoji="'+emo+'" style="border:1px solid '+(active?'var(--ac)':'var(--br)')+';background:'+(active?'rgba(124,58,237,.18)':'transparent')+';border-radius:12px;padding:.08rem .35rem;font-size:.62rem;display:inline-flex;align-items:center;gap:.12rem;cursor:pointer;opacity:'+(cnt>0?'1':'.5')+'">'+renderReactionEmojiAdminHtml(emo)+(cnt>0?'<span style="font-size:.54rem;color:var(--mu)">'+cnt+'</span>':'')+'</button>';
+    return '<button data-action="react" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" data-emoji="'+emo+'" data-archiveindex="'+(c.archiveIndex!=null?c.archiveIndex:'')+'" data-pastleagueid="'+escHtml(c.pastLeagueId||'')+'" style="border:1px solid '+(active?'var(--ac)':'var(--br)')+';background:'+(active?'rgba(124,58,237,.18)':'transparent')+';border-radius:12px;padding:.08rem .35rem;font-size:.62rem;display:inline-flex;align-items:center;gap:.12rem;cursor:pointer;opacity:'+(cnt>0?'1':'.5')+'">'+renderReactionEmojiAdminHtml(emo)+(cnt>0?'<span style="font-size:.54rem;color:var(--mu)">'+cnt+'</span>':'')+'</button>';
   }).join('')
   +'<button onclick="adminOpenFullEmojiPicker(\''+escHtml(c.matchId||'')+'\',\''+c.id+'\')" style="border:1px solid var(--br);background:transparent;border-radius:12px;padding:.08rem .4rem;font-size:.62rem;cursor:pointer;color:var(--mu);font-weight:800">➕ Diğer</button>';
   return '<div data-comment-id="'+c.id+'" style="display:flex;flex-direction:column;align-items:'+align+';margin-bottom:.5rem;'+(isReply?'margin-left:1.4rem':'')+'">'
@@ -14754,7 +14754,7 @@ function renderAdminChatBubble(c,isReply,repliesByParent){
     +'<button data-action="pin" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" data-archiveindex="'+(c.archiveIndex!=null?c.archiveIndex:'')+'" data-pastleagueid="'+escHtml(c.pastLeagueId||'')+'" style="background:transparent;border:1px solid var(--br);border-radius:12px;padding:.08rem .45rem;color:var(--mu);font-size:.6rem;cursor:pointer;font-weight:700">'+(c.pinned?'Kaldır':'Sabitle')+'</button>'
     +(c.text?'<button data-action="setfont" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" style="background:transparent;border:1px solid var(--br);border-radius:12px;padding:.08rem .45rem;color:var(--mu);font-size:.6rem;cursor:pointer;font-weight:700">🔠 Yazı Tipi</button>':'')
     +(!isDev?'<button data-action="penalty" data-user="'+escHtml(c.user||'')+'" style="background:transparent;border:1px solid rgba(245,158,11,.4);border-radius:12px;padding:.08rem .45rem;color:#fbbf24;font-size:.6rem;cursor:pointer;font-weight:700">⛔ Ceza</button>':'')
-    +'<button data-action="delete" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" style="background:transparent;border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:.08rem .45rem;color:#f87171;font-size:.6rem;cursor:pointer;font-weight:700">Sil</button>'
+    +'<button data-action="delete" data-matchid="'+escHtml(c.matchId||'')+'" data-cid="'+c.id+'" data-archiveindex="'+(c.archiveIndex!=null?c.archiveIndex:'')+'" data-pastleagueid="'+escHtml(c.pastLeagueId||'')+'" style="background:transparent;border:1px solid rgba(239,68,68,.3);border-radius:12px;padding:.08rem .45rem;color:#f87171;font-size:.6rem;cursor:pointer;font-weight:700">Sil</button>'
     +'</div>'
     +(!isReply&&repliesByParent[c.id]?repliesByParent[c.id].sort(function(a,b){return a.ts-b.ts;}).map(function(r){return renderAdminChatBubble(r,true,repliesByParent);}).join(''):'')
     +'</div></div>';
@@ -14878,11 +14878,25 @@ function adminShowReactorListPopup(matchId,cid,emoji){
   openSheet('',html, 'adminShowReactorListPopup');
 }
 // KULLANICI TALEBİ: Admin de emoji ile tepki verebilsin - "Geliştirici" kimliği altında.
-function adminToggleReaction(matchId,cid,emoji){
+// KULLANICI TALEBİ ("admin hangi sezonda olursa olsun bütün mesajlara müdahale edebilir,
+// eski sezonlar dahil"): adminToggleGenericPin/adminDeleteGenericComment İLE AYNI üç
+// kaynak ayrımı burada da uygulanır - önceden HER ZAMAN sadece _curLeagueId'ye/S.matches'e
+// yazıyordu, geçmiş sezon yorumlarında tepki vermek çalışmıyordu.
+function adminToggleReaction(matchId,cid,emoji,archiveIndex,pastLeagueId){
   if(!_curLeagueId){toast('❌ Önce bir lig seçin','er');return;}
   if(!_adminGuardModeration(cid))return; // bkz. _adminGuardModeration - sessiz başarısızlık düzeltmesi
-  var basePath=matchId?('leagues/'+_curLeagueId+'/matches/'+matchId+'/comments/'+cid):('leagues/'+_curLeagueId+'/generalChat/'+cid);
-  var obj=matchId?(S.matches[matchId]&&S.matches[matchId].comments&&S.matches[matchId].comments[cid]):(S.generalChat&&S.generalChat[cid]);
+  var basePath,obj;
+  if(pastLeagueId){
+    basePath=matchId?('leagues/'+pastLeagueId+'/matches/'+matchId+'/comments/'+cid):('leagues/'+pastLeagueId+'/generalChat/'+cid);
+    obj=(_pastSeasonChatCacheAdmin||[]).find(function(c){return c.pastLeagueId===pastLeagueId&&(c.matchId||null)===(matchId||null)&&c.id===cid;});
+  }else if(archiveIndex!=null){
+    var arc=(S.archives||[])[archiveIndex];
+    basePath='leagues/'+_curLeagueId+'/archives/'+archiveIndex+'/matches/'+matchId+'/comments/'+cid;
+    obj=arc&&arc.matches&&arc.matches[matchId]&&arc.matches[matchId].comments&&arc.matches[matchId].comments[cid];
+  }else{
+    basePath=matchId?('leagues/'+_curLeagueId+'/matches/'+matchId+'/comments/'+cid):('leagues/'+_curLeagueId+'/generalChat/'+cid);
+    obj=matchId?(S.matches[matchId]&&S.matches[matchId].comments&&S.matches[matchId].comments[cid]):(S.generalChat&&S.generalChat[cid]);
+  }
   if(!obj)return;
   var reactions=obj.reactions||{};
   // HATA DÜZELTMESİ (kullanıcı bildirdi: "admin tepkisini geri alamıyor, tekrar basınca
@@ -14943,8 +14957,8 @@ document.addEventListener('click',function(ev){
     else if(action==='pin')adminToggleGenericPin(el.dataset.matchid?'match':'general',el.dataset.matchid,el.dataset.cid,el.dataset.archiveindex!==''?el.dataset.archiveindex:null,el.dataset.pastleagueid||null);
     else if(action==='setfont')adminOpenFontOverrideSheet(el.dataset.matchid,el.dataset.cid);
     else if(action==='penalty')devReplyApplyPenalty(el.dataset.user);
-    else if(action==='delete')adminDeleteGenericComment(el.dataset.matchid?'match':'general',el.dataset.matchid,el.dataset.cid);
-    else if(action==='react')adminToggleReaction(el.dataset.matchid,el.dataset.cid,el.dataset.emoji);
+    else if(action==='delete')adminDeleteGenericComment(el.dataset.matchid?'match':'general',el.dataset.matchid,el.dataset.cid,el.dataset.archiveindex!==''?el.dataset.archiveindex:null,el.dataset.pastleagueid||null);
+    else if(action==='react')adminToggleReaction(el.dataset.matchid,el.dataset.cid,el.dataset.emoji,el.dataset.archiveindex!==''?el.dataset.archiveindex:null,el.dataset.pastleagueid||null);
     else if(action==='playvideo'){
       // HATA DÜZELTMESİ: Video verisi (potansiyel olarak birkaç MB) SADECE burada, kullanıcı
       // gerçekten izlemek istediğinde bir <video> elemanına JS ile atanıyor - hiçbir zaman
@@ -15231,20 +15245,41 @@ function adminToggleGenericPin(target,matchId,cid,archiveIndex,pastLeagueId){
     renderDevReplyMatchComments();
   }).catch(function(e){toast('❌ Güncellenemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
 }
-function adminDeleteGenericComment(target,matchId,cid){
+// KULLANICI TALEBİ ("admin hangi sezonda olursa olsun bütün mesajlara müdahale edebilir,
+// eski sezonlar dahil"): Bu fonksiyon ÖNCEDEN HER ZAMAN sadece _curLeagueId'ye yazıyordu -
+// geçmiş sezon (arşiv veya tamamen ayrı bitmiş bir lig) yorumunda "Sil"e basmak ya hiçbir
+// şey yapmıyor ya da yanlış (mevcut sezondaki, alakasız) bir kayda dokunuyordu. Artık
+// adminToggleGenericPin'deki İLE AYNI üç kaynak ayrımı (mevcut sezon / aynı ligin arşivi /
+// tamamen ayrı bitmiş lig) kullanılır.
+function adminDeleteGenericComment(target,matchId,cid,archiveIndex,pastLeagueId){
   if(!_curLeagueId){toast('❌ Önce bir lig seçin','er');return;}
   if(!_adminGuardModeration(cid))return; // bkz. _adminGuardModeration - sessiz başarısızlık düzeltmesi
+  var refPath,obj,applyLocal;
+  if(pastLeagueId){
+    refPath=matchId?('leagues/'+pastLeagueId+'/matches/'+matchId+'/comments/'+cid):('leagues/'+pastLeagueId+'/generalChat/'+cid);
+    obj=(_pastSeasonChatCacheAdmin||[]).find(function(c){return c.pastLeagueId===pastLeagueId&&(c.matchId||null)===(matchId||null)&&c.id===cid;});
+    applyLocal=function(){}; // Ayrı bir ligin önbelleğinden silmeye gerek yok - bir sonraki açılışta yeniden yüklenir.
+  }else if(archiveIndex!=null){
+    var arc=(S.archives||[])[archiveIndex];
+    refPath='leagues/'+_curLeagueId+'/archives/'+archiveIndex+'/matches/'+matchId+'/comments/'+cid;
+    obj=arc&&arc.matches&&arc.matches[matchId]&&arc.matches[matchId].comments&&arc.matches[matchId].comments[cid];
+    applyLocal=function(){if(arc&&arc.matches&&arc.matches[matchId]&&arc.matches[matchId].comments)delete arc.matches[matchId].comments[cid];};
+  }else{
+    refPath=target==='match'?('leagues/'+_curLeagueId+'/matches/'+matchId+'/comments/'+cid):('leagues/'+_curLeagueId+'/generalChat/'+cid);
+    obj=target==='match'?(S.matches[matchId]&&S.matches[matchId].comments&&S.matches[matchId].comments[cid]):(S.generalChat&&S.generalChat[cid]);
+    applyLocal=function(){
+      if(target==='match'){if(S.matches[matchId]&&S.matches[matchId].comments)delete S.matches[matchId].comments[cid];}
+      else{if(S.generalChat)delete S.generalChat[cid];}
+    };
+  }
   // KULLANICI TALEBİ: "Sohbette yöneticinin sabitlediği mesaj, sil butonuna basılsa dahi
   // silinmesin; sabitlenmiş mesajlar silinemez." - Önce sabitleme kaldırılmadan silinemez.
-  var obj=target==='match'?(S.matches[matchId]&&S.matches[matchId].comments&&S.matches[matchId].comments[cid]):(S.generalChat&&S.generalChat[cid]);
   if(obj&&obj.pinned){toast('📌 Sabitlenmiş bir mesaj silinemez - önce "Kaldır" ile sabitlemeyi kaldırın','er');return;}
   dlg('🗑️','Mesajı Sil','Bu mesaj kalıcı olarak silinecek.','Sil','dor').then(function(ok){
     if(!ok)return;
-    var refPath=target==='match'?('leagues/'+_curLeagueId+'/matches/'+matchId+'/comments/'+cid):('leagues/'+_curLeagueId+'/generalChat/'+cid);
     db.ref(refPath).remove().then(function(){
-      if(target==='match'){if(S.matches[matchId]&&S.matches[matchId].comments)delete S.matches[matchId].comments[cid];}
-      else{if(S.generalChat)delete S.generalChat[cid];}
-      logAction('🗑️ Sohbet mesajı silindi (admin)');
+      applyLocal();
+      logAction('🗑️ Sohbet mesajı silindi (admin)'+(pastLeagueId?' [geçmiş sezon]':archiveIndex!=null?' [arşiv]':''));
       renderDevReplyMatchComments();
       toast('✅ Silindi');
     }).catch(function(e){toast('❌ Silinemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
