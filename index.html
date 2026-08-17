@@ -1337,7 +1337,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-16-O';
+window.APP_BUILD='2026-08-16-P';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18396,9 +18396,37 @@ window.openExternalVideoLink=function(videoId){
   // Sekme açma çağrısı KULLANICI TIKLAMASININ hemen ardından, aynı senkron akışta kalacak
   // şekilde (setTimeout içine ALINMADAN) yapılır - tarayıcıların "kullanıcı etkileşimi
   // olmadan açılan pencere/sekme" engelleyicileri (popup blocker) tetiklenmesin diye.
-  // Geçiş animasyonu bu yüzden window.open'dan SONRA, kullanıcı zaten yeni sekmeye
-  // geçerken görülür - eski sekmeye dönüldüğünde de kısa süre görünür kalır.
-  window.open(v.url,'_blank','noopener');
+  var yeniSekme=null;
+  try{yeniSekme=window.open(v.url,'_blank','noopener');}catch(err){yeniSekme=null;}
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "TOD canlı yayın sekmesinde açılmıyor"):
+  // window.open, bazı ortamlarda SESSİZCE başarısız olur - açılır pencere engelleyicisi,
+  // uygulama içi tarayıcılar (Instagram/Facebook/Twitter içinden açılan sayfalar), Android
+  // WebView ve bazı gizli sekme ayarları bunu engeller. Önceki kod dönen değeri HİÇ kontrol
+  // etmiyordu: sekme açılmasa bile kart dönen bir bekleme animasyonuna geçiyor ve orada
+  // SONSUZA KADAR kalıyordu - kullanıcının gördüğü "açamıyor" tam olarak buydu. Artık sonuç
+  // denetleniyor ve engellenmişse İKİ yedek yol sunuluyor: aynı sekmede açma (bu asla
+  // engellenmez) ve elle dokunulabilir gerçek bir bağlantı.
+  if(!yeniSekme||yeniSekme.closed||typeof yeniSekme.closed==='undefined'){
+    if(card){
+      card.dataset.opening='';
+      card.innerHTML=`<div style="text-align:center;padding:1.6rem 1.1rem">
+        <div style="font-size:1.8rem;margin-bottom:.6rem">🔒</div>
+        <div style="font-size:.76rem;color:var(--mu);line-height:1.6;margin-bottom:1rem">Tarayıcınız yeni sekme açılmasını engelledi. Aşağıdaki düğmeyle bu sekmede açabilirsiniz - geri tuşuyla uygulamaya dönersiniz.</div>
+        <a href="${String(v.url).replace(/"/g,'&quot;')}" target="_blank" rel="noopener" style="display:inline-block;background:linear-gradient(135deg,var(--ac),var(--ac2));border-radius:12px;padding:.75rem 1.4rem;color:#fff;font-size:.82rem;font-weight:800;text-decoration:none;box-shadow:0 6px 20px var(--glow)">▶️ Yayını Aç</a>
+      </div>`;
+    }else{
+      // Kart yoksa (ör. liste üzerinden çağrıldıysa) doğrudan bu sekmede açılır.
+      location.href=v.url;
+    }
+    return;
+  }
+  // Sekme açıldı. Kullanıcı geri döndüğünde dönen animasyonla karşılaşmasın diye kart eski
+  // hâline alınır - önceden geri dönülünce ekran sonsuza kadar "yönlendiriliyorsunuz" da
+  // kalıyordu.
+  setTimeout(function(){
+    var c=document.getElementById('extWatchCard_'+videoId);
+    if(c){c.dataset.opening='';c.outerHTML=buildExternalWatchCardHtml(videoId,v.isLive);}
+  },3000);
 };
 function buildExternalWatchLoadingHtml(isLive){
   return `<div style="text-align:center;padding:2.2rem 1.2rem">
