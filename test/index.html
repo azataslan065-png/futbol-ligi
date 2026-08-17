@@ -1337,7 +1337,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-16-O';
+window.APP_BUILD='2026-08-16-Q';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -3467,6 +3467,11 @@ function doEnterAfterPasswordCheck(name){
   // için buradan değer okunması artık mümkün değil - favori takım Ayarlar'dan seçiliyor.
   const pendingFav='';
   document.getElementById('loginScreen').style.display='none';
+  // HATA DÜZELTMESİ: Lig verisi genelde kullanıcı adını yazmadan ÖNCE zaten yüklenmiş olur -
+  // bu durumda Firebase'de YENİ bir değişiklik olmadığından renderLiveTicker() otomatik
+  // tetiklenmez, şerit (artık giriş ekranı kapandığı için açılması gerekirken) kapalı
+  // kalabilirdi. Burada açıkça bir kez daha çağrılır - koşulları uygunsa hemen açılır.
+  if(typeof renderLiveTicker==='function')renderLiveTicker();
   // KULLANICI TALEBİ: Giriş yapıldıktan sonra veri gelene kadar (özellikle yavaş bağlantıda
   // veya lig kimliği için yeniden deneme sürerken) ekran "donmuş" gibi görünmesin diye bir
   // yükleniyor göstergesi eklendi. Veri geldiğinde (veya en fazla 15 saniye sonra, güvenlik
@@ -5575,6 +5580,16 @@ function renderLiveTicker(highlightId){
   const track=document.getElementById('liveTickerTrack');
   if(!ticker||!track)return;
   if(!_liveTickerEnabled){ ticker.classList.remove('on'); document.body.classList.remove('ticker-on'); return; }
+  // HATA DÜZELTMESİ (kullanıcı ekran görüntüsüyle bildirdi: "giriş ekranında canlı şerit
+  // neden var" - projeksiyonda net görülüyordu): Bu fonksiyon giriş yapılıp yapılmadığına
+  // HİÇ BAKMIYORDU - Firebase'den maç verisi indirilir indirilmez (bu, kullanıcı henüz
+  // adını/şifresini bile girmeden, sayfa açılır açılmaz olabilir) şeridi DOLDURUP
+  // AÇIYORDU. #loginScreen (z-index:1000) normalde şeridi (z-index:45) örtmesi
+  // gerekirken bunun güvenilir biçimde ÇALIŞMADIĞI en az bir durum (bkz. ekran görüntüsü)
+  // vardı - kök nedeni z-index değil, şeridin giriş ekranı AÇIKKEN hiç başlatılmaması
+  // gerektiğiydi. Artık giriş ekranı görünürse şerit KESİNLİKLE gösterilmiyor/başlatılmıyor.
+  const loginScr=document.getElementById('loginScreen');
+  if(loginScr&&loginScr.style.display!=='none'){ ticker.classList.remove('on'); document.body.classList.remove('ticker-on'); return; }
   // HATA DÜZELTMESİ (KESİN KANITLANMIŞ KÖK SEBEP - "silinen duyuru şeritte görünmeye devam
   // ediyor" şikayeti): Önceden "animationiteration" event listener'ı SADECE ticker'ın İLK KEZ
   // başlatıldığı anda (window._tickerCurrentHTML henüz boşken) bağlanıyordu. Eğer #liveTicker/
@@ -18555,8 +18570,43 @@ window.PTPlayer=(function(){
     s.onerror=function(){cb(false);};
     document.head.appendChild(s);
   }
-  function attachSource(){
+  // KULLANICI TALEBİ (TRT1 master.m3u8 linki denendi, çalışmadı): Bazı yayın sunucuları
+  // bizim uygulamamızın barındırıldığı alan adına (github.io) çapraz-köken (CORS) isteklerine
+  // izin vermiyor - tarayıcı bu isteği SESSİZCE reddediyor, hls.js bunu genel bir "ağ hatası"
+  // olarak görüyor (CORS reddi JS'e HİÇBİR ZAMAN ayrıntılı bildirilmez - bu tarayıcı
+  // güvenliğinin KASITLI bir parçası, hangi isteğin GERÇEKTEN CORS yüzünden başarısız
+  // olduğunu koddan KESİN olarak ayırt etmek mümkün DEĞİL). Bu yüzden art arda birkaç
+  // doğrudan bağlantı hatasından sonra, YAYINCI SUNUCUSUNU DEĞİL genel bir CORS proxy
+  // servisini (isteği kendi üzerinden geçirip CORS izni ekleyen aracı bir servis) deneyerek
+  // OTOMATİK bir kurtarma denemesi yapılır - hls.js'in TÜM istekleri (ana liste + alt
+  // kalite listeleri + video parçaları) bu proxy üzerinden geçecek şekilde özel bir
+  // yükleyici (loader) kullanılır, sadece ana adres değil.
+  // DÜRÜST OLMAK GEREKİR: Bu KESİN bir çözüm DEĞİL - herkese açık proxy servisleri
+  // güvenilmez olabilir (yavaş, kotalı, önceden haber vermeden kapanabilir) - ama kendi
+  // sunucumuz (bkz. Cloudflare Worker konuşmamız) olmadığından elimizdeki en pratik otomatik
+  // deneme budur. Gerçekten çalışan bir çözüm için hâlâ kendi proxy'nizi kurmanız en
+  // güvenilir yol olacaktır.
+  var CORS_PROXY_PREFIXES=['https://corsproxy.io/?url=','https://api.allorigins.win/raw?url='];
+  function buildProxiedLoader(prefix){
+    var BaseLoader=window.Hls&&window.Hls.DefaultConfig&&window.Hls.DefaultConfig.loader;
+    if(!BaseLoader)return null;
+    function ProxLoader(config){BaseLoader.call(this,config);}
+    ProxLoader.prototype=Object.create(BaseLoader.prototype);
+    ProxLoader.prototype.constructor=ProxLoader;
+    ProxLoader.prototype.load=function(context,config,callbacks){
+      try{
+        if(context&&context.url&&CORS_PROXY_PREFIXES.every(function(p){return context.url.indexOf(p)!==0;})){
+          context.url=prefix+encodeURIComponent(context.url);
+        }
+      }catch(e){}
+      BaseLoader.prototype.load.call(this,context,config,callbacks);
+    };
+    return ProxLoader;
+  }
+  function attachSource(proxyIdx){
     var v=S.video,url=S.url;
+    S.proxyIdx=(proxyIdx==null?null:proxyIdx);
+    S.recoverCount=0; // Mod değişince (doğrudan↔proxy) sayaç sıfırdan başlar.
     var hlsMi=/\.(m3u8)(\?|#|$)/i.test(url);
     if(!hlsMi){v.src=url;tryPlay();return;}
     // Safari/iOS HLS'i YERLEŞİK destekler - hls.js'e hiç gerek yok ve CORS de gerektirmez.
@@ -18566,14 +18616,19 @@ window.PTPlayer=(function(){
       if(!ok){v.src=url;tryPlay();return;}
       try{
         if(S.hls){try{S.hls.destroy();}catch(e){}}
-        var hls=new window.Hls({
+        var hlsConf={
           lowLatencyMode:true,
           // Canlı yayında kısa kesintilerden sonra kendi kendine toparlanma:
           liveSyncDurationCount:3,
           manifestLoadingMaxRetry:4,
           levelLoadingMaxRetry:4,
           fragLoadingMaxRetry:6
-        });
+        };
+        if(S.proxyIdx!=null&&CORS_PROXY_PREFIXES[S.proxyIdx]){
+          var ProxLoader=buildProxiedLoader(CORS_PROXY_PREFIXES[S.proxyIdx]);
+          if(ProxLoader)hlsConf.loader=ProxLoader;
+        }
+        var hls=new window.Hls(hlsConf);
         S.hls=hls;
         hls.loadSource(url);
         hls.attachMedia(v);
@@ -18613,6 +18668,22 @@ window.PTPlayer=(function(){
                 window.addEventListener('online',S.offlineHandler);
               }
               return;
+            }
+            // KULLANICI TALEBİ (CORS engeli için otomatik proxy denemesi - bkz. attachSource
+            // üzerindeki uzun not): 2 doğrudan bağlantı hatasından sonra, hâlâ doğrudan
+            // moddaysak, sırayla proxy servislerini dene. Aynı sunucuda ısrar etmek
+            // (hls.startLoad()) CORS engelliyse ASLA işe yaramaz - engel kalıcıdır, tekrar
+            // denemekle açılmaz, farklı bir yol (proxy) denemek gerekir.
+            if(S.recoverCount===2){
+              if(S.proxyIdx==null&&CORS_PROXY_PREFIXES.length){
+                showToastMsg('🔄 Farklı bir bağlantı yöntemi deneniyor…');
+                setTimeout(function(){if(S)attachSource(0);},300);
+                return;
+              }
+              if(S.proxyIdx!=null&&S.proxyIdx+1<CORS_PROXY_PREFIXES.length){
+                setTimeout(function(){if(S)attachSource(S.proxyIdx+1);},300);
+                return;
+              }
             }
             showToastMsg('Bağlantı yeniden kuruluyor…');
             try{hls.startLoad();}catch(e){}
