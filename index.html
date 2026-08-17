@@ -143,7 +143,7 @@ body.ticker-on .app-version-badge{display:none}
    normal akışta bir eleman haline geliyordu - arkaplan görseli (::before) de ona göre eksik/
    yanlış boyutta görünüyordu. "position:fixed" zaten ::before için geçerli bir konumlandırma
    bağlamı sağladığından, bu gereksiz ve çakışan kural tamamen kaldırıldı. */
-#loginScreen::before{content:'';position:absolute;inset:0;z-index:-1;background-color:var(--bg);background-image:var(--login-theme-image,none);background-size:cover;background-position:center;filter:var(--login-theme-filter,none);pointer-events:none}
+#loginScreen::before{content:'';position:absolute;inset:0;z-index:-1;background-color:var(--bg);background-image:var(--login-theme-image,none);background-size:cover;background-position:var(--login-theme-position,center);filter:var(--login-theme-filter,none);pointer-events:none}
 
 /* ── HAREKETLİ TEMA ANİMASYONLARI ── */
 @keyframes bgBreathe{0%,100%{background-size:100% 100%}50%{background-size:130% 130%}}
@@ -1337,7 +1337,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-17-B';
+window.APP_BUILD='2026-08-17-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -2167,6 +2167,7 @@ window.setFontFamily=function(fid){
   _fontFamily=fid;
   localStorage.setItem('pt_fontFamily',fid);
   applyFontFamily();
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings(); // Ayarlar ekranındaki seçili buton vurgusu güncellensin.
 };
 function applyFontFamily(){
@@ -2888,11 +2889,20 @@ function applyLoginScreenTheme(){
     const blur=theme&&typeof theme==='object'&&theme.blur!=null?theme.blur:0;
     const saturate=theme&&typeof theme==='object'&&theme.saturate!=null?theme.saturate:100;
     const brightness=theme&&typeof theme==='object'&&theme.brightness!=null?theme.brightness:100;
+    // KULLANICI TALEBİ (ekran görüntüsüyle bildirdi: "projeksiyon giriş teması tam
+    // oturmamış"): background-size:cover ile ORTADAN kırpma, dikey/kare tasarlanmış bir
+    // görseli çok GENİŞ bir ekranda (projeksiyon gibi) kırparken görselin önemli kısmını
+    // (ör. bir maskotun kafası/kanatları) uygunsuz kesebiliyordu. Admin artık görselin
+    // ODAK NOKTASINI seçebiliyor (bkz. admin.html'deki loginThemeFocusGrid) - o nokta HER
+    // ekran oranında görünür kalacak şekilde kırpma buna göre ayarlanır.
+    const position=(theme&&typeof theme==='object'&&theme.focus)||'center';
     root.setProperty('--login-theme-image',`linear-gradient(rgba(10,10,15,${(opacity*0.85).toFixed(2)}),rgba(10,10,15,${opacity.toFixed(2)})),url('${url}')`);
     root.setProperty('--login-theme-filter',`blur(${blur}px) saturate(${saturate}%) brightness(${brightness}%)`);
+    root.setProperty('--login-theme-position',position);
   }else{
     root.setProperty('--login-theme-image','none');
     root.setProperty('--login-theme-filter','none');
+    root.setProperty('--login-theme-position','center');
   }
 }
 
@@ -3586,6 +3596,18 @@ function loadProfileAndEnter(name,pendingFav){
       if(existingProfile.favTeam)_favTeam=existingProfile.favTeam;
       if(existingProfile.avatar)_userAvatar=existingProfile.avatar;
       applyTheme();
+      // KULLANICI TALEBİ ("hangi cihazda giriş yaparsa yapsın tüm ayarları görecek"): Diğer
+      // onlarca cihaz-yerel ayar (yazı tipi, ses/anons tercihleri, sessiz saatler vb.) burada
+      // localStorage'a yazılır - bir sonraki uygulama açılışında (bu oturumda hemen değilse
+      // bile) doğru şekilde devreye girer. Girişin TAM ORTASINDA sayfayı yeniden yüklemek
+      // (bazı değişkenler sadece sayfa yüklenirken okunuyor diye) kullanıcının az önce
+      // yazdığı ismi kaybetmesine/girişin kesilmesine yol açabileceğinden BİLEREK
+      // YAPILMIYOR - bunun yerine hemen uygulanabilecek olanlar (yazı tipi gibi) burada
+      // canlı uygulanır, geri kalanı doğal bir sonraki yüklemede kendiliğinden düzelir.
+      if(existingProfile.prefs){
+        applySyncedPrefsAndCheckChanged(existingProfile.prefs);
+        if(typeof applyFontFamily==='function')applyFontFamily();
+      }
     }else if(pendingFav){
       _favTeam=pendingFav;
     }
@@ -3605,7 +3627,8 @@ function registerVisitor(name,isNew){
     favTeam:_favTeam||null,
     palette:_curPalette||'',
     mode:_curMode||'dark',
-    avatar:_userAvatar||null
+    avatar:_userAvatar||null,
+    prefs:collectSyncedPrefs()
   };
   const updateData={
     name:name,
@@ -3652,13 +3675,49 @@ function registerVisitor(name,isNew){
 }
 
 // Profil bilgisini (tema/palet/favori/avatar değiştiğinde) Firebase'e senkronla
+// KULLANICI TALEBİ ("kullanıcı hangi cihazda giriş yaparsa yapsın, bütün verileri o cihazda
+// görünecek, yaptığı uygulama ayarları dahil"): ÖNCEDEN sadece favTeam/palette/mode/avatar
+// Firebase'e (userProfiles/) senkronize ediliyordu - geri kalan onlarca ayar (yazı tipi, tepki
+// paketi, canlı şerit, ses/anons tercihleri, otomatik gece modu, sessiz saatler vb.) SADECE o
+// cihazın localStorage'ında yaşıyordu; kullanıcı başka bir cihazdan (ör. projeksiyon) aynı
+// isimle giriş yapınca bunların HİÇBİRİNİ görmüyordu. Bu liste, senkronize edilecek TÜM
+// cihaz-yerel ayar anahtarlarını tek bir yerden yönetir - yeni bir ayar eklenirse buraya
+// eklemek yeterli olur.
+const SYNCED_PREF_KEYS=['pt_fontFamily','pt_reactionPack','pt_liveTicker','pt_bgPaletteSync',
+  'pt_clockMode','pt_voiceAnnouncer','pt_voiceAnnouncePrefs','pt_eventSoundOn','pt_eventSoundPrefs',
+  'pt_weeklySummaryOff','pt_autoDarkMode','pt_autoDarkStart','pt_autoDarkEnd',
+  'pt_hideTypingFromOthers','pt_quietHoursOn','pt_quietHoursStart','pt_quietHoursEnd'];
+function collectSyncedPrefs(){
+  const out={};
+  SYNCED_PREF_KEYS.forEach(function(k){
+    const v=localStorage.getItem(k);
+    if(v!=null)out[k]=v;
+  });
+  return out;
+}
+// Senkronize ayarları BU cihaza uygular. Birçoğu (ör. _fontFamily, _liveTickerEnabled) sayfa
+// yüklenirken BİR KEZ okunan localStorage değerleriyle başlatılan değişkenlerdir - sadece
+// localStorage'ı güncellemek bu ÇALIŞAN değişkenleri güncellemez. Bu yüzden gerçek bir
+// FARK varsa (bu cihazda farklıysa), fonksiyon true döner - çağıran taraf bu durumda
+// sayfayı YENİDEN YÜKLEYEREK tüm değişkenlerin güncel localStorage'dan taze başlamasını
+// sağlar. Fark yoksa (zaten aynıysa) hiçbir şey yapılmaz, gereksiz yeniden yükleme olmaz.
+function applySyncedPrefsAndCheckChanged(prefs){
+  if(!prefs)return false;
+  let changed=false;
+  SYNCED_PREF_KEYS.forEach(function(k){
+    if(prefs[k]==null)return;
+    if(localStorage.getItem(k)!==prefs[k]){changed=true;localStorage.setItem(k,prefs[k]);}
+  });
+  return changed;
+}
 function syncProfileToFirebase(){
   if(!_curVisitorId)return;
   const profileData={
     favTeam:_favTeam||null,
     palette:_curPalette||'',
     mode:_curMode||'dark',
-    avatar:_userAvatar||null
+    avatar:_userAvatar||null,
+    prefs:collectSyncedPrefs()
   };
   // Global yola yaz (asıl kalıcı kayıt) + varsa aktif lig altına da yansıt (geriye uyumluluk)
   firebase.database().ref('userProfiles/'+_curVisitorId).update(profileData).catch(()=>{});
@@ -5511,6 +5570,7 @@ function _ltClockMode(){
 window.setClockMode=function(mode){
   localStorage.setItem('pt_clockMode', mode==='seconds'?'seconds':'flowing');
   _ltApplyClockMode();
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   if(typeof openSettings==='function' && window._premiumScreenOpen==='settings') openSettings();
 };
 // KULLANICI TALEBİ (hata düzeltmesi - "eskisi gibi 04:35 olmalı"): Önceki sürümde "Akan Süre"
@@ -6014,6 +6074,7 @@ window.toggleLiveTicker=function(){
   _liveTickerEnabled=!_liveTickerEnabled;
   localStorage.setItem('pt_liveTicker',_liveTickerEnabled?'on':'off');
   renderLiveTicker();
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   if(typeof openSettings==='function' && window._premiumScreenOpen==='settings') openSettings();
 };
 
@@ -7499,6 +7560,7 @@ window.quickToggleVoiceAnnouncer=function(){
 window.toggleVoiceAnnouncer=function(){
   _voiceAnnouncerOn=!_voiceAnnouncerOn;
   localStorage.setItem('pt_voiceAnnouncer',_voiceAnnouncerOn?'1':'0');
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings();
   if(_voiceAnnouncerOn)announceEvent('Sesli anons açıldı');
 };
@@ -7552,6 +7614,7 @@ window.toggleVoicePref=function(cat){
   const prefs=getVoiceAnnouncePrefs();
   prefs[cat]=!(prefs[cat]!==false);
   localStorage.setItem('pt_voiceAnnouncePrefs',JSON.stringify(prefs));
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings();
 };
 
@@ -7595,12 +7658,14 @@ function eventSoundPrefsHtml(){
 window.toggleEventSoundMaster=function(){
   _eventSoundOnUI=!_eventSoundOnUI;
   localStorage.setItem('pt_eventSoundOn',_eventSoundOnUI?'1':'0');
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings();
 };
 window.toggleEventSoundPref=function(cat){
   const prefs=getEventSoundPrefs();
   prefs[cat]=!(prefs[cat]!==false);
   localStorage.setItem('pt_eventSoundPrefs',JSON.stringify(prefs));
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings();
 };
 // Ayarda "dinle" - o kategorinin sesini önizler (tercihe bakmadan). Artık kategori adı DOĞRUDAN
@@ -7688,6 +7753,7 @@ window.toggleWeeklySummaryNotif=function(){
   if(isOff)localStorage.removeItem('pt_weeklySummaryOff');
   else localStorage.setItem('pt_weeklySummaryOff','1');
   showToast(isOff?'📊 Haftalık özet bildirimi açıldı':'📊 Haftalık özet bildirimi kapatıldı');
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings();
 };
 // KULLANICI TALEBİ: 🌙 Otomatik Gece Modu - cihaz saatine göre (20:00-07:00 arası) otomatik
@@ -7700,6 +7766,7 @@ window.toggleAutoDarkMode=function(){
   else localStorage.setItem('pt_autoDarkMode','1');
   showToast(!isOn?'🌙 Otomatik gece modu açıldı (20:00-07:00 arası koyu tema uygulanır)':'🌙 Otomatik gece modu kapatıldı');
   applyAutoDarkModeIfNeeded();
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings();
 };
 // KULLANICI TALEBİ: "HH:MM" biçimindeki iki saat arasında şu an bulunup bulunmadığını
@@ -7726,6 +7793,7 @@ window.saveAutoDarkHours=function(){
   if(s)localStorage.setItem('pt_autoDarkStart',s.value||'20:00');
   if(e)localStorage.setItem('pt_autoDarkEnd',e.value||'07:00');
   applyAutoDarkModeIfNeeded();
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   showToast('🌙 Saatler kaydedildi');
 };
 function applyAutoDarkModeIfNeeded(){
@@ -7866,6 +7934,7 @@ window.toggleHideTyping=function(){
   if(isOn)localStorage.removeItem('pt_hideTypingFromOthers');
   else localStorage.setItem('pt_hideTypingFromOthers','1');
   showToast(!isOn?'🙈 "Yazıyor" durumunuz diğer kullanıcılardan gizlendi':'👁️ "Yazıyor" durumunuz tekrar herkese görünür');
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings();
 };
 window.toggleQuietHours=function(){
@@ -7873,12 +7942,14 @@ window.toggleQuietHours=function(){
   if(isOn)localStorage.removeItem('pt_quietHoursOn');
   else localStorage.setItem('pt_quietHoursOn','1');
   showToast(!isOn?'🔕 Sessiz saatler açıldı':'🔕 Sessiz saatler kapatıldı');
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings();
 };
 window.saveQuietHours=function(){
   const s=document.getElementById('quietHoursStartInp'),e=document.getElementById('quietHoursEndInp');
   if(s)localStorage.setItem('pt_quietHoursStart',s.value||'22:00');
   if(e)localStorage.setItem('pt_quietHoursEnd',e.value||'08:00');
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   showToast('🔕 Saatler kaydedildi');
 };
 function isQuietHoursActive(){
@@ -11362,6 +11433,7 @@ window.setReactionPack=function(pid){
   }
   _reactionPack=pid;
   localStorage.setItem('pt_reactionPack',pid);
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   openSettings();
   showToast('✅ Tepki paketi güncellendi: '+pack.name);
 };
@@ -20084,6 +20156,7 @@ window.toggleBgPaletteSync=function(){
   const sw=document.getElementById('bgPaletteSyncSw');
   if(sw)sw.classList.toggle('on',_bgPaletteSyncEnabled);
   applyBgTheme(); // Değişikliği hemen yansıt.
+  syncProfileToFirebase(); // KULLANICI TALEBİ: cihazlar arası ayar senkronizasyonu.
   showToast(_bgPaletteSyncEnabled?'🎨 Arkaplan-palet senkronizasyonu açıldı':'🎨 Arkaplan-palet senkronizasyonu kapatıldı');
 };
 
