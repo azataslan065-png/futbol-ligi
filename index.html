@@ -1393,7 +1393,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-19-G';
+window.APP_BUILD='2026-08-19-H';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -19835,8 +19835,8 @@ window.PTPlayer=(function(){
         +'<div style="flex:1;text-align:center"><input type="number" id="ptpLsS" min="0" max="59" value="0" style="width:100%;text-align:center;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#fff;font-size:.9rem;padding:.35rem 0"/><div style="font-size:.58rem;color:#94a3b8;margin-top:.15rem">saniye</div></div>'
         +'</div>'
         +'<div style="display:flex;gap:.4rem;padding:0 .45rem .5rem">'
-        +'<button class="ptp-opt" data-act="liveseek:back" style="flex:1;height:2.6rem;font-size:.78rem;font-weight:700;justify-content:center">⏪ Geri Git</button>'
-        +'<button class="ptp-opt" data-act="liveseek:fwd" style="flex:1;height:2.6rem;font-size:.78rem;font-weight:700;justify-content:center">İleri Git ⏩</button>'
+        +'<button class="ptp-opt" onclick="event.stopPropagation();PTPlayer.liveSeek(\'back\')" style="flex:1;height:2.6rem;font-size:.78rem;font-weight:700;justify-content:center">⏪ Geri Git</button>'
+        +'<button class="ptp-opt" onclick="event.stopPropagation();PTPlayer.liveSeek(\'fwd\')" style="flex:1;height:2.6rem;font-size:.78rem;font-weight:700;justify-content:center">İleri Git ⏩</button>'
         +'</div>';
       h+=opt('◀ Geri',false,'tab:main');
     }else if(tab==='sleep'){
@@ -19875,13 +19875,6 @@ window.PTPlayer=(function(){
       }
       if(a.indexOf('ccbg:')===0){setPref('cueBg',a.slice(5));applyCueStyle();openPanel('cc');return;}
       if(a.indexOf('skip:')===0){setPref('skip',Number(a.slice(5)));openPanel('skip');return;}
-      if(a==='liveseek:back'||a==='liveseek:fwd'){
-        var hEl=el('ptpLsH'),mEl=el('ptpLsM'),sEl=el('ptpLsS');
-        var toplam=(Number(hEl&&hEl.value)||0)*3600+(Number(mEl&&mEl.value)||0)*60+(Number(sEl&&sEl.value)||0);
-        if(!toplam){showToastMsg('❌ Önce bir süre girin');return;}
-        seekBy(a==='liveseek:back'?-toplam:toplam);
-        return;
-      }
       if(a.indexOf('sleep:')===0){setSleep(Number(a.slice(6)));return;}
       if(a==='toggle:loop'){S.video.loop=!S.video.loop;setPref('loop',S.video.loop);openPanel('main');return;}
       if(a==='toggle:autoplay'){setPref('autoplay',!pref('autoplay',true));openPanel('main');return;}
@@ -20186,6 +20179,11 @@ window.PTPlayer=(function(){
     // değerlendiriliyor.
     function syncStageAspect(){
       if(!S||!S.root)return;
+      // KULLANICI TALEBİ ("kanal değişince ekran oranı değişmesin"): Kanal değişimi sırasında
+      // önceki kutu şekli AÇIKÇA geri yüklendiyse (bkz. applyVisualState), bu otomatik ölçüm
+      // onu EZMESİN - bir SONRAKİ gerçek video boyutu değişikliğinde (kullanıcı BAŞKA bir
+      // videoya bilerek geçtiğinde) tekrar devreye girer, sadece BU geçişte bastırılır.
+      if(S.gorselKutuKilitli){S.gorselKutuKilitli=false;return;}
       var vw=video.videoWidth,vh=video.videoHeight;
       if(!vw||!vh||vw<64||vh<64)return;
       var stage=S.root.querySelector('.ptp-stage');
@@ -20446,15 +20444,37 @@ window.PTPlayer=(function(){
   // tarafından kanal değişiminin ÖNCESİNDE/SONRASINDA çağrılıp bu durumu korur.
   function getVisualState(){
     if(!S)return null;
-    return {fit:S.fit,zoom:S.zoom,brightness:S.brightness,contrast:S.contrast,saturation:S.saturation,rotate:S.rotate};
+    // KULLANICI TALEBİ ("ekran modu ne olursa olsun... ekran ORANI değişmesin"): fit (Sığdır/
+    // Kırp/Genişlet) DIŞINDA, kutunun KENDİ şekli de (dikey video algılamasıyla - bkz.
+    // .ptp-portrait) kanaldan kanala değişebiliyordu. O da burada yakalanıp korunuyor.
+    var stage=S.root&&S.root.querySelector('.ptp-stage');
+    return {fit:S.fit,zoom:S.zoom,brightness:S.brightness,contrast:S.contrast,saturation:S.saturation,rotate:S.rotate,
+      portrait:stage?stage.classList.contains('ptp-portrait'):false};
   }
   function applyVisualState(state){
     if(!S||!state)return;
     S.fit=state.fit;S.zoom=state.zoom;S.brightness=state.brightness;
     S.contrast=state.contrast;S.saturation=state.saturation;S.rotate=state.rotate;
     applyVisual();
+    var stage=S.root&&S.root.querySelector('.ptp-stage');
+    if(stage){
+      stage.classList.toggle('ptp-portrait',!!state.portrait);
+      S.gorselKutuKilitli=true; // syncStageAspect() bu transferden SONRA otomatik ölçüp EZMESİN diye.
+    }
   }
-  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,isActive:function(){return !!S;}};
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "düzeltmiştin olmamış" - .ptp-opt sınıf
+  // düzeltmesi YETERLİ OLMADI): Sınıf tabanlı olay temsilciliği (.ptp-opt üzerinden dispatch)
+  // kırılgan çıktı - bunun yerine düğmelere DOĞRUDAN onclick bağlanıyor, ara katman (event
+  // delegation) tamamen devre dışı bırakılıyor. Bu, "çalışmıyor" ihtimalini YAPISAL olarak
+  // ortadan kaldırır - tıklama artık HİÇBİR ara sınıf/dispatch kontrolüne bağlı değil.
+  function liveSeekFromInputs(yon){
+    if(!S)return;
+    var hEl=el('ptpLsH'),mEl=el('ptpLsM'),sEl=el('ptpLsS');
+    var toplam=(Number(hEl&&hEl.value)||0)*3600+(Number(mEl&&mEl.value)||0)*60+(Number(sEl&&sEl.value)||0);
+    if(!toplam){showToastMsg('❌ Önce bir süre girin (saat/dakika/saniye)');return;}
+    seekBy(yon==='back'?-toplam:toplam);
+  }
+  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,isActive:function(){return !!S;}};
 })();
 
 window.openVideoWatch=function(videoId){
@@ -20527,6 +20547,16 @@ window.openVideoWatch=function(videoId){
     if(oncekiTamEkran&&typeof PTPlayer.enterFullscreen==='function'){
       // Video/HLS bağlama işlemi başlasın diye kısa bir gecikme - DOM'un tam oturması için.
       setTimeout(function(){if(PTPlayer.isActive())PTPlayer.enterFullscreen();},80);
+    }
+    // GÜVENLİK AĞI (kullanıcı bildirdi: "ekran hala değişiyor, değişmesin" - önceki tek
+    // seferlik anında uygulama YETERSİZ kaldı): HLS bağlanma sürecindeki olası ASENKRON bir
+    // adım (manifest/seviye yüklenmesi vb.) görsel ayarları GEÇ bir noktada sıfırlıyor
+    // olabilir - bu ihtimale karşı görsel durum kısa bir gecikmeyle TEKRAR uygulanır, hangi
+    // sıralama gerçekleşirse gerçekleşsin son sözü kullanıcının önceki tercihi söyler.
+    if(oncekiGorselDurum){
+      setTimeout(function(){
+        if(PTPlayer.isActive()&&typeof PTPlayer.applyVisualState==='function')PTPlayer.applyVisualState(oncekiGorselDurum);
+      },300);
     }
   }
   if(window.PTSheetNav)PTSheetNav.mark('videoWatch_'+videoId);
