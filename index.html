@@ -1393,7 +1393,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-19-F';
+window.APP_BUILD='2026-08-19-G';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -19835,8 +19835,8 @@ window.PTPlayer=(function(){
         +'<div style="flex:1;text-align:center"><input type="number" id="ptpLsS" min="0" max="59" value="0" style="width:100%;text-align:center;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#fff;font-size:.9rem;padding:.35rem 0"/><div style="font-size:.58rem;color:#94a3b8;margin-top:.15rem">saniye</div></div>'
         +'</div>'
         +'<div style="display:flex;gap:.4rem;padding:0 .45rem .5rem">'
-        +'<button class="ptp-btn" data-act="liveseek:back" style="flex:1;height:2.6rem;font-size:.78rem;font-weight:700">⏪ Geri Git</button>'
-        +'<button class="ptp-btn" data-act="liveseek:fwd" style="flex:1;height:2.6rem;font-size:.78rem;font-weight:700">İleri Git ⏩</button>'
+        +'<button class="ptp-opt" data-act="liveseek:back" style="flex:1;height:2.6rem;font-size:.78rem;font-weight:700;justify-content:center">⏪ Geri Git</button>'
+        +'<button class="ptp-opt" data-act="liveseek:fwd" style="flex:1;height:2.6rem;font-size:.78rem;font-weight:700;justify-content:center">İleri Git ⏩</button>'
         +'</div>';
       h+=opt('◀ Geri',false,'tab:main');
     }else if(tab==='sleep'){
@@ -20438,7 +20438,23 @@ window.PTPlayer=(function(){
     S.fsFromRotate=true;
     toggleFullscreen();
   }
-  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,isActive:function(){return !!S;}};
+  // KULLANICI TALEBİ ("kumanda üzerinden kanal değiştirince ekran modu ne olursa olsun
+  // değişmesin, sadece kanal/video değişsin"): mount() her kanal değişiminde S nesnesini
+  // SIFIRDAN kurduğundan (fit:'contain' sabit başlangıç değeriyle), kullanıcının seçtiği
+  // Ekran Modu (Sığdır/Kırp/Genişlet) ve diğer görsel ayarlar (yakınlaştırma, parlaklık vb.)
+  // her kanal atlamasında SESSİZCE 'Sığdır'a sıfırlanıyordu. Bu iki fonksiyon, openVideoWatch
+  // tarafından kanal değişiminin ÖNCESİNDE/SONRASINDA çağrılıp bu durumu korur.
+  function getVisualState(){
+    if(!S)return null;
+    return {fit:S.fit,zoom:S.zoom,brightness:S.brightness,contrast:S.contrast,saturation:S.saturation,rotate:S.rotate};
+  }
+  function applyVisualState(state){
+    if(!S||!state)return;
+    S.fit=state.fit;S.zoom=state.zoom;S.brightness=state.brightness;
+    S.contrast=state.contrast;S.saturation=state.saturation;S.rotate=state.rotate;
+    applyVisual();
+  }
+  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,isActive:function(){return !!S;}};
 })();
 
 window.openVideoWatch=function(videoId){
@@ -20448,10 +20464,13 @@ window.openVideoWatch=function(videoId){
   // geçmesin"): Bu fonksiyon aşağıda #sheetContent'in TÜMÜNÜ sıfırdan kuruyor - eski oynatıcı
   // (varsa) tam ekrandaysa bu durum burada YAKALANIR, yeni oynatıcı kurulduktan sonra geri
   // uygulanır (bkz. PTPlayer.enterFullscreen).
-  var oncekiTamEkran=false;
+  // KULLANICI TALEBİ ("kanal değiştirince ekran modu ne olursa olsun değişmesin"): Eski
+  // oynatıcı (varsa) yok edilmeden ÖNCE görsel ayarları (Ekran Modu dahil) yakalanır.
+  var oncekiTamEkran=false,oncekiGorselDurum=null;
   try{
     var oncekiRoot=document.getElementById('ptpRoot');
     if(oncekiRoot&&oncekiRoot.classList.contains('ptp-fs'))oncekiTamEkran=true;
+    if(window.PTPlayer&&PTPlayer.isActive())oncekiGorselDurum=PTPlayer.getVisualState();
   }catch(e){}
   const liveTag=v.isLive?'<span style="background:#ef4444;color:#fff;font-size:.6rem;font-weight:800;padding:.15rem .5rem;border-radius:7px;margin-left:.5rem;vertical-align:middle">🔴 CANLI</span>':'';
   // Admin ham link, gömme kodu veya protokolsüz adres girmiş olabilir - hepsi tek bir temiz
@@ -20504,6 +20523,7 @@ window.openVideoWatch=function(videoId){
   // Özel oynatıcı, DOM hazır olduktan SONRA kurulur (kendi <video> etiketini kendisi yaratır).
   if(ozelOynatici&&window.PTPlayer){
     PTPlayer.mount('ptPlayerHost',{url:url,title:v.title||'',isLive:!!v.isLive,videoId:videoId});
+    if(oncekiGorselDurum&&typeof PTPlayer.applyVisualState==='function')PTPlayer.applyVisualState(oncekiGorselDurum);
     if(oncekiTamEkran&&typeof PTPlayer.enterFullscreen==='function'){
       // Video/HLS bağlama işlemi başlasın diye kısa bir gecikme - DOM'un tam oturması için.
       setTimeout(function(){if(PTPlayer.isActive())PTPlayer.enterFullscreen();},80);
