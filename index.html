@@ -1393,7 +1393,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-19-J';
+window.APP_BUILD='2026-08-19-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20076,7 +20076,7 @@ window.PTPlayer=(function(){
         +'<div class="ptp-lockbar"><button class="ptp-btn" id="ptpLockBtn" title="Ekran kilidi">🔓</button></div>'
         +'<div class="ptp-ov" id="ptpOv">'
           +'<div class="ptp-top">'
-            +(canli?'<span class="ptp-live" id="ptpLive">🔴 CANLI</span>':'')
+            +'<span class="ptp-live" id="ptpLive" style="'+(canli?'':'display:none;')+'">🔴 CANLI</span>'
             +'<div class="ptp-title">'+(opt.title||'').replace(/</g,'&lt;')+'</div>'
             // HATA DÜZELTMESİ (kullanıcı bildirdi: "ekran modu düğmesini göremedim" - KÖK
             // SEBEP BULUNDU): Bu düğme önceden aşağıdaki .ptp-row'daydı - o satırda ⏮️ ⏹️ ⏭️
@@ -20110,7 +20110,7 @@ window.PTPlayer=(function(){
               +'<button class="ptp-btn" id="ptpNext" title="Sonraki"'+(idx<0||idx>=list.length-1?' disabled':'')+'>⏭️</button>'
               +'<button class="ptp-btn" id="ptpMute" title="Ses">🔊</button>'
               +'<input type="range" class="ptp-vol" id="ptpVol" min="0" max="100" value="100"/>'
-              +(canli?'<button class="ptp-btn" id="ptpGoLive" title="Canlıya dön" style="width:auto;padding:0 .5rem;font-size:.62rem;font-weight:800">CANLIYA DÖN</button>':'')
+              +'<button class="ptp-btn" id="ptpGoLive" title="Canlıya dön" style="width:auto;padding:0 .5rem;font-size:.62rem;font-weight:800;'+(canli?'':'display:none;')+'">CANLIYA DÖN</button>'
               +'<button class="ptp-btn" id="ptpSpeed" title="Hız" style="width:auto;padding:0 .5rem;font-size:.66rem;font-weight:800">1x</button>'
               +'<button class="ptp-btn" id="ptpFs" title="Tam ekran">⛶</button>'
             +'</div>'
@@ -20430,6 +20430,32 @@ window.PTPlayer=(function(){
   // (openVideoWatch'tan) çağrılıp tam ekranı PROGRAMATİK olarak geri uygular - fsFromRotate
   // bayrağı BİLEREK true yapılır ki native Fullscreen API/kullanıcı jesti denemesin (bu
   // gerçek bir dokunuş değil), sadece CSS tabanlı tam ekran doğrudan uygulanır.
+  // KÖK SEBEP DÜZELTMESİ (ÜÇÜNCÜ ve GERÇEK neden - kullanıcı bildirdi: "yatay ekranda kanal
+  // değiştirince ekran dikey oluyor"): destroy()+mount() döngüsü, native tam ekrandaysa
+  // destroy() İÇİNDE document.exitFullscreen() çağırıyordu - mobil tarayıcılarda native tam
+  // ekrandan çıkmak SIKÇA cihazın İŞLETİM SİSTEMİ seviyesindeki döndürme kilidini de (bizim
+  // screen.orientation.lock() çağrımızdan TAMAMEN BAĞIMSIZ olarak) BIRAKTIRIYOR - bu da
+  // telefonun GERÇEKTEN fiziksel olarak sensöre göre yeniden yönlenmesine sebep olabiliyordu.
+  // ÖNCEKİ İKİ DÜZELTME (CSS sınıfı + zamanlama) bu YÜZDEN işe yaramadı - sorun hiç CSS'te
+  // değildi. Kalıcı çözüm: kanal değiştirirken oynatıcının DOM'u HİÇ YIKILIP YENİDEN
+  // KURULMUYOR - sadece KAYNAK (video adresi/başlık/canlı durumu) değiştiriliyor, #ptpRoot
+  // ve native tam ekran/döndürme kilidi TAMAMEN DOKUNULMADAN kalıyor.
+  function switchSourceInPlace(newUrl,newTitle,newIsLive,newVideoId){
+    if(!S)return false;
+    if(!S.isLive&&S.video)savePos(S.videoId,S.video.currentTime,S.video.duration);
+    S.url=newUrl;S.title=newTitle||'';S.isLive=!!newIsLive;S.videoId=newVideoId;
+    S.recoverCount=0;S.proxyIdx=null;
+    var titleEl=S.root&&S.root.querySelector('.ptp-title');
+    if(titleEl)titleEl.textContent=newTitle||'';
+    var liveEl=el('ptpLive');
+    if(liveEl)liveEl.style.display=S.isLive?'':'none';
+    var goLiveBtn=el('ptpGoLive');
+    if(goLiveBtn)goLiveBtn.style.display=S.isLive?'':'none';
+    attachSource();
+    syncUI();
+    checkForOtherRemoteSession();
+    return true;
+  }
   function enterFullscreenProgrammatic(){
     if(!S||S.root.classList.contains('ptp-fs'))return;
     S.fsFromRotate=true;
@@ -20473,12 +20499,28 @@ window.PTPlayer=(function(){
     if(!toplam){showToastMsg('❌ Önce bir süre girin (saat/dakika/saniye)');return;}
     seekBy(yon==='back'?-toplam:toplam);
   }
-  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,isActive:function(){return !!S;}};
+  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,switchSourceInPlace:switchSourceInPlace,isActive:function(){return !!S;}};
 })();
 
 window.openVideoWatch=function(videoId){
   const v=(D.videoLinks||[]).find(function(x){return x.id===videoId;});
   if(!v){showToast('❌ Video bulunamadı');return;}
+  const urlOnceden=ptExtractVideoUrl(v.url||'');
+  // KÖK SEBEP DÜZELTMESİ (ÜÇÜNCÜ ve GERÇEK neden - kullanıcı bildirdi: "yatay ekranda kanal
+  // değiştirince ekran dikey oluyor, ekran oranı hiçbir şekilde değişmeyecek"): Önceki iki
+  // düzeltme (CSS sınıfı + zamanlama) CSS katmanındaydı, ama GERÇEK sebep hiç orada değildi -
+  // bkz. PTPlayer.switchSourceInPlace üzerindeki uzun not (destroy() içindeki
+  // exitFullscreen() çağrısı, mobil tarayıcılarda cihazın OS seviyesindeki döndürme kilidini
+  // BİZİM KODUMUZDAN BAĞIMSIZ olarak bıraktırıyordu). Eğer ZATEN özel oynatıcıyla bir video/
+  // kanal izleniyorsa VE yeni hedef de aynı türdeyse (doğrudan medya/m3u8), oynatıcının DOM'u
+  // HİÇ YIKILIP YENİDEN KURULMUYOR - native tam ekran/döndürme kilidi TAMAMEN DOKUNULMADAN,
+  // sadece video kaynağı değişiyor.
+  if(window.PTPlayer&&PTPlayer.isActive()&&document.getElementById('ptPlayerHost')&&ptIsDirectMediaUrl(urlOnceden)&&typeof PTPlayer.switchSourceInPlace==='function'){
+    if(PTPlayer.switchSourceInPlace(urlOnceden,v.title||'',!!v.isLive,videoId)){
+      if(window.PTSheetNav)PTSheetNav.mark('videoWatch_'+videoId);
+      return;
+    }
+  }
   // KULLANICI TALEBİ ("kumanda üzerinden kanal değiştirildiğinde tam ekrandayken küçük ekrana
   // geçmesin"): Bu fonksiyon aşağıda #sheetContent'in TÜMÜNÜ sıfırdan kuruyor - eski oynatıcı
   // (varsa) tam ekrandaysa bu durum burada YAKALANIR, yeni oynatıcı kurulduktan sonra geri
