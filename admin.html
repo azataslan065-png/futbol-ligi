@@ -1254,7 +1254,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-19-E';
+window.APP_BUILD='2026-08-19-F';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -16478,7 +16478,24 @@ function listenToLeague(leagueId){
       S.premiumRequests=d.premiumRequests||null;
       S.premiumAccessCodes=d.premiumAccessCodes||null;
       S.sponsors=d.sponsors||null;
-      S.videoLinks=d.videoLinks||null;
+      // İKİNCİ HATA DÜZELTMESİ (kullanıcı bildirdi: "kanallar ve videolar YİNE kendiliğinden
+      // siliniyor" - önceki düzeltmeden SONRA bile devam ediyordu): Bu satır, CANLI Firebase
+      // dinleyicisinin HER tetiklenişinde (bir maça skor girilse BİLE, videoLinks'le hiç
+      // ilgisi olmasa bile) S.videoLinks'i gelen anlık görüntüyle KOŞULSUZ değiştiriyordu.
+      // Eğer "Kaydet" işlemi TAM tamamlanmadan (ağ gecikmesi) ARADA bir başka değişiklik bu
+      // dinleyiciyi tetiklerse, gelen anlık görüntü HENÜZ ESKİ videoLinks'i taşıyabilir - bu
+      // satır o an ekranda YENİ görünen listeyi SESSİZCE eskiyle değiştiriyordu. Artık: liste
+      // aniden ve BÜYÜK ORANDA küçülüyorsa (ör. tamamen boşalıyorsa) VE bu, admin'in BİZZAT
+      // az önce kaydettiği bir değişiklik DEĞİLSE (dirty bayrağı false), bu ŞÜPHELİ kabul
+      // edilip ESKİ liste KORUNUR - kayıt log'una uyarı düşülür, admin fark edebilir.
+      var gelenVL=d.videoLinks?Object.values(d.videoLinks):[];
+      var mevcutVL=S.videoLinks||[];
+      if(!window._videoLinksDirty&&mevcutVL.length>=3&&gelenVL.length<mevcutVL.length/2){
+        if(window.DiagCore)DiagCore.kaydet('adm_settings','uyari','Şüpheli videoLinks küçülmesi engellendi',{mevcut:mevcutVL.length,gelen:gelenVL.length});
+        console.warn('[Video Linkleri] Şüpheli küçülme algılandı ('+mevcutVL.length+' → '+gelenVL.length+'), eski liste korunuyor. Bu admin tarafından KASITLI bir silme değilse, sayfayı yenileyip tekrar kontrol edin.');
+      }else{
+        S.videoLinks=d.videoLinks||null;
+      }
       S.poll=d.poll||null;
       S.reports=d.reports||null;
       S.feedback=d.feedback||null;
