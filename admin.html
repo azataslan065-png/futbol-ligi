@@ -1261,7 +1261,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-20-B';
+window.APP_BUILD='2026-08-20-C';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5996,6 +5996,20 @@ function closeCatPrompt(){
   qs('catPromptOv').classList.remove('on');
   _catPromptTargetIdx=null;
 }
+// KULLANICI TALEBİ ("kanal havuzu kanal oluşturunca kategori giremiyor"): Havuz formundaki
+// (➕ Havuza Yeni Kanal / ✏️ Havuz Kanalını Düzenle) kategori seçimi eskiden sadece
+// S.videoCategories içindeki mevcut kategorileri listeliyordu, "+ Yeni Kategori Oluştur"
+// seçeneği YOKTU (bu seçenek TV/Video linkleri formunda vardı ama havuz formunda unutulmuştu) -
+// dolayısıyla havuza YENİ bir kategori girilemiyordu. Artık havuz formu da AYNI
+// catPromptOv kutusunu kullanıyor; hedef bir dizi indeksi değil 'cp' string'i olduğunda
+// (_catPromptTargetIdx==='cp') sonuç doğrudan #cpCategory <select>'ine yazılıyor.
+function promptNewChannelPoolCategory(){
+  _catPromptTargetIdx='cp';
+  var inp=qs('catPromptInp');
+  if(inp)inp.value='';
+  qs('catPromptOv').classList.add('on');
+  setTimeout(function(){if(inp)inp.focus();},80);
+}
 function confirmCatPrompt(){
   var inp=qs('catPromptInp');
   var name=(inp?inp.value:'').trim();
@@ -6004,6 +6018,18 @@ function confirmCatPrompt(){
   if(!name||i==null)return;
   S.videoCategories=S.videoCategories||[];
   if(S.videoCategories.indexOf(name)===-1)S.videoCategories.push(name);
+  if(i==='cp'){
+    var sel=qs('cpCategory');
+    if(sel){
+      if(!Array.prototype.some.call(sel.options,function(o){return o.value===name;})){
+        var opt=document.createElement('option');
+        opt.value=name;opt.textContent=name;
+        sel.insertBefore(opt,sel.lastElementChild);
+      }
+      sel.value=name;
+    }
+    return;
+  }
   setVideoLinkField(i,'category',name);
   renderVideoLinkAdmin();
 }
@@ -6163,8 +6189,9 @@ function _channelPoolFormHtml(c){
   return '<div class="field"><span class="lbl">Başlık</span><input id="cpTitle" value="'+(c.title||'').replace(/"/g,'&quot;')+'" placeholder="Kullanıcının göreceği isim"/></div>'
     +'<div class="field" style="margin-top:.5rem"><span class="lbl">Video/Yayın Linki</span><input id="cpUrl" value="'+(c.url||'').replace(/"/g,'&quot;')+'" placeholder="https://..."/></div>'
     +'<label style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--mu);cursor:pointer;margin-top:.6rem"><input type="checkbox" id="cpIsLive" '+(c.isLive?'checked':'')+' style="width:15px;height:15px;cursor:pointer"/>🔴 Bu bir canlı yayın</label>'
-    +'<div class="field" style="margin-top:.5rem"><span class="lbl">Kategori</span><select id="cpCategory" style="width:100%;font-size:.78rem;padding:.5rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif"><option value="">Kategorisiz</option>'
+    +'<div class="field" style="margin-top:.5rem"><span class="lbl">Kategori</span><select id="cpCategory" onchange="if(this.value===\'__new__\'){promptNewChannelPoolCategory();}" style="width:100%;font-size:.78rem;padding:.5rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif"><option value="">Kategorisiz</option>'
       +(S.videoCategories||[]).map(function(cat){return '<option value="'+escHtml(cat)+'"'+(c.category===cat?' selected':'')+'>'+escHtml(cat)+'</option>';}).join('')
+      +'<option value="__new__">➕ Yeni Kategori Oluştur...</option>'
       +'</select></div>'
     +'<div style="display:flex;align-items:center;gap:.5rem;margin-top:.6rem">'
     +(c.logo?'<img id="cpLogoPreview" src="'+escHtml(c.logo)+'" style="width:32px;height:32px;border-radius:8px;object-fit:contain;background:var(--s3);flex-shrink:0;padding:2px;box-sizing:border-box"/>':'<div id="cpLogoPreview" style="width:32px;height:32px;border-radius:8px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--mu);flex-shrink:0">🖼️</div>')
@@ -6261,9 +6288,27 @@ function deleteChannelPoolEntry(pid){
 // KULLANICI TALEBİ ("kanalları TV tarafına da gönderebilir"): Havuzdaki bir kanalı, dirty-flag
 // korumalı saveVideoLinkSettings() akışından GEÇEREK canlı videoLinks listesine ekler - böylece
 // bu ekleme de AYNI güvenli kaydetme yolunu kullanır, ayrı bir yazma riski oluşturmaz.
+// KULLANICI TALEBİ ("A kanalı daha önce TV kısmına gönderilmiş olsun, ikinci kez
+// gönderildiğinde mevcutsa uyarı versin, göndermesin; mevcut değilse göndersin"): Göndermeden
+// ÖNCE TV tarafındaki güncel liste (henüz kaydedilmemiş taslak düzenlemeler varsa
+// window._editVideoLinks, yoksa S.videoLinks) taranır. Eşleşme önce poolSourceId ile
+// (bu havuz kaydından daha önce gönderilmiş TAM O KAYIT), yoksa başlık+link birebir aynıysa
+// (havuz özelliğinden ÖNCE elle eklenmiş veya poolSourceId'si bir şekilde kaybolmuş aynı
+// kanal) aranır - ikisi de "zaten mevcut" sayılır ve tekrar gönderilmez.
 function sendChannelPoolEntryToTv(pid){
   db.ref('channelPool/'+pid).once('value').then(function(snap){
     var c=snap.val();if(!c)return;
+    var mevcutListe=window._editVideoLinks!=null?window._editVideoLinks:(S.videoLinks||[]);
+    var cTitle=(c.title||'').trim().toLowerCase();
+    var cUrl=(c.url||'').trim().toLowerCase();
+    var zatenVar=mevcutListe.some(function(v){
+      if(v.poolSourceId===pid)return true;
+      return (v.title||'').trim().toLowerCase()===cTitle&&(v.url||'').trim().toLowerCase()===cUrl;
+    });
+    if(zatenVar){
+      toast('⚠️ '+(c.title||'Bu kanal')+' zaten TV tarafında mevcut, tekrar gönderilmedi','er');
+      return;
+    }
     if(window._editVideoLinks===null)window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
     window._editVideoLinks.unshift({id:uid(),title:c.title||'',url:c.url||'',isLive:!!c.isLive,category:c.category||'',logo:c.logo||'',createdAt:Date.now(),poolSourceId:pid});
     S.videoLinks=window._editVideoLinks.slice();
