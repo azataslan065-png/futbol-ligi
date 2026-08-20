@@ -1398,7 +1398,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-20-A';
+window.APP_BUILD='2026-08-20-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18523,13 +18523,73 @@ window.moveVideoScreenItem=function(tab,id,dir){
   saveVideoScreenOrder(tab,merged);
   renderVideoScreenList();
 };
-// KULLANICI TALEBİ ("aynı hesap projeksiyonda açıkken telefonu kumanda olarak
-// kullanabilir"): Bu ekran, PTPlayer'ın DIŞINDA çalışır - bu cihazda YEREL bir video
-// oynatılmaz, sadece hedef oturuma (targetSessionId) Firebase üzerinden komut gönderilir.
+// KULLANICI TALEBİ ("kanal numarası girme butonunun yanına kayıtlı kanalların olduğu bir
+// liste, arama çubuğu ile beraber eklensin"): PTPlayer kapalıyken (bu ekran onun DIŞINDA
+// çalıştığından) kanal listesine PTPlayer'ın kendi playlist() fonksiyonu üzerinden
+// erişilemiyor - bu yüzden AYNI sıralama mantığının (kişisel sürükle-bırak sırası varsa
+// onu, yoksa admin'in eklediği sırayı kullanan) bağımsız/global bir kopyası burada tutulur.
+function remoteCtrlPlaylist(isLive){
+  var all=(window.D&&D.videoLinks)||[];
+  var list=all.filter(function(x){return !!x.isLive===!!isLive;});
+  try{
+    var order=typeof getVideoScreenOrder==='function'?getVideoScreenOrder(isLive?'tv':'video'):[];
+    if(order&&order.length){
+      var orderIdx={};for(var oi=0;oi<order.length;oi++)orderIdx[order[oi]]=oi;
+      list=list.slice().sort(function(a,b){
+        var ai=orderIdx.hasOwnProperty(a.id)?orderIdx[a.id]:Infinity;
+        var bi=orderIdx.hasOwnProperty(b.id)?orderIdx[b.id]:Infinity;
+        return ai-bi;
+      });
+    }
+  }catch(e){}
+  return list;
+}
+// KULLANICI TALEBİ (aynı istek): Bu ekran, hedef oturumdan gelen "session" verisiyle her
+// ~4 saniyede bir (heartbeat) TAMAMEN yeniden çiziliyor (bkz. openRemoteControllerScreen).
+// Arama kutusuna yazarken bu periyodik yeniden çizim odağı/imleci ÇALMASIN diye arama
+// metni ve odak durumu global değişkenlerde tutulup her çizimden SONRA input'a geri
+// uygulanır.
+function remoteCtrlChannelRowsHtml(isLive){
+  var list=remoteCtrlPlaylist(isLive);
+  var term=(window._remoteCtrlSearch||'').trim().toLocaleLowerCase('tr');
+  var items=list.map(function(x,i){return {x:x,i:i};});
+  if(term)items=items.filter(function(o){return (o.x.title||'').toLocaleLowerCase('tr').indexOf(term)>=0;});
+  if(!items.length)return '<div style="text-align:center;color:var(--mu);font-size:.68rem;padding:1rem 0">'+(term?'❌ Sonuç bulunamadı':'Kayıtlı yayın yok')+'</div>';
+  return items.map(function(o){
+    var x=o.x,i=o.i;
+    var harf=(x.title||'?').trim().charAt(0).toUpperCase()||'?';
+    var logoHtml=x.logo?'<img src="'+x.logo.replace(/"/g,'&quot;')+'" style="width:100%;height:100%;object-fit:contain"/>':harf;
+    return '<button onclick="remoteCtrlJumpTo('+i+')" style="width:100%;display:flex;align-items:center;gap:.5rem;padding:.4rem .3rem;background:none;border:none;border-bottom:1px solid var(--br);color:var(--tx);text-align:left;cursor:pointer;font-family:inherit">'
+      +'<span style="width:1.2rem;flex-shrink:0;text-align:center;font-size:.6rem;font-weight:800;color:var(--mu)">'+(i+1)+'</span>'
+      +'<span style="width:24px;height:24px;flex-shrink:0;border-radius:6px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:900;overflow:hidden">'+logoHtml+'</span>'
+      +'<span style="flex:1;min-width:0;font-size:.7rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(x.title||'İsimsiz yayın').replace(/</g,'&lt;')+'</span>'
+      +'</button>';
+  }).join('');
+}
+window.remoteCtrlJumpTo=function(idx){
+  sendRemoteCommand('jump',idx+1);
+};
+window.remoteCtrlSearchInput=function(val){
+  window._remoteCtrlSearch=val;
+  var body=document.getElementById('remoteCtrlChList');
+  var data=window._remoteCtrlSessionData;
+  if(body)body.innerHTML=remoteCtrlChannelRowsHtml(data?!!data.isLive:true);
+};
+function restoreRemoteCtrlSearchFocus(){
+  var inp=document.getElementById('remoteCtrlSearchInp');
+  if(!inp)return;
+  inp.value=window._remoteCtrlSearch||'';
+  if(window._remoteCtrlSearchHasFocus){
+    inp.focus();
+    try{var p=inp.value.length;inp.setSelectionRange(p,p);}catch(e){}
+  }
+}
 window.openRemoteControllerScreen=function(targetSessionId,basePath){
   window._remoteCtrlTarget=targetSessionId;
   window._remoteCtrlBase=basePath;
   window._remoteCtrlBuf='';
+  window._remoteCtrlSearch='';
+  window._remoteCtrlSearchHasFocus=false;
   if(window._remoteCtrlListener&&window._remoteCtrlBase){
     try{firebase.database().ref(window._remoteCtrlBase+'/session').off('value',window._remoteCtrlListener);}catch(e){}
   }
@@ -18544,6 +18604,7 @@ window.openRemoteControllerScreen=function(targetSessionId,basePath){
 function renderRemoteControllerScreen(){
   var data=window._remoteCtrlSessionData;
   var buf=window._remoteCtrlBuf||'';
+  var isLiveMode=data?!!data.isLive:true;
   var html=`<div class="sheet-handle"></div>
     <div style="font-size:.92rem;font-weight:900;margin-bottom:.3rem">📟 Kumanda Modu</div>
     <div style="font-size:.72rem;color:var(--mu);margin-bottom:.8rem;line-height:1.5">
@@ -18562,6 +18623,18 @@ function renderRemoteControllerScreen(){
          olmayabileceğinden, TÜM girilen numarayı tek dokunuşla temizleyen ayrı bir buton da
          eklendi - iki farklı "silme" ihtiyacı (tek hane / tamamı) ayrı ayrı karşılanıyor. -->
     ${buf?`<button onclick="remoteCtrlKey('C')" style="width:100%;padding:.5rem;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;font-size:.7rem;font-weight:700;cursor:pointer;margin-bottom:.6rem">🗑️ Tümünü Temizle</button>`:''}
+    <!-- KULLANICI TALEBİ ("kanal numarası girme butonunun yanına kayıtlı kanalların olduğu
+         bir liste, arama çubuğu ile beraber eklensin"): Numara tuş takımının HEMEN altında,
+         admin'in eklediği kanalların isme göre aranıp DOKUNARAK doğrudan seçilebildiği bir
+         liste. Satıra dokunmak, sayı girip "Git"e basmakla AYNI komutu (jump) gönderir -
+         sadece numarasını ezbere bilmeye gerek kalmaz. -->
+    <div style="font-size:.62rem;font-weight:800;color:var(--mu);margin-bottom:.3rem">📺 Kayıtlı Kanallar</div>
+    <input type="text" id="remoteCtrlSearchInp" placeholder="🔍 Kanal ara…" autocomplete="off"
+      oninput="remoteCtrlSearchInput(this.value)"
+      onfocus="window._remoteCtrlSearchHasFocus=true"
+      onblur="window._remoteCtrlSearchHasFocus=false"
+      style="width:100%;box-sizing:border-box;background:var(--s2);border:1.5px solid var(--br);border-radius:10px;padding:.5rem .7rem;font-size:.75rem;color:var(--tx);outline:none;font-family:inherit;margin-bottom:.4rem"/>
+    <div id="remoteCtrlChList" style="max-height:170px;overflow-y:auto;border:1px solid var(--br);border-radius:10px;padding:.1rem .3rem;margin-bottom:.7rem">${remoteCtrlChannelRowsHtml(isLiveMode)}</div>
     <div style="display:flex;gap:.5rem;margin-bottom:.6rem">
       <button onclick="remoteCtrlAction('prev')" style="flex:1;height:2.8rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.85rem;font-weight:700;cursor:pointer;color:var(--tx)">⏮ Önceki</button>
       <button onclick="remoteCtrlAction('playpause')" style="flex:1;height:2.8rem;border-radius:10px;background:var(--ac);border:none;font-size:.9rem;font-weight:700;cursor:pointer;color:#fff">⏯ Oynat/Duraklat</button>
@@ -18574,9 +18647,14 @@ function renderRemoteControllerScreen(){
       <button onclick="remoteCtrlAction('voldown')" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.8rem;font-weight:700;cursor:pointer;color:var(--tx)">🔉 Ses -</button>
       <button onclick="remoteCtrlAction('volup')" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.8rem;font-weight:700;cursor:pointer;color:var(--tx)">🔊 Ses +</button>
     </div>
+    <!-- KULLANICI TALEBİ ("kumandaya canlı tuşu da eklensin, yayın geri sarıldığında
+         kumanda üzerinden canlıya dönülsün"): Sadece hedef cihazda CANLI bir yayın
+         oynatıldığı bilindiğinde gösterilir. -->
+    ${isLiveMode&&data?`<button onclick="remoteCtrlAction('live')" style="width:100%;padding:.65rem;border-radius:10px;background:rgba(239,68,68,.15);border:1.5px solid rgba(239,68,68,.4);color:#f87171;font-size:.8rem;font-weight:800;cursor:pointer;margin-bottom:.6rem">🔴 Canlıya Dön</button>`:''}
     <button onclick="closeRemoteControllerScreen()" style="width:100%;padding:.6rem;border-radius:10px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#f87171;font-size:.75rem;font-weight:700;cursor:pointer">✕ Kumanda Modundan Çık</button>`;
   var el=document.getElementById('sheetContent');
   if(el)el.innerHTML=html;
+  restoreRemoteCtrlSearchFocus();
 }
 window.remoteCtrlKey=function(k){
   if(k==='C'){window._remoteCtrlBuf='';renderRemoteControllerScreen();return;}
@@ -18606,6 +18684,7 @@ window.closeRemoteControllerScreen=function(){
     try{firebase.database().ref(window._remoteCtrlBase+'/session').off('value',window._remoteCtrlListener);}catch(e){}
   }
   window._remoteCtrlListener=null;window._remoteCtrlTarget=null;window._remoteCtrlBase=null;
+  window._remoteCtrlSearch='';window._remoteCtrlSearchHasFocus=false;
   closeSheet();
 };
 // GÜVENLİK SIKILAŞTIRMASI (KULLANICI TALEBİ: "Admin herhangi bir siteden yayın eklediğinde
@@ -19558,6 +19637,17 @@ window.PTPlayer=(function(){
       if(lb&&S.locked)lb.classList.add('ptp-hide');
     },3000);
   }
+  // KULLANICI TALEBİ ("kilit ikonu her komut gönderiminde 3 sn sonra kaybolsun"): Ekran
+  // ZATEN kilitliyken gelen HER YENİ uzaktan komutta da ikon kısaca belirip 3 sn sonra
+  // tekrar gizlenir - sadece İLK kilitlenişte değil. toggleLock() bunu kilitleme ANINDA
+  // zaten yapıyor; bu fonksiyon ekran HÂLİHAZIRDA kilitliyken sonraki her komut için
+  // aynı "göster + 3 sn'de gizle" döngüsünü tetikler.
+  function pulseLockbar(){
+    if(!S||!S.locked)return;
+    var lb=S.root&&S.root.querySelector('.ptp-lockbar');
+    if(lb)lb.classList.remove('ptp-hide');
+    scheduleLockbarAutoHide();
+  }
   function toggleLock(){
     if(!S)return;
     S.locked=!S.locked;
@@ -20428,12 +20518,18 @@ window.PTPlayer=(function(){
         // ANLADIĞI ANDA, tercih açıksa kendi ekranını otomatik kilitler - projeksiyona
         // yanlışlıkla dokunup kumandayla çakışma riski ortadan kalkar. Sadece kilit henüz
         // AÇIK değilse tetiklenir, zaten kilitliyse tekrar dokunmaz.
-        if(pref('remoteAutoLock',true)&&!S.locked)toggleLock();
+        if(pref('remoteAutoLock',true)){
+          if(!S.locked)toggleLock();else pulseLockbar();
+        }
         if(cmd.action==='next')jump(1);
         else if(cmd.action==='prev')jump(-1);
         else if(cmd.action==='playpause')togglePlay();
         else if(cmd.action==='volup'){setVolume((S.video.muted?0:S.video.volume*100)+10);}
         else if(cmd.action==='voldown'){setVolume((S.video.muted?0:S.video.volume*100)-10);}
+        // KULLANICI TALEBİ ("yayın geri sarıldığında kumanda üzerinden canlıya dönülsün"):
+        // Telefon kumandasındaki "🔴 Canlı" tuşundan gelen komut - geri sarılmış canlı
+        // yayını en güncel (canlı) uca döndürür.
+        else if(cmd.action==='live')goLive();
         else if(cmd.action==='jump'){
           var pl2=playlist();
           if(cmd.value>=1&&cmd.value<=pl2.length&&typeof window.openVideoWatch==='function')window.openVideoWatch(pl2[cmd.value-1].id);
