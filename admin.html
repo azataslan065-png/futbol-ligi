@@ -1261,7 +1261,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-21-A';
+window.APP_BUILD='2026-08-21-B';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -16731,6 +16731,19 @@ function listenToLeague(leagueId){
     // eklenecek bir kod satırı), renderTeams() gibi kritik render işlemlerinin ETKİLENMEMESİ
     // için try/catch ile sarmalanmıştır.
     try{
+    // KULLANICI TALEBİ (tekrar bildirildi: "kanal havuzu kanal oluşturduğunda kategoriye
+    // girilemiyor veya kaydedilemiyor"): Gerçek kök sebep BURADA bulundu. Bu dinleyici HER
+    // Firebase güncellemesinde (videoCategories'le hiç ilgisi olmayan bir maç skoru
+    // girilse BİLE) S'i az aşağıda SIFIRDAN kuruyor - ama S.videoCategories bu kurulum
+    // listesinde HİÇ YOKTU, yani hiçbir zaman Firebase'den GERİ OKUNMUYORDU. Önceki
+    // düzeltmeler (kategori seçim kutusuna "+ Yeni Kategori" seçeneği eklemek, yeni
+    // kategoriyi ayrıca Firebase'e yazmak) bu yüzden işe yaramıyordu: yazım Firebase'e
+    // gidiyordu ama S HİÇBİR ZAMAN o alanı geri okumadığından, bu dinleyici bir sonraki
+    // tetiklenişinde S.videoCategories'i sessizce undefined'a döndürüyordu - kategoriler
+    // sanki hiç kaydedilmemiş gibi kayboluyordu. Sıfırlamadan HEMEN önce mevcut yerel
+    // listeyi yakalıyoruz ki aşağıda gelen listeyle birleştirebilelim (kategoriler bu
+    // ekranlarda sadece EKLENİR, hiçbir yerde silinmez - bu yüzden çıkarma yapmadan union).
+    var _oncekiVideoKategoriler=S.videoCategories||[];
     S={leagueName:'Lig',season:'1. Sezon',teams:{},matches:{}};
     // HATA DÜZELTMESİ (kullanıcı bildirdi: "giriş yapıldığında kayıtlı takımlar
     // görünmüyor, sekme değiştirip geri gelince görünüyor"): renderTeams() zaten senkron
@@ -16831,6 +16844,15 @@ function listenToLeague(leagueId){
       }else{
         S.videoLinks=d.videoLinks||null;
       }
+      // KULLANICI TALEBİ ("...İlgili kanalın kategorisi girildikten sonra hem kanal
+      // havuzunda hem de TV / Video Yönetimi tarafında senkronize olacak"): videoCategories
+      // artık Firebase'den gerçekten okunuyor. Yerel olarak az önce eklenmiş ama henüz
+      // Firebase'e ulaşmamış (ör. Video Yönetimi formunda "+ Yeni Kategori" ile eklenip
+      // "💾 Kaydet"e daha basılmamış) bir kategori, ARADA gelen bu tetiklenmede kaybolmasın
+      // diye ÇIKARMADAN birleştiriliyor (union) - kategoriler bu ekranlarda sadece eklenir,
+      // hiçbir akış onları silmez, dolayısıyla union tamamen güvenli.
+      var _gelenKategoriler=d.videoCategories||[];
+      S.videoCategories=_oncekiVideoKategoriler.concat(_gelenKategoriler.filter(function(k){return _oncekiVideoKategoriler.indexOf(k)===-1;}));
       S.poll=d.poll||null;
       S.reports=d.reports||null;
       S.feedback=d.feedback||null;
