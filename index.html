@@ -1398,7 +1398,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-20-C';
+window.APP_BUILD='2026-08-21-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18590,6 +18590,11 @@ window.openRemoteControllerScreen=function(targetSessionId,basePath){
   window._remoteCtrlBuf='';
   window._remoteCtrlSearch='';
   window._remoteCtrlSearchHasFocus=false;
+  // KULLANICI TALEBİ ("kumanda arayüzünü yeniden tasarla"): Ekran artık iki sekmeye
+  // ayrıldı (📺 Kanal Listesi / 🔢 Numara İle Git) - her açılışta varsayılan olarak
+  // listeyle başlar (sayı tuş takımına göre daha sık kullanılan, daha az dokunuş
+  // gerektiren yol).
+  window._remoteCtrlTab='liste';
   if(window._remoteCtrlListener&&window._remoteCtrlBase){
     try{firebase.database().ref(window._remoteCtrlBase+'/session').off('value',window._remoteCtrlListener);}catch(e){}
   }
@@ -18601,60 +18606,75 @@ window.openRemoteControllerScreen=function(targetSessionId,basePath){
   };
   firebase.database().ref(basePath+'/session').on('value',window._remoteCtrlListener);
 };
+// KULLANICI TALEBİ ("kumanda arayüzünü yeniden tasarla; düzen çok karmaşık duruyor"):
+// Eskiden numara tuş takımı VE kanal listesi HER ZAMAN aynı anda, alt alta gösteriliyordu -
+// ekranı dolduran uzun, kalabalık bir sayfa oluşuyordu. Artık ikisi ayrı bir sekmede: aynı
+// anda sadece BİRİ görünür. Oynatma (⏮/⏯/⏭) ve ses (🔉/🔊) kontrolleri de iki ayrı satır
+// yerine TEK bir kompakt satırda birleştirildi, "Kumanda Modundan Çık" ise ekranın altında
+// tam genişlikte büyük bir buton yerine üstte küçük bir "✕ Çık" düğmesine indirildi - toplam
+// düzen çok daha kısa ve sade.
+window.remoteCtrlSetTab=function(tab){
+  window._remoteCtrlTab=tab;
+  window._remoteCtrlSearch='';window._remoteCtrlSearchHasFocus=false;window._remoteCtrlBuf='';
+  renderRemoteControllerScreen();
+};
 function renderRemoteControllerScreen(){
   var data=window._remoteCtrlSessionData;
   var buf=window._remoteCtrlBuf||'';
   var isLiveMode=data?!!data.isLive:true;
-  var html=`<div class="sheet-handle"></div>
-    <div style="font-size:.92rem;font-weight:900;margin-bottom:.3rem">📟 Kumanda Modu</div>
-    <div style="font-size:.72rem;color:var(--mu);margin-bottom:.8rem;line-height:1.5">
-      ${data?`📡 Şu an oynatılıyor: <b>${(data.title||'').replace(/</g,'&lt;')}</b><br/>Kanal ${data.channelNo||'?'} / ${data.total||'?'} · ${data.playing?'▶️ Oynatılıyor':'⏸️ Duraklatıldı'}`:'⏳ Diğer cihaza bağlanılıyor...'}
-    </div>
-    <!-- KULLANICI TALEBİ ("sayı girerken okunacak"): Boşken sadece "—" göstermek yerine ne
-         yapılacağını AÇIKÇA söyleyen bir ipucu metni; dolu iken rakamlar BÜYÜK ve net. -->
-    <div id="remoteCtrlDisp" style="text-align:center;font-size:${buf?'1.9rem':'.8rem'};font-weight:800;letter-spacing:.15em;background:var(--s2);border:1.5px solid ${buf?'var(--ac)':'var(--br)'};border-radius:12px;padding:.8rem;margin-bottom:.7rem;min-height:1.4em;color:${buf?'var(--tx)':'var(--mu)'}">${buf||'Kanal numarası girin'}</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem;margin-bottom:.4rem">
-      ${['1','2','3','4','5','6','7','8','9','⌫','0','Git'].map(function(k){
-        var accent=k==='Git';
-        return `<button onclick="remoteCtrlKey('${k}')" style="height:3rem;border-radius:10px;background:${accent?'var(--ac)':'var(--s2)'};border:1.5px solid ${accent?'var(--ac)':'var(--br)'};font-size:1.1rem;font-weight:700;cursor:pointer;color:${accent?'#fff':'var(--tx)'}">${k==='Git'?'✓':k}</button>`;
-      }).join('')}
-    </div>
-    <!-- KULLANICI TALEBİ ("sil tuşları ekle"): ⌫ (yukarıda, tek hane siler) YETERLİ
-         olmayabileceğinden, TÜM girilen numarayı tek dokunuşla temizleyen ayrı bir buton da
-         eklendi - iki farklı "silme" ihtiyacı (tek hane / tamamı) ayrı ayrı karşılanıyor. -->
-    ${buf?`<button onclick="remoteCtrlKey('C')" style="width:100%;padding:.5rem;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;font-size:.7rem;font-weight:700;cursor:pointer;margin-bottom:.6rem">🗑️ Tümünü Temizle</button>`:''}
-    <!-- KULLANICI TALEBİ ("kanal numarası girme butonunun yanına kayıtlı kanalların olduğu
-         bir liste, arama çubuğu ile beraber eklensin"): Numara tuş takımının HEMEN altında,
-         admin'in eklediği kanalların isme göre aranıp DOKUNARAK doğrudan seçilebildiği bir
-         liste. Satıra dokunmak, sayı girip "Git"e basmakla AYNI komutu (jump) gönderir -
-         sadece numarasını ezbere bilmeye gerek kalmaz. -->
-    <div style="font-size:.62rem;font-weight:800;color:var(--mu);margin-bottom:.3rem">📺 Kayıtlı Kanallar</div>
-    <input type="text" id="remoteCtrlSearchInp" placeholder="🔍 Kanal ara…" autocomplete="off"
+  var tab=window._remoteCtrlTab||'liste';
+  // KULLANICI TALEBİ ("kanalların olduğu listeyi en aşağı çektiğinde kendiliğinden tekrar
+  // yukarı çıkıyor"): Bu ekran hedef oturumdan ~4 saniyede bir (heartbeat) TAMAMEN yeniden
+  // çiziliyor (bkz. remoteCtrlChannelRowsHtml üzerindeki not). Arama kutusunun odağı için
+  // zaten bir koruma vardı ama kanal listesinin kaydırma konumu için YOKTU - bu yüzden
+  // kullanıcı listeyi aşağı kaydırdığı anda bir sonraki heartbeat'te innerHTML sıfırdan
+  // yazılıyor ve liste elemanı BAŞA (scrollTop=0) dönüyordu; kullanıcıya "liste kendiliğinden
+  // yukarı çıkıyor" gibi görünen buydu. Artık AYNI arama-odağı koruma mantığıyla, yeniden
+  // çizimden ÖNCE mevcut kaydırma konumu yakalanıp SONRA aynen geri uygulanıyor.
+  var _prevChScroll=0;
+  var _prevChEl=document.getElementById('remoteCtrlChList');
+  if(_prevChEl)_prevChScroll=_prevChEl.scrollTop;
+  var infoHtml=data
+    ?`📡 <b style="color:var(--tx)">${(data.title||'').replace(/</g,'&lt;')}</b><br/>Kanal ${data.channelNo||'?'} / ${data.total||'?'} · ${data.playing?'▶️ Oynatılıyor':'⏸️ Duraklatıldı'}`
+    :'⏳ Diğer cihaza bağlanılıyor...';
+  var listeTabHtml=`<input type="text" id="remoteCtrlSearchInp" placeholder="🔍 Kanal ara…" autocomplete="off"
       oninput="remoteCtrlSearchInput(this.value)"
       onfocus="window._remoteCtrlSearchHasFocus=true"
       onblur="window._remoteCtrlSearchHasFocus=false"
       style="width:100%;box-sizing:border-box;background:var(--s2);border:1.5px solid var(--br);border-radius:10px;padding:.5rem .7rem;font-size:.75rem;color:var(--tx);outline:none;font-family:inherit;margin-bottom:.4rem"/>
-    <div id="remoteCtrlChList" style="max-height:170px;overflow-y:auto;border:1px solid var(--br);border-radius:10px;padding:.1rem .3rem;margin-bottom:.7rem">${remoteCtrlChannelRowsHtml(isLiveMode)}</div>
-    <div style="display:flex;gap:.5rem;margin-bottom:.6rem">
-      <button onclick="remoteCtrlAction('prev')" style="flex:1;height:2.8rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.85rem;font-weight:700;cursor:pointer;color:var(--tx)">⏮ Önceki</button>
-      <button onclick="remoteCtrlAction('playpause')" style="flex:1;height:2.8rem;border-radius:10px;background:var(--ac);border:none;font-size:.9rem;font-weight:700;cursor:pointer;color:#fff">⏯ Oynat/Duraklat</button>
-      <button onclick="remoteCtrlAction('next')" style="flex:1;height:2.8rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.85rem;font-weight:700;cursor:pointer;color:var(--tx)">Sonraki ⏭</button>
+    <div id="remoteCtrlChList" style="max-height:230px;overflow-y:auto;border:1px solid var(--br);border-radius:10px;padding:.1rem .3rem">${remoteCtrlChannelRowsHtml(isLiveMode)}</div>`;
+  var numaraTabHtml=`<div id="remoteCtrlDisp" style="text-align:center;font-size:${buf?'1.8rem':'.78rem'};font-weight:800;letter-spacing:.15em;background:var(--s2);border:1.5px solid ${buf?'var(--ac)':'var(--br)'};border-radius:12px;padding:.7rem;margin-bottom:.55rem;min-height:1.3em;color:${buf?'var(--tx)':'var(--mu)'}">${buf||'Kanal numarası girin'}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;margin-bottom:${buf?'.45rem':'0'}">
+      ${['1','2','3','4','5','6','7','8','9','⌫','0','Git'].map(function(k){
+        var accent=k==='Git';
+        return `<button onclick="remoteCtrlKey('${k}')" style="height:2.7rem;border-radius:10px;background:${accent?'var(--ac)':'var(--s2)'};border:1.5px solid ${accent?'var(--ac)':'var(--br)'};font-size:1rem;font-weight:700;cursor:pointer;color:${accent?'#fff':'var(--tx)'}">${k==='Git'?'✓':k}</button>`;
+      }).join('')}
     </div>
-    <!-- KULLANICI TALEBİ ("telefon projeksiyon için kumanda olarak kullanıldığında ses
-         artırma/kısma butonları yok, eklenmeli"): Bu ekranda önceden SADECE kanal/oynatma
-         kontrolleri vardı, sesle ilgili hiçbir şey yoktu. -->
-    <div style="display:flex;gap:.5rem;margin-bottom:.6rem">
-      <button onclick="remoteCtrlAction('voldown')" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.8rem;font-weight:700;cursor:pointer;color:var(--tx)">🔉 Ses -</button>
-      <button onclick="remoteCtrlAction('volup')" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.8rem;font-weight:700;cursor:pointer;color:var(--tx)">🔊 Ses +</button>
+    ${buf?`<button onclick="remoteCtrlKey('C')" style="width:100%;padding:.45rem;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;font-size:.66rem;font-weight:700;cursor:pointer">🗑️ Tümünü Temizle</button>`:''}`;
+  var html=`<div class="sheet-handle"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.55rem">
+      <div style="font-size:.92rem;font-weight:900">📟 Kumanda Modu</div>
+      <button onclick="closeRemoteControllerScreen()" style="flex-shrink:0;background:rgba(239,68,68,.13);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:9px;padding:.32rem .6rem;font-size:.64rem;font-weight:700;cursor:pointer">✕ Çık</button>
     </div>
-    <!-- KULLANICI TALEBİ ("kumandaya canlı tuşu da eklensin, yayın geri sarıldığında
-         kumanda üzerinden canlıya dönülsün"): Sadece hedef cihazda CANLI bir yayın
-         oynatıldığı bilindiğinde gösterilir. -->
-    ${isLiveMode&&data?`<button onclick="remoteCtrlAction('live')" style="width:100%;padding:.65rem;border-radius:10px;background:rgba(239,68,68,.15);border:1.5px solid rgba(239,68,68,.4);color:#f87171;font-size:.8rem;font-weight:800;cursor:pointer;margin-bottom:.6rem">🔴 Canlıya Dön</button>`:''}
-    <button onclick="closeRemoteControllerScreen()" style="width:100%;padding:.6rem;border-radius:10px;background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#f87171;font-size:.75rem;font-weight:700;cursor:pointer">✕ Kumanda Modundan Çık</button>`;
+    <div style="background:var(--s2);border:1.5px solid var(--br);border-radius:12px;padding:.6rem .7rem;margin-bottom:.7rem;font-size:.68rem;color:var(--mu);line-height:1.55">${infoHtml}</div>
+    <div style="display:flex;gap:.2rem;background:rgba(128,128,128,.1);border-radius:10px;padding:.15rem;margin-bottom:.55rem">
+      <button onclick="remoteCtrlSetTab('liste')" style="flex:1;padding:.42rem 0;border-radius:8px;border:none;cursor:pointer;font-size:.66rem;font-weight:800;background:${tab==='liste'?'var(--ac)':'transparent'};color:${tab==='liste'?'#fff':'var(--mu)'}">📺 Kanal Listesi</button>
+      <button onclick="remoteCtrlSetTab('numara')" style="flex:1;padding:.42rem 0;border-radius:8px;border:none;cursor:pointer;font-size:.66rem;font-weight:800;background:${tab==='numara'?'var(--ac)':'transparent'};color:${tab==='numara'?'#fff':'var(--mu)'}">🔢 Numara İle Git</button>
+    </div>
+    <div style="margin-bottom:.65rem">${tab==='numara'?numaraTabHtml:listeTabHtml}</div>
+    <div style="display:flex;gap:.35rem;margin-bottom:.6rem">
+      <button onclick="remoteCtrlAction('prev')" title="Önceki" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">⏮</button>
+      <button onclick="remoteCtrlAction('voldown')" title="Ses Azalt" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">🔉</button>
+      <button onclick="remoteCtrlAction('playpause')" title="Oynat/Duraklat" style="flex:1.6;height:2.6rem;border-radius:10px;background:var(--ac);border:none;font-size:1.05rem;cursor:pointer;color:#fff">⏯</button>
+      <button onclick="remoteCtrlAction('volup')" title="Ses Arttır" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">🔊</button>
+      <button onclick="remoteCtrlAction('next')" title="Sonraki" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">⏭</button>
+    </div>
+    ${isLiveMode&&data?`<button onclick="remoteCtrlAction('live')" style="width:100%;padding:.6rem;border-radius:10px;background:rgba(239,68,68,.15);border:1.5px solid rgba(239,68,68,.4);color:#f87171;font-size:.78rem;font-weight:800;cursor:pointer">🔴 Canlıya Dön</button>`:''}`;
   var el=document.getElementById('sheetContent');
   if(el)el.innerHTML=html;
   restoreRemoteCtrlSearchFocus();
+  var chEl=document.getElementById('remoteCtrlChList');
+  if(chEl)chEl.scrollTop=_prevChScroll;
 }
 window.remoteCtrlKey=function(k){
   if(k==='C'){window._remoteCtrlBuf='';renderRemoteControllerScreen();return;}
