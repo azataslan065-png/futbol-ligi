@@ -1261,7 +1261,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-21-D';
+window.APP_BUILD='2026-08-21-E';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1462,23 +1462,21 @@ function saveGlobalAdminSetting(key,value){
 }
 // KULLANICI TALEBİ ("İlgili kanalın kategorisi kanal havuzuna girildiği zaman otomatik
 // olarak TV / Video Yönetimi sekmesinde de yansıyacak veya TV / Video Yönetimi sekmesinde
-// girildiğinde otomatik olarak havuzda görünecektir" - defalarca bildirildi): Video/kanal
-// kategorileri artık channelPool ile AYNI mantıkla, LİGDEN TAMAMEN BAĞIMSIZ, kök seviyede
-// bir Firebase yoluna ('videoCategories') yazılıp buradan CANLI dinleniyor - globalAdminSettings
-// ile BİREBİR AYNI, kanıtlanmış desen. Önceki hâlde kategori listesi HANGİ ligin altına
-// yazılacağı 'o an ekranda açık olan lig' (_curLeagueId) neyse ona bağlıydı; bu hem Kanal
-// Havuzu'nun "hiçbir lige bağlı değil" tasarımıyla ÇELİŞİYORDU hem de admin panel henüz bir
-// lig yüklenmemişken/başka bir ligdeyken kategori girilince kaydın YA HİÇ gitmemesine YA DA
-// yanlış lige gitmesine (dolayısıyla "giriliyor ama kaydedilmiyormuş gibi görünmesine") yol
-// açıyordu. Artık TEK, PAYLAŞILAN, ligden bağımsız bir liste var - Kanal Havuzu ve TV/Video
-// Yönetimi AYNI kaynaktan okur/yazar, dolayısıyla biri değiştiğinde diğeri OTOMATİK görür.
+// girildiğinde otomatik olarak havuzda görünecektir" - defalarca bildirildi, önceki
+// düzeltmeler işe yaramadı): GERÇEK kök sebep bulundu. Bir önceki denemede kategori listesi
+// TAMAMEN YENİ, kök seviyede bir Firebase yoluna ('videoCategories') taşınmıştı - ama bu site
+// zaten (bkz. openChannelPool içindeki uzun not) Firebase güvenlik kurallarında HER yolun
+// AYRI AYRI, elle izin verilmesini gerektiren bir yapı kullanıyor. Yepyeni, daha önce HİÇ
+// var olmamış bir kök yol eklemek, o yola HENÜZ izin tanımlanmadığı için sessizce
+// permission_denied hatası veriyordu - yazma HİÇ gerçekleşmiyordu, okuma dinleyicisi de hata
+// callback'i olmadığı için sessizce hiçbir şey döndürmüyordu; "giriliyor ama görünmüyor" bunun
+// içindi. Çözüm: yeni bir yol İCAT ETMEK yerine, ZATEN İZİNLİ ve production'da KANITLANMIŞ
+// şekilde çalışan 'globalAdminSettings' yolunun İÇİNE bir alan olarak ekliyoruz - tıpkı
+// adminMenuGroups/pageLayout/settingsSectionOrder gibi. Aynı üst-seviye yol olduğu için AYNI
+// izin kapsamına girer, Firebase Console'da HİÇBİR ek ayar gerekmez.
 function saveVideoCategoryGlobal(list){
-  return db.ref('videoCategories').set(list);
+  return db.ref('globalAdminSettings/videoCategories').set(list);
 }
-db.ref('videoCategories').on('value',function(snap){
-  S.videoCategories=snap.val()||[];
-  renderVideoLinkAdmin();
-});
 db.ref('globalAdminSettings').on('value',function(snap){
   var g=snap.val()||{};
   S.adminMenuGroups=g.adminMenuGroups||null;
@@ -1487,6 +1485,8 @@ db.ref('globalAdminSettings').on('value',function(snap){
   S.customPageTabs=g.customPageTabs||[];
   S.splitCards=g.splitCards||{};
   S.splitCardChildOrder=g.splitCardChildOrder||{};
+  S.videoCategories=g.videoCategories||[];
+  renderVideoLinkAdmin();
   ensureAllCustomTabsDom();
   renderAdminMenuButtons();
   applyPageLayout();
@@ -6039,21 +6039,18 @@ function confirmCatPrompt(){
   var yeniKategori=S.videoCategories.indexOf(name)===-1;
   if(yeniKategori)S.videoCategories.push(name);
   // KULLANICI TALEBİ (defalarca bildirildi - "kanal havuzu kanal oluşturduğunda kategoriye
-  // girilemiyor veya kaydedilemiyor... şu an sadece birinde kategori girilince oluyor"):
-  // Asıl kök sebep bulundu - kategori listesi ÖNCEDEN 'o an admin panelinde açık olan lig'
-  // neyse ona bağlı bir yola ('leagues/'+_curLeagueId+'/videoCategories') yazılıyordu. Ama
-  // Kanal Havuzu tasarımı gereği HİÇBİR lige bağlı DEĞİL - admin bir lig hiç seçilmemişken/
-  // yüklenmemişken (_curLeagueId boş) ya da farklı bir ligdeyken Kanal Havuzu'nu kullanınca,
-  // kategori YA hiçbir yere yazılamıyor (boş _curLeagueId koşulu tutmadığı için sessizce
-  // atlanıyordu) YA DA o an ekranda açık olan alakasız bir lige yazılıp asıl kullanılan
-  // yerde hiç görünmüyordu - "giriliyor ama kaydedilmiyor" ve "sadece birinde çalışıyor"
-  // şikayetlerinin gerçek sebebi buydu. Artık kategori listesi channelPool ile AYNI
-  // mantıkla, LİGDEN TAMAMEN BAĞIMSIZ tek bir global yola ('videoCategories') yazılıyor -
-  // Kanal Havuzu ve TV/Video Yönetimi AYNI kaynağı paylaşıyor, _curLeagueId'nin ne olduğu
-  // (hatta hiç seçili olmaması) artık HİÇ ÖNEMLİ DEĞİL.
+  // girilemiyor veya kaydedilemiyor... hâlâ görünmüyor"): Kategori listesi artık ZATEN
+  // İZİNLİ, kanıtlanmış 'globalAdminSettings' yolunun bir alanı olarak kaydediliyor (bkz.
+  // saveVideoCategoryGlobal - yukarıdaki mimari not). Bu yazım daha önce SESSİZCE yutulan bir
+  // hataya (DiagSil) düşüyordu - bir izin sorunu olsa bile admin FARK ETMİYORDU. Artık
+  // başarısız olursa admin'e AÇIKÇA, ekranda görünen bir uyarı gösteriliyor - "sessiz
+  // başarısızlık" ihtimali ortadan kalkıyor.
   if(yeniKategori){
     saveVideoCategoryGlobal(S.videoCategories)
-      .catch(function(_e){DiagSil('confirmCatPrompt->videoCategoriesSync',_e);});
+      .catch(function(_e){
+        DiagSil('confirmCatPrompt->videoCategoriesSync',_e);
+        toast('❌ Kategori kaydedilemedi: '+(_e&&_e.message?_e.message:'bağlantı/izin hatası'),'er');
+      });
   }
   if(i==='cp'){
     var sel=qs('cpCategory');
@@ -16761,9 +16758,10 @@ function listenToLeague(leagueId){
     // o an başka bir ligdeyken Kanal Havuzu'nu kullanabiliyordu; bu durumlarda kategori ya
     // hiç bir lige yazılamıyor (_curLeagueId boş) ya da YANLIŞ/ilgisiz bir lige yazılıyordu -
     // "giriliyor ama kaydedilmiyormuş gibi" görünmesinin sebebi buydu. Kategori listesi
-    // artık TAMAMEN LİGDEN BAĞIMSIZ, global bir yoldan ('videoCategories' kök seviyede)
-    // canlı senkronize ediliyor (bkz. aşağıdaki db.ref('videoCategories').on('value',...)
-    // - globalAdminSettings ile AYNI, kanıtlanmış desen). Bu yüzden burada, S SIFIRDAN
+    // artık TAMAMEN LİGDEN BAĞIMSIZ, ZATEN İZİNLİ 'globalAdminSettings' yolunun bir alanı
+    // olarak (globalAdminSettings/videoCategories) canlı senkronize ediliyor (bkz. dosyanın
+    // başındaki db.ref('globalAdminSettings').on('value',...) - adminMenuGroups ile AYNI,
+    // kanıtlanmış desen; yeni, izinsiz bir kök yol İCAT EDİLMİYOR). Bu yüzden burada, S SIFIRDAN
     // kurulurken (aşağıda), o global dinleyicinin doldurduğu değer SİLİNMESİN diye önce
     // yakalanıp hemen sonra GERİ KONUYOR - ligle hiçbir alışverişi yok, sadece S'in bu
     // resetten ETKİLENMEMESİ sağlanıyor.
@@ -16869,9 +16867,8 @@ function listenToLeague(leagueId){
       }else{
         S.videoLinks=d.videoLinks||null;
       }
-      // videoCategories artık burada OKUNMUYOR - kategori listesi lig'den bağımsız, global
-      // bir dinleyiciyle senkronize ediliyor (bkz. yukarıdaki not ve
-      // db.ref('videoCategories').on('value',...)).
+      // videoCategories artık burada OKUNMUYOR - kategori listesi lig'den bağımsız,
+      // globalAdminSettings dinleyicisiyle senkronize ediliyor (bkz. yukarıdaki not).
       S.poll=d.poll||null;
       S.reports=d.reports||null;
       S.feedback=d.feedback||null;
