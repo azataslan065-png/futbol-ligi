@@ -1261,7 +1261,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-21-C';
+window.APP_BUILD='2026-08-21-D';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1460,6 +1460,25 @@ window._authSonda={durum:'ortam-uygun-değil',hata:null,uid:null,ms:null,kaynak:
 function saveGlobalAdminSetting(key,value){
   return db.ref('globalAdminSettings/'+key).set(value);
 }
+// KULLANICI TALEBİ ("İlgili kanalın kategorisi kanal havuzuna girildiği zaman otomatik
+// olarak TV / Video Yönetimi sekmesinde de yansıyacak veya TV / Video Yönetimi sekmesinde
+// girildiğinde otomatik olarak havuzda görünecektir" - defalarca bildirildi): Video/kanal
+// kategorileri artık channelPool ile AYNI mantıkla, LİGDEN TAMAMEN BAĞIMSIZ, kök seviyede
+// bir Firebase yoluna ('videoCategories') yazılıp buradan CANLI dinleniyor - globalAdminSettings
+// ile BİREBİR AYNI, kanıtlanmış desen. Önceki hâlde kategori listesi HANGİ ligin altına
+// yazılacağı 'o an ekranda açık olan lig' (_curLeagueId) neyse ona bağlıydı; bu hem Kanal
+// Havuzu'nun "hiçbir lige bağlı değil" tasarımıyla ÇELİŞİYORDU hem de admin panel henüz bir
+// lig yüklenmemişken/başka bir ligdeyken kategori girilince kaydın YA HİÇ gitmemesine YA DA
+// yanlış lige gitmesine (dolayısıyla "giriliyor ama kaydedilmiyormuş gibi görünmesine") yol
+// açıyordu. Artık TEK, PAYLAŞILAN, ligden bağımsız bir liste var - Kanal Havuzu ve TV/Video
+// Yönetimi AYNI kaynaktan okur/yazar, dolayısıyla biri değiştiğinde diğeri OTOMATİK görür.
+function saveVideoCategoryGlobal(list){
+  return db.ref('videoCategories').set(list);
+}
+db.ref('videoCategories').on('value',function(snap){
+  S.videoCategories=snap.val()||[];
+  renderVideoLinkAdmin();
+});
 db.ref('globalAdminSettings').on('value',function(snap){
   var g=snap.val()||{};
   S.adminMenuGroups=g.adminMenuGroups||null;
@@ -6019,20 +6038,21 @@ function confirmCatPrompt(){
   S.videoCategories=S.videoCategories||[];
   var yeniKategori=S.videoCategories.indexOf(name)===-1;
   if(yeniKategori)S.videoCategories.push(name);
-  // KULLANICI TALEBİ ("İlgili kanalın kategorisi kanal havuzuna girildiği zaman otomatik
-  // olarak TV / Video Yönetimi sekmesinde de yansıyacak veya TV / Video Yönetimi
-  // sekmesinde girildiğinde otomatik olarak havuzda görünecektir"): Kategori listesi
-  // (S.videoCategories) TEK bir ortak liste - hem Kanal Havuzu hem TV/Video Yönetimi formu
-  // AYNI listeden okuyor. Havuz formu YENİ kategoriyi zaten HEMEN, bağımsız bir yazımla
-  // Firebase'e kaydediyordu (önceki düzeltme); TV/Video Yönetimi tarafında ise YENİ bir
-  // kategori önceden SADECE bellekte kalıyor, admin ayrıca "💾 Kaydet"e basana kadar
-  // Firebase'e hiç ulaşmıyordu - bu da havuz tarafının o kategoriyi "Kaydet"e basılana
-  // kadar hiç GÖRMEMESİ anlamına geliyordu (otomatik değil, gecikmeli/koşullu senkron).
-  // Artık HANGİ formdan girilirse girilsin (havuz veya TV/Video Yönetimi), YENİ kategori
-  // AYNI anda, AYNI bağımsız/izole yazımla anında kaydediliyor - "Kaydet" butonuna
-  // basılmasını beklemeden, iki taraf da HEMEN görür.
-  if(yeniKategori&&_curLeagueId){
-    db.ref('leagues/'+_curLeagueId+'/videoCategories').set(S.videoCategories)
+  // KULLANICI TALEBİ (defalarca bildirildi - "kanal havuzu kanal oluşturduğunda kategoriye
+  // girilemiyor veya kaydedilemiyor... şu an sadece birinde kategori girilince oluyor"):
+  // Asıl kök sebep bulundu - kategori listesi ÖNCEDEN 'o an admin panelinde açık olan lig'
+  // neyse ona bağlı bir yola ('leagues/'+_curLeagueId+'/videoCategories') yazılıyordu. Ama
+  // Kanal Havuzu tasarımı gereği HİÇBİR lige bağlı DEĞİL - admin bir lig hiç seçilmemişken/
+  // yüklenmemişken (_curLeagueId boş) ya da farklı bir ligdeyken Kanal Havuzu'nu kullanınca,
+  // kategori YA hiçbir yere yazılamıyor (boş _curLeagueId koşulu tutmadığı için sessizce
+  // atlanıyordu) YA DA o an ekranda açık olan alakasız bir lige yazılıp asıl kullanılan
+  // yerde hiç görünmüyordu - "giriliyor ama kaydedilmiyor" ve "sadece birinde çalışıyor"
+  // şikayetlerinin gerçek sebebi buydu. Artık kategori listesi channelPool ile AYNI
+  // mantıkla, LİGDEN TAMAMEN BAĞIMSIZ tek bir global yola ('videoCategories') yazılıyor -
+  // Kanal Havuzu ve TV/Video Yönetimi AYNI kaynağı paylaşıyor, _curLeagueId'nin ne olduğu
+  // (hatta hiç seçili olmaması) artık HİÇ ÖNEMLİ DEĞİL.
+  if(yeniKategori){
+    saveVideoCategoryGlobal(S.videoCategories)
       .catch(function(_e){DiagSil('confirmCatPrompt->videoCategoriesSync',_e);});
   }
   if(i==='cp'){
@@ -16732,20 +16752,24 @@ function listenToLeague(leagueId){
     // eklenecek bir kod satırı), renderTeams() gibi kritik render işlemlerinin ETKİLENMEMESİ
     // için try/catch ile sarmalanmıştır.
     try{
-    // KULLANICI TALEBİ (tekrar bildirildi: "kanal havuzu kanal oluşturduğunda kategoriye
-    // girilemiyor veya kaydedilemiyor"): Gerçek kök sebep BURADA bulundu. Bu dinleyici HER
-    // Firebase güncellemesinde (videoCategories'le hiç ilgisi olmayan bir maç skoru
-    // girilse BİLE) S'i az aşağıda SIFIRDAN kuruyor - ama S.videoCategories bu kurulum
-    // listesinde HİÇ YOKTU, yani hiçbir zaman Firebase'den GERİ OKUNMUYORDU. Önceki
-    // düzeltmeler (kategori seçim kutusuna "+ Yeni Kategori" seçeneği eklemek, yeni
-    // kategoriyi ayrıca Firebase'e yazmak) bu yüzden işe yaramıyordu: yazım Firebase'e
-    // gidiyordu ama S HİÇBİR ZAMAN o alanı geri okumadığından, bu dinleyici bir sonraki
-    // tetiklenişinde S.videoCategories'i sessizce undefined'a döndürüyordu - kategoriler
-    // sanki hiç kaydedilmemiş gibi kayboluyordu. Sıfırlamadan HEMEN önce mevcut yerel
-    // listeyi yakalıyoruz ki aşağıda gelen listeyle birleştirebilelim (kategoriler bu
-    // ekranlarda sadece EKLENİR, hiçbir yerde silinmez - bu yüzden çıkarma yapmadan union).
-    var _oncekiVideoKategoriler=S.videoCategories||[];
+    // KULLANICI TALEBİ (tekrar tekrar bildirildi: "kanal havuzu kanal oluşturduğunda
+    // kategoriye girilemiyor veya kaydedilemiyor"): Gerçek kök sebep bulundu - kategori
+    // listesi (S.videoCategories) önceden HER LİGE ÖZEL bir Firebase yoluna
+    // ('leagues/'+_curLeagueId+'/videoCategories') yazılıyordu. Ama Kanal Havuzu, tasarımı
+    // gereği HİÇBİR lige bağlı DEĞİL (bkz. openChannelPool/renderChannelPoolSheet'teki
+    // mimari not) - admin panelini AÇTIĞINDA henüz bir lig seçilmemiş/yüklenmemişken ya da
+    // o an başka bir ligdeyken Kanal Havuzu'nu kullanabiliyordu; bu durumlarda kategori ya
+    // hiç bir lige yazılamıyor (_curLeagueId boş) ya da YANLIŞ/ilgisiz bir lige yazılıyordu -
+    // "giriliyor ama kaydedilmiyormuş gibi" görünmesinin sebebi buydu. Kategori listesi
+    // artık TAMAMEN LİGDEN BAĞIMSIZ, global bir yoldan ('videoCategories' kök seviyede)
+    // canlı senkronize ediliyor (bkz. aşağıdaki db.ref('videoCategories').on('value',...)
+    // - globalAdminSettings ile AYNI, kanıtlanmış desen). Bu yüzden burada, S SIFIRDAN
+    // kurulurken (aşağıda), o global dinleyicinin doldurduğu değer SİLİNMESİN diye önce
+    // yakalanıp hemen sonra GERİ KONUYOR - ligle hiçbir alışverişi yok, sadece S'in bu
+    // resetten ETKİLENMEMESİ sağlanıyor.
+    var _korunanVideoKategorileri=S.videoCategories;
     S={leagueName:'Lig',season:'1. Sezon',teams:{},matches:{}};
+    S.videoCategories=_korunanVideoKategorileri||[];
     // HATA DÜZELTMESİ (kullanıcı bildirdi: "giriş yapıldığında kayıtlı takımlar
     // görünmüyor, sekme değiştirip geri gelince görünüyor"): renderTeams() zaten senkron
     // sırasında koşulsuz çağrılıyordu, ama veri henüz Firebase'den gelmemişken (kısa bir
@@ -16845,15 +16869,9 @@ function listenToLeague(leagueId){
       }else{
         S.videoLinks=d.videoLinks||null;
       }
-      // KULLANICI TALEBİ ("...İlgili kanalın kategorisi girildikten sonra hem kanal
-      // havuzunda hem de TV / Video Yönetimi tarafında senkronize olacak"): videoCategories
-      // artık Firebase'den gerçekten okunuyor. Yerel olarak az önce eklenmiş ama henüz
-      // Firebase'e ulaşmamış (ör. Video Yönetimi formunda "+ Yeni Kategori" ile eklenip
-      // "💾 Kaydet"e daha basılmamış) bir kategori, ARADA gelen bu tetiklenmede kaybolmasın
-      // diye ÇIKARMADAN birleştiriliyor (union) - kategoriler bu ekranlarda sadece eklenir,
-      // hiçbir akış onları silmez, dolayısıyla union tamamen güvenli.
-      var _gelenKategoriler=d.videoCategories||[];
-      S.videoCategories=_oncekiVideoKategoriler.concat(_gelenKategoriler.filter(function(k){return _oncekiVideoKategoriler.indexOf(k)===-1;}));
+      // videoCategories artık burada OKUNMUYOR - kategori listesi lig'den bağımsız, global
+      // bir dinleyiciyle senkronize ediliyor (bkz. yukarıdaki not ve
+      // db.ref('videoCategories').on('value',...)).
       S.poll=d.poll||null;
       S.reports=d.reports||null;
       S.feedback=d.feedback||null;
