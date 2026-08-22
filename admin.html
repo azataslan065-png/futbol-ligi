@@ -1261,7 +1261,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-21-B';
+window.APP_BUILD='2026-08-21-C';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6019,6 +6019,22 @@ function confirmCatPrompt(){
   S.videoCategories=S.videoCategories||[];
   var yeniKategori=S.videoCategories.indexOf(name)===-1;
   if(yeniKategori)S.videoCategories.push(name);
+  // KULLANICI TALEBİ ("İlgili kanalın kategorisi kanal havuzuna girildiği zaman otomatik
+  // olarak TV / Video Yönetimi sekmesinde de yansıyacak veya TV / Video Yönetimi
+  // sekmesinde girildiğinde otomatik olarak havuzda görünecektir"): Kategori listesi
+  // (S.videoCategories) TEK bir ortak liste - hem Kanal Havuzu hem TV/Video Yönetimi formu
+  // AYNI listeden okuyor. Havuz formu YENİ kategoriyi zaten HEMEN, bağımsız bir yazımla
+  // Firebase'e kaydediyordu (önceki düzeltme); TV/Video Yönetimi tarafında ise YENİ bir
+  // kategori önceden SADECE bellekte kalıyor, admin ayrıca "💾 Kaydet"e basana kadar
+  // Firebase'e hiç ulaşmıyordu - bu da havuz tarafının o kategoriyi "Kaydet"e basılana
+  // kadar hiç GÖRMEMESİ anlamına geliyordu (otomatik değil, gecikmeli/koşullu senkron).
+  // Artık HANGİ formdan girilirse girilsin (havuz veya TV/Video Yönetimi), YENİ kategori
+  // AYNI anda, AYNI bağımsız/izole yazımla anında kaydediliyor - "Kaydet" butonuna
+  // basılmasını beklemeden, iki taraf da HEMEN görür.
+  if(yeniKategori&&_curLeagueId){
+    db.ref('leagues/'+_curLeagueId+'/videoCategories').set(S.videoCategories)
+      .catch(function(_e){DiagSil('confirmCatPrompt->videoCategoriesSync',_e);});
+  }
   if(i==='cp'){
     var sel=qs('cpCategory');
     if(sel){
@@ -6028,21 +6044,6 @@ function confirmCatPrompt(){
         sel.insertBefore(opt,sel.lastElementChild);
       }
       sel.value=name;
-    }
-    // KULLANICI TALEBİ ("kanal havuzu... kategoriye girilemiyor veya kaydedilemiyor"):
-    // Kanal Havuzu formu, S/save() akışının TAMAMEN DIŞINDA kendi db.ref() yazmalarıyla
-    // çalışır (bkz. dosyanın başındaki "KANAL HAVUZU" mimari notu). Bu yüzden buradan
-    // eklenen YENİ bir kategori önceden SADECE S.videoCategories içinde, bellekte kalıyordu;
-    // admin (kanal havuzuyla hiç ilgisi olmayan) BAŞKA bir "Kaydet" işlemi yapıp save()
-    // tetiklenene kadar bu yeni kategori Firebase'e HİÇ yazılmıyordu - sayfa yenilenince
-    // veya başka bir cihazdan/admin hesabından bakılınca kategori sanki hiç girilmemiş gibi
-    // kayboluyordu. Çözüm: S nesnesinin TAMAMINI (ve save()'in taşıdığı, yukarıdaki uzun
-    // notlarda anlatılan yarış durumu risklerini) göndermeden, SADECE videoCategories
-    // yolunu hedefleyen bağımsız, izole bir yazımla kategori HEMEN kalıcı hale getirilir -
-    // channelPool'un kendi bağımsız yazma prensibiyle TUTARLI bir çözüm.
-    if(yeniKategori&&_curLeagueId){
-      db.ref('leagues/'+_curLeagueId+'/videoCategories').set(S.videoCategories)
-        .catch(function(_e){DiagSil('confirmCatPrompt->cpCategorySync',_e);});
     }
     return;
   }
