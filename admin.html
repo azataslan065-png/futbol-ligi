@@ -1261,7 +1261,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-21-F';
+window.APP_BUILD='2026-08-23-A';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5995,6 +5995,16 @@ function renderVideoLinkAdmin(){
       +'<input type="checkbox" '+(v.isLive?'checked':'')+' onchange="setVideoLinkField('+i+',\'isLive\',this.checked);renderVideoLinkAdmin()" style="width:15px;height:15px;cursor:pointer"/>'
       +'🔴 Bu bir canlı yayın (📡 Canlı Yayın sekmesine taşınır - işaretsiz bırakılırsa 🎬 Video sekmesinde kalır)'
       +'</label>'
+      // KULLANICI TALEBİ ("yönetici istediği kanalları şifreli yapabilir... böyle bir
+      // sistem zaten var, ekstra TV ekleyeceğiz"): Mevcut premium sistemi (yazı tipi/tema/
+      // tepki paketi ile AYNI - hasPremiumAccess/premiumAccessCodes/premiumPrices) TV
+      // kanallarına da genişletildi. Burada sadece "premium" bayrağı işaretlenir - fiyat/
+      // süre ayarları AYNI Premium Fiyatları ekranından (openPremiumPricesManager)
+      // yapılır, kod üretme akışı da AYNI (talep onayı / puanla satın alma).
+      +'<label style="display:flex;align-items:center;gap:.4rem;font-size:.68rem;color:var(--mu);cursor:pointer;margin-top:.4rem">'
+      +'<input type="checkbox" '+(v.premium?'checked':'')+' onchange="setVideoLinkField('+i+',\'premium\',this.checked);renderVideoLinkAdmin()" style="width:15px;height:15px;cursor:pointer"/>'
+      +'🔒 Bu kanal premium/şifreli (fiyat ve süre ayarı için: ⚙️ → Premium Fiyatları)'
+      +'</label>'
       +'<div id="vlCheck_'+i+'" style="font-size:.62rem;line-height:1.5;margin-top:.4rem;color:var(--mu)"></div>'
       +'</div>';
   }).join('');
@@ -6448,6 +6458,10 @@ function removeVideoLink(i){
   // Kaldırılan linkte KENDİ yüklediğimiz bir dosya varsa, Supabase'ten de gerçekten silinir -
   // aksi halde liste temiz görünür ama depolama alanı hâlâ dolu kalırdı.
   if(window._editVideoLinks&&window._editVideoLinks[i])deleteOwnSupabaseFileIfAny(window._editVideoLinks[i].url);
+  // KULLANICI TALEBİ ("aynı şekilde puan sistemi ve fiyatlar bölümünde de geçerlidir"):
+  // Premium işaretli bir kanal kalıcı olarak kaldırılırsa, ona ait fiyat kaydı da (font/tema
+  // silinince yapıldığı gibi) öksüz kalmasın diye temizlenir.
+  if(window._editVideoLinks&&window._editVideoLinks[i]&&window._editVideoLinks[i].premium&&S.premiumPrices)delete S.premiumPrices['ch_'+window._editVideoLinks[i].id];
   window._editVideoLinks.splice(i,1);
   renderVideoLinkAdmin();
 }
@@ -14162,6 +14176,15 @@ function openPremiumPricesManager(){
     html+='<div style="font-size:.62rem;font-weight:800;color:var(--ac);text-transform:uppercase;margin:.6rem 0 .35rem">🎨 Renk Paletleri</div>';
     html+=customPremiumThemes.map(function(t){return priceRow(t.id,t.name);}).join('');
   }
+  // KULLANICI TALEBİ ("yönetici istediği kanalları şifreli yapabilir... aynı şekilde puan
+  // sistemi ve fiyatlar bölümünde de geçerlidir"): Premium işaretli TV/video kanalları da
+  // AYNI fiyatlandırma listesinde, AYNI priceRow() ile görünür - itemId olarak çakışma
+  // olmasın diye 'ch_' önekiyle kanalın kendi id'si kullanılır.
+  var premiumChannels=(S.videoLinks||[]).filter(function(v){return v.premium;});
+  if(premiumChannels.length){
+    html+='<div style="font-size:.62rem;font-weight:800;color:var(--ac);text-transform:uppercase;margin:.6rem 0 .35rem">📺 TV / Video Kanalları</div>';
+    html+=premiumChannels.map(function(v){return priceRow('ch_'+v.id,(v.isLive?'🔴 ':'🎬 ')+(v.title||'İsimsiz'));}).join('');
+  }
   // HATA DÜZELTMESİ (kullanıcı bildirdi: "admin sildiği bazı unsurlar burada görünüyor"):
   // Bu düzeltmeden ÖNCE silinmiş unsurların fiyat kayıtları hâlâ veride duruyor olabilir.
   // Artık hangi kayıtların ÖKSÜZ (karşılığı olan paket/font/palet artık yok) olduğu tespit
@@ -14173,6 +14196,7 @@ function openPremiumPricesManager(){
   Object.values(S.reactionPacks||{}).forEach(function(p){validIds[p.id]=true;});
   Object.values(S.customFonts||{}).forEach(function(f){validIds['font_'+f.id]=true;});
   Object.values(S.customThemes||{}).forEach(function(t){validIds[t.id]=true;});
+  (S.videoLinks||[]).forEach(function(v){if(v.premium)validIds['ch_'+v.id]=true;});
   var orphanIds=Object.keys(S.premiumPrices||{}).filter(function(id){return !validIds[id];});
   if(orphanIds.length){
     html+='<div style="margin-top:.8rem;background:rgba(245,158,11,.1);border:1.5px solid rgba(245,158,11,.35);border-radius:11px;padding:.6rem .7rem">'
@@ -14192,6 +14216,7 @@ function cleanOrphanPremiumPrices(){
   Object.values(S.reactionPacks||{}).forEach(function(p){validIds[p.id]=true;});
   Object.values(S.customFonts||{}).forEach(function(f){validIds['font_'+f.id]=true;});
   Object.values(S.customThemes||{}).forEach(function(t){validIds[t.id]=true;});
+  (S.videoLinks||[]).forEach(function(v){if(v.premium)validIds['ch_'+v.id]=true;});
   var orphans=Object.keys(S.premiumPrices||{}).filter(function(id){return !validIds[id];});
   if(!orphans.length){toast('ℹ️ Temizlenecek kayıt yok');return;}
   dlg('🧹','Kayıtları Temizle',orphans.length+' adet, artık var olmayan unsura ait fiyat kaydı silinecek. Geçerli fiyatlarınız etkilenmez. Onaylıyor musunuz?','Temizle','dor').then(function(ok){
