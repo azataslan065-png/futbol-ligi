@@ -1398,7 +1398,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-23-C';
+window.APP_BUILD='2026-08-23-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18602,21 +18602,24 @@ function remoteCtrlChannelRowsHtml(isLive){
     var x=o.x,i=o.i;
     var harf=(x.title||'?').trim().charAt(0).toUpperCase()||'?';
     var logoHtml=x.logo?'<img src="'+x.logo.replace(/"/g,'&quot;')+'" style="width:100%;height:100%;object-fit:contain"/>':harf;
-    return '<button onclick="remoteCtrlJumpTo('+i+')" style="width:100%;display:flex;align-items:center;gap:.5rem;padding:.4rem .3rem;background:none;border:none;border-bottom:1px solid var(--br);color:var(--tx);text-align:left;cursor:pointer;font-family:inherit">'
+    return '<button onclick="remoteCtrlJumpTo(\''+x.id.replace(/'/g,"\\'")+'\')" style="width:100%;display:flex;align-items:center;gap:.5rem;padding:.4rem .3rem;background:none;border:none;border-bottom:1px solid var(--br);color:var(--tx);text-align:left;cursor:pointer;font-family:inherit">'
       +'<span style="width:1.2rem;flex-shrink:0;text-align:center;font-size:.6rem;font-weight:800;color:var(--mu)">'+(i+1)+'</span>'
       +'<span style="width:24px;height:24px;flex-shrink:0;border-radius:6px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:.7rem;font-weight:900;overflow:hidden">'+logoHtml+'</span>'
       +'<span style="flex:1;min-width:0;font-size:.7rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(x.title||'İsimsiz yayın').replace(/</g,'&lt;')+'</span>'
       +'</button>';
   }).join('');
 }
-window.remoteCtrlJumpTo=function(idx){
-  sendRemoteCommand('jump',idx+1);
+// KULLANICI TALEBİ ("telefonu kumanda olarak kullanırken TV sekmesinden video sekmesine
+// geçiş yapabilir"): Artık listedeki bir öğeye dokununca KONUM değil, o öğenin KENDİ
+// kimliği (videoId) gönderilir - liste TV'de olsun Video'da olsun, hedef cihaz her zaman
+// DOĞRU içeriği açar (bkz. 'jumpid' komutu üzerindeki not).
+window.remoteCtrlJumpTo=function(id){
+  sendRemoteCommand('jumpid',id);
 };
 window.remoteCtrlSearchInput=function(val){
   window._remoteCtrlSearch=val;
   var body=document.getElementById('remoteCtrlChList');
-  var data=window._remoteCtrlSessionData;
-  if(body)body.innerHTML=remoteCtrlChannelRowsHtml(data?!!data.isLive:true);
+  if(body)body.innerHTML=remoteCtrlChannelRowsHtml(!!window._remoteCtrlListMode);
 };
 function restoreRemoteCtrlSearchFocus(){
   var inp=document.getElementById('remoteCtrlSearchInp');
@@ -18638,6 +18641,10 @@ window.openRemoteControllerScreen=function(targetSessionId,basePath){
   // listeyle başlar (sayı tuş takımına göre daha sık kullanılan, daha az dokunuş
   // gerektiren yol).
   window._remoteCtrlTab='liste';
+  // KULLANICI TALEBİ ("TV sekmesinden video sekmesine geçiş yapabilir"): Her yeni kumanda
+  // oturumu açılışında liste modu SIFIRLANIR - bir SONRAKİ açılışta yine o an oynatılan
+  // türle (isLiveMode) başlar, önceki oturumdan kalan seçim karışıklığa yol açmaz.
+  window._remoteCtrlListMode=null;
   if(window._remoteCtrlListener&&window._remoteCtrlBase){
     try{firebase.database().ref(window._remoteCtrlBase+'/session').off('value',window._remoteCtrlListener);}catch(e){}
   }
@@ -18663,30 +18670,54 @@ window.remoteCtrlSetTab=function(tab){
   renderRemoteControllerScreen();
 };
 function renderRemoteControllerScreen(){
+  // HATA DÜZELTMESİ (kullanıcı bildirdi: "arama çubuğuna tıklayınca bazen geri tepiyor"):
+  // Bu ekran hedef cihazdan ~4 saniyede bir (heartbeat) TAMAMEN yeniden çiziliyor. Kullanıcı
+  // TAM O SIRADA arama kutusuna dokunup klavyeyi açtıysa, innerHTML'in SIFIRDAN yazılması
+  // input elemanını YOK EDİP YENİDEN KURUYOR - bu da odağı/klavyeyi bir an için KAPATIP
+  // hemen tekrar açtırıyordu (kullanıcıya "geri tepme" gibi hissettiren buydu). Aynı sorun,
+  // Ayarlar sekmesindeki kaydırıcılardan biri SÜRÜKLENİRKEN de yaşanabilir. Artık: kullanıcı
+  // O AN bu ekranın İÇİNDE bir yazı/kaydırıcı alanıyla etkileşiyorsa (odak oradaysa), o
+  // heartbeat turu için TÜM yeniden çizim atlanır - veri yine de saklanır, bir SONRAKİ
+  // etkileşimsiz turda ekrana yansır.
+  var _aktifEl=document.activeElement;
+  var _sheetHost=document.getElementById('sheetContent');
+  if(_sheetHost&&_aktifEl&&_sheetHost.contains(_aktifEl)&&/^(INPUT|TEXTAREA|SELECT)$/.test(_aktifEl.tagName)){
+    return;
+  }
   var data=window._remoteCtrlSessionData;
   var buf=window._remoteCtrlBuf||'';
   var isLiveMode=data?!!data.isLive:true;
   var tab=window._remoteCtrlTab||'liste';
-  // KULLANICI TALEBİ ("kanalların olduğu listeyi en aşağı çektiğinde kendiliğinden tekrar
-  // yukarı çıkıyor"): Bu ekran hedef oturumdan ~4 saniyede bir (heartbeat) TAMAMEN yeniden
-  // çiziliyor (bkz. remoteCtrlChannelRowsHtml üzerindeki not). Arama kutusunun odağı için
-  // zaten bir koruma vardı ama kanal listesinin kaydırma konumu için YOKTU - bu yüzden
-  // kullanıcı listeyi aşağı kaydırdığı anda bir sonraki heartbeat'te innerHTML sıfırdan
-  // yazılıyor ve liste elemanı BAŞA (scrollTop=0) dönüyordu; kullanıcıya "liste kendiliğinden
-  // yukarı çıkıyor" gibi görünen buydu. Artık AYNI arama-odağı koruma mantığıyla, yeniden
-  // çizimden ÖNCE mevcut kaydırma konumu yakalanıp SONRA aynen geri uygulanıyor.
+  // KULLANICI TALEBİ ("telefonu kumanda olarak kullanırken TV sekmesinden video sekmesine
+  // geçiş yapabilir"): Liste sekmesi ÖNCEDEN her zaman o an OYNATILAN türü (isLiveMode)
+  // gösteriyordu - kullanıcı TV izlerken bir VİDEO seçemiyordu. Artık liste, o an
+  // OYNATILANDAN bağımsız, kullanıcının kendi seçtiği bir 📡TV/🎬Video anahtarına göre
+  // taranır; anahtar ilk açılışta o an oynatılan türle başlar.
+  if(window._remoteCtrlListMode==null)window._remoteCtrlListMode=isLiveMode;
+  var listMode=!!window._remoteCtrlListMode;
+  // KULLANICI TALEBİ ("...TV listesi ile ayarlar listesini aşağı kaydırınca kendiliğinden
+  // yukarı çıkıyor"): Kanal listesi için zaten bir kaydırma-konumu koruması vardı, Ayarlar
+  // listesi için YOKTU - ikisi de AYNI yöntemle (çizimden önce yakala, sonra geri uygula)
+  // korunuyor artık.
   var _prevChScroll=0;
   var _prevChEl=document.getElementById('remoteCtrlChList');
   if(_prevChEl)_prevChScroll=_prevChEl.scrollTop;
+  var _prevSetScroll=0;
+  var _prevSetEl=document.getElementById('remoteCtrlSetList');
+  if(_prevSetEl)_prevSetScroll=_prevSetEl.scrollTop;
   var infoHtml=data
     ?`📡 <b style="color:var(--tx)">${(data.title||'').replace(/</g,'&lt;')}</b><br/>Kanal ${data.channelNo||'?'} / ${data.total||'?'} · ${data.playing?'▶️ Oynatılıyor':'⏸️ Duraklatıldı'}`
     :'⏳ Diğer cihaza bağlanılıyor...';
-  var listeTabHtml=`<input type="text" id="remoteCtrlSearchInp" placeholder="🔍 Kanal ara…" autocomplete="off"
+  var modeSwitchHtml=`<div style="display:flex;gap:.35rem;margin-bottom:.4rem">
+      <button onclick="remoteCtrlSetListMode(true)" style="flex:1;padding:.4rem 0;border-radius:8px;border:1.5px solid ${listMode?'var(--ac)':'var(--br)'};background:${listMode?'var(--ac)':'var(--s2)'};color:${listMode?'#fff':'var(--mu)'};font-size:.66rem;font-weight:800;cursor:pointer">📡 TV</button>
+      <button onclick="remoteCtrlSetListMode(false)" style="flex:1;padding:.4rem 0;border-radius:8px;border:1.5px solid ${!listMode?'var(--ac)':'var(--br)'};background:${!listMode?'var(--ac)':'var(--s2)'};color:${!listMode?'#fff':'var(--mu)'};font-size:.66rem;font-weight:800;cursor:pointer">🎬 Video</button>
+    </div>`;
+  var listeTabHtml=modeSwitchHtml+`<input type="text" id="remoteCtrlSearchInp" placeholder="${listMode?'🔍 Kanal ara…':'🔍 Video ara…'}" autocomplete="off"
       oninput="remoteCtrlSearchInput(this.value)"
       onfocus="window._remoteCtrlSearchHasFocus=true"
       onblur="window._remoteCtrlSearchHasFocus=false"
       style="width:100%;box-sizing:border-box;background:var(--s2);border:1.5px solid var(--br);border-radius:10px;padding:.5rem .7rem;font-size:.75rem;color:var(--tx);outline:none;font-family:inherit;margin-bottom:.4rem"/>
-    <div id="remoteCtrlChList" style="max-height:230px;overflow-y:auto;border:1px solid var(--br);border-radius:10px;padding:.1rem .3rem">${remoteCtrlChannelRowsHtml(isLiveMode)}</div>`;
+    <div id="remoteCtrlChList" style="max-height:230px;overflow-y:auto;border:1px solid var(--br);border-radius:10px;padding:.1rem .3rem">${remoteCtrlChannelRowsHtml(listMode)}</div>`;
   var numaraTabHtml=`<div id="remoteCtrlDisp" style="text-align:center;font-size:${buf?'1.8rem':'.78rem'};font-weight:800;letter-spacing:.15em;background:var(--s2);border:1.5px solid ${buf?'var(--ac)':'var(--br)'};border-radius:12px;padding:.7rem;margin-bottom:.55rem;min-height:1.3em;color:${buf?'var(--tx)':'var(--mu)'}">${buf||'Kanal numarası girin'}</div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.4rem;margin-bottom:${buf?'.45rem':'0'}">
       ${['1','2','3','4','5','6','7','8','9','⌫','0','Git'].map(function(k){
@@ -18695,6 +18726,22 @@ function renderRemoteControllerScreen(){
       }).join('')}
     </div>
     ${buf?`<button onclick="remoteCtrlKey('C')" style="width:100%;padding:.45rem;border-radius:10px;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;font-size:.66rem;font-weight:700;cursor:pointer">🗑️ Tümünü Temizle</button>`:''}`;
+  // KULLANICI TALEBİ ("video sekmesindeki video ilerleme çubuğu kumanda üzerinden kontrol
+  // edilebilir olmalı; çubuk ayrı, süre ayrı kontrol edilmeli"): Sadece CANLI OLMAYAN
+  // (kayıtlı/VOD) içerikte anlamlı. Çubuk (sürükleyip BIRAKINCA gönderir) ile süre yazısı
+  // (heartbeat'ten gelen konum/süre) KASITLI olarak İKİ AYRI eleman - biri sürüklenirken
+  // diğeri onunla YARIŞMASIN, ikisi birbirine karışıp tek/bozuk bir bileşen OLMASIN diye.
+  var progressHtml='';
+  if(!isLiveMode&&data&&data.dur){
+    var _pos=data.pos||0,_dur=data.dur;
+    progressHtml=`<div style="margin-bottom:.5rem">
+      <input type="range" id="remoteCtrlSeekBar" min="0" max="${_dur}" step="1" value="${_pos}"
+        oninput="document.getElementById('remoteCtrlSeekLbl').textContent=remoteCtrlFmtDuration(this.value)+' / '+remoteCtrlFmtDuration(${_dur})"
+        onchange="remoteCtrlSeek(this.value)"
+        style="width:100%;margin-bottom:.25rem"/>
+      <div id="remoteCtrlSeekLbl" style="text-align:center;font-size:.64rem;color:var(--mu)">${remoteCtrlFmtDuration(_pos)} / ${remoteCtrlFmtDuration(_dur)}</div>
+    </div>`;
+  }
   var html=`<div class="sheet-handle"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.55rem">
       <div style="font-size:.92rem;font-weight:900">📟 Kumanda Modu</div>
@@ -18707,6 +18754,7 @@ function renderRemoteControllerScreen(){
       <button onclick="remoteCtrlSetTab('ayarlar')" style="flex:1;padding:.42rem 0;border-radius:8px;border:none;cursor:pointer;font-size:.62rem;font-weight:800;background:${tab==='ayarlar'?'var(--ac)':'transparent'};color:${tab==='ayarlar'?'#fff':'var(--mu)'}">⚙️ Ayarlar</button>
     </div>
     <div style="margin-bottom:.65rem">${tab==='numara'?numaraTabHtml:(tab==='ayarlar'?remoteCtrlSettingsHtml(data):listeTabHtml)}</div>
+    ${tab==='ayarlar'?'':progressHtml}
     ${tab==='ayarlar'?'':`<div style="display:flex;gap:.35rem;margin-bottom:.6rem">
       <button onclick="remoteCtrlAction('prev')" title="Önceki" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">⏮</button>
       <button onclick="remoteCtrlAction('voldown')" title="Ses Azalt" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">🔉</button>
@@ -18721,7 +18769,17 @@ function renderRemoteControllerScreen(){
   restoreRemoteCtrlSearchFocus();
   var chEl=document.getElementById('remoteCtrlChList');
   if(chEl)chEl.scrollTop=_prevChScroll;
+  var setEl=document.getElementById('remoteCtrlSetList');
+  if(setEl)setEl.scrollTop=_prevSetScroll;
 }
+window.remoteCtrlSetListMode=function(isLive){
+  window._remoteCtrlListMode=isLive;
+  window._remoteCtrlSearch='';window._remoteCtrlSearchHasFocus=false;
+  renderRemoteControllerScreen();
+};
+window.remoteCtrlSeek=function(v){
+  sendRemoteCommand('seekto',Number(v));
+};
 window.remoteCtrlKey=function(k){
   if(k==='C'){window._remoteCtrlBuf='';renderRemoteControllerScreen();return;}
   // KULLANICI TALEBİ ("sil tuşları ekle"): ⌫ - sadece SON haneyi siler (tam temizleme "C"
@@ -18888,7 +18946,7 @@ function remoteCtrlSettingsHtml(data){
       +'</div>';
     h+=remoteCtrlSettingsOpt('◀ Geri',false,back);
   }
-  return '<div style="max-height:340px;overflow-y:auto;border:1px solid var(--br);border-radius:10px;padding:.1rem .3rem">'+h+'</div>';
+  return '<div id="remoteCtrlSetList" style="max-height:340px;overflow-y:auto;border:1px solid var(--br);border-radius:10px;padding:.1rem .3rem">'+h+'</div>';
 }
 // PTPlayer modülü içindeki fmtSeekDuration ile AYNI biçimlendirme (o fonksiyon kendi
 // kapsamında kapalı olduğundan burada bağımsız bir kopyası kullanılır).
@@ -18910,8 +18968,13 @@ window.remoteCtrlLiveSeek=function(yon){
 };
 function sendRemoteCommand(action,value){
   if(!window._remoteCtrlTarget||!window._remoteCtrlBase)return;
-  firebase.database().ref(window._remoteCtrlBase+'/command').set({
-    action:action,value:value||null,target:window._remoteCtrlTarget,ts:Date.now()
+  // HATA DÜZELTMESİ (kullanıcı bildirdi: "kanal ilerletme tuşu çalışmıyor"): Tek bir düğüme
+  // .set() ile yazmak yerine artık '/commands' kuyruğuna push() ile eklenir - böylece art
+  // arda hızlıca basılan HER tuş, bir öncekinin üzerine yazıp KAYBOLMAK yerine kendi ayrı
+  // kaydını alır ve karşı cihaza sırayla, hiç kaybolmadan ulaşır (bkz. startRemoteHeartbeat
+  // içindeki 'child_added' dinleyicisi üzerindeki uzun not).
+  firebase.database().ref(window._remoteCtrlBase+'/commands').push({
+    action:action,value:value===undefined?null:value,target:window._remoteCtrlTarget,ts:Date.now()
   }).catch(function(){});
   if(typeof showToast==='function')showToast('📤 Komut gönderildi');
 }
@@ -19788,21 +19851,65 @@ window.PTPlayer=(function(){
       // tabanlı tam ekran YİNE DE tam olarak çalışmaya devam eder, hiçbir işlevsellik
       // kaybolmaz, sadece o durumlarda adres çubuğu görünür kalır (kaçınılmaz).
       if(!S.fsFromRotate){
-        try{
-          var req=root.requestFullscreen||root.webkitRequestFullscreen;
-          if(req)req.call(root).catch(function(){});
-        }catch(e){}
-        try{
-          if(screen.orientation&&screen.orientation.lock&&pref('autoRotate',true)){
-            var yatay=S.video.videoWidth>=S.video.videoHeight;
-            screen.orientation.lock(yatay?'landscape':'portrait').catch(function(){});
+        // HATA DÜZELTMESİ (kullanıcı bildirdi: "küçük ekranı büyütünce site ayarları
+        // görünmesin"): Kumandadan (telefondan) gönderilen 'fullscreen' komutuyla buraya
+        // gelindiğinde (S.fsFromRemote===true), bu çağrı PROJEKSİYON cihazında GERÇEK bir
+        // kullanıcı dokunuşundan KAYNAKLANMIYOR - tarayıcılar requestFullscreen()'i SADECE
+        // doğrudan bir tıklama/dokunma olayının İÇİNDEN çağrıldığında kabul eder, aksi halde
+        // sessizce reddeder (.catch ile yutuluyordu). Sonuç: CSS tabanlı tam ekran görünür
+        // ama tarayıcının KENDİ adres çubuğu/site bilgisi simgesi EKRANDA KALIYORDU. Artık bu
+        // durumda native çağrı hemen denenmiyor - bunun yerine projeksiyon cihazına
+        // dokunulan İLK GERÇEK jestte (bu GERÇEK bir kullanıcı jesti olduğundan tarayıcı
+        // kabul eder) native tam ekran/döndürme kilidi devreye sokuluyor.
+        if(S.fsFromRemote){
+          S.fsFromRemote=false;
+          // Eğer bir ÖNCEKİ uzaktan tam ekran isteğinden kalma, henüz tetiklenmemiş bir
+          // bekleyen dinleyici varsa (kullanıcı hiç dokunmadan tekrar kumandayla tam ekranı
+          // açıp kapattıysa), önce o temizlenir - aksi halde dinleyiciler üst üste birikir.
+          if(S._fsGestureHandler){
+            document.removeEventListener('pointerdown',S._fsGestureHandler,true);
+            document.removeEventListener('touchstart',S._fsGestureHandler,true);
+            S._fsGestureHandler=null;
           }
-        }catch(e){}
+          var _tekSeferlikJest=function(){
+            document.removeEventListener('pointerdown',_tekSeferlikJest,true);
+            document.removeEventListener('touchstart',_tekSeferlikJest,true);
+            if(S)S._fsGestureHandler=null;
+            if(!S||!root.classList.contains('ptp-fs'))return;
+            try{var req2=root.requestFullscreen||root.webkitRequestFullscreen;if(req2)req2.call(root).catch(function(){});}catch(e){}
+            try{
+              if(screen.orientation&&screen.orientation.lock&&pref('autoRotate',true)){
+                var yatay2=S.video.videoWidth>=S.video.videoHeight;
+                screen.orientation.lock(yatay2?'landscape':'portrait').catch(function(){});
+              }
+            }catch(e){}
+          };
+          S._fsGestureHandler=_tekSeferlikJest;
+          document.addEventListener('pointerdown',_tekSeferlikJest,true);
+          document.addEventListener('touchstart',_tekSeferlikJest,true);
+        }else{
+          try{
+            var req=root.requestFullscreen||root.webkitRequestFullscreen;
+            if(req)req.call(root).catch(function(){});
+          }catch(e){}
+          try{
+            if(screen.orientation&&screen.orientation.lock&&pref('autoRotate',true)){
+              var yatay=S.video.videoWidth>=S.video.videoHeight;
+              screen.orientation.lock(yatay?'landscape':'portrait').catch(function(){});
+            }
+          }catch(e){}
+        }
       }
     }else{
       root.classList.remove('ptp-fs');
       document.body.classList.remove('ptp-fs-active');
       S.fsFromRotate=false;
+      S.fsFromRemote=false;
+      if(S._fsGestureHandler){
+        document.removeEventListener('pointerdown',S._fsGestureHandler,true);
+        document.removeEventListener('touchstart',S._fsGestureHandler,true);
+        S._fsGestureHandler=null;
+      }
       // Native tam ekran da BİZ tetiklemişsek (yukarıdaki dal), burada da temiz çıkılır.
       try{
         var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
@@ -20770,6 +20877,12 @@ window.PTPlayer=(function(){
           fullscreen:!!(S.root&&S.root.classList.contains('ptp-fs')),
           volume:S.video.muted?0:Math.round(S.video.volume*100),
           info:infoData,
+          // KULLANICI TALEBİ ("video sekmesindeki video ilerleme çubuğu kumanda üzerinden
+          // kontrol edilebilir olmalı; çubuk ayrı, süre ayrı kontrol edilmeli"): Kumandanın
+          // ilerleme çubuğunu VE süre yazısını BAĞIMSIZ olarak çizebilmesi için konum/süre
+          // ayrı alanlar halinde (ikisi de sadece CANLI OLMAYAN içerikte anlamlıdır).
+          pos:(!S.isLive&&isFinite(S.video.currentTime))?Math.floor(S.video.currentTime):null,
+          dur:(!S.isLive&&isFinite(S.video.duration))?Math.floor(S.video.duration):null,
           settings:{
             speed:S.video.playbackRate,
             qualityPref:akt,qualityCur:curLevelH,levels:levels,
@@ -20791,25 +20904,28 @@ window.PTPlayer=(function(){
     S.remoteHeartbeatT=setInterval(beat,4000);
     // Bu oturuma yönelik uzaktan komutları dinle (bkz. takeoverAsRemoteController).
     try{
-      var cmdRef=firebase.database().ref(base+'/command');
+      // HATA DÜZELTMESİ (kullanıcı bildirdi: "kanal ilerletme tuşu çalışmıyor" - KÖK SEBEP):
+      // Komutlar ÖNCEDEN TEK bir '/command' düğümüne .set() ile yazılıyordu. Firebase'in
+      // 'value' dinleyicisi bir yola SADECE o yoldaki GÜNCEL/SON değeri bildirir - kullanıcı
+      // kumandada ⏭ tuşuna ÜST ÜSTE hızlı basınca (gerçek kullanım şekli budur), araya
+      // sıkışan komutlar okunmadan bir SONRAKİ yazının ALTINDA KALIP kayboluyordu; sonuçta
+      // kanal ilerlemesi rastgele/eksik/hiç çalışmıyormuş gibi görünüyordu. Artık her komut
+      // AYRI bir kayıt olarak '/commands' altına push() ile eklenir (Firebase bunları ASLA
+      // birbirinin üstüne yazmaz) ve 'child_added' ile dinlenir - bu olay TÜRÜ her yeni çocuk
+      // için AYRI AYRI, kaybolmadan ve sırayla tetiklenir. İşlenen her komut hemen silinir ki
+      // kuyruk şişmesin.
+      var cmdRef=firebase.database().ref(base+'/commands');
       S.remoteCmdRef=cmdRef;
-      // HATA DÜZELTMESİ (kullanıcı bildirdi: "5 kanal varken 1.'den ileriye basınca 5.'e
-      // gidiyor, 5.'ten geri basınca 1.'e gidiyor" - KÖK SEBEP): .set() ile yazılan komut
-      // Firebase'de KALICI olarak durur (bir sonraki komut YAZILANA kadar). .on('value')
-      // dinleyicisi İLK BAĞLANDIĞINDA o an orada duran değeri HEMEN bir kez daha bildirir -
-      // bu, GEÇMİŞ bir test oturumundan kalan ESKİ bir komut olsa BİLE, yeni açılan HER
-      // videoda "yeni bir komutmuş gibi" ANINDA işleniyordu (S.remoteLastCmdTs henüz boş
-      // olduğundan eski/tekrar kontrolü de bunu YAKALAYAMIYORDU). Bu, kanal listesinde
-      // rastgele/beklenmedik atlamalara yol açan asıl sebepti. Artık dinleyicinin İLK
-      // tetiklenişi bir KOMUT olarak işlenmiyor - sadece "bu zaman damgasını gördüm" diye
-      // temel alınıyor, SADECE ondan SONRA gelen GERÇEK yeni komutlar işleme alınıyor.
-      var ilkKomutBildirimi=true;
+      var _cmdAttachTs=Date.now();
       S.remoteCmdHandler=function(snap){
         var cmd=snap.val();
-        if(ilkKomutBildirimi){ilkKomutBildirimi=false;if(cmd&&cmd.ts)S.remoteLastCmdTs=cmd.ts;return;}
-        if(!S||!cmd||cmd.target!==window._ptRemoteSessionId)return;
-        if(S.remoteLastCmdTs&&cmd.ts<=S.remoteLastCmdTs)return; // eski/tekrar komut - yoksay
-        S.remoteLastCmdTs=cmd.ts;
+        // Dinleyici İLK bağlandığında Firebase, o an kuyrukta duran (muhtemelen ÖNCEKİ bir
+        // oturumdan/oynatımdan kalmış, artık geçersiz) TÜM eski komutları da 'child_added'
+        // olarak bir kerede bildirir - bunlar burada zaman damgasına bakılarak elenir.
+        if(!cmd||(cmd.ts&&cmd.ts<_cmdAttachTs)){try{snap.ref.remove();}catch(e){}return;}
+        if(!S||cmd.target!==window._ptRemoteSessionId){try{snap.ref.remove();}catch(e){}return;}
+        // İşlendi - kuyruktan hemen kaldırılır.
+        try{snap.ref.remove();}catch(e){}
         // KULLANICI TALEBİ ("kumanda için bir ayar ekleyin - projeksiyonda oynatıcı açık
         // kalıyor"): Bu cihaz GERÇEKTEN uzaktan kumanda edildiğini (bir komut aldığını)
         // ANLADIĞI ANDA, tercih açıksa kendi ekranını otomatik kilitler - projeksiyona
@@ -20841,7 +20957,7 @@ window.PTPlayer=(function(){
         }
         // Kumandadaki "Büyük Ekran / Küçük Ekran" düğmesi - projeksiyon tarafındaki tam
         // ekran CSS modunu açar/kapatır (bkz. toggleFullscreen üzerindeki uzun not).
-        else if(cmd.action==='fullscreen')toggleFullscreen();
+        else if(cmd.action==='fullscreen'){S.fsFromRemote=true;toggleFullscreen();}
         // KULLANICI TALEBİ ("telefonu kumanda olarak kullanırken normal oynatıcıdaki bütün
         // ayarlar ve özelliklere sahip olacak"): Kumanda ekranındaki ⚙️ Ayarlar sekmesinden
         // gelen TÜM ayar komutları - yerel ⚙️ panelindeki AYNI işleyicilerin (bkz. openPanel
@@ -20889,15 +21005,32 @@ window.PTPlayer=(function(){
           var pl2=playlist();
           if(cmd.value>=1&&cmd.value<=pl2.length&&typeof window.openVideoWatch==='function')window.openVideoWatch(pl2[cmd.value-1].id);
         }
+        // KULLANICI TALEBİ ("telefonu kumanda olarak kullanırken TV sekmesinden video
+        // sekmesine geçiş yapabilir"): Kumandadaki 📺TV/🎬Video sekme anahtarıyla, o AN
+        // OYNATILANDAN FARKLI türde bir liste taraniyorsa (ör. TV izlerken kumandadan bir
+        // VİDEO seçildiyse), konum tabanlı 'jump' işe yaramaz çünkü konum HER ZAMAN o an
+        // OYNATILAN türün listesine göredir - bu yüzden liste ekranından seçim, doğrudan
+        // hedefin kendi kimliğiyle (videoId) gönderilir; hangi türden olursa olsun
+        // openVideoWatch zaten doğru şekilde açar.
+        else if(cmd.action==='jumpid'){
+          if(cmd.value&&typeof window.openVideoWatch==='function')window.openVideoWatch(String(cmd.value));
+        }
+        // KULLANICI TALEBİ ("video sekmesindeki video ilerleme çubuğu kumanda üzerinden
+        // kontrol edilebilir olmalı"): Kumandadaki ilerleme çubuğu bırakıldığında (sürüklenip
+        // BIRAKILDIĞINDA - anlık sürüklemede DEĞİL) gönderilen mutlak saniye konumuna atlanır.
+        else if(cmd.action==='seekto'){
+          var _skT=Number(cmd.value);
+          if(S.video&&isFinite(_skT))S.video.currentTime=Math.max(0,Math.min(_skT,S.video.duration||_skT));
+        }
         showToastMsg('📱 Telefonunuzdan komut alındı');
       };
-      cmdRef.on('value',S.remoteCmdHandler);
+      cmdRef.on('child_added',S.remoteCmdHandler);
     }catch(e){}
   }
   function stopRemoteHeartbeat(){
     if(!S)return;
     if(S.remoteHeartbeatT){clearInterval(S.remoteHeartbeatT);S.remoteHeartbeatT=null;}
-    if(S.remoteCmdRef&&S.remoteCmdHandler){try{S.remoteCmdRef.off('value',S.remoteCmdHandler);}catch(e){}}
+    if(S.remoteCmdRef&&S.remoteCmdHandler){try{S.remoteCmdRef.off('child_added',S.remoteCmdHandler);}catch(e){}}
     var base=remoteBasePath();
     if(base&&typeof firebase!=='undefined'){
       try{
