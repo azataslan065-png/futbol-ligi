@@ -1431,7 +1431,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-24-C';
+window.APP_BUILD='2026-08-24-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20443,7 +20443,8 @@ window.PTPlayer=(function(){
     var pl=playlist();
     var curIdx=pl.findIndex(function(x){return x.id===S.videoId;});
     var tab=S.chTab||'kumanda';
-    var headHtml='<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;flex-shrink:0">'
+    var headHtml='<div id="ptpChDragHandle" style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;flex-shrink:0;cursor:grab;padding:.15rem 0 .3rem;margin-top:-.15rem;border-bottom:1px dashed rgba(255,255,255,.15)">'
+      +'<span style="font-size:.6rem;color:#64748b;flex-shrink:0">⠿</span>'
       +'<span style="font-size:.68rem;font-weight:800;color:#fff;flex:1">'+(tab==='kumanda'?'📟 Kumanda':'📺 Kanallar')+'</span>'
       +'<button data-chk="close" style="flex-shrink:0;width:1.6rem;height:1.6rem;border-radius:7px;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:.8rem;cursor:pointer">✕</button>'
       +'</div>'
@@ -20512,6 +20513,57 @@ window.PTPlayer=(function(){
         });
       }
     }
+    // KULLANICI TALEBİ ("Kumanda, kullanıcı tarafından isteğe bağlı olarak ekranın her
+    // yerine taşınabilir"): Tek cihazdaki bu 📟 Kumanda/📺 Kanallar kutusu da (📺 düğmesiyle
+    // açılan) iki cihazlı kumanda ekranıyla AYNI şekilde artık taşınabilir - her iki tab
+    // için de (headHtml ortak olduğundan) tek bir çağrı yeterli.
+    chBoxInitDrag();
+  }
+  // İki cihazlı kumanda ekranındaki (bkz. remoteCtrlInitDrag, index.html'in üst kısmında)
+  // AYNI sürükleme mantığı - burada #ptpChBox, position:fixed + left/right/top/bottom ile
+  // ORTALANMIŞ durur; sürüklenince right/bottom/margin kaldırılıp sabit piksel left/top'a
+  // geçilir, böylece kutu GÖRSEL olarak YERİNDE KALIR (sıçrama olmaz) ve parmağı takip eder.
+  function chBoxInitDrag(){
+    var handle=el('ptpChDragHandle');
+    var box=el('ptpChBox');
+    if(!handle||!box||handle._dragBound)return;
+    handle._dragBound=true;
+    var basX=0,basY=0,kutuX=0,kutuY=0,suruklemede=false;
+    function basla(e){
+      var p=e.touches?e.touches[0]:e;
+      suruklemede=true;
+      basX=p.clientX;basY=p.clientY;
+      var r=box.getBoundingClientRect();
+      kutuX=r.left;kutuY=r.top;
+      box.style.left=kutuX+'px';box.style.top=kutuY+'px';
+      box.style.right='auto';box.style.bottom='auto';box.style.margin='0';
+      box.style.width=r.width+'px';box.style.height=r.height+'px';
+      handle.style.cursor='grabbing';
+      e.preventDefault();e.stopPropagation();
+    }
+    function tasi(e){
+      if(!suruklemede)return;
+      var p=e.touches?e.touches[0]:e;
+      var dx=p.clientX-basX,dy=p.clientY-basY;
+      var yeniX=kutuX+dx,yeniY=kutuY+dy;
+      var vw=window.innerWidth,vh=window.innerHeight,br=box.getBoundingClientRect();
+      yeniX=Math.max(10-br.width,Math.min(vw-10,yeniX));
+      yeniY=Math.max(0,Math.min(vh-10,yeniY));
+      box.style.left=yeniX+'px';box.style.top=yeniY+'px';
+      e.preventDefault();
+    }
+    function birak(){suruklemede=false;handle.style.cursor='grab';}
+    handle.addEventListener('mousedown',basla);
+    handle.addEventListener('touchstart',basla,{passive:false});
+    if(!window._ptpChDragDocBound){
+      window._ptpChDragDocBound=true;
+      document.addEventListener('mousemove',function(e){if(window._ptpChDragTasi)window._ptpChDragTasi(e);});
+      document.addEventListener('touchmove',function(e){if(window._ptpChDragTasi)window._ptpChDragTasi(e);},{passive:false});
+      document.addEventListener('mouseup',function(e){if(window._ptpChDragBirak)window._ptpChDragBirak(e);});
+      document.addEventListener('touchend',function(e){if(window._ptpChDragBirak)window._ptpChDragBirak(e);});
+    }
+    window._ptpChDragTasi=tasi;
+    window._ptpChDragBirak=birak;
   }
   // KULLANICI TALEBİ ("arama çubuğu ile beraber olsun"): Satır oluşturma mantığı, hem ilk
   // çizimde hem de her arama tuş vuruşunda (renderChannelListOverlay'i TAMAMEN yeniden
