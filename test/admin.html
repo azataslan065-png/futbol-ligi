@@ -1261,7 +1261,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-23-F';
+window.APP_BUILD='2026-08-24-A';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6388,6 +6388,21 @@ function admVideoLinkCozumle(raw){
   s=s.replace(/&amp;/g,'&').trim();
   if(/^\/\//.test(s))s='https:'+s;
   if(!s)return {durum:'bos'};
+  // KULLANICI TALEBİ ("tv-trtkurdi.medya.trt.com.tr yapısını destekleyecek şekilde
+  // güncellesen"): Admin, TRT'nin yayın sunucularını genelde tarayıcıdan/uygulamadan
+  // kopyalarken sadece ÇIPLAK alan adını (https:// ÖNEKİ ve /master.m3u8 YOLU OLMADAN,
+  // ör. "tv-trtkurdi.medya.trt.com.tr") yapıştırıyor - bu ÖNCEDEN doğrudan "❌ Geçersiz
+  // adres" hatasına düşüyordu ve admin'in linkin nereye eksik olduğunu anlaması
+  // gerekiyordu. TRT'nin TÜM kanal sunucuları (trtkurdi, trtmuzik, trt1 vb.) AYNI
+  // "https://<alan-adı>/master.m3u8" kalıbını kullandığından, girilen metin GEÇERLİ bir
+  // alan adı gibi görünüyorsa (nokta içeren, protokol/yol/boşluk İÇERMEYEN düz bir isim)
+  // otomatik olarak bu kalıba TAMAMLANIR - admin sadece "tv-trtkurdi.medya.trt.com.tr"
+  // yapıştırsa bile doğrudan çalışan bir yayın linki üretilir.
+  var otomatikTamamlandi=false;
+  if(!/^https?:\/\//i.test(s)&&/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(s)&&s.indexOf(' ')===-1){
+    s='https://'+s+'/master.m3u8';
+    otomatikTamamlandi=true;
+  }
   if(!/^https?:\/\//i.test(s))return {durum:'gecersiz',url:s};
   var host='';
   try{host=new URL(s).hostname.toLowerCase();}catch(e){return {durum:'gecersiz',url:s};}
@@ -6412,13 +6427,13 @@ function admVideoLinkCozumle(raw){
   else if(ana(['streamable.com']))platform='Streamable';
   else if(ana(['tiktok.com'])&&/\/video\/\d{6,}/.test(s))platform='TikTok';
   else if(ana(['ok.ru','odnoklassniki.ru'])&&/\/video\/\d+/.test(s))platform='OK.ru';
-  if(platform)return {durum:'video',url:s,platform:platform};
-  if(/\.(m3u8|mpd)(\?|#|$)/i.test(s))return {durum:'video',url:s,platform:'Canlı yayın akışı (HLS/DASH)'};
-  if(/\.(mp4|webm|ogg|ogv|m4v|mov)(\?|#|$)/i.test(s))return {durum:'video',url:s,platform:'Doğrudan video dosyası'};
+  if(platform)return {durum:'video',url:s,platform:platform,otomatikTamamlandi:otomatikTamamlandi};
+  if(/\.(m3u8|mpd)(\?|#|$)/i.test(s))return {durum:'video',url:s,platform:'Canlı yayın akışı (HLS/DASH)',otomatikTamamlandi:otomatikTamamlandi};
+  if(/\.(mp4|webm|ogg|ogv|m4v|mov)(\?|#|$)/i.test(s))return {durum:'video',url:s,platform:'Doğrudan video dosyası',otomatikTamamlandi:otomatikTamamlandi};
   var path='';
   try{var u=new URL(s);path=u.pathname+u.search;}catch(e){path=s;}
   if(/^player\.|^embed\./i.test(host)||/\/embed(?:\/|\?|$)/i.test(path)||/\/player(?:\/|\?|$)/i.test(path)||/\/iframe(?:\/|\?|$)/i.test(path))
-    return {durum:'video',url:s,platform:'Oynatıcı (embed) sayfası'};
+    return {durum:'video',url:s,platform:'Oynatıcı (embed) sayfası',otomatikTamamlandi:otomatikTamamlandi};
   return {durum:'harici',url:s,host:host};
 }
 window.admVideoLinkCozumle=admVideoLinkCozumle;
@@ -6430,7 +6445,16 @@ function updateVideoLinkCheck(i){
   if(r.durum==='bos'){el.style.color='var(--mu)';el.innerHTML='Link girilmedi';return;}
   if(r.durum==='gecersiz'){el.style.color='#f87171';el.innerHTML='❌ Geçersiz adres - https:// ile başlayan tam bir link yapıştırın';return;}
   if(r.durum==='eksik'){el.style.color='#f59e0b';el.innerHTML='⚠️ '+r.ipucu;return;}
-  if(r.durum==='video'){el.style.color='#34d399';el.innerHTML='✅ '+r.platform+' - uygulamada SADECE video görünecek (site içeriği görünmez)';return;}
+  if(r.durum==='video'){
+    // KULLANICI TALEBİ: Otomatik tamamlanan adres kaydedilmeden ÖNCE admin'e AÇIKÇA
+    // gösterilir - "sanırım bunu demek istediniz" şeffaflığıyla; yanlışsa admin linki
+    // elle düzeltebilir, sessizce farklı bir şeye kaydedilmiş olmaz.
+    if(r.otomatikTamamlandi&&window._editVideoLinks&&window._editVideoLinks[i])window._editVideoLinks[i].url=r.url;
+    el.style.color='#34d399';
+    el.innerHTML='✅ '+r.platform+' - uygulamada SADECE video görünecek (site içeriği görünmez)'
+      +(r.otomatikTamamlandi?'<br>🔧 Adres otomatik tamamlandı: <b>'+r.url+'</b>':'');
+    return;
+  }
   el.style.color='#f59e0b';
   el.innerHTML='⚠️ Bu adresten videoyu ayıklayamıyoruz ('+r.host+'). Sitenin tamamını uygulamanın içinde göstermemek için bu link gömülmez; kullanıcı "▶️ Yayını Aç" düğmesiyle yayını yeni sekmede açar.<br>Gömülü oynatmak isterseniz: sayfadaki videonun <b>gömme (embed) adresini</b> ya da <b>&lt;iframe&gt; kodunu</b> buraya yapıştırın - ikisini de kabul ediyoruz.';
 }
