@@ -1431,7 +1431,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-25-A';
+window.APP_BUILD='2026-08-25-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20225,11 +20225,35 @@ window.PTPlayer=(function(){
   // olarak bu, dikey (portre) çekilmiş bir yayını yatay bir ekranda/TV'de TAM DOLDURACAK
   // şekilde 90° döndürüp kırpma (cover) modunu birlikte uygular - tekrar dokununca normale
   // (0°, Sığdır) döner. Genel 4 yönlü rotate() döngüsünden BAĞIMSIZ, tek dokunuşlu bir anahtar.
+  // HATA DÜZELTMESİ (kullanıcı ekran görüntüsüyle bildirdi: "Dikey-Yatay düğmesine basınca
+  // video yan yatıyor, olması gereken bu değil" - GERÇEK KÖK SEBEP): Bu fonksiyon ÖNCEDEN
+  // videonun GERÇEK yönüne HİÇ bakmadan KÖRLEMESİNE her zaman 90° döndürüyordu - eğer video
+  // ZATEN normal (yatay çekilmiş, 16:9) bir içerikse, onu 90° döndürmek görüntüyü YAN YATIRIP
+  // BOZUYORDU (tam da bildirilen ekran görüntüsündeki gibi). Artık video AÇILMADAN ÖNCE
+  // kendi gerçek boyutlarına (videoWidth/videoHeight) bakılır: sadece video GERÇEKTEN dikey
+  // (portre, örn. bir telefonla dikey çekilmiş) ise VE ekran yatay ise (veya tam tersi)
+  // döndürme uygulanır - ikisi zaten UYUMLUYSA (çoğu normal video/TV yayını gibi) hiçbir
+  // döndürme yapılmaz, video her zaman OLDUĞU GİBİ (bozulmadan, doğru dik) gösterilir.
   function toggleDikeyYatay(){
     if(!S)return;
     if(S.rotate===90||S.rotate===270){
       S.rotate=0;S.fit='contain';S.dikeyYatayOlcekli=false;
       showToastMsg('📱 Dikey (normal)');
+      applyVisual();buildPanelIfOpen();
+      return;
+    }
+    var vw=S.video.videoWidth,vh=S.video.videoHeight;
+    var stage=S.root&&S.root.querySelector('.ptp-stage');
+    var kw=(stage&&stage.clientWidth)||window.innerWidth,kh=(stage&&stage.clientHeight)||window.innerHeight;
+    var videoDikey=vw&&vh&&vh>vw;      // Video kendisi portre mi (dikey çekilmiş)?
+    var ekranYatay=kw>kh;               // Ekran/konteyner şu an yatay mı?
+    // Video boyutları HENÜZ yüklenmediyse (ör. yayın daha yeni başladı), GÜVENLİ tarafta
+    // kalınır - döndürme YAPILMAZ (bozma riski, döndürmemekten HER ZAMAN daha kötüdür).
+    if(!vw||!vh||videoDikey===ekranYatay){
+      // Video zaten ekranla UYUMLU yönde (ikisi de dikey ya da ikisi de yatay) - döndürmeye
+      // GEREK YOK, döndürmek sadece bozardı. Sadece ekranı doldurmaya (Kırp) geçilir.
+      S.rotate=0;S.fit='cover';S.dikeyYatayOlcekli=false;
+      showToastMsg('🖥️ Ekranı doldur (döndürmeye gerek yoktu)');
     }else{
       S.rotate=90;S.fit='cover';S.dikeyYatayOlcekli=true;
       showToastMsg('🖥️ Yatay (döndürülmüş, ekranı doldur)');
