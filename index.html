@@ -1431,7 +1431,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-24-A';
+window.APP_BUILD='2026-08-24-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -18782,9 +18782,9 @@ function renderRemoteControllerScreen(){
       </div>
     </div>`;
   }
-  var html=`<div class="sheet-handle"></div>
+  var html=`<div class="sheet-handle" id="remoteCtrlDragHandle" style="pointer-events:auto;cursor:grab;width:44px;height:6px;top:9px"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.55rem">
-      <div style="font-size:.92rem;font-weight:900">📟 Kumanda Modu</div>
+      <div style="font-size:.92rem;font-weight:900">📟 Kumanda Modu <span style="font-size:.58rem;font-weight:600;color:var(--mu)">(taşımak için ▬ tutamacı sürükleyin)</span></div>
       <button onclick="closeRemoteControllerScreen()" style="flex-shrink:0;background:rgba(239,68,68,.13);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:9px;padding:.32rem .6rem;font-size:.64rem;font-weight:700;cursor:pointer">✕ Çık</button>
     </div>
     <div style="background:var(--s2);border:1.5px solid var(--br);border-radius:12px;padding:.6rem .7rem;margin-bottom:.7rem;font-size:.68rem;color:var(--mu);line-height:1.55">${infoHtml}</div>
@@ -18798,7 +18798,7 @@ function renderRemoteControllerScreen(){
     ${tab==='ayarlar'?'':`<div style="display:flex;gap:.35rem;margin-bottom:.6rem">
       <button onclick="remoteCtrlAction('prev')" title="Önceki" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">⏮</button>
       <button onclick="remoteCtrlAction('voldown')" title="Ses Azalt" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">🔉</button>
-      <button onclick="remoteCtrlAction('playpause')" title="Oynat/Duraklat" style="flex:1.6;height:2.6rem;border-radius:10px;background:var(--ac);border:none;font-size:1.05rem;cursor:pointer;color:#fff">⏯</button>
+      <button onclick="remoteCtrlAction('playpause')" title="Oynat/Duraklat" style="flex:1.6;height:2.6rem;border-radius:10px;background:var(--ac);border:none;font-size:1.05rem;cursor:pointer;color:#fff">${data&&data.playing===false?'▶️':'⏸️'}</button>
       <button onclick="remoteCtrlAction('volup')" title="Ses Arttır" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">🔊</button>
       <button onclick="remoteCtrlAction('next')" title="Sonraki" style="flex:1;height:2.6rem;border-radius:10px;background:var(--s2);border:1.5px solid var(--br);font-size:.95rem;cursor:pointer;color:var(--tx)">⏭</button>
     </div>
@@ -18811,6 +18811,82 @@ function renderRemoteControllerScreen(){
   if(chEl)chEl.scrollTop=_prevChScroll;
   var setEl=document.getElementById('remoteCtrlSetList');
   if(setEl)setEl.scrollTop=_prevSetScroll;
+  // KULLANICI TALEBİ ("Kumanda, kullanıcı tarafından isteğe bağlı olarak ekranın her yerine
+  // taşınabilir"): Tutamaç her yeniden çizimde SIFIRDAN kurulduğundan (innerHTML tamamen
+  // değişiyor), sürükleme dinleyicisi de her çizimden SONRA yeniden bağlanır - ama kutunun
+  // KENDİSİNİN (sheetContent, innerHTML'in dışında kalan bir eleman) konumu ayrı bir
+  // fonksiyonda saklanıp korunur, bu yüzden heartbeat yeniden çizimleri sırasında kullanıcının
+  // taşıdığı yer KAYBOLMAZ.
+  remoteCtrlInitDrag();
+}
+// KULLANICI TALEBİ ("Kumanda, kullanıcı tarafından isteğe bağlı olarak ekranın her yerine
+// taşınabilir"): #sheetContent normalde ekranın ALTINA sabitlenmiş, ORTALANMIŞ bir "sheet"
+// (bkz. CSS .sheet-wrap: align-items:flex-end;justify-content:center) - TÜM ekranlarda
+// (Ayarlar, Kanal Listesi, vb.) AYNI paylaşılan kapsayıcı kullanıldığından, konum
+// değişikliği SADECE kumanda ekranı açıkken uygulanır ve kumanda kapanınca (bkz.
+// closeRemoteControllerScreen) TAMAMEN sıfırlanır - böylece diğer ekranlar asla etkilenmez.
+function remoteCtrlInitDrag(){
+  var handle=document.getElementById('remoteCtrlDragHandle');
+  var box=document.getElementById('sheetContent');
+  if(!handle||!box)return;
+  // Önceki çizimden kalan sürükleme dinleyicisi varsa (bu tutamaç YENİ bir DOM elemanı
+  // olduğundan aslında gerekmiyor ama savunma amaçlı) tekrar eklenmesin.
+  if(handle._dragBound)return;
+  handle._dragBound=true;
+  var basX=0,basY=0,kutuX=0,kutuY=0,suruklemede=false;
+  function basla(e){
+    var p=e.touches?e.touches[0]:e;
+    suruklemede=true;
+    basX=p.clientX;basY=p.clientY;
+    var r=box.getBoundingClientRect();
+    kutuX=r.left;kutuY=r.top;
+    // İlk sürüklemede "sheet" mizanpajından (alta sabit, ortalanmış) çıkarılıp GERÇEK
+    // piksel konumuyla sabitlenir - konteynerin GÖRSEL olarak YERİNDE KALDIĞINDAN kullanıcı
+    // hiçbir sıçrama/zıplama görmez.
+    box.style.position='fixed';
+    box.style.left=kutuX+'px';
+    box.style.top=kutuY+'px';
+    box.style.right='auto';box.style.bottom='auto';box.style.margin='0';
+    box.style.maxHeight='80vh';
+    handle.style.cursor='grabbing';
+    e.preventDefault();
+  }
+  function tasi(e){
+    if(!suruklemede)return;
+    var p=e.touches?e.touches[0]:e;
+    var dx=p.clientX-basX,dy=p.clientY-basY;
+    var yeniX=kutuX+dx,yeniY=kutuY+dy;
+    // Ekran dışına TAMAMEN kaybolmasın diye kabaca sınırlanır (en az 20px görünür kalır).
+    var vw=window.innerWidth,vh=window.innerHeight,br=box.getBoundingClientRect();
+    yeniX=Math.max(20-br.width,Math.min(vw-20,yeniX));
+    yeniY=Math.max(0,Math.min(vh-20,yeniY));
+    box.style.left=yeniX+'px';
+    box.style.top=yeniY+'px';
+    e.preventDefault();
+  }
+  function birak(){
+    suruklemede=false;
+    handle.style.cursor='grab';
+  }
+  handle.addEventListener('mousedown',basla);
+  handle.addEventListener('touchstart',basla,{passive:false});
+  // KULLANICI TALEBİ (aynı istek): document seviyesindeki dinleyiciler (mousemove/touchmove/
+  // mouseup/touchend) HER yeniden çizimde tekrar eklenirse (tutamaç HER SEFERİNDE yeni bir
+  // DOM elemanı olduğundan yukarıdaki handle._dragBound koruması BUNLARI YAKALAYAMAZ) kalıcı
+  // olarak BİRİKİR - saatler süren bir kumanda oturumunda yüzlerce yinelenen dinleyiciye
+  // yol açardı. Bunlar bu yüzden SADECE BİR KEZ (tüm oturum boyunca) eklenir, ayrı bir genel
+  // bayrakla korunur - "tasi"/"birak" fonksiyonları HER ZAMAN o anki (en güncel) box/tutamaç
+  // referanslarını KAPALI DEĞİŞKEN (closure) olarak DEĞİL, HER ÇAĞRIDA document'tan TAZE
+  // okuyarak çalışır, bu yüzden eski bir çizimden kalan işlevler asla stale referans taşımaz.
+  if(!window._remoteCtrlDragDocBound){
+    window._remoteCtrlDragDocBound=true;
+    document.addEventListener('mousemove',function(e){if(window._remoteCtrlDragTasi)window._remoteCtrlDragTasi(e);});
+    document.addEventListener('touchmove',function(e){if(window._remoteCtrlDragTasi)window._remoteCtrlDragTasi(e);},{passive:false});
+    document.addEventListener('mouseup',function(e){if(window._remoteCtrlDragBirak)window._remoteCtrlDragBirak(e);});
+    document.addEventListener('touchend',function(e){if(window._remoteCtrlDragBirak)window._remoteCtrlDragBirak(e);});
+  }
+  window._remoteCtrlDragTasi=tasi;
+  window._remoteCtrlDragBirak=birak;
 }
 window.remoteCtrlSetListMode=function(isLive){
   window._remoteCtrlListMode=isLive;
@@ -19049,6 +19125,14 @@ window.closeRemoteControllerScreen=function(){
   }
   window._remoteCtrlListener=null;window._remoteCtrlTarget=null;window._remoteCtrlBase=null;
   window._remoteCtrlSearch='';window._remoteCtrlSearchHasFocus=false;
+  // KULLANICI TALEBİ ("Kumanda, kullanıcı tarafından isteğe bağlı olarak ekranın her yerine
+  // taşınabilir"): #sheetContent kumanda ekranındayken sürüklenip SABİT pikselde bırakılmış
+  // olabilir - bu, uygulamanın TÜM diğer ekranlarının (Ayarlar, Kanal Listesi vb.) da
+  // paylaştığı AYNI kapsayıcı, o yüzden kumandadan çıkarken konum MUTLAKA normal "sheet"
+  // mizanpajına (alta sabit, ortalanmış) geri döndürülür - aksi halde bir SONRAKİ açılan
+  // ekran bile yanlış yerde/boyutta kalırdı.
+  var box=document.getElementById('sheetContent');
+  if(box){box.style.position='';box.style.left='';box.style.top='';box.style.right='';box.style.bottom='';box.style.margin='';box.style.maxHeight='';}
   closeSheet();
 };
 // GÜVENLİK SIKILAŞTIRMASI (KULLANICI TALEBİ: "Admin herhangi bir siteden yayın eklediğinde
@@ -19668,8 +19752,26 @@ window.PTPlayer=(function(){
     // slider'ı değiştirdiğinde devreye giriyor. Aynı mantık transform için de uygulanır.
     var filtreGerekli=(S.brightness!==1||S.contrast!==1||S.saturation!==1);
     v.style.filter=filtreGerekli?('brightness('+S.brightness+') contrast('+S.contrast+') saturate('+S.saturation+')'):'';
-    var donusumGerekli=(S.rotate!==0||S.zoom!==1);
-    v.style.transform=donusumGerekli?('rotate('+S.rotate+'deg) scale('+S.zoom+')'):'';
+    var olcek=S.zoom;
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "Dikey-Yatay ekran modu telefon ekranında tutarlı
+    // görünmüyor" - KÖK SEBEP): 90°/270° döndürülmüş bir kutunun görsel "ayak izi" GENİŞLİK
+    // ve YÜKSEKLİĞİ YER DEĞİŞTİRİR (ör. 300x600'lük bir kutu döndürülünce görsel olarak
+    // 600x300 bir alan kaplar) - ama konteynerin KENDİSİ döndürülmediğinden aynı 300x600
+    // olarak kalır, aralarındaki UYUMSUZLUK cihazdan cihaza, video oranından oranına
+    // FARKLI görünüyordu ("tutarlı değil" tam olarak buydu). Artık sabit bir yakınlaştırma
+    // yerine, konteynerin GERÇEK piksel boyutlarından (genişlik/yükseklik oranının tersi)
+    // matematiksel olarak doğru ölçek hesaplanır - döndürülmüş video HER ZAMAN, HER cihazda/
+    // orandaTAM olarak konteyneri doldurur, kırpma/boşluk oranı HER ZAMAN aynı tutarlı
+    // görünümde olur.
+    if((S.rotate===90||S.rotate===270)&&S.dikeyYatayOlcekli){
+      var _dyStage=S.root&&S.root.querySelector('.ptp-stage');
+      if(_dyStage){
+        var _dyW=_dyStage.clientWidth,_dyH=_dyStage.clientHeight;
+        if(_dyW>0&&_dyH>0)olcek=S.zoom*Math.max(_dyW/_dyH,_dyH/_dyW);
+      }
+    }
+    var donusumGerekli=(S.rotate!==0||olcek!==1);
+    v.style.transform=donusumGerekli?('rotate('+S.rotate+'deg) scale('+olcek+')'):'';
     v.setAttribute('data-fit',S.fit);
     var fb=el('ptpFit');
     if(fb)fb.textContent=({contain:'⬜',cover:'✂️',fill:'↔️'})[S.fit]||'⬜';
@@ -20079,15 +20181,24 @@ window.PTPlayer=(function(){
   function toggleDikeyYatay(){
     if(!S)return;
     if(S.rotate===90||S.rotate===270){
-      S.rotate=0;S.fit='contain';
+      S.rotate=0;S.fit='contain';S.dikeyYatayOlcekli=false;
       showToastMsg('📱 Dikey (normal)');
     }else{
-      S.rotate=90;S.fit='cover';
+      S.rotate=90;S.fit='cover';S.dikeyYatayOlcekli=true;
       showToastMsg('🖥️ Yatay (döndürülmüş, ekranı doldur)');
     }
     applyVisual();
     buildPanelIfOpen();
   }
+  // HATA DÜZELTMESİ (kullanıcı bildirdi: "Dikey-Yatay ekran modu telefon ekranında tutarlı
+  // görünmüyor"): Ölçek hesaplaması konteynerin GERÇEK piksel boyutuna dayandığından (bkz.
+  // applyVisual), telefon fiziksel olarak döndürülüp konteynerin genişlik/yükseklik oranı
+  // DEĞİŞTİĞİNDE bu ölçek de YENİDEN hesaplanmalı - aksi halde eski (artık yanlış) bir
+  // ölçekte kalır. Dikey-Yatay modu aktifken pencere yeniden boyutlanınca (döndürme dahil)
+  // otomatik olarak yeniden uygulanır.
+  window.addEventListener('resize',function(){
+    if(S&&S.dikeyYatayOlcekli)applyVisual();
+  });
 
   // ── Ekran kilidi (yanlış dokunmayı engeller) ──
   // KULLANICI TALEBİ ("kilit logosu sabit kalıyor, 3 sn sonra kaybolsun"): Kilit ikonu
@@ -20177,7 +20288,14 @@ window.PTPlayer=(function(){
   function jump(delta){
     var list=playlist();
     var i=list.findIndex(function(x){return x.id===S.videoId;});
-    if(i<0)return;
+    // TEŞHİS DÜZELTMESİ (kullanıcı bildirdi: "oynatıcıdaki kanal ilerletme tuşu çalışmıyor" -
+    // iki KÖK SEBEP (id çakışması + eskimiş disabled durumu) zaten düzeltildi ama sorun HÂLÂ
+    // bildiriliyor): Bu satır SESSİZCE çıkıyordu - S.videoId, o an FİLTRELENMİŞ (aynı isLive
+    // türündeki) listede BULUNAMADIĞINDA kullanıcıya HİÇBİR geri bildirim verilmiyordu, tuşa
+    // basmak "hiçbir şey olmuyormuş" gibi görünüyordu. Artık en azından NEDEN bir şey
+    // olmadığı açıkça bildiriliyor - bu sayede bir sonraki teşhis turunda kesin neyin
+    // yanlış gittiğini (liste boş mu, videoId eşleşmiyor mu) doğrudan görebiliriz.
+    if(i<0){showToastMsg('⚠️ Kanal listesinde konum bulunamadı (videoId: '+(S.videoId||'yok')+')');return;}
     var n=i+delta;
     // KULLANICI TALEBİ ("TV modunda son kanaldan sonra ileri tuşuna basınca ilk kanala
     // geçsin, ilk kanaldayken geri tuşuna basınca son kanala geçsin"): Sadece CANLI TV
@@ -20797,9 +20915,20 @@ window.PTPlayer=(function(){
             +'<div class="ptp-seekwrap"><div class="ptp-buf" id="ptpBuf" style="width:0"></div>'
               +'<input type="range" class="ptp-seek" id="ptpSeek" min="0" max="100" step="0.1" value="0"/></div>'
             +'<div class="ptp-row">'
-              +'<button class="ptp-btn" id="ptpPrev" title="Önceki"'+(idx<=0?' disabled':'')+'>⏮️</button>'
+              // HATA DÜZELTMESİ (kullanıcı bildirdi: "kanal ilerletme tuşu çalışmıyor -
+              // kullanıcı sadece telefonda veya sadece projeksiyonda TV izlerken kanalı
+              // değiştiremiyor" - KÖK SEBEP BULUNDU): jump() fonksiyonu CANLI TV listesinde
+              // uçlara gelince BAŞA/SONA SARIYOR (yukarıdaki not) - ama bu düğmeler mount
+              // anında idx BAŞTA/SONDAYSA "disabled" özniteliği alıyordu ve tarayıcı
+              // disabled bir düğmeye TIKLAMAYI TAMAMEN ENGELLER. Yani kullanıcı listenin
+              // ilk/son kanalında AÇILDIYSA (çok yaygın - en son eklenen/ilk sıradaki kanal),
+              // ⏮️/⏭️ görsel olarak ORADA duruyor ama HİÇBİR ZAMAN tıklanamıyordu - jump()'ın
+              // kendi sarma mantığına hiç ulaşılamıyordu. Canlı TV'de bu düğmeler ARTIK HİÇ
+              // devre dışı bırakılmaz (zaten her zaman sarıyor); sadece kayıtlı video
+              // listesinde (gerçekten "son video" anlamlı olduğunda) eski davranış korunur.
+              +'<button class="ptp-btn" id="ptpPrev" title="Önceki"'+(!canli&&idx<=0?' disabled':'')+'>⏮️</button>'
               +'<button class="ptp-btn" id="ptpStop" title="Durdur">⏹️</button>'
-              +'<button class="ptp-btn" id="ptpNext" title="Sonraki"'+(idx<0||idx>=list.length-1?' disabled':'')+'>⏭️</button>'
+              +'<button class="ptp-btn" id="ptpNext" title="Sonraki"'+(!canli&&(idx<0||idx>=list.length-1)?' disabled':'')+'>⏭️</button>'
               +'<button class="ptp-btn" id="ptpMute" title="Ses">🔊</button>'
               +'<input type="range" class="ptp-vol" id="ptpVol" min="0" max="100" value="100"/>'
               +'<button class="ptp-btn" id="ptpGoLive" title="Canlıya dön" style="width:auto;padding:0 .5rem;font-size:.62rem;font-weight:800;'+(canli?'':'display:none;')+'">CANLIYA DÖN</button>'
@@ -21197,7 +21326,17 @@ window.PTPlayer=(function(){
         // BIRAKILDIĞINDA - anlık sürüklemede DEĞİL) gönderilen mutlak saniye konumuna atlanır.
         else if(cmd.action==='seekto'){
           var _skT=Number(cmd.value);
-          if(S.video&&isFinite(_skT))S.video.currentTime=Math.max(0,Math.min(_skT,S.video.duration||_skT));
+          if(S.video&&isFinite(_skT)){
+            S.video.currentTime=Math.max(0,Math.min(_skT,isFinite(S.video.duration)?S.video.duration:_skT));
+            // HATA DÜZELTMESİ (kullanıcı bildirdi: "video ileri sarıldığında yüklenmiyor veya
+            // oynatılmıyor" - KÖK SEBEP): currentTime SADECE konumu değiştirir, video DURAKLI
+            // İSE orada TAKILI KALIR (hls.js yeni konumu YÜKLER ama OYNATMAZ) - kullanıcıya
+            // "sarma çalışmadı" gibi görünüyordu. "...video oradan devam etmeli" isteğine göre
+            // sarma SONRASI oynatma her zaman (yeniden) tetiklenir.
+            var _oynatDene=function(){S.video.play().catch(function(){});};
+            if(S.video.readyState>=2)_oynatDene();
+            else S.video.addEventListener('loadeddata',_oynatDene,{once:true});
+          }
         }
         showToastMsg('📱 Telefonunuzdan komut alındı');
       };
@@ -21322,6 +21461,16 @@ window.PTPlayer=(function(){
   // değildi. Kalıcı çözüm: kanal değiştirirken oynatıcının DOM'u HİÇ YIKILIP YENİDEN
   // KURULMUYOR - sadece KAYNAK (video adresi/başlık/canlı durumu) değiştiriliyor, #ptpRoot
   // ve native tam ekran/döndürme kilidi TAMAMEN DOKUNULMADAN kalıyor.
+  function updatePrevNextDisabled(){
+    if(!S)return;
+    var list=playlist();
+    var i=list.findIndex(function(x){return x.id===S.videoId;});
+    var prevBtn=el('ptpPrev'),nextBtn=el('ptpNext');
+    // Canlı TV'de jump() her zaman baştan/sondan sarar - bu düğmeler ASLA devre dışı
+    // bırakılmaz (bkz. mount() içindeki aynı mantık üzerindeki uzun not).
+    if(prevBtn)prevBtn.disabled=!S.isLive&&i<=0;
+    if(nextBtn)nextBtn.disabled=!S.isLive&&(i<0||i>=list.length-1);
+  }
   function switchSourceInPlace(newUrl,newTitle,newIsLive,newVideoId){
     if(!S)return false;
     if(!S.isLive&&S.video)savePos(S.videoId,S.video.currentTime,S.video.duration);
@@ -21335,6 +21484,11 @@ window.PTPlayer=(function(){
     if(goLiveBtn)goLiveBtn.style.display=S.isLive?'':'none';
     attachSource();
     syncUI();
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "kanal ilerletme tuşu çalışmıyor"): switchSourceInPlace
+    // DOM'u SIFIRDAN kurmadığından (bilinçli olarak, akıcı geçiş için), ⏮️/⏭️ düğmelerinin
+    // "disabled" özniteliği İLK AÇILIŞTAKİ konuma göre SABİT KALIYORDU - kanal değiştikçe hiç
+    // güncellenmiyordu. Artık her geçişte yeniden hesaplanır.
+    updatePrevNextDisabled();
     checkForOtherRemoteSession();
     return true;
   }
