@@ -1431,7 +1431,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-23-G';
+window.APP_BUILD='2026-08-24-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -19658,8 +19658,18 @@ window.PTPlayer=(function(){
   function applyVisual(){
     if(!S)return;
     var v=S.video;
-    v.style.filter='brightness('+S.brightness+') contrast('+S.contrast+') saturate('+S.saturation+')';
-    v.style.transform='rotate('+S.rotate+'deg) scale('+S.zoom+')';
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "canlı kanallar büyük ekranlarda çok kasıyor"):
+    // Video elemanına ÖNCEDEN parlaklık/kontrast/doygunluk DEĞERLERİ VARSAYILAN (1,1,1) OLSA
+    // BİLE her zaman bir CSS filter katmanı uygulanıyordu - tarayıcı bunu "kimlik" (etkisiz)
+    // olsa da HER KAREDE yeniden render etmek zorunda kalıyor, özellikle büyük ekranda/
+    // projeksiyonda yüksek çözünürlüklü canlı yayın + bu sürekli filtre katmanı üst üste
+    // binince gözle görülür kasmaya yol açabiliyordu. Artık değerler varsayılandaysa filter
+    // TAMAMEN kaldırılıyor (pahalı katman hiç oluşmuyor), sadece kullanıcı gerçekten bir
+    // slider'ı değiştirdiğinde devreye giriyor. Aynı mantık transform için de uygulanır.
+    var filtreGerekli=(S.brightness!==1||S.contrast!==1||S.saturation!==1);
+    v.style.filter=filtreGerekli?('brightness('+S.brightness+') contrast('+S.contrast+') saturate('+S.saturation+')'):'';
+    var donusumGerekli=(S.rotate!==0||S.zoom!==1);
+    v.style.transform=donusumGerekli?('rotate('+S.rotate+'deg) scale('+S.zoom+')'):'';
     v.setAttribute('data-fit',S.fit);
     var fb=el('ptpFit');
     if(fb)fb.textContent=({contain:'⬜',cover:'✂️',fill:'↔️'})[S.fit]||'⬜';
@@ -20013,23 +20023,36 @@ window.PTPlayer=(function(){
     var mq=window.matchMedia('(orientation: landscape)');
     var handler=function(){
       if(!S)return;
-      var isFs=S.root.classList.contains('ptp-fs');
-      if(mq.matches&&!isFs){
-        S.fsFromRotate=true;
-        toggleFullscreen();
-      }else if(!mq.matches&&isFs&&S.fsFromRotate){
-        toggleFullscreen();
-      }
+      // HATA DÜZELTMESİ (kullanıcı bildirdi: "ekran dikey veya yatay yapıldığında görüntü
+      // stabil görünmüyor"): matchMedia 'change' olayı, tarayıcının KENDİ döndürme/yeniden
+      // boyutlandırma (reflow) ANİMASYONU DAHA TAMAMLANMADAN tetikleniyordu - tam ekrana
+      // geçiş/çıkış TAM O ANDA uygulanınca, video birkaç kare boyunca yanlış/sıkışmış
+      // ölçülüyor, SONRA doğru boyuta zıplıyordu (iki animasyon ÜST ÜSTE biniyordu). Küçük
+      // bir gecikme, tarayıcının KENDİ döndürme reflow'unun BİTMESİNİ bekleyip bizim
+      // geçişimizi ANCAK ONDAN SONRA uygular - geçiş artık tek ve pürüzsüz.
+      clearTimeout(S.orientDebounceT);
+      S.orientDebounceT=setTimeout(function(){
+        if(!S)return;
+        var isFsNow=S.root.classList.contains('ptp-fs');
+        if(mq.matches&&!isFsNow){
+          S.fsFromRotate=true;
+          toggleFullscreen();
+        }else if(!mq.matches&&isFsNow&&S.fsFromRotate){
+          toggleFullscreen();
+        }
+      },220);
     };
     S.orientMq=mq;S.orientHandler=handler;
     if(mq.addEventListener)mq.addEventListener('change',handler);
     else if(mq.addListener)mq.addListener(handler); // eski Safari
     // Oynatıcı AÇILDIĞI anda telefon zaten yataysa (kullanıcı yayını yatay tutarken açtıysa)
-    // döndürme olayı hiç ateşlenmeyeceğinden burada BİR KEZ hemen kontrol edilir.
+    // döndürme olayı hiç ateşlenmeyeceğinden burada BİR KEZ hemen kontrol edilir (bu ilk
+    // kontrolde gecikmeye gerek yok - henüz bir döndürme ANİMASYONU yaşanmıyor).
     if(mq.matches)handler();
   }
   function unbindOrientation(){
     if(!S||!S.orientMq)return;
+    clearTimeout(S.orientDebounceT);
     if(S.orientMq.removeEventListener)S.orientMq.removeEventListener('change',S.orientHandler);
     else if(S.orientMq.removeListener)S.orientMq.removeListener(S.orientHandler);
     S.orientMq=null;S.orientHandler=null;
@@ -20257,6 +20280,14 @@ window.PTPlayer=(function(){
       if(k==='golive'){goLive();return;}
       if(k==='volup'){setVolume((S.video.muted?0:S.video.volume*100)+10);showToastMsg('🔊 '+Math.round(S.video.volume*100)+'%');return;}
       if(k==='voldown'){setVolume((S.video.muted?0:S.video.volume*100)-10);showToastMsg('🔉 '+Math.round(S.video.volume*100)+'%');return;}
+      // KULLANICI TALEBİ ("bu ayar, kumandanın normal modunda tek cihazken de seçilebilir
+      // olsun"): Ekran modu düğmeleri - yerel ⚙️→Görüntü panelindeki AYNI mantık, sadece bu
+      // hızlı erişim listesinden de ulaşılabilir.
+      if(k==='fit-contain'){S.fit='contain';applyVisual();renderChannelListOverlay();if(S.panelOpen&&S.panelTab==='image')openPanel('image');return;}
+      if(k==='fit-cover'){S.fit='cover';applyVisual();renderChannelListOverlay();if(S.panelOpen&&S.panelTab==='image')openPanel('image');return;}
+      if(k==='fit-fill'){S.fit='fill';applyVisual();renderChannelListOverlay();if(S.panelOpen&&S.panelTab==='image')openPanel('image');return;}
+      if(k==='dikeyyatay'){toggleDikeyYatay();renderChannelListOverlay();return;}
+      if(k==='fstoggle'){toggleFullscreen();renderChannelListOverlay();return;}
       if(k==='C'){S.chBuf='';clearTimeout(S.chAutoT);renderChannelListOverlay();return;}
       if(k==='⌫'){S.chBuf=(S.chBuf||'').slice(0,-1);clearTimeout(S.chAutoT);renderChannelListOverlay();return;}
       if(k==='Git'){confirmChannelBuf();return;}
@@ -20319,6 +20350,21 @@ window.PTPlayer=(function(){
         +'<div class="ptp-rc-row">'
           +'<button class="ptp-rc-btn" data-chk="voldown">🔉 Ses -</button>'
           +'<button class="ptp-rc-btn" data-chk="volup">🔊 Ses +</button>'
+        +'</div>'
+        // KULLANICI TALEBİ ("bu ayar, kumandanın normal modunda tek cihazken de seçilebilir
+        // olsun"): Ekran modu düğmeleri (Sığdır/Kırp/Genişlet/Dikey-Yatay/Tam Ekran) ÖNCEDEN
+        // sadece İKİ CİHAZLI kumanda ekranında (telefon-TV ayrı) vardı - tek cihaz kullanan
+        // kullanıcı bunlara ancak ⚙️→Görüntü'ye girerek ulaşabiliyordu. Artık buradaki yerel
+        // "📟 Kumanda" sekmesinde de AYNI hızlı erişim var - iki senaryo da birebir eşit.
+        +'<div style="font-size:.56rem;font-weight:800;color:#94a3b8;margin:.3rem 0 .25rem">🖼 EKRAN MODU</div>'
+        +'<div class="ptp-rc-row">'
+          +'<button class="ptp-rc-btn'+(S.fit==='contain'?' ptp-rc-accent':'')+'" data-chk="fit-contain" style="flex:1">📐 Sığdır</button>'
+          +'<button class="ptp-rc-btn'+(S.fit==='cover'?' ptp-rc-accent':'')+'" data-chk="fit-cover" style="flex:1">✂️ Kırp</button>'
+          +'<button class="ptp-rc-btn'+(S.fit==='fill'?' ptp-rc-accent':'')+'" data-chk="fit-fill" style="flex:1">↔️ Genişlet</button>'
+        +'</div>'
+        +'<div class="ptp-rc-row">'
+          +'<button class="ptp-rc-btn'+((S.rotate===90||S.rotate===270)?' ptp-rc-accent':'')+'" data-chk="dikeyyatay">📱↔️🖥️ Dikey - Yatay</button>'
+          +'<button class="ptp-rc-btn'+(S.root&&S.root.classList.contains('ptp-fs')?' ptp-rc-accent':'')+'" data-chk="fstoggle">⛶ Tam Ekran</button>'
         +'</div>'
         // KULLANICI TALEBİ ("kumandaya canlı tuşunu da ekle"): Sadece canlı yayın izlerken
         // anlamlı - geri sarılmış/duraklamış bir canlı yayını tek dokunuşla en güncel ana
@@ -20725,6 +20771,14 @@ window.PTPlayer=(function(){
             // taşıyordu, kullanıcı onu kaydırmadan ASLA GÖREMEZDİ. Artık üst çubukta,
             // TAŞMA/KAYDIRMA RİSKİ OLMAYAN sabit bir konumda.
             +'<button class="ptp-btn" id="ptpFit" title="Ekran Modu" onclick="PTPlayer.cycleFit()">⬜</button>'
+            // HATA DÜZELTMESİ (kullanıcı bildirdi: "küçük ekrandayken ekranı büyütme butonu
+            // görünmüyor" - KÖK SEBEP: ⬜ düğmesiyle AYNI hata): Bu düğme aşağıdaki .ptp-row
+            // içindeydi - küçük (tam ekran OLMAYAN) görünümde .ptp-stage sabit/kısıtlı
+            // yükseklikte VE overflow:hidden olduğundan, satır 2. satıra sardığında (çok
+            // düğme sığmadığında) alt satır kutunun DIŞINA taşıp KIRPILIYORDU - tam da ⬜
+            // düğmesi için daha önce bulduğumuz KÖK SEBEBİN AYNISI. Aynı çözüm: üst çubukta,
+            // TAŞMA/KIRPILMA RİSKİ OLMAYAN sabit bir konumda HER ZAMAN görünür.
+            +'<button class="ptp-btn" id="ptpFsTop" title="Tam ekran">⛶</button>'
             // KULLANICI TALEBİ: "Kumandayı ayarlardan değil, oynatıcıya doğrudan dokununca
             // görsün." Artık ⚙️'nin ardındaki gizli bir sekme değil, üst çubukta HER ZAMAN
             // görünür, tek dokunuşla açılan bir düğme - bkz. openChannelListOverlay().
@@ -20750,7 +20804,6 @@ window.PTPlayer=(function(){
               +'<input type="range" class="ptp-vol" id="ptpVol" min="0" max="100" value="100"/>'
               +'<button class="ptp-btn" id="ptpGoLive" title="Canlıya dön" style="width:auto;padding:0 .5rem;font-size:.62rem;font-weight:800;'+(canli?'':'display:none;')+'">CANLIYA DÖN</button>'
               +'<button class="ptp-btn" id="ptpSpeed" title="Hız" style="width:auto;padding:0 .5rem;font-size:.66rem;font-weight:800">1x</button>'
-              +'<button class="ptp-btn" id="ptpFs" title="Tam ekran">⛶</button>'
             +'</div>'
           +'</div>'
         +'</div>'
@@ -20780,7 +20833,7 @@ window.PTPlayer=(function(){
     on('ptpPrev',function(){jump(-1);});
     on('ptpNext',function(){jump(1);});
     on('ptpMute',toggleMute);
-    on('ptpFs',toggleFullscreen);
+    on('ptpFsTop',toggleFullscreen);
     on('ptpPip',togglePip);
     on('ptpGoLive',goLive);
     on('ptpLockBtn',toggleLock);
