@@ -1539,7 +1539,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-26-I';
+window.APP_BUILD='2026-08-26-J';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20175,11 +20175,48 @@ window.PTPlayer=(function(){
     // özel ölçekleme mantığı KALDIRILDI - artık sadece manuel yakınlaştırma (S.zoom, ⚙️
     // panelindeki kaydırıcı) ve genel 4 yönlü döndürme (rotate() - 90° arttıran genel düğme)
     // kullanılıyor, ikisi de basit ve öngörülebilir.
-    var donusumGerekli=(S.rotate!==0||S.zoom!==1);
-    v.style.transform=donusumGerekli?('rotate('+S.rotate+'deg) scale('+S.zoom+')'):'';
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "Dikey/yatay tuşu çalışmıyor" - İKİNCİ KÖK SEBEP):
+    // Döndürme SADECE bir CSS transform'u olarak uygulanıyordu; video elemanının KUTUSU
+    // (genişlik/yükseklik) hiç değişmiyordu. 90°/270°'de bu şu demek: 16:9 geniş bir kutuda
+    // duran video kendi merkezi etrafında yan yatıyor, ama kutu hâlâ GENİŞ - döndürülmüş
+    // görüntü o geniş kutunun içine sığmadığı için ince, uzun ve kırpılmış bir şerit halinde
+    // görünüyordu. Kullanıcı düğmeye bastığında ya hiçbir şey olmuyor ya da ekran bozuluyor
+    // gibi hissediliyordu. Doğrusu: 90°/270°'de videonun KUTUSU da 90° "çevrilmelidir" -
+    // yani genişliği sahnenin YÜKSEKLİĞİ, yüksekliği sahnenin GENİŞLİĞİ olur; sonra merkeze
+    // alınıp döndürülür. Böylece döndürülmüş görüntü sahneyi tam olarak doldurur.
+    var yanYatik=(S.rotate===90||S.rotate===270);
+    if(yanYatik){
+      var sahne=S.root&&S.root.querySelector('.ptp-stage');
+      var sw=(sahne&&sahne.clientWidth)||0,sh=(sahne&&sahne.clientHeight)||0;
+      if(sw&&sh){
+        v.style.position='absolute';v.style.left='50%';v.style.top='50%';
+        v.style.width=sh+'px';v.style.height=sw+'px';
+        v.style.transform='translate(-50%,-50%) rotate('+S.rotate+'deg) scale('+S.zoom+')';
+      }else{
+        v.style.transform='rotate('+S.rotate+'deg) scale('+S.zoom+')';
+      }
+    }else{
+      // Döndürme yokken elemanı KENDİ varsayılan yerleşimine geri bırakıyoruz - aksi halde
+      // bir kez döndürülüp geri alınan video, mutlak konumlanmış ve piksel ölçülü halde
+      // takılı kalırdı (ekran döndürüldüğünde yanlış boyutta donma sebebi).
+      v.style.position='';v.style.left='';v.style.top='';v.style.width='';v.style.height='';
+      v.style.transform=(S.zoom!==1)?('scale('+S.zoom+')'):'';
+    }
     v.setAttribute('data-fit',S.fit);
     var fb=el('ptpFit');
     if(fb)fb.textContent=({contain:'⬜',cover:'✂️',fill:'↔️'})[S.fit]||'⬜';
+  }
+  // Döndürülmüş videonun kutusu PİKSEL cinsinden sahneye göre hesaplandığı için, sahne boyutu
+  // değiştiğinde (telefon döndürüldü, tam ekrana geçildi, kumandadan ekran modu değiştirildi)
+  // yeniden hesaplanmalıdır - yoksa döndürülmüş görüntü eski ölçüsünde donup kalır ve taşar.
+  // Dinleyici tüm oturumda BİR KEZ bağlanır; döndürme yokken hiçbir iş yapmaz.
+  if(!window._ptpDonusOlcuBagli){
+    window._ptpDonusOlcuBagli=true;
+    var _olcuYenile=function(){
+      if(S&&(S.rotate===90||S.rotate===270))applyVisual();
+    };
+    window.addEventListener('resize',_olcuYenile);
+    window.addEventListener('orientationchange',function(){setTimeout(_olcuYenile,150);});
   }
   // KULLANICI TALEBİ ("ekrana sığdır, genişlet, sığdırmak için kırp seçeneklerini ekle"):
   // Ana kontrol satırındaki tek düğmeyle üç ekran modu arasında SIRAYLA geçiş yapılır - panel
@@ -20429,6 +20466,8 @@ window.PTPlayer=(function(){
       root.classList.add('ptp-fs');
       document.body.classList.add('ptp-fs-active');
       showControls();
+      // Aynı sebeple tam ekrana GİRERKEN de yeniden ölçülür.
+      setTimeout(function(){if(S&&(S.rotate===90||S.rotate===270))applyVisual();},60);
       // Yatay/dik: Tam ekranda cihaz yönü kilitlenebiliyorsa videonun oranına göre seçilir.
       // (Bu, döndürmeyle TETİKLENEN tam ekranda gereksiz - kullanıcı zaten o yöne döndürdü -
       // ama fsFromRotate BAYRAĞI YOKSA (düğmeyle manuel açıldıysa) burada denenir.)
@@ -20497,6 +20536,9 @@ window.PTPlayer=(function(){
       document.body.classList.remove('ptp-fs-active');
       S.fsFromRotate=false;
       S.fsFromRemote=false;
+      // Tam ekrandan çıkınca sahne küçülür; döndürülmüş video kutusu piksel ölçülü olduğundan
+      // yeniden hesaplanmalı (aksi halde tam ekran ölçüsünde kalıp taşardı).
+      setTimeout(function(){if(S&&(S.rotate===90||S.rotate===270))applyVisual();},60);
       if(S._fsGestureHandler){
         document.removeEventListener('pointerdown',S._fsGestureHandler,true);
         document.removeEventListener('touchstart',S._fsGestureHandler,true);
@@ -20609,7 +20651,19 @@ window.PTPlayer=(function(){
     var kw=(stage&&stage.clientWidth)||window.innerWidth,kh=(stage&&stage.clientHeight)||window.innerHeight;
     var videoDikey=vw&&vh&&vh>vw;
     var ekranYatay=kw>kh;
-    if(!vw||!vh||videoDikey===ekranYatay){
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "Dikey/yatay tuşu çalışmıyor" - BİRİNCİ KÖK SEBEP):
+    // Karşılaştırma TERSTİ. Buradaki iki değişken BİRBİRİNİN ZITTINI soruyor: videoDikey
+    // "video DİKEY mi?", ekranYatay ise "sahne YATAY mı?". Dolayısıyla ikisi AYNI yöne
+    // baktığında (ör. yatay video + yatay sahne) değerleri FARKLI olur (false / true), zıt
+    // yöne baktığında ise AYNI olur (true / true). Eski kod ise "videoDikey===ekranYatay"
+    // durumunu "aynı yön, döndürmeye gerek yok" sanıyordu - tam tersi.
+    // Pratik sonucu: Telefon DİKEYKEN normal bir 16:9 yayında (videoDikey=false,
+    // ekranYatay=false) koşul DOĞRU çıkıyor, kod "döndürmeye gerek yoktu" deyip S.rotate'i
+    // 0'da bırakıyordu - yani düğmeye basınca görüntü HİÇ dönmüyor, sadece kırpma modu
+    // değişiyordu. Kullanıcının "çalışmıyor" dediği şey buydu. Yatay ekranda ise tersi
+    // oluyor, zaten doğru duran yayını yan yatırıyordu.
+    var ayniYon=(videoDikey!==ekranYatay);
+    if(!vw||!vh||ayniYon){
       S.rotate=0;S.fit='cover';
       showToastMsg('🖥️ Ekranı doldur (döndürmeye gerek yoktu)');
     }else{
