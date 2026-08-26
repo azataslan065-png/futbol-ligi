@@ -20978,6 +20978,10 @@ window.PTPlayer=(function(){
       if(!b)return;
       var k=b.getAttribute('data-chk');
       if(k==='close'){closeChannelList();return;}
+      // KULLANICI TALEBİ ("kumandayı yeniden tasarla" - konum kalıcılığı): İki cihazlı
+      // kumandadaki ⌖ düğmesiyle BİREBİR aynı - kaydedilmiş konumu siler, kutuyu CSS'teki
+      // varsayılan (ortalanmış) yerine döndürür.
+      if(k==='resetpos'){ptpChResetPos();return;}
       if(k==='tab-kumanda'||k==='tab-kanallar'){S.chTab=k==='tab-kumanda'?'kumanda':'kanallar';renderChannelListOverlay();return;}
       if(k==='takeover'){closeChannelList();takeoverAsRemoteController();return;}
       // KULLANICI TALEBİ ("kumandadaki ileri geri kanal değişimi içindi"): Bu iki düğme
@@ -21035,9 +21039,25 @@ window.PTPlayer=(function(){
     var pl=playlist();
     var curIdx=pl.findIndex(function(x){return x.id===S.videoId;});
     var tab=S.chTab||'kumanda';
+    // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "kumanda taşınınca orada kalmıyor, kapatıp
+    // açınca yine ortada beliriyor" + "bazı tuşlar hiç görünmüyor, ör. CANLI"): İKİ ayrı
+    // kusur birden giderildi:
+    //   1) Bu kutunun (iki cihazlı kumandanın aksine) taşınan konumu HİÇBİR YERE
+    //      kaydedilmiyordu (bkz. chBoxInitDrag) - kutu kapatılıp yeniden açıldığında ya da
+    //      sayfa tazelendiğinde her zaman CSS'teki varsayılan (ortalanmış) konuma dönüyordu.
+    //      Artık iki cihazlı kumandayla AYNI yöntemle (bkz. ptpChPosOku/ptpChPosYaz) ekrana
+    //      ORANLA (piksel değil) localStorage'a yazılıp okunuyor.
+    //   2) "📟 Kumanda" sekmesinin içeriği ÖNCEDEN doğrudan kutunun kendisine yazılıyordu -
+    //      kutunun toplam yüksekliği (top:22vh;bottom:22vh ile sınırlı, max-height:420px)
+    //      içeriğin tamamını almadığında (küçük telefon ekranı, kutu ekranın üst/alt
+    //      kenarına yakın bir yere taşınmış vb.) taşan alt kısım (CANLI, Tam Ekran gibi)
+    //      hiçbir kaydırma imkânı OLMADAN görünmez oluyordu. "📺 Kanallar" sekmesindeki
+    //      AYNI .ptp-chlist-body sınıfı (flex:1+overflow-y:auto) buraya da uygulanarak
+    //      artık içerik kutuya sığmadığında dikey kaydırılabiliyor - hiçbir tuş kaybolmuyor.
     var headHtml='<div id="ptpChDragHandle" style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;flex-shrink:0;cursor:grab;padding:.15rem 0 .3rem;margin-top:-.15rem;border-bottom:1px dashed rgba(255,255,255,.15)">'
       +'<span style="font-size:.6rem;color:#64748b;flex-shrink:0">⠿</span>'
       +'<span style="font-size:.68rem;font-weight:800;color:#fff;flex:1">'+(tab==='kumanda'?'📟 Kumanda':'📺 Kanallar')+'</span>'
+      +'<button data-chk="resetpos" title="Kumandayı varsayılan konuma döndür" style="flex-shrink:0;width:1.6rem;height:1.6rem;border-radius:7px;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:.68rem;cursor:pointer">⌖</button>'
       +'<button data-chk="close" style="flex-shrink:0;width:1.6rem;height:1.6rem;border-radius:7px;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:.8rem;cursor:pointer">✕</button>'
       +'</div>'
       +'<div class="ptp-chlist-tabs">'
@@ -21046,6 +21066,19 @@ window.PTPlayer=(function(){
       +'</div>';
     var bodyHtml;
     if(tab==='kumanda'){
+      // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "telefon kumanda modundayken ayarlardan
+      // parlaklık gibi filtreler işlenmiyor"): Parlaklık/Kontrast/Doygunluk ÖNCEDEN bu hızlı
+      // panelde HİÇ YOKTU - sadece ⚙️→Görüntü'ye (bu kutu KAPATILIP açılan ayrı bir panel)
+      // girerek değiştirilebiliyordu. Kullanıcı kumandayı açıkken bu değerleri "ayarlardan"
+      // (Görüntü paneliyle BİREBİR aynı mantıkla, bkz. aşağıdaki chBindKumandaSliders) burada
+      // da değiştirebilsin diye üç kaydırıcı EKRAN MODU bölümüne eklendi - iki cihazlı
+      // kumandadaki remoteCtrlSettingsSlider ile AYNI davranışı yerel olarak uygular.
+      function chSlider(id,label,min,max,step,val,birim){
+        return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.3rem">'
+          +'<label style="flex-shrink:0;width:3.6rem;font-size:.56rem;color:#94a3b8">'+label+'</label>'
+          +'<input type="range" id="'+id+'" min="'+min+'" max="'+max+'" step="'+step+'" value="'+val+'" style="flex:1;height:1.1rem"/>'
+          +'<span id="'+id+'V" style="width:2.3rem;text-align:right;font-size:.56rem;color:#94a3b8">'+val+birim+'</span></div>';
+      }
       bodyHtml='<div class="ptp-chlist-num">'+(S.chBuf||'Kanal No Girin')+'</div>'
         +(S.chBuf?'<div style="display:flex;justify-content:space-between;align-items:center;margin:-.3rem 0 .4rem"><span style="font-size:.54rem;color:#94a3b8">3 sn içinde otomatik gidilecek…</span><button data-chk="C" style="background:none;border:none;color:#f87171;font-size:.56rem;font-weight:700;cursor:pointer;padding:.1rem .3rem">🗑️ Tümünü Temizle</button></div>':'')
         +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.3rem;margin-bottom:.5rem;flex-shrink:0">'
@@ -21077,12 +21110,16 @@ window.PTPlayer=(function(){
           +'<button class="ptp-rc-btn'+((S.rotate===90||S.rotate===270||S.yatayKilit)?' ptp-rc-accent':'')+'" data-chk="dikeyyatay">📱↔️🖥️ Dikey - Yatay</button>'
           +'<button class="ptp-rc-btn'+(S.root&&S.root.classList.contains('ptp-fs')?' ptp-rc-accent':'')+'" data-chk="fstoggle">⛶ Tam Ekran</button>'
         +'</div>'
+        +chSlider('ptpChBri','☀️ Parlaklık',40,200,5,Math.round((S.brightness||1)*100),'%')
+        +chSlider('ptpChCon','◐ Kontrast',40,200,5,Math.round((S.contrast||1)*100),'%')
+        +chSlider('ptpChSat','🎨 Doygunluk',0,250,5,Math.round((S.saturation||1)*100),'%')
         // KULLANICI TALEBİ ("kumandaya canlı tuşunu da ekle"): Sadece canlı yayın izlerken
         // anlamlı - geri sarılmış/duraklamış bir canlı yayını tek dokunuşla en güncel ana
         // (canlı uca) döndürür, tıpkı bir TV kumandasındaki "LIVE" tuşu gibi.
         +(S.isLive?'<div class="ptp-rc-row"><button class="ptp-rc-btn ptp-rc-accent" data-chk="golive">🔴 Canlı</button></div>':'')
         +(S.remoteOtherSession?'<div style="background:rgba(124,58,237,.22);border:1px solid rgba(167,139,250,.5);border-radius:8px;padding:.4rem .5rem;font-size:.58rem;color:#e2e8f0;margin-top:.15rem;display:flex;align-items:center;gap:.35rem;flex-shrink:0"><span style="flex:1">📡 Başka cihazda açık: '+(S.remoteOtherSession.title||'').replace(/</g,'&lt;')+'</span><button data-chk="takeover" style="flex-shrink:0;background:var(--ac,#7c3aed);border:none;border-radius:7px;padding:.3rem .5rem;color:#fff;font-size:.56rem;font-weight:700;cursor:pointer">Kumanda Yap</button></div>':'');
-      box.innerHTML=headHtml+bodyHtml;
+      box.innerHTML=headHtml+'<div class="ptp-chlist-body" id="ptpChBodyKumanda">'+bodyHtml+'</div>';
+      chBindKumandaSliders();
     }else{
       // KULLANICI TALEBİ ("kayıtlı kanalların olduğu listede arama çubuğu ile beraber
       // olsun"): Arama kutusu, satır listesinden AYRI bir alt bölüme (#ptpChBodyList)
@@ -21111,6 +21148,85 @@ window.PTPlayer=(function(){
     // için de (headHtml ortak olduğundan) tek bir çağrı yeterli.
     chBoxInitDrag();
   }
+  // ═══ KUMANDANIN (TEK CİHAZ) KONUM KALICILIĞI ══════════════════════════════════════════
+  // KULLANICI BİLDİRDİ: "Kumanda, görüntüdeki yere taşınıyor. Ardından kapatıp yeniden giriş
+  // yapıldığında kumanda konumu ekranın ortasında beliriyor." KÖK SEBEP: Bu kutunun taşınan
+  // konumu SADECE o anki sürükleme oturumunun DOM'undaydı - hiçbir yere (değişkene bile)
+  // kaydedilmiyordu. Kutu kapatılınca (closeChannelList → box.remove()) DOM'dan tamamen
+  // silindiği için konum da onunla birlikte yok oluyordu; bir sonraki açılışta CSS'teki
+  // varsayılan (top:22vh;bottom:22vh, ortalanmış) yerleşime dönmesi bu yüzden KAÇINILMAZDI.
+  // ÇÖZÜM: İki cihazlı kumandadaki AYNI yöntem (bkz. rcPosOku/rcPosYaz, index.html'in üst
+  // kısmında) - konum piksel değil EKRANA ORANLA (0-1 arası) localStorage'a yazılır, geri
+  // uygulanırken ekran sınırlarına kırpılır, ekran döndüğünde/boyutu değiştiğinde yeniden
+  // hesaplanır. Farklı bir anahtar kullanılır (PTP_CH_POS_KEY) çünkü bu, İKİ CİHAZLI kumanda
+  // ekranından (ayrı bir kapsayıcı, #sheetContent) TAMAMEN bağımsız bir kutu (#ptpChBox).
+  var PTP_CH_POS_KEY='pt_kumanda_konum_v1_tekli';
+  function ptpChPosOku(){
+    if(window._ptpChSavedPos)return window._ptpChSavedPos;
+    try{
+      var ham=localStorage.getItem(PTP_CH_POS_KEY);
+      if(!ham)return null;
+      var o=JSON.parse(ham);
+      if(!o||typeof o.xr!=='number'||typeof o.yr!=='number')return null;
+      window._ptpChSavedPos=o;
+      return o;
+    }catch(e){return null;}
+  }
+  function ptpChPosYaz(xr,yr){
+    window._ptpChSavedPos={xr:xr,yr:yr};
+    try{localStorage.setItem(PTP_CH_POS_KEY,JSON.stringify(window._ptpChSavedPos));}catch(e){}
+  }
+  // Kırpma kuralı iki cihazlı kumandayla AYNI: kutunun en az 64px'i yatayda, tamamı dikeyde
+  // ekran içinde kalır - tutamaç (⠿) HER ZAMAN yakalanabilir durumda kalır.
+  function ptpChPosUygula(box){
+    if(window._ptpChSurukleniyor)return false; // Sürüklerken uygulanmaz (bkz. birak()).
+    var p=ptpChPosOku();
+    if(!p||!box)return false;
+    // NOT: position BİLEREK burada değiştirilmiyor - sürükleme (basla()) de aynı şekilde
+    // davranır. Kutunun normal (dikey) görünümde CSS'ten gelen position:fixed'i, döndürülmüş
+    // (.ptp-rotated) görünümde ise position:absolute'u KORUNUR; sadece left/top/right/bottom
+    // buradan yazılır - iki mizanpaj da kendi konumlandırma bağlamını (viewport/rotated
+    // sarmalayıcı) korur.
+    box.style.right='auto';box.style.bottom='auto';box.style.margin='0';
+    var r=box.getBoundingClientRect();
+    var vw=window.innerWidth,vh=window.innerHeight;
+    var x=p.xr*vw,y=p.yr*vh;
+    x=Math.max(64-r.width,Math.min(vw-64,x));
+    y=Math.max(0,Math.min(vh-44,y));
+    box.style.left=Math.round(x)+'px';box.style.top=Math.round(y)+'px';
+    return true;
+  }
+  // Başlık satırındaki ⌖ düğmesi (bkz. yukarıdaki headHtml) bunu çağırır - kutuyu
+  // varsayılan (ortalanmış) yerine döndürür ve kaydedilmiş konumu temizler.
+  window.ptpChResetPos=function(){
+    window._ptpChSavedPos=null;
+    try{localStorage.removeItem(PTP_CH_POS_KEY);}catch(e){}
+    var box=el('ptpChBox');
+    if(box){box.style.position='';box.style.left='';box.style.top='';box.style.right='';box.style.bottom='';box.style.margin='';box.style.width='';box.style.height='';}
+    if(typeof showToastMsg==='function')showToastMsg('⌖ Kumanda varsayılan konuma alındı');
+  };
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "ayarlardan parlaklık gibi filtreler
+  // işlenmiyor"): 📟 Kumanda sekmesine eklenen Parlaklık/Kontrast/Doygunluk kaydırıcıları -
+  // ⚙️→Görüntü panelindeki bind() ile BİREBİR aynı mantık: her 'input' olayında S üzerine
+  // yazılır ve applyVisual() ile ANINDA video elemanına CSS filter olarak uygulanır. Kutu
+  // her render'da innerHTML'den SIFIRDAN kurulduğundan bu bağlama da her çizimden SONRA
+  // (chBoxInitDrag ile aynı noktada) yeniden yapılır.
+  function chBindKumandaSliders(){
+    function bindOne(id,uygula){
+      var s=el(id);
+      if(!s)return;
+      s.addEventListener('input',function(){
+        var lab=el(id+'V');
+        var n=Number(s.value);
+        uygula(n);
+        if(lab)lab.textContent=n+'%';
+      });
+      s.addEventListener('click',function(e){e.stopPropagation();});
+    }
+    bindOne('ptpChBri',function(n){if(S){S.brightness=n/100;applyVisual();}});
+    bindOne('ptpChCon',function(n){if(S){S.contrast=n/100;applyVisual();}});
+    bindOne('ptpChSat',function(n){if(S){S.saturation=n/100;applyVisual();}});
+  }
   // İki cihazlı kumanda ekranındaki (bkz. remoteCtrlInitDrag, index.html'in üst kısmında)
   // AYNI sürükleme mantığı - burada #ptpChBox, position:fixed + left/right/top/bottom ile
   // ORTALANMIŞ durur; sürüklenince right/bottom/margin kaldırılıp sabit piksel left/top'a
@@ -21118,12 +21234,18 @@ window.PTPlayer=(function(){
   function chBoxInitDrag(){
     var handle=el('ptpChDragHandle');
     var box=el('ptpChBox');
-    if(!handle||!box||handle._dragBound)return;
+    if(!handle||!box)return;
+    // Kaydedilmiş bir konum varsa kutu HER ÇİZİMDE (ilk açılış dahil) ona göre kurulur -
+    // kullanıcı bir kez nereye taşırsa taşısın, kumandayı kapatıp tekrar açsa bile AYNI
+    // yerde açılmaya devam eder (bkz. yukarıdaki uzun not).
+    ptpChPosUygula(box);
+    if(handle._dragBound)return;
     handle._dragBound=true;
     var basX=0,basY=0,kutuX=0,kutuY=0,suruklemede=false;
     function basla(e){
       var p=e.touches?e.touches[0]:e;
       suruklemede=true;
+      window._ptpChSurukleniyor=true;
       basX=p.clientX;basY=p.clientY;
       var r=box.getBoundingClientRect();
       kutuX=r.left;kutuY=r.top;
@@ -21144,7 +21266,17 @@ window.PTPlayer=(function(){
       box.style.left=yeniX+'px';box.style.top=yeniY+'px';
       e.preventDefault();
     }
-    function birak(){suruklemede=false;handle.style.cursor='grab';}
+    function birak(){
+      if(!suruklemede)return;
+      suruklemede=false;
+      window._ptpChSurukleniyor=false;
+      handle.style.cursor='grab';
+      // Bırakılan konum HATIRLANIR - piksel değil, ekrana ORAN olarak (bkz. yukarıdaki uzun
+      // not). Böylece bir sonraki açılışta (kapatıp tekrar açma ve sayfa yeniden yüklenmesi
+      // dahil) aynı göreli noktada belirir.
+      var vw=window.innerWidth||1,vh=window.innerHeight||1;
+      ptpChPosYaz((parseFloat(box.style.left)||0)/vw,(parseFloat(box.style.top)||0)/vh);
+    }
     handle.addEventListener('mousedown',basla);
     handle.addEventListener('touchstart',basla,{passive:false});
     if(!window._ptpChDragDocBound){
@@ -21153,9 +21285,27 @@ window.PTPlayer=(function(){
       document.addEventListener('touchmove',function(e){if(window._ptpChDragTasi)window._ptpChDragTasi(e);},{passive:false});
       document.addEventListener('mouseup',function(e){if(window._ptpChDragBirak)window._ptpChDragBirak(e);});
       document.addEventListener('touchend',function(e){if(window._ptpChDragBirak)window._ptpChDragBirak(e);});
+      // HATA DÜZELTMESİ: Android'de bir dokunuş sistem hareketiyle (kenardan geri kaydırma
+      // vb.) 'touchend' YERİNE 'touchcancel' ile bitebilir - dinlenmezse sürükleme hiç
+      // bitmemiş sayılır, konum kaydedilmez. İptal de normal bir bırakma gibi işlenir.
+      document.addEventListener('touchcancel',function(e){if(window._ptpChDragBirak)window._ptpChDragBirak(e);});
     }
     window._ptpChDragTasi=tasi;
     window._ptpChDragBirak=birak;
+    // KULLANICI TALEBİ ("Dikey ve yatay ekran modları için bir düzenleme"): Telefon
+    // döndürüldüğünde görünür alanın eni/boyu yer değiştirir - bu dinleyici, kumanda AÇIKKEN
+    // her yön/boyut değişiminde konumu yeniden hesaplayıp ekran içine kırpar. Sadece BİR KEZ
+    // (tüm oturum boyunca) bağlanır.
+    if(!window._ptpChOrientBound){
+      window._ptpChOrientBound=true;
+      var _chYonDegisti=function(){
+        var b=el('ptpChBox');
+        if(!b)return; // Kumanda kapalıysa dokunma.
+        ptpChPosUygula(b);
+      };
+      window.addEventListener('resize',_chYonDegisti);
+      window.addEventListener('orientationchange',function(){setTimeout(_chYonDegisti,120);});
+    }
   }
   // KULLANICI TALEBİ ("arama çubuğu ile beraber olsun"): Satır oluşturma mantığı, hem ilk
   // çizimde hem de her arama tuş vuruşunda (renderChannelListOverlay'i TAMAMEN yeniden
