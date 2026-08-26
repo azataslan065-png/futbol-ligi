@@ -1546,7 +1546,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-26-K';
+window.APP_BUILD='2026-08-26-L';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -19014,7 +19014,9 @@ function renderRemoteControllerScreen(){
   var _fitIkon={contain:'📐',cover:'✂️',fill:'↔️'};
   var _fitAd={contain:'Sığdır',cover:'Kırp',fill:'Genişlet'};
   var _rot=(_ayar&&data.settings.rotate)||0;
-  var _dyAct=(_rot===90||_rot===270);
+  // Yatay mod iki yoldan sağlanabilir: cihazın gerçekten döndürülmesi (yatayKilit) veya
+  // yedek CSS döndürmesi (rotate 90/270). Düğme ikisinde de aktif görünmelidir.
+  var _dyAct=(_rot===90||_rot===270)||!!(_ayar&&data.settings.yatayKilit);
   var _fs=!!(data&&data.fullscreen);
   var _muted=!!(data&&data.muted);
   // Ekran/görüntü düğmeleri SADECE uygulamanın kendi oynatıcısı çalışıyorsa iş görür (harici
@@ -19424,7 +19426,7 @@ function remoteCtrlSettingsHtml(data){
     h+=remoteCtrlSettingsOpt('↔️ Genişlet',data.fit==='fill','remoteCtrlSetFit(\'fill\')');
     h+=remoteCtrlSettingsOpt('✂️ Sığdırmak İçin Kırp',data.fit==='cover','remoteCtrlSetFit(\'cover\')');
     h+=remoteCtrlSettingsOpt('🔄 Döndür · '+s.rotate+'°',false,'remoteCtrlSend(\'rotate\')');
-    h+=remoteCtrlSettingsOpt('📱↔️🖥️ Dikey - Yatay',(s.rotate===90||s.rotate===270),'remoteCtrlSend(\'dikeyyatay\')');
+    h+=remoteCtrlSettingsOpt('📱↔️🖥️ Dikey - Yatay',(s.rotate===90||s.rotate===270||!!s.yatayKilit),'remoteCtrlSend(\'dikeyyatay\')');
     h+=remoteCtrlSettingsSlider('rcZoom','Yakınlaştır',100,300,5,s.zoom,'%','zoom');
     h+=remoteCtrlSettingsSlider('rcBri','Parlaklık',40,200,5,s.brightness,'%','brightness');
     h+=remoteCtrlSettingsSlider('rcCon','Kontrast',40,200,5,s.contrast,'%','contrast');
@@ -20585,7 +20587,12 @@ window.PTPlayer=(function(){
       S.root.classList.remove('ptp-fs');
       document.body.classList.remove('ptp-fs-active');
       S.fsFromRotate=false;
+      // Yatay mod native tam ekrana BAĞLIDIR - tam ekran düşerse yön kilidi de düşmüş
+      // demektir; durumumuzu buna göre sıfırlarız, yoksa düğme "yatay" görünmeye devam
+      // ederdi ama cihaz çoktan dikeye dönmüş olurdu.
+      S.yatayKilit=false;S.fsYatayIcin=false;
       try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
+      applyVisual();buildPanelIfOpen();
     }
   }
   // KULLANICI TALEBİ ("Yatay mod, dikey mod izlenebilsin, video izlemede ise tam ekran, tam
@@ -20660,8 +20667,55 @@ window.PTPlayer=(function(){
   // ekranı doldurur (Kırp); SADECE video gerçekten TERS yöndeyse (ör. dikey çekilmiş bir
   // video, yatay bir ekranda) döndürür. Böylece bir önceki sürümdeki "videoyu yan yatırma"
   // hatası bir daha oluşmaz.
+  // ── GERÇEK CİHAZ DÖNDÜRMESİ ────────────────────────────────────────────────────────────
+  // KULLANICI BİLDİRDİ: "Ekran yatayken niye cihazın kendi ses butonu yukarıdan beliriyor,
+  // TRT1 yazısının altındaki kenarda belirmesi gerekiyor."
+  // KÖK SEBEP: "Dikey-Yatay" şimdiye kadar SADECE bir CSS döndürmesi yapıyordu. CSS
+  // döndürmesi sayfanın İÇİNDE kalır - işletim sistemi bundan HABERSİZDİR. Telefon fiziksel
+  // olarak hâlâ DİKEY durumdadır; bu yüzden Android'in kendi ses paneli, bildirim çekmecesi,
+  // durum çubuğu ve gezinme çubuğu DİKEY yerleşime göre (yani kullanıcının çevrilmiş
+  // görüntüsüne göre "yanlış" kenardan) açılır. Bunu CSS ile düzeltmek MÜMKÜN DEĞİLDİR -
+  // sistem arayüzü web sayfasının erişemeyeceği bir katmandır.
+  // ÇÖZÜM: Artık ÖNCE CİHAZI GERÇEKTEN döndürmeyi deniyoruz (Screen Orientation API ile
+  // 'landscape' kilidi). Bu başarılı olursa işletim sistemi de yatay moda geçer - ses paneli,
+  // durum çubuğu ve gezinme çubuğu doğru kenara yerleşir, üstelik videoyu hiç döndürmemiz
+  // gerekmez (S.rotate=0 kalır, dolayısıyla jest ekseni ve küçük pencere gibi her şey doğal
+  // davranır). Yön kilidi tarayıcılarda YALNIZCA native tam ekranda ve gerçek bir kullanıcı
+  // dokunuşundan kabul edilir; iOS Safari ise bu API'yi hiç desteklemez. Bu yüzden başarısız
+  // olursa eski CSS döndürmesine SESSİZCE geri düşülür - hiçbir işlevsellik kaybolmaz.
+  function cihazYatayaKilitle(){
+    var root=S&&S.root;
+    if(!root)return Promise.reject();
+    if(!(window.screen&&screen.orientation&&screen.orientation.lock))return Promise.reject();
+    var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
+    var adim;
+    if(fsEl){adim=Promise.resolve();}
+    else{
+      try{
+        var req=root.requestFullscreen||root.webkitRequestFullscreen;
+        adim=req?req.call(root):null;
+      }catch(e){adim=null;}
+      if(!adim||!adim.then)return Promise.reject();
+      S.fsYatayIcin=true;   // tam ekranı BU özellik açtı - yatay moddan çıkarken geri kapatılır
+    }
+    return adim.then(function(){return screen.orientation.lock('landscape');});
+  }
   function toggleDikeyYatay(){
     if(!S)return;
+    // Yatay moddan çıkış: cihaz kilidi varsa önce o çözülür.
+    if(S.yatayKilit){
+      S.yatayKilit=false;S.rotate=0;
+      try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
+      if(S.fsYatayIcin){
+        S.fsYatayIcin=false;
+        // Tam ekranı SADECE bu özellik açtıysa geri kapatırız - kullanıcı ⛶ ile kendisi
+        // açtıysa dokunmayız.
+        if(S.root.classList.contains('ptp-fs'))toggleFullscreen();
+      }
+      showToastMsg('📱 Dikey (normal)');
+      applyVisual();buildPanelIfOpen();
+      return;
+    }
     // KULLANICI TALEBİ ("Dikey yatay butonlarına tıklayınca ekran modları değişiyor. Buton ve
     // ekran olarak değişmeyecek; kullanıcı en son neyi seçtiyse o mod üzerinden yatay veya
     // dikey moda geçecek."): Bu fonksiyon ÖNCEDEN her çağrıldığında S.fit'i de zorla
@@ -20676,6 +20730,25 @@ window.PTPlayer=(function(){
       applyVisual();buildPanelIfOpen();
       return;
     }
+    // ÖNCE GERÇEK CİHAZ DÖNDÜRMESİ (bkz. cihazYatayaKilitle üzerindeki uzun not) - başarılı
+    // olursa işletim sistemi de yatay moda geçer ve görüntüyü hiç döndürmemiz gerekmez.
+    // Başarısız olursa (iOS Safari, kilit desteklenmiyor, ya da komut kumandadan geldiği için
+    // gerçek bir dokunuş yok) aşağıdaki CSS döndürmesine geri düşülür.
+    cihazYatayaKilitle().then(function(){
+      S.yatayKilit=true;S.rotate=0;
+      if(!S.root.classList.contains('ptp-fs')){
+        S.root.classList.add('ptp-fs');document.body.classList.add('ptp-fs-active');
+      }
+      applyVisual();buildPanelIfOpen();showControls();
+      showToastMsg('🖥️ Yatay mod');
+    }).catch(function(){
+      S.fsYatayIcin=false;
+      cssIleDondur();
+    });
+  }
+  // Yedek yol: cihaz gerçekten döndürülemediğinde görüntü + oynatıcı arayüzü CSS ile döndürülür.
+  function cssIleDondur(){
+    if(!S)return;
     var vw=S.video.videoWidth,vh=S.video.videoHeight;
     var stage=S.root&&S.root.querySelector('.ptp-stage');
     var kw=(stage&&stage.clientWidth)||window.innerWidth,kh=(stage&&stage.clientHeight)||window.innerHeight;
@@ -20698,7 +20771,7 @@ window.PTPlayer=(function(){
       showToastMsg('📱 Zaten aynı yönde - döndürmeye gerek yok');
     }else{
       S.rotate=90;
-      showToastMsg('🖥️ Yatay (döndürüldü)');
+      showToastMsg('🖥️ Yatay (görüntü döndürüldü)');
     }
     applyVisual();
     buildPanelIfOpen();
@@ -21001,7 +21074,7 @@ window.PTPlayer=(function(){
           +'<button class="ptp-rc-btn'+(S.fit==='fill'?' ptp-rc-accent':'')+'" data-chk="fit-fill" style="flex:1">↔️ Genişlet</button>'
         +'</div>'
         +'<div class="ptp-rc-row">'
-          +'<button class="ptp-rc-btn'+((S.rotate===90||S.rotate===270)?' ptp-rc-accent':'')+'" data-chk="dikeyyatay">📱↔️🖥️ Dikey - Yatay</button>'
+          +'<button class="ptp-rc-btn'+((S.rotate===90||S.rotate===270||S.yatayKilit)?' ptp-rc-accent':'')+'" data-chk="dikeyyatay">📱↔️🖥️ Dikey - Yatay</button>'
           +'<button class="ptp-rc-btn'+(S.root&&S.root.classList.contains('ptp-fs')?' ptp-rc-accent':'')+'" data-chk="fstoggle">⛶ Tam Ekran</button>'
         +'</div>'
         // KULLANICI TALEBİ ("kumandaya canlı tuşunu da ekle"): Sadece canlı yayın izlerken
@@ -21178,7 +21251,7 @@ window.PTPlayer=(function(){
       h+=opt('↔️ Genişlet',S.fit==='fill','fit:fill');
       h+=opt('✂️ Sığdırmak İçin Kırp',S.fit==='cover','fit:cover');
       h+=opt('🔄 Döndür · '+S.rotate+'°',false,'rotate');
-      h+=opt('📱↔️🖥️ Dikey - Yatay',(S.rotate===90||S.rotate===270),'dikeyyatay');
+      h+=opt('📱↔️🖥️ Dikey - Yatay',(S.rotate===90||S.rotate===270||!!S.yatayKilit),'dikeyyatay');
       h+=slider('ptpZoom','Yakınlaştır',100,300,5,Math.round(S.zoom*100),'%');
       h+=slider('ptpBri','Parlaklık',40,200,5,Math.round(S.brightness*100),'%');
       h+=slider('ptpCon','Kontrast',40,200,5,Math.round(S.contrast*100),'%');
@@ -21680,7 +21753,31 @@ window.PTPlayer=(function(){
       if(/\.m3u8/i.test(S.url)&&S.hls)return; // hls.js kendi hata yolunu işletir
       fail('Video açılamadı','Bu yayın kaynağı yanıt vermiyor veya bu tarayıcıdan erişime izin vermiyor.');
     });
-    video.addEventListener('enterpictureinpicture',function(){showToastMsg('🗗 Küçük pencere');});
+    // KULLANICI BİLDİRDİ: "Ekran yatayken çıkış yapılıyor, ardından PiP niye normal moda
+    // dönmüyor." KÖK SEBEP: Küçük pencere (PiP) açıldığında video AYRI bir sistem penceresine
+    // taşınır; tarayıcı bu sırada tam ekranı da yön kilidini de KENDİLİĞİNDEN bırakır - ama
+    // BİZİM durumumuz (S.yatayKilit / .ptp-fs sınıfı / CSS döndürmesinin piksel ölçüleri)
+    // bunu bilmediği için "hâlâ yatay moddayız" sanmaya devam ediyordu. PiP kapanıp video
+    // sayfaya geri döndüğünde de oynatıcı o eski, artık geçersiz ölçülerle çiziliyor,
+    // normal moda dönmüyordu. Artık PiP'e girerken yatay mod düzgünce kapatılır, PiP'ten
+    // çıkarken de yerleşim güncel sahne ölçüsüyle yeniden hesaplanır.
+    video.addEventListener('enterpictureinpicture',function(){
+      showToastMsg('🗗 Küçük pencere');
+      if(!S)return;
+      if(S.yatayKilit){
+        S.yatayKilit=false;S.fsYatayIcin=false;
+        try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
+      }
+      if(S.rotate){S.rotate=0;applyVisual();}
+      S.root.classList.remove('ptp-fs');
+      document.body.classList.remove('ptp-fs-active');
+      buildPanelIfOpen();
+    });
+    video.addEventListener('leavepictureinpicture',function(){
+      if(!S)return;
+      // Sahne ölçüsü PiP sırasında değişmiş olabilir; bir sonraki çizim karesinde yeniden ölç.
+      setTimeout(function(){if(S)applyVisual();},80);
+    });
 
     document.addEventListener('keydown',onKey);
     document.addEventListener('fullscreenchange',onNativeFsChange);
@@ -21767,6 +21864,10 @@ window.PTPlayer=(function(){
             speed:S.video.playbackRate,
             qualityPref:akt,qualityCur:curLevelH,levels:levels,
             rotate:S.rotate||0,zoom:Math.round((S.zoom||1)*100),
+            // Yatay mod artık CİHAZI gerçekten döndürerek de sağlanabiliyor (o durumda
+            // S.rotate 0 kalır). Kumandanın düğmeyi doğru vurgulayabilmesi için bu bayrak
+            // ayrıca gönderilir - yoksa cihaz yatayken düğme sönük görünürdü.
+            yatayKilit:!!S.yatayKilit,
             brightness:Math.round((S.brightness||1)*100),contrast:Math.round((S.contrast||1)*100),
             saturation:Math.round((S.saturation||1)*100),
             ccList:ccList,ccActive:ccActive,
@@ -22019,6 +22120,12 @@ window.PTPlayer=(function(){
       wakeLock(false);
       unbindOrientation();
       document.body.classList.remove('ptp-fs-active');
+      // KULLANICI BİLDİRDİ ("Ekran yatayken çıkış yapılıyor..."): Yatay mod artık cihazın
+      // GERÇEK yön kilidiyle sağlanabildiği için, oynatıcı kapatılırken bu kilit MUTLAKA
+      // bırakılmalıdır - aksi halde kullanıcı video ekranından çıksa bile telefon yatayda
+      // takılı kalır (uygulamanın geri kalanı da yan görünür).
+      S.yatayKilit=false;S.fsYatayIcin=false;
+      try{if(window.screen&&screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
       // Kapatılırken hâlâ native tam ekrandaysak (kullanıcı sheet'i tam ekran video izlerken
       // kapattıysa) düzgünce çıkılır - aksi halde tarayıcı "tam ekranda" takılı kalabilir.
       try{
