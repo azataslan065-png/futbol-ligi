@@ -1008,9 +1008,23 @@ body.ptp-fs-active{overflow:hidden}
    telefondan çok daha büyük OLDUĞUNDAN, vh/rem tabanlı boyutlar orada ORANTISIZ büyük
    görünüyordu - kutu daha da küçültüldü VE mutlak bir üst yükseklik sınırı (max-height)
    eklendi, böylece çok büyük/uzun bir ekranda bile kutu belirli bir boyutun ÜZERİNE çıkmıyor. */
-.ptp-chlist{position:fixed;left:.6rem;right:.6rem;top:22vh;bottom:22vh;background:#0f172a;
-  border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:.4rem;z-index:99999999;
-  box-shadow:0 20px 50px rgba(0,0,0,.6);display:flex;flex-direction:column;max-width:210px;max-height:420px;margin:0 auto}
+/* TEŞHİS/KULLANICI BİLDİRİMİ ("tasarım gereği bazı tuşlar kısıtlı görünüyor, orada 'canlı'
+   tuşu hiç görünmüyor"): KÖK SEBEP - kutu 210px genişlik ve 22vh/22vh (yani ekranın ancak
+   %56'sı) yüksekliğe SIKIŞTIRILMIŞTI; içindeki bölümlerin HEPSİ flex-shrink:0 ve kutuda
+   taşma kuralı yoktu. Kumanda sekmesinin içeriği bu kutudan uzun olduğu için alttaki satırlar
+   (Dikey-Yatay, Tam Ekran ve en altta duran 🔴 Canlı) kutunun dışında kalıp KIRPILIYORDU -
+   kullanıcı onları görmüyordu bile. Kutu artık hem daha geniş hem daha uzun; ayrıca son çare
+   olarak kendi içinde kayabiliyor, yani hiçbir tuş ERİŞİLEMEZ kalmıyor. */
+.ptp-chlist{position:fixed;left:.6rem;right:.6rem;top:6vh;bottom:6vh;background:#0f172a;
+  border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:.45rem;z-index:99999999;
+  box-shadow:0 20px 50px rgba(0,0,0,.6);display:flex;flex-direction:column;
+  max-width:min(92vw,330px);max-height:min(88vh,560px);margin:0 auto;
+  overflow-y:auto;overscroll-behavior:contain}
+/* Kumanda komutları: SABİT 6 sütunlu ızgara - hiçbir tuş gizli kaydırmaya ya da taşmaya
+   bırakılmaz, hepsi aynı anda ekranda durur. */
+.ptp-rc-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.22rem;margin-bottom:.28rem;flex-shrink:0}
+.ptp-rc-grid>button{min-width:0;height:1.9rem;padding:0;font-size:.78rem}
+.ptp-rc-grid>button.ptp-rc-lbl{font-size:.5rem;font-weight:800;flex-direction:column;gap:.05rem}
 .ptp-chlist-tabs{display:flex;gap:.2rem;margin-bottom:.32rem;flex-shrink:0;background:rgba(255,255,255,.06);border-radius:8px;padding:.12rem}
 .ptp-chlist-tab{flex:1;text-align:center;padding:.26rem 0;border-radius:6px;font-size:.54rem;font-weight:800;color:#94a3b8;cursor:pointer;border:none;background:none}
 .ptp-chlist-tab.ptp-chtab-on{background:var(--ac,#7c3aed);color:#fff}
@@ -1167,7 +1181,7 @@ body.ptp-fs-active{overflow:hidden}
     aspect-ratio:3/4;height:auto;max-height:min(54vh,440px)}
   /* Gömülü (YouTube/Twitch vb.) oynatıcılar satır içi style ile geldiğinden !important gerekir.
      Onlarda da oranı BOZMUYORUZ - sadece üst sınır koyuyoruz. */
-  #videoPlayerBox > iframe{max-height:min(54vh,440px)!important}
+  #videoPlayerBox:not(.ptf-on) > iframe{max-height:min(54vh,440px)!important}
 }
 @media (orientation:landscape) and (max-height:560px){
   #sheetWrap:has(#videoPlayerBox){align-items:center}
@@ -1179,8 +1193,56 @@ body.ptp-fs-active{overflow:hidden}
   #sheetContent:has(#videoPlayerBox) .ptp:not(.ptp-fs) .ptp-stage,
   #sheetContent:has(#videoPlayerBox) .ptp:not(.ptp-fs) .ptp-stage.ptp-portrait{
     aspect-ratio:auto;height:calc(100dvh - 1.2rem);max-height:none}
-  #videoPlayerBox > iframe{height:calc(100dvh - 1.2rem)!important;aspect-ratio:auto!important;max-height:none!important}
+  #videoPlayerBox:not(.ptf-on) > iframe{height:calc(100dvh - 1.2rem)!important;aspect-ratio:auto!important;max-height:none!important}
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   PTFrame - GÖMÜLÜ OYNATICILAR İÇİN KENDİ TAM EKRAN KABUĞUMUZ
+   KULLANICI TALEBİ ("Samsung internet üzerinden YouTube'a girince sağ alttaki mavi ok
+   düğmesine tıklayınca Samsung kendi oynatıcısı devreye giriyor. Biz de buna benzer bir şey
+   yapabilir miyiz?"):
+   O düğme Samsung Internet'in TARAYICI özelliğidir (Video Assistant) - tarayıcı, sayfanın
+   medyasına ayrıcalıklı erişimle videoyu KENDİ native oynatıcısına devreder. Bir web sayfası
+   bunu BİREBİR yapamaz: YouTube iframe'i ÇAPRAZ KAYNAKTIR, içindeki görüntü akışını okumamız
+   tarayıcı güvenliği gereği imkansızdır. (Bizim KENDİ yayınlarımızda bu sorun yok - m3u8/mp4
+   adresleri zaten PTPlayer ile, tam kontrollü açılıyor.)
+   YAPABİLDİĞİMİZ: iframe'in KENDİSİ bizim DOM'umuzda. Bu yüzden onu kendi tam ekran
+   kabuğumuzun içine alıp ÜSTÜNE kendi kontrol katmanımızı koyabiliyoruz. Kabuk, Samsung'un
+   oynatıcısındaki işlerin karşılıklarını verir:
+     • Ekran modu (Sığdır / Genişlet / Kırp) - iframe'e ölçek dönüşümü uygulanarak; "Kırp"ta
+       taşan kısmı kabuk kırpar, "Genişlet"te iframe oransız gerilerek gerçekten doldurur.
+     • Dikey-Yatay - mümkünse cihazı GERÇEKTEN döndürerek (bkz. cihazYatayaKilitle notu).
+     • Ekran kilidi - yanlış dokunmaları engeller.
+     • YouTube'da oynat/duraklat ve sarma - IFrame API'ye postMessage ile (bkz. enablejsapi).
+   YAPAMADIĞIMIZ (ve neden): Ses düzeyi, kalite, altyazı gibi ayarlar platformun KENDİ
+   oynatıcısına aittir - o arayüz iframe'in içindedir ve dışarıdan değiştirilemez. Küçük
+   pencere (PiP) de aynı sebeple platformun kendi düğmesinden yapılmalıdır.
+   ═══════════════════════════════════════════════════════════════════════════════════════ */
+#videoPlayerBox.ptf-on{background:#000;border-radius:0;overflow:hidden}
+#videoPlayerBox.ptf-on > iframe{position:absolute;left:50%;top:50%;transform-origin:50% 50%;border:none;border-radius:0}
+.ptf-ov{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;justify-content:space-between;
+  pointer-events:none;opacity:1;transition:opacity .2s;
+  background:linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,0) 22%,rgba(0,0,0,0) 60%,rgba(0,0,0,.62))}
+.ptf-ov.ptf-hide{opacity:0}
+.ptf-ov > *{pointer-events:auto}
+.ptf-top,.ptf-bot{display:flex;align-items:center;gap:.35rem;padding:.5rem .6rem}
+.ptf-title{flex:1;min-width:0;color:#fff;font-size:.72rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;text-shadow:0 1px 3px rgba(0,0,0,.85)}
+.ptf-bot{justify-content:center;flex-wrap:wrap;gap:.3rem}
+.ptf-btn{flex-shrink:0;min-width:2.3rem;height:2.3rem;padding:0 .5rem;border-radius:10px;border:none;
+  background:rgba(0,0,0,.55);color:#fff;font-size:.85rem;font-weight:700;cursor:pointer;font-family:inherit;
+  display:flex;align-items:center;justify-content:center;gap:.2rem;line-height:1;white-space:nowrap}
+.ptf-btn.ptf-sm{font-size:.6rem;font-weight:800}
+.ptf-btn.ptf-acc{background:var(--ac,#7c3aed)}
+/* Kilitliyken kontroller gizlenir ve maske TÜM dokunmaları yutar - iframe'e de geçmez. */
+.ptf-lockmask{position:absolute;inset:0;z-index:7;display:none}
+#videoPlayerBox.ptf-locked .ptf-lockmask{display:block}
+#videoPlayerBox.ptf-locked .ptf-top,#videoPlayerBox.ptf-locked .ptf-bot{display:none}
+.ptf-lockbtn{position:absolute;right:.6rem;bottom:.6rem;z-index:8;pointer-events:auto}
+.ptf-toast{position:absolute;left:50%;top:14%;transform:translateX(-50%);z-index:9;
+  background:rgba(0,0,0,.62);color:#fff;font-size:.72rem;font-weight:700;padding:.4rem .9rem;border-radius:16px;
+  opacity:0;transition:opacity .2s;pointer-events:none;white-space:nowrap}
+.ptf-toast.ptf-show{opacity:1}
 </style>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js" onerror="window._fbLoadFailed=true"></script>
@@ -1546,7 +1608,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-26-L';
+window.APP_BUILD='2026-08-26-N';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -13869,6 +13931,9 @@ window.closeSheet=function(e){
     // izleme konumu kaydedilir. Aksi halde ekran kapansa bile yayın arka planda veri çekmeye
     // devam ederdi (pil ve mobil veri israfı).
     if(window.PTPlayer&&PTPlayer.isActive())PTPlayer.destroy();
+    // Gömülü oynatıcı kabuğu (PTFrame) da kapanmalı - açık kalırsa tam ekran ve yön kilidi
+    // menü kapandıktan sonra da sürer, telefon yatayda takılı kalırdı.
+    if(window.PTFrame&&PTFrame.aktif())PTFrame.kapat();
     document.getElementById('sheetWrap').classList.remove('open');
     // HATA DÜZELTMESİ (kumanda taşıma özelliğiyle birlikte ortaya çıkan yan etki): Kumanda
     // paneli #sheetContent'e satır içi stiller (sabit konum, dar genişlik, kendi iç boşluğu)
@@ -19711,9 +19776,14 @@ function buildVideoEmbedHtml(url){
       // Kanal kimliği verilmişse KALICI canlı yayın oynatıcısı kurulur (bkz.
       // isEmbeddableVideoUrl'deki not) - kanal ne zaman canlıya geçerse o yayın görünür.
       const kanal=url.match(/[?&]channel=(UC[A-Za-z0-9_-]{10,})/)||url.match(/\/channel\/(UC[A-Za-z0-9_-]{10,})\/live/);
-      if(kanal)return `<iframe src="https://www.youtube.com/embed/live_stream?channel=${kanal[1]}&autoplay=1&playsinline=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      // KULLANICI TALEBİ ("Samsung kendi oynatıcısı devreye giriyor, biz de benzer bir şey
+      // yapabilir miyiz?"): enablejsapi=1, YouTube'un IFrame API'sini açar. Akışı OKUYAMAYIZ
+      // (çapraz kaynak), ama bu bayrak sayesinde iframe'e postMessage ile oynat/duraklat/sar
+      // KOMUTU gönderebiliriz - kendi tam ekran kabuğumuzun (bkz. PTFrame) düğmeleri buna
+      // dayanır. Bayrak olmadan YouTube bu komutları sessizce yok sayar.
+      if(kanal)return `<iframe src="https://www.youtube.com/embed/live_stream?channel=${kanal[1]}&autoplay=1&playsinline=1&enablejsapi=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       const yt=url.match(/(?:watch\?v=|\/live\/|\/shorts\/|\/embed\/)([A-Za-z0-9_-]{6,})/)||url.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
-      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       return '';
     }
     if(isKnownVideoHost(host,['twitch.tv'])){
@@ -19898,6 +19968,215 @@ function _ptHlsBagla(vid,url){
 // KULLANICI TALEBİ: Oynatıcıya tam ekran modu. Fullscreen API #videoPlayerBox konteynerine
 // uygulanır (bkz. yukarıdaki CSS) - iOS Safari konteyner tam ekranını desteklemediğinden,
 // <video> elemanı varsa onun kendi webkitEnterFullscreen'ine düşülür.
+// ══════════════════════════════════════════════════════════════════════════════════════
+// PTFrame - GÖMÜLÜ (iframe) OYNATICILAR İÇİN KENDİ TAM EKRAN KABUĞUMUZ
+// Ne yapıp ne yapamadığının gerekçesi için CSS'teki .ptf-* bloğunun üzerindeki uzun nota bakın.
+// Kısaca: iframe'in İÇİNE giremeyiz, ama iframe BİZİM elemanımız olduğu için onu ölçekleyip
+// döndürebilir ve üzerine kendi kontrol katmanımızı koyabiliriz.
+// ══════════════════════════════════════════════════════════════════════════════════════
+window.PTFrame=(function(){
+  var A=null; // aktif kabuk durumu
+  function kutu(){return document.getElementById('videoPlayerBox');}
+  function cerceve(){var b=kutu();return b?b.querySelector('iframe'):null;}
+  function youtubeMu(){
+    var f=cerceve();
+    try{return !!(f&&/youtube(-nocookie)?\.com/i.test(f.src));}catch(e){return false;}
+  }
+  // YouTube IFrame API'sine komut - akışı okumayız, sadece komut göndeririz. Bu yüzden
+  // "oynuyor mu" bilgisini KENDİMİZ takip ederiz (A.oynuyor); tek yönlü ama güvenilirdir.
+  function ytKomut(fn,args){
+    var f=cerceve();
+    if(!f||!f.contentWindow)return;
+    try{f.contentWindow.postMessage(JSON.stringify({event:'command',func:fn,args:args||[]}),'*');}catch(e){}
+  }
+  function bildir(msg){
+    var t=document.getElementById('ptfToast');
+    if(!t)return;
+    t.textContent=msg;t.classList.add('ptf-show');
+    clearTimeout(A&&A.toastT);
+    if(A)A.toastT=setTimeout(function(){t.classList.remove('ptf-show');},1400);
+  }
+  // Ekran modu + döndürme, iframe'e TEK bir dönüşümle uygulanır.
+  //   Sığdır  : oranı koruyarak kutuya SIĞACAK ölçek (kenarlarda siyah kalabilir)
+  //   Kırp    : oranı koruyarak kutuyu KAPLAYACAK ölçek - taşan kısmı kutu kırpar
+  //   Genişlet: yatay ve dikey AYRI ölçeklenir - iframe gerçekten gerilir, boşluk kalmaz
+  function olcuUygula(){
+    var b=kutu(),f=cerceve();
+    if(!b||!f||!A)return;
+    var cw=b.clientWidth,ch=b.clientHeight;
+    if(!cw||!ch)return;
+    var dondu=(A.rotate===90||A.rotate===270);
+    var hw=dondu?ch:cw, hh=dondu?cw:ch;      // döndürülmüş çerçevedeki hedef kutu
+    var bw=hw, bh=Math.max(1,Math.round(hw*9/16)); // iframe'in mantıksal 16:9 kutusu
+    f.style.width=bw+'px';f.style.height=bh+'px';
+    f.style.maxHeight='none';f.style.aspectRatio='auto';
+    var sx,sy;
+    if(A.fit==='fill'){sx=hw/bw;sy=hh/bh;}
+    else if(A.fit==='cover'){sx=sy=Math.max(hw/bw,hh/bh);}
+    else{sx=sy=Math.min(hw/bw,hh/bh);}
+    f.style.transform='translate(-50%,-50%)'+(A.rotate?(' rotate('+A.rotate+'deg)'):'')
+      +' scale('+sx.toFixed(4)+','+sy.toFixed(4)+')';
+    var fb=document.getElementById('ptfFit');
+    if(fb)fb.textContent=({contain:'📐 Sığdır',fill:'↔️ Genişlet',cover:'✂️ Kırp'})[A.fit];
+    var db=document.getElementById('ptfRot');
+    if(db)db.classList.toggle('ptf-acc',dondu||!!A.yatayKilit);
+  }
+  function kontrolleriGoster(){
+    var ov=document.getElementById('ptfOv');
+    if(!ov||!A)return;
+    ov.classList.remove('ptf-hide');
+    clearTimeout(A.hideT);
+    A.hideT=setTimeout(function(){
+      var o=document.getElementById('ptfOv');
+      if(o&&A&&!A.panelDokunuldu)o.classList.add('ptf-hide');
+    },3200);
+  }
+  function kabukHtml(baslik){
+    var yt=youtubeMu();
+    return '<div class="ptf-lockmask" id="ptfLockMask"></div>'
+      +'<div class="ptf-toast" id="ptfToast"></div>'
+      +'<div class="ptf-ov" id="ptfOv">'
+        +'<div class="ptf-top">'
+          +'<div class="ptf-title">'+(baslik||'').replace(/</g,'&lt;')+'</div>'
+          +'<button class="ptf-btn" id="ptfClose" title="Büyük ekrandan çık">✕</button>'
+        +'</div>'
+        +'<div class="ptf-bot">'
+          +(yt?'<button class="ptf-btn" id="ptfBack" title="Geri sar">⏪</button>'
+              +'<button class="ptf-btn ptf-acc" id="ptfPlay" title="Oynat / Duraklat">⏸️</button>'
+              +'<button class="ptf-btn" id="ptfFwd" title="İleri sar">⏩</button>':'')
+          +'<button class="ptf-btn ptf-sm" id="ptfFit" title="Ekran modu - dokununca sıradakine geçer">📐 Sığdır</button>'
+          +'<button class="ptf-btn" id="ptfRot" title="Dikey / Yatay">🔄</button>'
+          +'<button class="ptf-btn" id="ptfLock" title="Ekran kilidi">🔓</button>'
+        +'</div>'
+      +'</div>'
+      +'<button class="ptf-btn ptf-lockbtn" id="ptfUnlock" title="Kilidi aç" style="display:none">🔒</button>';
+  }
+  function bagla(baslik){
+    var b=kutu();
+    if(!b)return;
+    var eski=document.getElementById('ptfOv');
+    if(eski)temizleKabuk();
+    b.insertAdjacentHTML('beforeend',kabukHtml(baslik));
+    b.classList.add('ptf-on');
+    function tikla(id,fn){var e=document.getElementById(id);if(e)e.addEventListener('click',function(ev){ev.stopPropagation();kontrolleriGoster();fn();});}
+    tikla('ptfClose',function(){kapat();});
+    tikla('ptfFit',function(){
+      // Sıra, oynatıcının kendi döngüsüyle AYNI: Sığdır → Genişlet → Kırp.
+      var sira=['contain','fill','cover'];
+      A.fit=sira[(sira.indexOf(A.fit)+1)%3];
+      olcuUygula();
+      bildir(({contain:'📐 Ekrana Sığdır',fill:'↔️ Genişlet',cover:'✂️ Sığdırmak İçin Kırp'})[A.fit]);
+    });
+    tikla('ptfRot',function(){dikeyYatay();});
+    tikla('ptfLock',function(){kilit(true);});
+    tikla('ptfPlay',function(){
+      A.oynuyor=!A.oynuyor;
+      ytKomut(A.oynuyor?'playVideo':'pauseVideo');
+      var e=document.getElementById('ptfPlay');if(e)e.textContent=A.oynuyor?'⏸️':'▶️';
+    });
+    tikla('ptfBack',function(){ytKomut('seekTo',[-10],true);bildir('⏪ 10 sn geri');});
+    tikla('ptfFwd',function(){ytKomut('seekTo',[10],true);bildir('⏩ 10 sn ileri');});
+    var unlock=document.getElementById('ptfUnlock');
+    if(unlock)unlock.addEventListener('click',function(ev){ev.stopPropagation();kilit(false);});
+    var mask=document.getElementById('ptfLockMask');
+    if(mask)mask.addEventListener('click',function(ev){
+      ev.stopPropagation();
+      var u=document.getElementById('ptfUnlock');
+      if(u)u.style.display=(u.style.display==='none'?'flex':'none');
+    });
+    var ov=document.getElementById('ptfOv');
+    if(ov)ov.addEventListener('click',function(ev){if(ev.target===ov)kontrolleriGoster();});
+  }
+  function temizleKabuk(){
+    ['ptfOv','ptfToast','ptfLockMask','ptfUnlock'].forEach(function(id){
+      var e=document.getElementById(id);if(e)e.remove();
+    });
+  }
+  function kilit(ac){
+    var b=kutu();if(!b||!A)return;
+    A.kilitli=!!ac;
+    b.classList.toggle('ptf-locked',A.kilitli);
+    var u=document.getElementById('ptfUnlock');
+    if(u)u.style.display=A.kilitli?'flex':'none';
+    bildir(A.kilitli?'🔒 Ekran kilitlendi':'🔓 Kilit açıldı');
+  }
+  // Dikey-Yatay: PTPlayer'daki mantığın AYNISI - önce cihazı gerçekten döndürmeyi dener,
+  // olmazsa iframe'i CSS ile çevirir. Ekran modu BURADA DA değiştirilmez (kullanıcının
+  // seçtiği mod korunur).
+  function dikeyYatay(){
+    if(!A)return;
+    if(A.yatayKilit){
+      A.yatayKilit=false;A.rotate=0;
+      try{if(window.screen&&screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
+      olcuUygula();bildir('📱 Dikey (normal)');
+      return;
+    }
+    if(A.rotate){A.rotate=0;olcuUygula();bildir('📱 Dikey (normal)');return;}
+    var b=kutu();
+    var kilitDene=(window.screen&&screen.orientation&&screen.orientation.lock&&b);
+    if(kilitDene){
+      var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
+      var adim;
+      if(fsEl)adim=Promise.resolve();
+      else{
+        try{var req=b.requestFullscreen||b.webkitRequestFullscreen;adim=req?req.call(b):null;}catch(e){adim=null;}
+      }
+      if(adim&&adim.then){
+        adim.then(function(){return screen.orientation.lock('landscape');}).then(function(){
+          A.yatayKilit=true;A.rotate=0;
+          setTimeout(olcuUygula,120);
+          bildir('🖥️ Yatay mod');
+        }).catch(function(){A.rotate=90;olcuUygula();bildir('🖥️ Yatay (görüntü döndürüldü)');});
+        return;
+      }
+    }
+    A.rotate=90;olcuUygula();bildir('🖥️ Yatay (görüntü döndürüldü)');
+  }
+  function ac(baslik){
+    var b=kutu();
+    if(!b){return;}
+    if(!cerceve()){return;} // Gömülü oynatıcı yoksa kabuğun anlamı yok
+    A={fit:'contain',rotate:0,kilitli:false,oynuyor:true,yatayKilit:false,hideT:null,toastT:null};
+    bagla(baslik||'');
+    // Tam ekranı kutunun KENDİSİNE uygularız - iframe DOM'da YERİNDE KALIR. iframe'i başka
+    // bir kapsayıcıya TAŞIMAK onu yeniden yükler (video baştan başlar), bu yüzden bilerek
+    // taşımıyoruz; sadece kutuyu büyütüp üstüne kendi katmanımızı koyuyoruz.
+    try{
+      var req=b.requestFullscreen||b.webkitRequestFullscreen;
+      if(req)req.call(b).catch(function(){});
+    }catch(e){}
+    setTimeout(function(){olcuUygula();kontrolleriGoster();},150);
+    if(!window._ptfOlcuBagli){
+      window._ptfOlcuBagli=true;
+      window.addEventListener('resize',function(){if(A)olcuUygula();});
+      window.addEventListener('orientationchange',function(){setTimeout(function(){if(A)olcuUygula();},180);});
+      document.addEventListener('fullscreenchange',function(){
+        var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
+        if(!fsEl&&A)kapat();          // Android geri jestiyle çıkıldığında kabuk da kalkar
+        else if(A)setTimeout(olcuUygula,120);
+      });
+    }
+  }
+  function kapat(){
+    var b=kutu(),f=cerceve();
+    if(A&&A.yatayKilit){
+      try{if(window.screen&&screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
+    }
+    if(A){clearTimeout(A.hideT);clearTimeout(A.toastT);}
+    A=null;
+    temizleKabuk();
+    if(b){b.classList.remove('ptf-on','ptf-locked');}
+    // iframe'in satır içi ölçüleri TEMİZLENİR - aksi halde küçük görünüme dönünce tam ekran
+    // ölçüsünde kalıp taşardı.
+    if(f){f.style.position='';f.style.left='';f.style.top='';f.style.width='';f.style.height='';
+          f.style.transform='';f.style.maxHeight='';f.style.aspectRatio='';}
+    try{
+      var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
+      if(fsEl){var ex=document.exitFullscreen||document.webkitExitFullscreen;if(ex)ex.call(document).catch(function(){});}
+    }catch(e){}
+  }
+  return {ac:ac,kapat:kapat,aktif:function(){return !!A;}};
+})();
 window.togglePtVideoFullscreen=function(){
   try{
     const box=document.getElementById('videoPlayerBox');
@@ -20978,10 +21257,7 @@ window.PTPlayer=(function(){
       if(!b)return;
       var k=b.getAttribute('data-chk');
       if(k==='close'){closeChannelList();return;}
-      // KULLANICI TALEBİ ("kumandayı yeniden tasarla" - konum kalıcılığı): İki cihazlı
-      // kumandadaki ⌖ düğmesiyle BİREBİR aynı - kaydedilmiş konumu siler, kutuyu CSS'teki
-      // varsayılan (ortalanmış) yerine döndürür.
-      if(k==='resetpos'){ptpChResetPos();return;}
+      if(k==='konumsifirla'){window.ptpChKonumSifirla();showToastMsg('⌖ Kumanda varsayılan konuma alındı');return;}
       if(k==='tab-kumanda'||k==='tab-kanallar'){S.chTab=k==='tab-kumanda'?'kumanda':'kanallar';renderChannelListOverlay();return;}
       if(k==='takeover'){closeChannelList();takeoverAsRemoteController();return;}
       // KULLANICI TALEBİ ("kumandadaki ileri geri kanal değişimi içindi"): Bu iki düğme
@@ -21039,25 +21315,12 @@ window.PTPlayer=(function(){
     var pl=playlist();
     var curIdx=pl.findIndex(function(x){return x.id===S.videoId;});
     var tab=S.chTab||'kumanda';
-    // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "kumanda taşınınca orada kalmıyor, kapatıp
-    // açınca yine ortada beliriyor" + "bazı tuşlar hiç görünmüyor, ör. CANLI"): İKİ ayrı
-    // kusur birden giderildi:
-    //   1) Bu kutunun (iki cihazlı kumandanın aksine) taşınan konumu HİÇBİR YERE
-    //      kaydedilmiyordu (bkz. chBoxInitDrag) - kutu kapatılıp yeniden açıldığında ya da
-    //      sayfa tazelendiğinde her zaman CSS'teki varsayılan (ortalanmış) konuma dönüyordu.
-    //      Artık iki cihazlı kumandayla AYNI yöntemle (bkz. ptpChPosOku/ptpChPosYaz) ekrana
-    //      ORANLA (piksel değil) localStorage'a yazılıp okunuyor.
-    //   2) "📟 Kumanda" sekmesinin içeriği ÖNCEDEN doğrudan kutunun kendisine yazılıyordu -
-    //      kutunun toplam yüksekliği (top:22vh;bottom:22vh ile sınırlı, max-height:420px)
-    //      içeriğin tamamını almadığında (küçük telefon ekranı, kutu ekranın üst/alt
-    //      kenarına yakın bir yere taşınmış vb.) taşan alt kısım (CANLI, Tam Ekran gibi)
-    //      hiçbir kaydırma imkânı OLMADAN görünmez oluyordu. "📺 Kanallar" sekmesindeki
-    //      AYNI .ptp-chlist-body sınıfı (flex:1+overflow-y:auto) buraya da uygulanarak
-    //      artık içerik kutuya sığmadığında dikey kaydırılabiliyor - hiçbir tuş kaybolmuyor.
     var headHtml='<div id="ptpChDragHandle" style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;flex-shrink:0;cursor:grab;padding:.15rem 0 .3rem;margin-top:-.15rem;border-bottom:1px dashed rgba(255,255,255,.15)">'
       +'<span style="font-size:.6rem;color:#64748b;flex-shrink:0">⠿</span>'
       +'<span style="font-size:.68rem;font-weight:800;color:#fff;flex:1">'+(tab==='kumanda'?'📟 Kumanda':'📺 Kanallar')+'</span>'
-      +'<button data-chk="resetpos" title="Kumandayı varsayılan konuma döndür" style="flex-shrink:0;width:1.6rem;height:1.6rem;border-radius:7px;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:.68rem;cursor:pointer">⌖</button>'
+      // Kumanda bir kez uzağa taşındıktan sonra kullanıcının onu varsayılan yerine
+      // döndürebilmesi gerekir - ⌖ kaydedilmiş konumu da temizler.
+      +'<button data-chk="konumsifirla" title="Kumandayı varsayılan konuma döndür" style="flex-shrink:0;width:1.6rem;height:1.6rem;border-radius:7px;background:rgba(255,255,255,.1);border:none;color:#94a3b8;font-size:.72rem;cursor:pointer">⌖</button>'
       +'<button data-chk="close" style="flex-shrink:0;width:1.6rem;height:1.6rem;border-radius:7px;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:.8rem;cursor:pointer">✕</button>'
       +'</div>'
       +'<div class="ptp-chlist-tabs">'
@@ -21066,60 +21329,59 @@ window.PTPlayer=(function(){
       +'</div>';
     var bodyHtml;
     if(tab==='kumanda'){
-      // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "telefon kumanda modundayken ayarlardan
-      // parlaklık gibi filtreler işlenmiyor"): Parlaklık/Kontrast/Doygunluk ÖNCEDEN bu hızlı
-      // panelde HİÇ YOKTU - sadece ⚙️→Görüntü'ye (bu kutu KAPATILIP açılan ayrı bir panel)
-      // girerek değiştirilebiliyordu. Kullanıcı kumandayı açıkken bu değerleri "ayarlardan"
-      // (Görüntü paneliyle BİREBİR aynı mantıkla, bkz. aşağıdaki chBindKumandaSliders) burada
-      // da değiştirebilsin diye üç kaydırıcı EKRAN MODU bölümüne eklendi - iki cihazlı
-      // kumandadaki remoteCtrlSettingsSlider ile AYNI davranışı yerel olarak uygular.
-      function chSlider(id,label,min,max,step,val,birim){
-        return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.3rem">'
-          +'<label style="flex-shrink:0;width:3.6rem;font-size:.56rem;color:#94a3b8">'+label+'</label>'
-          +'<input type="range" id="'+id+'" min="'+min+'" max="'+max+'" step="'+step+'" value="'+val+'" style="flex:1;height:1.1rem"/>'
-          +'<span id="'+id+'V" style="width:2.3rem;text-align:right;font-size:.56rem;color:#94a3b8">'+val+birim+'</span></div>';
-      }
-      bodyHtml='<div class="ptp-chlist-num">'+(S.chBuf||'Kanal No Girin')+'</div>'
-        +(S.chBuf?'<div style="display:flex;justify-content:space-between;align-items:center;margin:-.3rem 0 .4rem"><span style="font-size:.54rem;color:#94a3b8">3 sn içinde otomatik gidilecek…</span><button data-chk="C" style="background:none;border:none;color:#f87171;font-size:.56rem;font-weight:700;cursor:pointer;padding:.1rem .3rem">🗑️ Tümünü Temizle</button></div>':'')
-        +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.3rem;margin-bottom:.5rem;flex-shrink:0">'
+      // KULLANICI BİLDİRDİ ("tasarım gereği bazı tuşlar kısıtlı görünüyor, orada 'canlı' tuşu
+      // hiç görünmüyor. Bu yüzden kumandayı yeniden tasarla"):
+      // ESKİ DURUM: Her komut TAM GENİŞLİKTE, yazılı bir düğmeydi ("⏮️ Önceki Kanal",
+      // "⏯️ Oynat/Duraklat", "🔉 Ses -", "📱↔️🖥️ Dikey - Yatay", "⛶ Tam Ekran", "🔴 Canlı"...)
+      // ve bunlar ALT ALTA diziliyordu - sadece bu satırlar 7 sıra, ~14rem yer kaplıyordu.
+      // Dar ve kısa kutuya sığmadıkları için en alttakiler (özellikle 🔴 Canlı) kırpılıp
+      // GÖRÜNMEZ oluyordu.
+      // YENİ DURUM: Uzun yazılı satırlar, SABİT 6 sütunlu iki ızgaraya indirildi (bkz.
+      // CSS'teki .ptp-rc-grid). 12 komutun hepsi iki sırada, aynı anda ekranda - 7 sıra
+      // yerine 2 sıra. Yazılar düğmelerin üzerinde değil, dokunulunca çıkan başlıklarda
+      // (title) duruyor; ekran modu düğmeleri ise simge + kısa etiket taşıyor.
+      var _fsAcik=!!(S.root&&S.root.classList.contains('ptp-fs'));
+      var _yatay=(S.rotate===90||S.rotate===270||S.yatayKilit);
+      bodyHtml='<div class="ptp-chlist-num" style="display:flex;align-items:center;justify-content:center;gap:.4rem">'
+          +'<span style="flex:1;min-width:0">'+(S.chBuf||'Kanal No Girin')+'</span>'
+          +(S.chBuf?'<button data-chk="C" title="Tümünü temizle" style="flex-shrink:0;background:none;border:none;color:#f87171;font-size:.8rem;cursor:pointer;padding:0 .2rem">🗑️</button>':'')
+        +'</div>'
+        +(S.chBuf?'<div style="text-align:center;font-size:.5rem;color:#94a3b8;margin:-.2rem 0 .3rem;flex-shrink:0">3 sn içinde otomatik gidilecek…</div>':'')
+        +'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.25rem;margin-bottom:.35rem;flex-shrink:0">'
           +['1','2','3','4','5','6','7','8','9','⌫','0','Git'].map(function(k){
-            return '<button class="ptp-rc-btn'+(k==='Git'?' ptp-rc-accent':'')+'" data-chk="'+k+'" style="height:1.95rem;font-size:.8rem">'+(k==='Git'?'✓':k)+'</button>';
+            return '<button class="ptp-rc-btn'+(k==='Git'?' ptp-rc-accent':'')+'" data-chk="'+k+'" style="height:1.85rem;font-size:.78rem">'+(k==='Git'?'✓':k)+'</button>';
           }).join('')
         +'</div>'
-        +'<div class="ptp-rc-row">'
-          +'<button class="ptp-rc-btn" data-chk="seekback">⏮️ Önceki Kanal</button>'
-          +'<button class="ptp-rc-btn ptp-rc-accent" data-chk="playpause">⏯️ Oynat/Duraklat</button>'
-          +'<button class="ptp-rc-btn" data-chk="seekfwd">Sonraki Kanal ⏭️</button>'
+        // 1. sıra: kanal geçişi, oynatma, ses ve canlıya dönüş.
+        +'<div class="ptp-rc-grid">'
+          +'<button class="ptp-rc-btn" data-chk="seekback" title="Önceki kanal">⏮️</button>'
+          +'<button class="ptp-rc-btn ptp-rc-accent" data-chk="playpause" title="Oynat / Duraklat">⏯️</button>'
+          +'<button class="ptp-rc-btn" data-chk="seekfwd" title="Sonraki kanal">⏭️</button>'
+          +'<button class="ptp-rc-btn" data-chk="voldown" title="Ses azalt">🔉</button>'
+          +'<button class="ptp-rc-btn" data-chk="volup" title="Ses arttır">🔊</button>'
+          // KULLANICI TALEBİ ("kumandaya canlı tuşunu da ekle"): Geri sarılmış/duraklamış bir
+          // canlı yayını tek dokunuşla en güncel ana döndürür. Canlı yayın DIŞINDA anlamsız
+          // olduğundan gizlenmez, SOLUK ve tıklanamaz gösterilir - böylece tuşun yeri her
+          // zaman aynı kalır ve düzen kanaldan kanala zıplamaz.
+          +(S.isLive
+            ?'<button class="ptp-rc-btn ptp-rc-accent" data-chk="golive" title="Canlı yayının şu anına dön">🔴</button>'
+            :'<button class="ptp-rc-btn" disabled title="Sadece canlı yayında kullanılır" style="opacity:.3">🔴</button>')
         +'</div>'
-        +'<div class="ptp-rc-row">'
-          +'<button class="ptp-rc-btn" data-chk="voldown">🔉 Ses -</button>'
-          +'<button class="ptp-rc-btn" data-chk="volup">🔊 Ses +</button>'
-        +'</div>'
+        // 2. sıra: görüntü/ekran kontrolleri.
         // KULLANICI TALEBİ ("bu ayar, kumandanın normal modunda tek cihazken de seçilebilir
-        // olsun"): Ekran modu düğmeleri (Sığdır/Kırp/Genişlet/Dikey-Yatay/Tam Ekran) ÖNCEDEN
-        // sadece İKİ CİHAZLI kumanda ekranında (telefon-TV ayrı) vardı - tek cihaz kullanan
-        // kullanıcı bunlara ancak ⚙️→Görüntü'ye girerek ulaşabiliyordu. Artık buradaki yerel
-        // "📟 Kumanda" sekmesinde de AYNI hızlı erişim var - iki senaryo da birebir eşit.
-        +'<div style="font-size:.56rem;font-weight:800;color:#94a3b8;margin:.3rem 0 .25rem">🖼 EKRAN MODU</div>'
-        +'<div class="ptp-rc-row">'
-          +'<button class="ptp-rc-btn'+(S.fit==='contain'?' ptp-rc-accent':'')+'" data-chk="fit-contain" style="flex:1">📐 Sığdır</button>'
-          +'<button class="ptp-rc-btn'+(S.fit==='cover'?' ptp-rc-accent':'')+'" data-chk="fit-cover" style="flex:1">✂️ Kırp</button>'
-          +'<button class="ptp-rc-btn'+(S.fit==='fill'?' ptp-rc-accent':'')+'" data-chk="fit-fill" style="flex:1">↔️ Genişlet</button>'
+        // olsun"): Ekran modu düğmeleri ÖNCEDEN sadece İKİ CİHAZLI kumanda ekranındaydı;
+        // burada da AYNI hızlı erişim var - iki senaryo birebir eşit.
+        // Sıra, oynatıcının kendi döngüsüyle aynı: Sığdır → Genişlet → Kırp.
+        +'<div class="ptp-rc-grid">'
+          +'<button class="ptp-rc-btn ptp-rc-lbl'+(S.fit==='contain'?' ptp-rc-accent':'')+'" data-chk="fit-contain" title="Ekrana sığdır">📐<span>Sığdır</span></button>'
+          +'<button class="ptp-rc-btn ptp-rc-lbl'+(S.fit==='fill'?' ptp-rc-accent':'')+'" data-chk="fit-fill" title="Genişlet">↔️<span>Genişlet</span></button>'
+          +'<button class="ptp-rc-btn ptp-rc-lbl'+(S.fit==='cover'?' ptp-rc-accent':'')+'" data-chk="fit-cover" title="Sığdırmak için kırp">✂️<span>Kırp</span></button>'
+          +'<button class="ptp-rc-btn'+(_yatay?' ptp-rc-accent':'')+'" data-chk="dikeyyatay" title="Dikey / Yatay">🔄</button>'
+          +'<button class="ptp-rc-btn'+(_fsAcik?' ptp-rc-accent':'')+'" data-chk="fstoggle" title="'+(_fsAcik?'Küçük ekrana dön':'Tam ekran')+'">'+(_fsAcik?'🔳':'⛶')+'</button>'
+          +'<button class="ptp-rc-btn" data-chk="close" title="Kumandayı kapat">✕</button>'
         +'</div>'
-        +'<div class="ptp-rc-row">'
-          +'<button class="ptp-rc-btn'+((S.rotate===90||S.rotate===270||S.yatayKilit)?' ptp-rc-accent':'')+'" data-chk="dikeyyatay">📱↔️🖥️ Dikey - Yatay</button>'
-          +'<button class="ptp-rc-btn'+(S.root&&S.root.classList.contains('ptp-fs')?' ptp-rc-accent':'')+'" data-chk="fstoggle">⛶ Tam Ekran</button>'
-        +'</div>'
-        +chSlider('ptpChBri','☀️ Parlaklık',40,200,5,Math.round((S.brightness||1)*100),'%')
-        +chSlider('ptpChCon','◐ Kontrast',40,200,5,Math.round((S.contrast||1)*100),'%')
-        +chSlider('ptpChSat','🎨 Doygunluk',0,250,5,Math.round((S.saturation||1)*100),'%')
-        // KULLANICI TALEBİ ("kumandaya canlı tuşunu da ekle"): Sadece canlı yayın izlerken
-        // anlamlı - geri sarılmış/duraklamış bir canlı yayını tek dokunuşla en güncel ana
-        // (canlı uca) döndürür, tıpkı bir TV kumandasındaki "LIVE" tuşu gibi.
-        +(S.isLive?'<div class="ptp-rc-row"><button class="ptp-rc-btn ptp-rc-accent" data-chk="golive">🔴 Canlı</button></div>':'')
         +(S.remoteOtherSession?'<div style="background:rgba(124,58,237,.22);border:1px solid rgba(167,139,250,.5);border-radius:8px;padding:.4rem .5rem;font-size:.58rem;color:#e2e8f0;margin-top:.15rem;display:flex;align-items:center;gap:.35rem;flex-shrink:0"><span style="flex:1">📡 Başka cihazda açık: '+(S.remoteOtherSession.title||'').replace(/</g,'&lt;')+'</span><button data-chk="takeover" style="flex-shrink:0;background:var(--ac,#7c3aed);border:none;border-radius:7px;padding:.3rem .5rem;color:#fff;font-size:.56rem;font-weight:700;cursor:pointer">Kumanda Yap</button></div>':'');
-      box.innerHTML=headHtml+'<div class="ptp-chlist-body" id="ptpChBodyKumanda">'+bodyHtml+'</div>';
-      chBindKumandaSliders();
+      box.innerHTML=headHtml+bodyHtml;
     }else{
       // KULLANICI TALEBİ ("kayıtlı kanalların olduğu listede arama çubuğu ile beraber
       // olsun"): Arama kutusu, satır listesinden AYRI bir alt bölüme (#ptpChBodyList)
@@ -21148,97 +21410,59 @@ window.PTPlayer=(function(){
     // için de (headHtml ortak olduğundan) tek bir çağrı yeterli.
     chBoxInitDrag();
   }
-  // ═══ KUMANDANIN (TEK CİHAZ) KONUM KALICILIĞI ══════════════════════════════════════════
-  // KULLANICI BİLDİRDİ: "Kumanda, görüntüdeki yere taşınıyor. Ardından kapatıp yeniden giriş
-  // yapıldığında kumanda konumu ekranın ortasında beliriyor." KÖK SEBEP: Bu kutunun taşınan
-  // konumu SADECE o anki sürükleme oturumunun DOM'undaydı - hiçbir yere (değişkene bile)
-  // kaydedilmiyordu. Kutu kapatılınca (closeChannelList → box.remove()) DOM'dan tamamen
-  // silindiği için konum da onunla birlikte yok oluyordu; bir sonraki açılışta CSS'teki
-  // varsayılan (top:22vh;bottom:22vh, ortalanmış) yerleşime dönmesi bu yüzden KAÇINILMAZDI.
-  // ÇÖZÜM: İki cihazlı kumandadaki AYNI yöntem (bkz. rcPosOku/rcPosYaz, index.html'in üst
-  // kısmında) - konum piksel değil EKRANA ORANLA (0-1 arası) localStorage'a yazılır, geri
-  // uygulanırken ekran sınırlarına kırpılır, ekran döndüğünde/boyutu değiştiğinde yeniden
-  // hesaplanır. Farklı bir anahtar kullanılır (PTP_CH_POS_KEY) çünkü bu, İKİ CİHAZLI kumanda
-  // ekranından (ayrı bir kapsayıcı, #sheetContent) TAMAMEN bağımsız bir kutu (#ptpChBox).
-  var PTP_CH_POS_KEY='pt_kumanda_konum_v1_tekli';
-  function ptpChPosOku(){
-    if(window._ptpChSavedPos)return window._ptpChSavedPos;
-    try{
-      var ham=localStorage.getItem(PTP_CH_POS_KEY);
-      if(!ham)return null;
-      var o=JSON.parse(ham);
-      if(!o||typeof o.xr!=='number'||typeof o.yr!=='number')return null;
-      window._ptpChSavedPos=o;
-      return o;
-    }catch(e){return null;}
-  }
-  function ptpChPosYaz(xr,yr){
-    window._ptpChSavedPos={xr:xr,yr:yr};
-    try{localStorage.setItem(PTP_CH_POS_KEY,JSON.stringify(window._ptpChSavedPos));}catch(e){}
-  }
-  // Kırpma kuralı iki cihazlı kumandayla AYNI: kutunun en az 64px'i yatayda, tamamı dikeyde
-  // ekran içinde kalır - tutamaç (⠿) HER ZAMAN yakalanabilir durumda kalır.
-  function ptpChPosUygula(box){
-    if(window._ptpChSurukleniyor)return false; // Sürüklerken uygulanmaz (bkz. birak()).
-    var p=ptpChPosOku();
-    if(!p||!box)return false;
-    // NOT: position BİLEREK burada değiştirilmiyor - sürükleme (basla()) de aynı şekilde
-    // davranır. Kutunun normal (dikey) görünümde CSS'ten gelen position:fixed'i, döndürülmüş
-    // (.ptp-rotated) görünümde ise position:absolute'u KORUNUR; sadece left/top/right/bottom
-    // buradan yazılır - iki mizanpaj da kendi konumlandırma bağlamını (viewport/rotated
-    // sarmalayıcı) korur.
-    box.style.right='auto';box.style.bottom='auto';box.style.margin='0';
-    var r=box.getBoundingClientRect();
-    var vw=window.innerWidth,vh=window.innerHeight;
-    var x=p.xr*vw,y=p.yr*vh;
-    x=Math.max(64-r.width,Math.min(vw-64,x));
-    y=Math.max(0,Math.min(vh-44,y));
-    box.style.left=Math.round(x)+'px';box.style.top=Math.round(y)+'px';
-    return true;
-  }
-  // Başlık satırındaki ⌖ düğmesi (bkz. yukarıdaki headHtml) bunu çağırır - kutuyu
-  // varsayılan (ortalanmış) yerine döndürür ve kaydedilmiş konumu temizler.
-  window.ptpChResetPos=function(){
-    window._ptpChSavedPos=null;
-    try{localStorage.removeItem(PTP_CH_POS_KEY);}catch(e){}
-    var box=el('ptpChBox');
-    if(box){box.style.position='';box.style.left='';box.style.top='';box.style.right='';box.style.bottom='';box.style.margin='';box.style.width='';box.style.height='';}
-    if(typeof showToastMsg==='function')showToastMsg('⌖ Kumanda varsayılan konuma alındı');
-  };
-  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "ayarlardan parlaklık gibi filtreler
-  // işlenmiyor"): 📟 Kumanda sekmesine eklenen Parlaklık/Kontrast/Doygunluk kaydırıcıları -
-  // ⚙️→Görüntü panelindeki bind() ile BİREBİR aynı mantık: her 'input' olayında S üzerine
-  // yazılır ve applyVisual() ile ANINDA video elemanına CSS filter olarak uygulanır. Kutu
-  // her render'da innerHTML'den SIFIRDAN kurulduğundan bu bağlama da her çizimden SONRA
-  // (chBoxInitDrag ile aynı noktada) yeniden yapılır.
-  function chBindKumandaSliders(){
-    function bindOne(id,uygula){
-      var s=el(id);
-      if(!s)return;
-      s.addEventListener('input',function(){
-        var lab=el(id+'V');
-        var n=Number(s.value);
-        uygula(n);
-        if(lab)lab.textContent=n+'%';
-      });
-      s.addEventListener('click',function(e){e.stopPropagation();});
-    }
-    bindOne('ptpChBri',function(n){if(S){S.brightness=n/100;applyVisual();}});
-    bindOne('ptpChCon',function(n){if(S){S.contrast=n/100;applyVisual();}});
-    bindOne('ptpChSat',function(n){if(S){S.saturation=n/100;applyVisual();}});
-  }
   // İki cihazlı kumanda ekranındaki (bkz. remoteCtrlInitDrag, index.html'in üst kısmında)
   // AYNI sürükleme mantığı - burada #ptpChBox, position:fixed + left/right/top/bottom ile
   // ORTALANMIŞ durur; sürüklenince right/bottom/margin kaldırılıp sabit piksel left/top'a
   // geçilir, böylece kutu GÖRSEL olarak YERİNDE KALIR (sıçrama olmaz) ve parmağı takip eder.
+  // ── KONUMUN KALICILIĞI ────────────────────────────────────────────────────────────────
+  // KULLANICI BİLDİRDİ: "Kumanda görüntüdeki yere taşınıyor, ardından kapatıp yeniden giriş
+  // yapıldığında kumanda konumu ekranın ortasında beliriyor."
+  // KÖK SEBEP: Bu kutunun sürükleme kodu, bırakılan konumu HİÇBİR YERE yazmıyordu - taşıma
+  // yalnızca elemanın o anki satır içi stilini değiştiriyordu. Kumanda kapatıldığında kutu
+  // DOM'dan siliniyor (bkz. closeChannelList), yeniden açılınca da CSS'teki varsayılan
+  // "ortalanmış" kurallarla (left/right + margin:0 auto) sıfırdan doğuyordu. Yani konum hiç
+  // kaydedilmediği için her açılışta ortaya dönüyordu.
+  // NOT: Bu kutu, iki cihazlı kumanda ekranındakinden (#sheetContent) AYRI bir bileşendir;
+  // oradaki kalıcılık düzeltmesi buraya uygulanmamıştı. Aynı yaklaşım burada da kullanılıyor:
+  // konum PİKSEL değil EKRANA ORAN olarak saklanır, böylece ekran döndüğünde ya da farklı bir
+  // cihazda açıldığında da aynı göreli noktaya denk gelir ve ekran dışında kalmaz.
+  var CH_POS_KEY='pt_oynatici_kumanda_konum_v1';
+  function chPosOku(){
+    try{
+      var o=JSON.parse(localStorage.getItem(CH_POS_KEY)||'null');
+      return (o&&typeof o.xr==='number'&&typeof o.yr==='number')?o:null;
+    }catch(e){return null;}
+  }
+  function chPosYaz(xr,yr){
+    try{localStorage.setItem(CH_POS_KEY,JSON.stringify({xr:xr,yr:yr}));}catch(e){}
+  }
+  function chPosUygula(box){
+    if(!box||window._ptpChSurukleniyor)return;
+    var p=chPosOku();
+    if(!p)return;
+    var r=box.getBoundingClientRect();
+    if(!r.width||!r.height)return;
+    var vw=window.innerWidth,vh=window.innerHeight;
+    // Kutunun en az 90px'i yatayda, üst kenarı da her zaman ekran içinde kalır - yoksa
+    // tutamaç erişilemez hale gelir ve kullanıcı kutuyu geri sürükleyemez.
+    var x=Math.max(90-r.width,Math.min(vw-90,p.xr*vw));
+    var y=Math.max(0,Math.min(vh-44,p.yr*vh));
+    box.style.left=Math.round(x)+'px';box.style.top=Math.round(y)+'px';
+    box.style.right='auto';box.style.bottom='auto';box.style.margin='0';
+    box.style.width=Math.round(r.width)+'px';
+  }
+  window.ptpChKonumSifirla=function(){
+    try{localStorage.removeItem(CH_POS_KEY);}catch(e){}
+    var b=el('ptpChBox');
+    if(b){b.style.left='';b.style.top='';b.style.right='';b.style.bottom='';b.style.margin='';b.style.width='';b.style.height='';}
+  };
   function chBoxInitDrag(){
     var handle=el('ptpChDragHandle');
     var box=el('ptpChBox');
     if(!handle||!box)return;
-    // Kaydedilmiş bir konum varsa kutu HER ÇİZİMDE (ilk açılış dahil) ona göre kurulur -
-    // kullanıcı bir kez nereye taşırsa taşısın, kumandayı kapatıp tekrar açsa bile AYNI
-    // yerde açılmaya devam eder (bkz. yukarıdaki uzun not).
-    ptpChPosUygula(box);
+    // Kaydedilmiş konum HER ÇİZİMDE uygulanır - kutu her yeniden çizildiğinde (kanal değişimi,
+    // sekme geçişi, yeniden açılış) kullanıcının bıraktığı yerde belirir.
+    chPosUygula(box);
     if(handle._dragBound)return;
     handle._dragBound=true;
     var basX=0,basY=0,kutuX=0,kutuY=0,suruklemede=false;
@@ -21271,11 +21495,8 @@ window.PTPlayer=(function(){
       suruklemede=false;
       window._ptpChSurukleniyor=false;
       handle.style.cursor='grab';
-      // Bırakılan konum HATIRLANIR - piksel değil, ekrana ORAN olarak (bkz. yukarıdaki uzun
-      // not). Böylece bir sonraki açılışta (kapatıp tekrar açma ve sayfa yeniden yüklenmesi
-      // dahil) aynı göreli noktada belirir.
       var vw=window.innerWidth||1,vh=window.innerHeight||1;
-      ptpChPosYaz((parseFloat(box.style.left)||0)/vw,(parseFloat(box.style.top)||0)/vh);
+      chPosYaz((parseFloat(box.style.left)||0)/vw,(parseFloat(box.style.top)||0)/vh);
     }
     handle.addEventListener('mousedown',basla);
     handle.addEventListener('touchstart',basla,{passive:false});
@@ -21285,27 +21506,16 @@ window.PTPlayer=(function(){
       document.addEventListener('touchmove',function(e){if(window._ptpChDragTasi)window._ptpChDragTasi(e);},{passive:false});
       document.addEventListener('mouseup',function(e){if(window._ptpChDragBirak)window._ptpChDragBirak(e);});
       document.addEventListener('touchend',function(e){if(window._ptpChDragBirak)window._ptpChDragBirak(e);});
-      // HATA DÜZELTMESİ: Android'de bir dokunuş sistem hareketiyle (kenardan geri kaydırma
-      // vb.) 'touchend' YERİNE 'touchcancel' ile bitebilir - dinlenmezse sürükleme hiç
-      // bitmemiş sayılır, konum kaydedilmez. İptal de normal bir bırakma gibi işlenir.
+      // Dokunuş sistem hareketiyle iptal olursa (kenardan geri kaydırma, gelen çağrı) 'touchend'
+      // hiç gelmez; bu olay dinlenmezse konum kaydedilmez ve sürükleme bayrağı açık kalırdı.
       document.addEventListener('touchcancel',function(e){if(window._ptpChDragBirak)window._ptpChDragBirak(e);});
+      // Ekran döndüğünde kutu ekran dışında kalmasın diye konum yeniden hesaplanır.
+      var _yenidenKonumla=function(){var b=el('ptpChBox');if(b)chPosUygula(b);};
+      window.addEventListener('resize',_yenidenKonumla);
+      window.addEventListener('orientationchange',function(){setTimeout(_yenidenKonumla,150);});
     }
     window._ptpChDragTasi=tasi;
     window._ptpChDragBirak=birak;
-    // KULLANICI TALEBİ ("Dikey ve yatay ekran modları için bir düzenleme"): Telefon
-    // döndürüldüğünde görünür alanın eni/boyu yer değiştirir - bu dinleyici, kumanda AÇIKKEN
-    // her yön/boyut değişiminde konumu yeniden hesaplayıp ekran içine kırpar. Sadece BİR KEZ
-    // (tüm oturum boyunca) bağlanır.
-    if(!window._ptpChOrientBound){
-      window._ptpChOrientBound=true;
-      var _chYonDegisti=function(){
-        var b=el('ptpChBox');
-        if(!b)return; // Kumanda kapalıysa dokunma.
-        ptpChPosUygula(b);
-      };
-      window.addEventListener('resize',_chYonDegisti);
-      window.addEventListener('orientationchange',function(){setTimeout(_chYonDegisti,120);});
-    }
   }
   // KULLANICI TALEBİ ("arama çubuğu ile beraber olsun"): Satır oluşturma mantığı, hem ilk
   // çizimde hem de her arama tuş vuruşunda (renderChannelListOverlay'i TAMAMEN yeniden
@@ -22489,7 +22699,13 @@ window.openVideoWatch=function(videoId){
     // uygulamanın içinde göstermektense, yayın yeni sekmede kendi platformunda açılır.
     playerHtml=buildExternalWatchCardHtml(videoId,v.isLive);
   }
-  const fsBtn=isIframeLike?`<button onclick="togglePtVideoFullscreen()" title="Tam Ekran" aria-label="Tam Ekran" style="position:absolute;top:.5rem;right:.5rem;z-index:5;background:rgba(0,0,0,.55);border:none;border-radius:8px;width:32px;height:32px;color:#fff;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center">⛶</button>`:'';
+  // KULLANICI TALEBİ ("Samsung kendi oynatıcısı devreye giriyor, biz de benzer bir şey
+  // yapabilir miyiz?"): Bu düğme ÖNCEDEN sadece tarayıcının çıplak tam ekranını açıyordu -
+  // gömülü oynatıcı büyüyor ama üzerinde BİZE ait hiçbir kontrol olmuyordu (ekran modu,
+  // dikey-yatay, kilit yok; hepsi platformun kendi arayüzüne kalıyordu). Artık kendi tam
+  // ekran kabuğumuzu (PTFrame) açıyor - Samsung'un video yardımcısının yaptığı işlerin
+  // web'den yapılabilen karşılıkları. Ayrıntılı gerekçe için CSS'teki .ptf-* notuna bakın.
+  const fsBtn=isIframeLike?`<button onclick="PTFrame.ac('${escAttr(v.title||'Video')}')" title="Büyük Ekran Oynatıcı" aria-label="Büyük Ekran Oynatıcı" style="position:absolute;top:.5rem;right:.5rem;z-index:5;background:rgba(0,0,0,.55);border:none;border-radius:8px;width:32px;height:32px;color:#fff;font-size:1rem;cursor:pointer;display:flex;align-items:center;justify-content:center">⛶</button>`:'';
   // Yedek bağlantı BİLEREK #videoPlayerBox'ın DIŞINDA tutulur - kutu tam ekrana geçtiğinde
   // (bkz. CSS: #videoPlayerBox:fullscreen iframe) sadece iframe genişler, bu küçük metin
   // tam ekran görünümüne karışmaz.
