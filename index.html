@@ -1780,7 +1780,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-27-L';
+window.APP_BUILD='2026-08-27-N';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20319,6 +20319,78 @@ window.PTFrame=(function(){
     if(!f||!f.contentWindow)return;
     try{f.contentWindow.postMessage(JSON.stringify({event:'command',func:fn,args:args||[]}),'*');}catch(e){}
   }
+  // ── DURUM DİNLEME: GÖMÜLÜ YAYINI "NORMAL KANAL" SEVİYESİNE ÇIKARIR ────────────────────
+  // KULLANICI TALEBİ ("TV linkleri için kullandığımız oynatıcı ve kumanda, YouTube linkleri
+  // için de tam kapasite karşılasın"):
+  // Şimdiye kadar gömülü yayına yalnızca KOMUT gönderiyorduk - tek yönlü. Bu yüzden ilerleme
+  // çubuğu yoktu, ⏯ düğmesi gerçek durumu değil kendi tahminini gösteriyordu ve ses düzeyi
+  // bilinmiyordu. Oysa YouTube'un IFrame API'si, kendisine {event:'listening'} gönderildiğinde
+  // GERİYE de sürekli durum mesajı akıtıyor. Aşağıdaki dinleyici o akışı okuyup oynatıcının
+  // kendi kanallarındakiyle AYNI bilgileri elde ediyor: anlık konum, toplam süre, gerçek
+  // oynatma durumu, ses düzeyi, sessizlik ve oynatma hızı.
+  // HÂLÂ ELDE EDİLEMEYENLER ve sebebi: altyazı listesi, ses dili ve video kalitesi iframe'in
+  // İÇİNDEKİ arayüze aittir; görüntü filtreleri (parlaklık/kontrast) ise piksellere erişim
+  // gerektirir - çapraz kaynak kuralı ikisine de kapalıdır.
+  function ytDinlemeBaslat(){
+    var f=cerceve();
+    if(!f||!f.contentWindow)return;
+    try{f.contentWindow.postMessage(JSON.stringify({event:'listening',id:'ptframe',channel:'widget'}),'*');}catch(e){}
+  }
+  function ytMesaj(e){
+    if(!A)return;
+    if(!/youtube(-nocookie)?\.com$/.test(String(e.origin||'').replace(/^https?:\/\//,'')))return;
+    var d;
+    try{d=typeof e.data==='string'?JSON.parse(e.data):e.data;}catch(err){return;}
+    if(!d)return;
+    if(d.event==='onReady'||d.event==='initialDelivery')ytDinlemeBaslat();
+    var i=d.info||(d.event==='infoDelivery'?d.info:null);
+    if(!i)return;
+    if(typeof i.currentTime==='number')A.pos=i.currentTime;
+    if(typeof i.duration==='number'&&i.duration>0)A.dur=i.duration;
+    if(typeof i.volume==='number')A.ses=Math.round(i.volume);
+    if(typeof i.muted==='boolean')A.sessiz=i.muted;
+    if(typeof i.playbackRate==='number')A.hiz=i.playbackRate;
+    // playerState: 1=oynuyor, 2=duraklatıldı, 3=arabelleğe alınıyor
+    if(typeof i.playerState==='number'&&i.playerState>=0){
+      var yeni=(i.playerState===1||i.playerState===3);
+      if(yeni!==A.oynuyor){
+        A.oynuyor=yeni;
+        var p=document.getElementById('ptfPlay');
+        if(p)p.textContent=A.oynuyor?'⏸️':'▶️';
+      }
+    }
+    ytArayuzTazele();
+  }
+  // Sadece DEĞERLERİ tazeler - tüm arayüzü yeniden çizmez. Saniyede birkaç kez gelen durum
+  // mesajında innerHTML yazmak, düğmeleri parmağın altından kaydırırdı.
+  function ytArayuzTazele(){
+    if(!A)return;
+    var bar=document.getElementById('ptfSeek');
+    if(bar&&A.dur&&!A.seekTutuluyor){
+      bar.max=Math.round(A.dur);
+      bar.value=Math.round(A.pos||0);
+    }
+    var c=document.getElementById('ptfCur'),t=document.getElementById('ptfTot');
+    if(c)c.textContent=ptfSure(A.pos||0);
+    if(t)t.textContent=A.canli?'CANLI':ptfSure(A.dur||0);
+    var m=document.getElementById('ptfMute');
+    if(m)m.textContent=A.sessiz?'🔇':'🔈';
+    var h=document.getElementById('ptfHiz');
+    if(h)h.textContent=(A.hiz||1)+'x';
+    // Kumanda açıksa oradaki değerler de aynı anda güncellenir - iki arayüz asla ayrışmaz.
+    var rc=document.getElementById('ptfRcBox');
+    if(rc){
+      var rb=rc.querySelector('.rcx-prog input');
+      if(rb&&A.dur&&!A.seekTutuluyor){rb.max=Math.round(A.dur);rb.value=Math.round(A.pos||0);}
+      var rr=rc.querySelectorAll('.rcx-prog .r span');
+      if(rr&&rr.length===2){rr[0].textContent=ptfSure(A.pos||0);rr[1].textContent=A.canli?'CANLI':ptfSure(A.dur||0);}
+    }
+  }
+  function ptfSure(sn){
+    sn=Math.max(0,Math.floor(sn||0));
+    var s2=sn%60,d2=Math.floor(sn/60)%60,h2=Math.floor(sn/3600);
+    return (h2?h2+':'+String(d2).padStart(2,'0'):String(d2))+':'+String(s2).padStart(2,'0');
+  }
   function bildir(msg){
     var t=document.getElementById('ptfToast');
     if(!t)return;
@@ -20382,7 +20454,16 @@ window.PTFrame=(function(){
           +(yt?'<button class="ptp-btn ptp-play" id="ptfPlay" title="Oynat / Duraklat">⏸️</button>':'')
           +(yt?'<button class="ptp-btn" id="ptfFwd" title="İleri sar">⏩</button>':'')
         +'</div>'
-        +'<div class="ptp-bot"><div class="ptp-row">'
+        +'<div class="ptp-bot">'
+          // KULLANICI TALEBİ ("tam kapasite"): Kendi kanallarımızdaki oynatıcıda olan ilerleme
+          // çubuğu ve süre göstergesi artık gömülü yayınlarda da var - değerler YouTube'un
+          // durum akışından geliyor (bkz. ytMesaj). Canlı yayında toplam süre yerine "CANLI"
+          // yazar ve çubuk sarma için değil, canlıdan ne kadar geride kalındığını göstermek
+          // için kullanılır.
+          +'<div class="ptp-times"><span id="ptfCur">0:00</span><span class="ptp-sp"></span>'
+            +'<span id="ptfTot">'+(canli?'CANLI':'0:00')+'</span></div>'
+          +'<div class="ptp-seekwrap"><input type="range" class="ptp-seek" id="ptfSeek" min="0" max="100" value="0"/></div>'
+        +'<div class="ptp-row">'
           // KULLANICI TALEBİ ("ekstra ses tuşları"): YouTube gömme oynatıcısının ses düzeyi,
           // IFrame API üzerinden 0-100 arası ayarlanabiliyor - bu yüzden gerçek bir ses
           // kontrolü sunulabiliyor. YouTube DIŞINDAKİ platformlarda böyle bir arayüz yok;
@@ -20404,6 +20485,7 @@ window.PTFrame=(function(){
           +'<button class="ptp-btn" id="ptfVolUp" title="Ses arttır"'+(yt?'':' disabled')+'>🔊</button>'
           +'<button class="ptp-btn" id="ptfFit" style="font-size:.6rem;font-weight:800" title="Ekran modu">📐 Sığdır</button>'
           +'<button class="ptp-btn" id="ptfRot" title="Dikey / Yatay">🔄</button>'
+          +'<button class="ptp-btn" id="ptfHiz" style="font-size:.62rem;font-weight:800" title="Oynatma hızı">1x</button>'
           +'<button class="ptp-btn" id="ptfLock" title="Ekran kilidi">🔓</button>'
         +'</div></div>'
       +'</div>'
@@ -20438,11 +20520,9 @@ window.PTFrame=(function(){
     });
     tikla('ptfRot',function(){dikeyYatay();});
     tikla('ptfLock',function(){kilit(true);});
-    tikla('ptfPlay',function(){
-      A.oynuyor=!A.oynuyor;
-      ytKomut(A.oynuyor?'playVideo':'pauseVideo');
-      var e=document.getElementById('ptfPlay');if(e)e.textContent=A.oynuyor?'⏸️':'▶️';
-    });
+    // Durum akışı bağlandığı için ⏯ artık tahmin yürütmüyor: komut gönderiliyor, gerçek
+    // sonuç YouTube'dan geri geldiğinde ikon ona göre güncelleniyor (bkz. ytMesaj).
+    tikla('ptfPlay',function(){ytKomut(A.oynuyor?'pauseVideo':'playVideo');});
     tikla('ptfBack',function(){ytKomut('seekTo',[-10],true);bildir('⏪ 10 sn geri');});
     tikla('ptfFwd',function(){ytKomut('seekTo',[10],true);bildir('⏩ 10 sn ileri');});
     tikla('ptfVolUp',function(){sesAyarla(A.ses+10);});
@@ -20450,13 +20530,33 @@ window.PTFrame=(function(){
     tikla('ptfNext',function(){ptfKanal(1);});
     tikla('ptfRc',function(){ptfKumanda();});
     tikla('ptfLive',function(){ytKomut('seekTo',[9e9],true);bildir('🔴 Canlıya dönüldü');});
-    tikla('ptfVolDn',function(){sesAyarla(A.ses-10);});
-    tikla('ptfMute',function(){
-      A.sessiz=!A.sessiz;
-      ytKomut(A.sessiz?'mute':'unMute');
-      var e=document.getElementById('ptfMute');if(e)e.textContent=A.sessiz?'🔇':'🔈';
-      bildir(A.sessiz?'🔇 Ses kapalı':'🔈 Ses açık');
+    tikla('ptfHiz',function(){
+      var sira=[0.5,0.75,1,1.25,1.5,2];
+      var i=sira.indexOf(A.hiz||1);
+      A.hiz=sira[(i<0?2:i+1)%sira.length];
+      ytKomut('setPlaybackRate',[A.hiz]);
+      ytArayuzTazele();bildir('⏱ Hız: '+A.hiz+'x');
     });
+    var sk=document.getElementById('ptfSeek');
+    if(sk){
+      sk.addEventListener('pointerdown',function(e){e.stopPropagation();A.seekTutuluyor=true;});
+      sk.addEventListener('click',function(e){e.stopPropagation();});
+      sk.addEventListener('input',function(e){
+        e.stopPropagation();
+        var c=document.getElementById('ptfCur');
+        if(c)c.textContent=ptfSure(Number(sk.value));
+      });
+      sk.addEventListener('change',function(e){
+        e.stopPropagation();A.seekTutuluyor=false;
+        ytKomut('seekTo',[Number(sk.value),true]);
+      });
+    }
+    // Durum akışını başlat - iframe henüz yüklenmemiş olabileceği için birkaç kez denenir.
+    ytDinlemeBaslat();
+    [400,1200,2500].forEach(function(ms){setTimeout(ytDinlemeBaslat,ms);});
+    if(!window._ptfMsgBagli){window._ptfMsgBagli=true;window.addEventListener('message',ytMesaj);}
+    tikla('ptfVolDn',function(){sesAyarla(A.ses-10);});
+    tikla('ptfMute',function(){ytKomut(A.sessiz?'unMute':'mute');});
     var unlock=document.getElementById('ptfUnlock');
     if(unlock)unlock.addEventListener('click',function(ev){ev.stopPropagation();kilit(false);});
     // Tek dokunma alanı: TÜM görüntüyü kaplar ve kontrolleri açıp kapatır. Kontrollerin
@@ -20551,7 +20651,9 @@ window.PTFrame=(function(){
       oynuyor:A.oynuyor!==false,
       sessiz:!!A.sessiz,
       buf:A.buf||'',
-      sure:null,
+      // Gömülü yayında da GERÇEK ilerleme gösterilir - değerler YouTube'un durum akışından
+      // gelir (bkz. ytMesaj). Canlıda ilerleme çubuğu anlamsız olduğu için çizilmez.
+      sure:(!A.canli&&A.dur)?{cur:ptfSure(A.pos||0),tot:ptfSure(A.dur),yuzde:((A.pos||0)/A.dur)*100}:null,
       fit:A.fit||'contain',
       yatay:!!(A.rotate||A.yatayKilit),
       tamEkran:!!(document.fullscreenElement||document.webkitFullscreenElement),
@@ -20581,6 +20683,16 @@ window.PTFrame=(function(){
     box.id='ptfRcBox';box.className='ptf-rcbox rcx-panel';
     box.innerHTML=govde;
     b.appendChild(box);
+    // Kumandadaki ilerleme çubuğu da gerçek sarma yapar.
+    var rcSeek=box.querySelector('.rcx-prog input');
+    if(rcSeek){
+      rcSeek.addEventListener('pointerdown',function(e){e.stopPropagation();A.seekTutuluyor=true;});
+      rcSeek.addEventListener('click',function(e){e.stopPropagation();});
+      rcSeek.addEventListener('change',function(e){
+        e.stopPropagation();A.seekTutuluyor=false;
+        ytKomut('seekTo',[Number(rcSeek.value),true]);
+      });
+    }
     box.addEventListener('click',function(ev){
       ev.stopPropagation();
       var satir=ev.target.closest('[data-vid]');
@@ -20603,20 +20715,12 @@ window.PTFrame=(function(){
     if(a.indexOf('tab-')===0){A.rcSekme=a.slice(4);ptfKumandaCiz();return;}
     if(a==='prev'){ptfKanal(-1);return;}
     if(a==='next'){ptfKanal(1);return;}
-    if(a==='playpause'){
-      A.oynuyor=!A.oynuyor;ytKomut(A.oynuyor?'playVideo':'pauseVideo');
-      var p=document.getElementById('ptfPlay');if(p)p.textContent=A.oynuyor?'⏸️':'▶️';
-      ptfKumandaCiz();return;
-    }
+    if(a==='playpause'){ytKomut(A.oynuyor?'pauseVideo':'playVideo');return;}
     if(a==='seekback'){ytKomut('seekTo',[-10],true);bildir('⏪ 10 sn geri');return;}
     if(a==='seekfwd'){ytKomut('seekTo',[10],true);bildir('⏩ 10 sn ileri');return;}
     if(a==='volup'){sesAyarla(A.ses+10);return;}
     if(a==='voldown'){sesAyarla(A.ses-10);return;}
-    if(a==='mute'){
-      A.sessiz=!A.sessiz;ytKomut(A.sessiz?'mute':'unMute');
-      var m=document.getElementById('ptfMute');if(m)m.textContent=A.sessiz?'🔇':'🔈';
-      ptfKumandaCiz();return;
-    }
+    if(a==='mute'){ytKomut(A.sessiz?'unMute':'mute');return;}
     if(a==='golive'){ytKomut('seekTo',[9e9],true);bildir('🔴 Canlıya dönüldü');return;}
     if(a==='dikeyyatay'){dikeyYatay();ptfKumandaCiz();return;}
     if(a==='fstoggle'){tamEkranDegistir();setTimeout(ptfKumandaCiz,200);return;}
@@ -20636,15 +20740,16 @@ window.PTFrame=(function(){
       setTimeout(function(){if(typeof window.openVideoWatch==='function')window.openVideoWatch(id);},80);
       return;
     }
+    if(a==='seek')return;   // çubuğun kendisi aşağıda ayrıca bağlanır
     if(/^[0-9]$/.test(a)){A.buf=((A.buf||'')+a).slice(-3);ptfKumandaCiz();return;}
   }
   function sesAyarla(v){
     if(!A)return;
-    A.ses=Math.max(0,Math.min(100,Math.round(v)));
-    if(A.ses>0&&A.sessiz){A.sessiz=false;ytKomut('unMute');
-      var m=document.getElementById('ptfMute');if(m)m.textContent='🔈';}
-    ytKomut('setVolume',[A.ses]);
-    bildir('🔊 '+A.ses+'%');
+    var yeni=Math.max(0,Math.min(100,Math.round(v)));
+    if(yeni>0&&A.sessiz)ytKomut('unMute');
+    ytKomut('setVolume',[yeni]);
+    A.ses=yeni;            // akış birazdan gerçek değeri zaten teyit edecek
+    bildir('🔊 '+yeni+'%');
   }
   function tamEkranDegistir(){
     var b=kutu();if(!b)return;
@@ -20712,7 +20817,8 @@ window.PTFrame=(function(){
     if(!b){return;}
     if(!cerceve()){return;} // Gömülü oynatıcı yoksa kabuğun anlamı yok
     A={fit:'contain',rotate:0,kilitli:false,oynuyor:true,yatayKilit:false,ses:100,sessiz:false,gizli:false,
-       toastT:null,canli:!!canli,videoId:videoId||null,baslik:baslik||'',buf:'',rcSekme:'kumanda'};
+       toastT:null,canli:!!canli,videoId:videoId||null,baslik:baslik||'',buf:'',rcSekme:'kumanda',
+       pos:0,dur:0,hiz:1,seekTutuluyor:false};
     bagla(baslik||'',!!canli);
     // Tam ekranı kutunun KENDİSİNE uygularız - iframe DOM'da YERİNDE KALIR. iframe'i başka
     // bir kapsayıcıya TAŞIMAK onu yeniden yükler (video baştan başlar), bu yüzden bilerek
@@ -20759,7 +20865,7 @@ window.PTFrame=(function(){
       if(fsEl){var ex=document.exitFullscreen||document.webkitExitFullscreen;if(ex)ex.call(document).catch(function(){});}
     }catch(e){}
   }
-  return {ac:ac,kapat:kapat,aktif:function(){return !!A;}};
+  return {ac:ac,kapat:kapat,aktif:function(){return !!A;},kumandaAc:function(){if(A&&!document.getElementById('ptfRcBox'))ptfKumandaCiz();}};
 })();
 // Gömülü görüntünün sağ üst köşesine dokunulduğunda büyük ekran düğmesini açar/kapatır.
 // KİLİT KORUMASI (kullanıcı talebi): Oynatıcı kilidi aktifken düğme HİÇ görünmez - kilidin
@@ -23297,6 +23403,16 @@ window.openVideoWatch=function(videoId){
     return;
   }
   const urlOnceden=ptExtractVideoUrl(v.url||'');
+  // Geçiş öncesi görünüm durumunu sakla (bkz. aşağıdaki "TÜR DEĞİŞİMİNDE SÜREKLİLİK" notu).
+  try{
+    var _oncekiTam=!!(document.querySelector('.ptp.ptp-fs')||document.querySelector('#videoPlayerBox.ptf-on'));
+    var _oncekiKumanda=!!(document.getElementById('ptpChBox')||document.getElementById('ptfRcBox'));
+    window._ptGecisDurumu=(_oncekiTam||_oncekiKumanda)?{tamEkran:_oncekiTam,kumanda:_oncekiKumanda}:null;
+  }catch(e){window._ptGecisDurumu=null;}
+  // Farklı TÜRDE bir oynatıcıya geçiliyorsa, eski motor bırakılmadan yeni ekran kurulursa
+  // eski oturumun zamanlayıcıları ve dinleyicileri artık var olmayan DOM'a bağlı kalır ve
+  // sessizce hata üretmeye devam eder. Her iki motor da burada kesin olarak kapatılır.
+  try{if(window.PTFrame&&PTFrame.aktif())PTFrame.kapat();}catch(e){}
   // KÖK SEBEP DÜZELTMESİ (ÜÇÜNCÜ ve GERÇEK neden - kullanıcı bildirdi: "yatay ekranda kanal
   // değiştirince ekran dikey oluyor, ekran oranı hiçbir şekilde değişmeyecek"): Önceki iki
   // düzeltme (CSS sınıfı + zamanlama) CSS katmanındaydı, ama GERÇEK sebep hiç orada değildi -
@@ -23398,11 +23514,47 @@ window.openVideoWatch=function(videoId){
   // ÖNCE eski PTPlayer oturumu (aktifse) açıkça ve tam olarak kapatılır.
   if(window.PTPlayer&&PTPlayer.isActive())PTPlayer.destroy();
   document.getElementById('sheetContent').innerHTML=html;
-  // Gömülü yayında büyük ekran düğmesini kısa süre göster, sonra çek (bkz. ptfFsBtnTanit).
-  if(isIframeLike&&typeof window.ptfFsBtnTanit==='function')window.ptfFsBtnTanit();
+  // ── TÜR DEĞİŞİMİNDE SÜREKLİLİK ────────────────────────────────────────────────────────
+  // KULLANICI BİLDİRDİ ("Herhangi bir linkten YouTube linkine geçince oynatıcı farklı diye
+  // hata veriyor. Kanal geçişi normal olsun, oynatıcı ve kumanda sistemi YouTube ile beraber
+  // aynı olsun."):
+  // Kanal listesinde m3u8 kanallarla YouTube kanalları YAN YANA duruyor. Biri kendi
+  // oynatıcımızla (PTPlayer), diğeri gömülü kabukla (PTFrame) açılıyor. Kullanıcı ⏭ ile
+  // aralarında geçtiğinde ise EKRAN TAMAMEN SIFIRDAN kuruluyor: tam ekran düşüyor, kumanda
+  // kapanıyor, kullanıcı kendini küçük bir kutunun içinde buluyordu - "oynatıcı farklı diye
+  // hata veriyor" dediği durum buydu.
+  // ÇÖZÜM: Geçişten ÖNCE hangi görünümde olunduğu (tam ekran mı, kumanda açık mıydı)
+  // hatırlanır; yeni kanal gömülü türdeyse kabuk O DURUMLA açılır. Böylece kullanıcı için
+  // kanal geçişi, iki kanalın teknik olarak farklı motorlarla açılmasına rağmen KESİNTİSİZ
+  // görünür - ekran modu, tam ekran ve kumanda aynen devam eder.
+  if(isIframeLike){
+    var _devam=window._ptGecisDurumu;
+    window._ptGecisDurumu=null;
+    if(typeof window.ptfFsBtnTanit==='function')window.ptfFsBtnTanit();
+    if(_devam&&_devam.tamEkran&&window.PTFrame){
+      setTimeout(function(){
+        try{
+          PTFrame.ac(v.title||'Video',!!v.isLive,videoId);
+          if(_devam.kumanda)setTimeout(function(){try{PTFrame.kumandaAc();}catch(e){}},260);
+        }catch(e){}
+      },120);
+    }
+  }
   // Özel oynatıcı, DOM hazır olduktan SONRA kurulur (kendi <video> etiketini kendisi yaratır).
   if(ozelOynatici&&window.PTPlayer){
     PTPlayer.mount('ptPlayerHost',{url:url,title:v.title||'',isLive:!!v.isLive,videoId:videoId});
+    // Ters yön: gömülü bir YouTube kanalından kendi oynatıcımıza geçilirken de tam ekran ve
+    // kumanda durumu korunur (bkz. "TÜR DEĞİŞİMİNDE SÜREKLİLİK" notu). İki motor arasında
+    // gidip gelirken kullanıcı hiçbir kopukluk hissetmemeli.
+    try{
+      var _dv=window._ptGecisDurumu;window._ptGecisDurumu=null;
+      if(_dv&&_dv.tamEkran&&typeof PTPlayer.enterFullscreen==='function'){
+        setTimeout(function(){try{PTPlayer.enterFullscreen();}catch(e){}},150);
+      }
+      if(_dv&&_dv.kumanda&&typeof PTPlayer.openChannelList==='function'){
+        setTimeout(function(){try{PTPlayer.openChannelList();}catch(e){}},320);
+      }
+    }catch(e){}
     if(oncekiGorselDurum&&typeof PTPlayer.applyVisualState==='function')PTPlayer.applyVisualState(oncekiGorselDurum);
     // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "yatay ekranda kanal değiştirince ekran dikey
     // oluyor" - bu ONA sebep olan asıl mekanizmaydı): Tam ekran geri yükleme önceden 80ms'lik
