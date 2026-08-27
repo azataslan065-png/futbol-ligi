@@ -1066,6 +1066,10 @@ body.ptp-fs-active{overflow:hidden}
    ═══════════════════════════════════════════════════════════════════════════════════════ */
 .rcx-panel,#ptpChBox{--rcu:12px}
 .rcx-panel,#ptpChBox{container-type:inline-size;--rcu:clamp(6px,5.7cqw,9.6px)}
+/* Telefon kumandaya dönüştüğünde panel ekranın tamamına sahiptir - taban ölçüsünün üst sınırı
+   yükseltilir, böylece aynı tasarım daha büyük ve parmağa daha uygun çıkar. Oran sistemi
+   değişmediği için görünüm birebir aynı kalır, sadece ölçeklenir. */
+#sheetContent.rcx-panel{--rcu:clamp(8px,5.7cqw,14px)}
 .rcx-panel,#ptpChBox{font-size:var(--rcu)}
 .rcx-head{display:flex;align-items:center;gap:calc(var(--rcu)*.36);
   margin-bottom:calc(var(--rcu)*.36);flex-shrink:0}
@@ -1780,7 +1784,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-27-N';
+window.APP_BUILD='2026-08-27-O';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -19198,6 +19202,10 @@ function renderRemoteControllerScreen(){
   // kalkınca bir sonraki turda ekrana yansır) - böylece taşıma işlemi hiçbir zaman
   // yarıda kesilmez.
   if(window._rcSurukleniyor)return;
+  // Kullanıcı bir kaydırıcıyı (ses, parlaklık, hız, altyazı boyutu...) parmağıyla tutuyorsa
+  // yeniden çizim ERTELENİR - aksi halde kaydırıcı parmağın altından silinir ve ayar hiç
+  // iletilmez (bkz. remoteCtrlSendSlider üzerindeki uzun not).
+  if(window._rcSliderTutuluyor)return;
   var data=window._remoteCtrlSessionData;
   var buf=window._remoteCtrlBuf||'';
   var isLiveMode=data?!!data.isLive:true;
@@ -19363,8 +19371,13 @@ function renderRemoteControllerScreen(){
     // KULLANICI TALEBİ ("Ekran hangi modda olursa olsun ... onayladığım kumanda tasarımı
     // olacak"): Genişlik YÖNDEN BAĞIMSIZ - tasarım her iki modda da aynı. Yatayda yalnızca
     // yükseklik sınırı değişir; içerik sığmazsa kutu kendi içinde kayar.
-    el.style.maxWidth='min(64vw,182px)';
-    el.style.maxHeight=_yatay?'96vh':'min(88vh,640px)';
+    // KULLANICI TALEBİ ("telefon kumanda olduğunda kumanda görünümü daha büyük olabilir"):
+    // Oynatıcı İÇİNDEKİ kumanda, videonun üstünde yüzen bir katmandır - görüntüyü kapatmaması
+    // için dar tutulur. Telefon KUMANDAYA dönüştüğünde ise ekranda başka bir iş yoktur; o
+    // yüzden panel burada belirgin biçimde büyür ve tuşlar parmağa göre rahatlar. İki bağlam
+    // farklı olduğundan ölçüler de bilerek farklıdır - tasarım aynı, ölçek farklı.
+    el.style.maxWidth='min(92vw,330px)';
+    el.style.maxHeight=_yatay?'96vh':'min(92vh,760px)';
     el.style.overflowY='auto';
     el.style.overflowX='hidden';
     el.style.padding='calc(var(--rcu,9px)*.8)';
@@ -19648,9 +19661,32 @@ window.remoteCtrlToggleFullscreen=function(){sendRemoteCommand('fullscreen');};
 window._remoteCtrlSettingsTab=window._remoteCtrlSettingsTab||'main';
 window.remoteCtrlSettingsNav=function(tab){window._remoteCtrlSettingsTab=tab;renderRemoteControllerScreen();};
 window.remoteCtrlSend=function(action,value){sendRemoteCommand(action,value);};
-window.remoteCtrlSendSlider=function(action,inputId){
+// KULLANICI BİLDİRDİ ("telefon kumanda moduna geçince bazı ayarlar olmuyor, mesela görüntü
+// ayarları TV'ye iletilmiyor"):
+// KÖK SEBEP - komutların karşılığı ALICIDA VARDI (zoom/brightness/contrast/saturation hepsi
+// işleniyor); sorun komutun HİÇ GÖNDERİLEMEMESİYDİ. Kaydırıcılar yalnızca 'onchange' ile,
+// yani parmak KALKTIĞINDA gönderiyordu. Bu ekran ise karşı cihazdan gelen heartbeat ile
+// ~4 saniyede bir tamamen yeniden çiziliyor. Kullanıcı kaydırıcıyı sürüklerken araya bir
+// heartbeat girdiğinde:
+//   1) panel yeniden yazıldığı için kaydırıcı elemanı DOM'dan siliniyor,
+//   2) parmak kalktığında 'change' olayı ARTIK VAR OLMAYAN elemanda tetikleniyor,
+//   3) gönderim fonksiyonu da id ile arayıp bulamıyor ve sessizce çıkıyordu.
+// Yani ayar hiç iletilmiyordu. İki taraflı düzeltildi: (a) değer artık sürüklerken de
+// gönderiliyor (kısa aralıklarla, ağı boğmadan), (b) kaydırıcıya dokunulduğu sürece yeniden
+// çizim erteleniyor (bkz. _rcSliderTutuluyor).
+window.remoteCtrlSliderTut=function(v){window._rcSliderTutuluyor=!!v;};
+window.remoteCtrlSendSlider=function(action,inputId,anlik){
   var i=document.getElementById(inputId);
-  if(i)sendRemoteCommand(action,i.value);
+  if(!i)return;
+  if(anlik){
+    // Sürükleme sırasında: en fazla 150ms'de bir gönder - hem TV anında tepki verir hem de
+    // her piksel için ayrı bir yazma isteği oluşmaz.
+    var now=Date.now();
+    window._rcSliderSon=window._rcSliderSon||{};
+    if(now-(window._rcSliderSon[action]||0)<150)return;
+    window._rcSliderSon[action]=now;
+  }
+  sendRemoteCommand(action,i.value);
 };
 function remoteCtrlSettingsOpt(label,selected,onclick){
   return '<button onclick="'+onclick+'" style="width:100%;display:flex;align-items:center;gap:.5rem;padding:.55rem .3rem;background:none;border:none;border-bottom:1px solid var(--br);color:var(--tx);text-align:left;cursor:pointer;font-family:inherit;font-size:.72rem">'
@@ -19660,8 +19696,10 @@ function remoteCtrlSettingsSlider(id,label,min,max,step,val,birim,action){
   return '<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem .3rem">'
     +'<label style="flex-shrink:0;width:5.2rem;font-size:.66rem;color:var(--mu)">'+label+'</label>'
     +'<input type="range" id="'+id+'" min="'+min+'" max="'+max+'" step="'+step+'" value="'+val+'" style="flex:1"'
-    +' oninput="document.getElementById(\''+id+'V\').textContent=this.value+\''+birim+'\'"'
-    +' onchange="remoteCtrlSendSlider(\''+action+'\',\''+id+'\')"/>'
+    +' onpointerdown="remoteCtrlSliderTut(true)" onpointerup="remoteCtrlSliderTut(false)"'
+    +' onpointercancel="remoteCtrlSliderTut(false)"'
+    +' oninput="document.getElementById(\''+id+'V\').textContent=this.value+\''+birim+'\';remoteCtrlSendSlider(\''+action+'\',\''+id+'\',true)"'
+    +' onchange="remoteCtrlSliderTut(false);remoteCtrlSendSlider(\''+action+'\',\''+id+'\')"/>'
     +'<span id="'+id+'V" style="width:2.8rem;text-align:right;font-size:.66rem;color:var(--mu)">'+val+birim+'</span></div>';
 }
 function remoteCtrlSettingsHtml(data){
@@ -19735,7 +19773,8 @@ function remoteCtrlSettingsHtml(data){
     h+='<div style="display:flex;align-items:center;gap:.5rem;padding:.4rem .3rem">'
       +'<label style="flex-shrink:0;width:5.2rem;font-size:.66rem;color:var(--mu)">Yazı rengi</label>'
       +'<input type="color" id="rcCcCol" value="'+s.cueColor+'" style="flex:1;height:26px;background:none;border:none"'
-      +' onchange="remoteCtrlSendSlider(\'cccolor\',\'rcCcCol\')"/></div>';
+      +' onpointerdown="remoteCtrlSliderTut(true)" onpointerup="remoteCtrlSliderTut(false)"'
+      +' onchange="remoteCtrlSliderTut(false);remoteCtrlSendSlider(\'cccolor\',\'rcCcCol\')"/></div>';
     h+=remoteCtrlSettingsOpt('Arka plan: Siyah',s.cueBg==='rgba(0,0,0,0.72)','remoteCtrlSend(\'ccbg\',\'rgba(0,0,0,0.72)\')');
     h+=remoteCtrlSettingsOpt('Arka plan: Yok',s.cueBg==='transparent','remoteCtrlSend(\'ccbg\',\'transparent\')');
     h+=remoteCtrlSettingsSlider('rcCcSync','Senkron',-10,10,.5,s.cueSync,'sn','ccsync');
