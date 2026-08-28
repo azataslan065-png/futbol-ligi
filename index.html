@@ -1360,8 +1360,17 @@ body.ptp-fs-active{overflow:hidden}
    ÇÖZÜM: Kabuk açıkken kutu ARTIK KENDİ BAŞINA tüm ekranı kaplar (position:fixed inset:0).
    Native tam ekran alınabilirse tadından bir şey eksilmez, alınamazsa da kabuk yine tam
    ekran görünür - yani oynatıcının görünürlüğü artık tarayıcı iznine bağlı DEĞİL. */
-#videoPlayerBox.ptf-on{position:fixed;inset:0;width:100vw;height:100dvh;max-width:none;max-height:none;
-  margin:0;z-index:2147483000;background:#000;border-radius:0;overflow:hidden}
+/* KULLANICI BİLDİRDİ ("küçük ekrandayken YouTube için tutarsız ekran oluyor, TV
+   kanallarındaki küçük ekran gibi düzenli görünsün"):
+   Kabuk şimdiye kadar SADECE tam ekranda kuruluyordu. Küçük görünümde ise ortada çıplak bir
+   iframe ve kenarında tek başına duran bir ⛶ düğmesi kalıyordu - TV kanallarında aynı yerde
+   başlık, oynatma tuşları, ilerleme çubuğu ve alt satır varken. İki kanal türü arasındaki
+   tutarsızlık buydu. Kabuk artık KÜÇÜK GÖRÜNÜMDE DE kuruluyor; tam ekran ayrı bir sınıfla
+   (.ptf-fs) uygulanıyor. Yani YouTube kanalı da TV kanalı gibi, küçük ekranda kendi
+   oynatıcısıyla açılıyor ve ⛶ ile büyüyor. */
+#videoPlayerBox.ptf-on{position:relative;aspect-ratio:16/9;background:#000;overflow:hidden}
+#videoPlayerBox.ptf-on.ptf-fs{position:fixed;inset:0;width:100vw;height:100dvh;aspect-ratio:auto;
+  max-width:none;max-height:none;margin:0;z-index:2147483000;border-radius:0}
 #videoPlayerBox.ptf-on > iframe{position:absolute;left:50%;top:50%;transform-origin:50% 50%;border:none;border-radius:0}
 /* Kabuk açıkken uygulamanın kendi ⛶ düğmesi gizlenir - aksi halde kabuğun kendi
    büyüt/küçült tuşuyla ÜST ÜSTE iki ayrı düğme görünüyordu (kullanıcı bunu "görüntü
@@ -1784,7 +1793,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-27-O';
+window.APP_BUILD='2026-08-27-P';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20474,59 +20483,47 @@ window.PTFrame=(function(){
   // daha önemlisi, gömülü bir yayın ile kendi yayınımız arasında görünüm farkı kalmadı.
   // Yerleşim de oynatıcının aynısı: başlık üstte, büyük oynatma tuşları ORTADA, ikincil
   // kontroller altta tek sırada. Böylece düğmeler videonun üstüne yayılmıyor.
+  // KULLANICI TALEBİ ("Siyah fotoğraftaki oynatıcı düzeninin birebir aynısını YouTube ekranı
+  // için de uygula" + "küçük ekrandayken YouTube için tutarsız ekran oluyor"):
+  // Kabuk artık kendi düzenini kurmuyor - TV kanallarındaki oynatıcının (PTPlayer) üst çubuk,
+  // orta tuşlar ve alt satır YERLEŞİMİNİ birebir tekrar ediyor: aynı sınıflar, aynı sıra,
+  // aynı düğmeler. Böylece kanal m3u8 de olsa YouTube da olsa kullanıcı AYNI oynatıcıyı görür.
+  // Yalnızca elde edilemeyen bilgiye bağlı düğmeler (altyazı, ses pisti, kalite) yok - onlar
+  // iframe'in içindeki arayüze ait olduğundan dışarıdan erişilemiyor.
   function kabukHtml(baslik,canli){
     var yt=youtubeMu();
+    var k=yt?'':' disabled';
     return '<div class="ptf-tap" id="ptfTap"></div>'
       +'<div class="ptf-toast" id="ptfToast"></div>'
       +'<div class="ptp-ov" id="ptfOv">'
         +'<div class="ptp-top">'
-          +'<span class="ptp-title">'+(baslik||'').replace(/</g,'&lt;')+'</span>'
           +(canli?'<span class="ptp-live">🔴 CANLI</span>':'')
-          // "Ekranı büyüt / küçült" - kapatma DEĞİL. Eskiden sağ üstte sadece ✕ vardı ve
-          // altında uygulamanın kendi ⛶ düğmesi de görünmeye devam ediyordu (iki ayrı tuş,
-          // kirlilik). O düğme kabuk açıkken artık gizleniyor (bkz. CSS .ptf-on > button).
-          +'<button class="ptp-btn" id="ptfExpand" title="Ekranı büyüt / küçült">⛶</button>'
+          +'<div class="ptp-title">'+(baslik||'').replace(/</g,'&lt;')+'</div>'
+          +'<button class="ptp-btn" id="ptfFit" title="Ekran Modu">⬜</button>'
+          +'<button class="ptp-btn" id="ptfExpand" title="Tam ekran">⛶</button>'
+          +'<button class="ptp-btn" id="ptfRc" title="Kanallar / Kumanda">📺</button>'
+          +'<button class="ptp-btn" id="ptfRot" title="Dikey / Yatay">🔄</button>'
           +'<button class="ptp-btn" id="ptfClose" title="Kapat">✕</button>'
         +'</div>'
         +'<div class="ptp-mid">'
-          +(yt?'<button class="ptp-btn" id="ptfBack" title="Geri sar">⏪</button>':'')
-          +(yt?'<button class="ptp-btn ptp-play" id="ptfPlay" title="Oynat / Duraklat">⏸️</button>':'')
-          +(yt?'<button class="ptp-btn" id="ptfFwd" title="İleri sar">⏩</button>':'')
+          +'<button class="ptp-btn" id="ptfBack" title="Geri sar"'+k+'>⏪</button>'
+          +'<button class="ptp-btn ptp-play" id="ptfPlay" title="Oynat/Duraklat"'+k+'>▶️</button>'
+          +'<button class="ptp-btn" id="ptfFwd" title="İleri sar"'+k+'>⏩</button>'
         +'</div>'
         +'<div class="ptp-bot">'
-          // KULLANICI TALEBİ ("tam kapasite"): Kendi kanallarımızdaki oynatıcıda olan ilerleme
-          // çubuğu ve süre göstergesi artık gömülü yayınlarda da var - değerler YouTube'un
-          // durum akışından geliyor (bkz. ytMesaj). Canlı yayında toplam süre yerine "CANLI"
-          // yazar ve çubuk sarma için değil, canlıdan ne kadar geride kalındığını göstermek
-          // için kullanılır.
-          +'<div class="ptp-times"><span id="ptfCur">0:00</span><span class="ptp-sp"></span>'
-            +'<span id="ptfTot">'+(canli?'CANLI':'0:00')+'</span></div>'
-          +'<div class="ptp-seekwrap"><input type="range" class="ptp-seek" id="ptfSeek" min="0" max="100" value="0"/></div>'
-        +'<div class="ptp-row">'
-          // KULLANICI TALEBİ ("ekstra ses tuşları"): YouTube gömme oynatıcısının ses düzeyi,
-          // IFrame API üzerinden 0-100 arası ayarlanabiliyor - bu yüzden gerçek bir ses
-          // kontrolü sunulabiliyor. YouTube DIŞINDAKİ platformlarda böyle bir arayüz yok;
-          // orada tuşlar gizlenmez, SOLUK ve tıklanamaz durur ki düzen kaymasın.
-          // KULLANICI TALEBİ ("oraya canlı butonu ve diğer kanallara geçiş için kumanda ekle"):
-          // Gömülü oynatıcıda da kanal değiştirmek mümkün - kanal listesi bizim tarafımızda
-          // (D.videoLinks) durduğundan, bir sonraki/önceki yayına geçmek YouTube'a bağlı
-          // değil; uygulamanın kendi izleme ekranı yeniden açılıyor.
-          +'<button class="ptp-btn" id="ptfPrev" title="Önceki kanal">⏮</button>'
-          +'<button class="ptp-btn" id="ptfNext" title="Sonraki kanal">⏭</button>'
-          +'<button class="ptp-btn" id="ptfRc" title="Kumanda">📟</button>'
-          // "Canlıya dön": YouTube canlı yayınında ileri sarma sınırı canlı ucudur - çok
-          // büyük bir konuma atlamak oynatıcıyı en güncel ana çeker. Yalnızca canlı yayında
-          // görünür; kayıtlı videoda anlamsız olurdu.
-          +(canli?'<button class="ptp-btn" id="ptfLive" title="Canlı yayının şu anına dön" style="font-size:.6rem;font-weight:800;color:#ff9a8a">🔴 CANLI</button>':'')
-          +'<span style="flex:1"></span>'
-          +'<button class="ptp-btn" id="ptfVolDn" title="Ses azalt"'+(yt?'':' disabled')+'>🔉</button>'
-          +'<button class="ptp-btn" id="ptfMute" title="Sesi aç / kapat"'+(yt?'':' disabled')+'>🔈</button>'
-          +'<button class="ptp-btn" id="ptfVolUp" title="Ses arttır"'+(yt?'':' disabled')+'>🔊</button>'
-          +'<button class="ptp-btn" id="ptfFit" style="font-size:.6rem;font-weight:800" title="Ekran modu">📐 Sığdır</button>'
-          +'<button class="ptp-btn" id="ptfRot" title="Dikey / Yatay">🔄</button>'
-          +'<button class="ptp-btn" id="ptfHiz" style="font-size:.62rem;font-weight:800" title="Oynatma hızı">1x</button>'
-          +'<button class="ptp-btn" id="ptfLock" title="Ekran kilidi">🔓</button>'
-        +'</div></div>'
+          +'<div class="ptp-times"><span id="ptfCur">'+(canli?'CANLI':'0:00')+'</span>'
+            +'<span class="ptp-sp"></span><span id="ptfTot">'+(canli?'':'0:00')+'</span></div>'
+          +'<div class="ptp-seekwrap"><input type="range" class="ptp-seek" id="ptfSeek" min="0" max="100" step="0.1" value="0"'+(canli?' disabled':'')+'/></div>'
+          +'<div class="ptp-row">'
+            +'<button class="ptp-btn" id="ptfPrev" title="Önceki kanal">⏮️</button>'
+            +'<button class="ptp-btn" id="ptfNext" title="Sonraki kanal">⏭️</button>'
+            +'<button class="ptp-btn" id="ptfMute" title="Ses"'+k+'>🔊</button>'
+            +'<input type="range" class="ptp-vol" id="ptfVol" min="0" max="100" value="100"'+k+'/>'
+            +(canli?'<button class="ptp-btn" id="ptfLive" title="Canlıya dön" style="width:auto;padding:0 .5rem;font-size:.62rem;font-weight:800">CANLIYA DÖN</button>':'')
+            +'<button class="ptp-btn" id="ptfHiz" title="Hız" style="width:auto;padding:0 .5rem;font-size:.66rem;font-weight:800"'+k+'>1x</button>'
+            +'<button class="ptp-btn" id="ptfLock" title="Ekran kilidi">🔓</button>'
+          +'</div>'
+        +'</div>'
       +'</div>'
       +'<button class="ptp-btn ptf-lockbtn" id="ptfUnlock" title="Kilidi aç" style="display:none">🔒</button>';
   }
@@ -20564,7 +20561,6 @@ window.PTFrame=(function(){
     tikla('ptfPlay',function(){ytKomut(A.oynuyor?'pauseVideo':'playVideo');});
     tikla('ptfBack',function(){ytKomut('seekTo',[-10],true);bildir('⏪ 10 sn geri');});
     tikla('ptfFwd',function(){ytKomut('seekTo',[10],true);bildir('⏩ 10 sn ileri');});
-    tikla('ptfVolUp',function(){sesAyarla(A.ses+10);});
     tikla('ptfPrev',function(){ptfKanal(-1);});
     tikla('ptfNext',function(){ptfKanal(1);});
     tikla('ptfRc',function(){ptfKumanda();});
@@ -20594,7 +20590,12 @@ window.PTFrame=(function(){
     ytDinlemeBaslat();
     [400,1200,2500].forEach(function(ms){setTimeout(ytDinlemeBaslat,ms);});
     if(!window._ptfMsgBagli){window._ptfMsgBagli=true;window.addEventListener('message',ytMesaj);}
-    tikla('ptfVolDn',function(){sesAyarla(A.ses-10);});
+    // Ses kaydırıcısı - TV oynatıcısındakiyle aynı yerde ve aynı davranışta.
+    var vol=document.getElementById('ptfVol');
+    if(vol){
+      vol.addEventListener('click',function(e){e.stopPropagation();});
+      vol.addEventListener('input',function(e){e.stopPropagation();sesAyarla(Number(vol.value));});
+    }
     tikla('ptfMute',function(){ytKomut(A.sessiz?'unMute':'mute');});
     var unlock=document.getElementById('ptfUnlock');
     if(unlock)unlock.addEventListener('click',function(ev){ev.stopPropagation();kilit(false);});
@@ -20792,17 +20793,18 @@ window.PTFrame=(function(){
   }
   function tamEkranDegistir(){
     var b=kutu();if(!b)return;
+    // Tam ekran görünümü KENDİ sınıfımızla sağlanır; native tam ekran yalnızca durum
+    // çubuğunu da gizlemek için ek olarak denenir (reddedilirse görünüm yine tam ekrandır).
+    var acik=b.classList.toggle('ptf-fs');
     try{
       var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
-      if(fsEl){var ex=document.exitFullscreen||document.webkitExitFullscreen;if(ex)ex.call(document);}
-      else{var req=b.requestFullscreen||b.webkitRequestFullscreen;if(req)req.call(b).catch(function(){});}
+      if(acik&&!fsEl){var req=b.requestFullscreen||b.webkitRequestFullscreen;
+        if(req){var pr=req.call(b);if(pr&&pr.catch)pr.catch(function(){});}}
+      else if(!acik&&fsEl){var ex=document.exitFullscreen||document.webkitExitFullscreen;if(ex)ex.call(document);}
     }catch(e){}
-    setTimeout(function(){
-      var e2=document.getElementById('ptfExpand');
-      var f=document.fullscreenElement||document.webkitFullscreenElement;
-      if(e2)e2.textContent=f?'🔳':'⛶';
-      olcuUygula();
-    },160);
+    var e2=document.getElementById('ptfExpand');
+    if(e2)e2.textContent=acik?'🔳':'⛶';
+    setTimeout(olcuUygula,160);
   }
   function temizleKabuk(){
     ['ptfOv','ptfToast','ptfTap','ptfUnlock','ptfRcBox'].forEach(function(id){
@@ -20851,7 +20853,7 @@ window.PTFrame=(function(){
     }
     A.rotate=90;olcuUygula();bildir('🖥️ Yatay (görüntü döndürüldü)');
   }
-  function ac(baslik,canli,videoId){
+  function ac(baslik,canli,videoId,tamEkranIste){
     var b=kutu();
     if(!b){return;}
     if(!cerceve()){return;} // Gömülü oynatıcı yoksa kabuğun anlamı yok
@@ -20859,16 +20861,9 @@ window.PTFrame=(function(){
        toastT:null,canli:!!canli,videoId:videoId||null,baslik:baslik||'',buf:'',rcSekme:'kumanda',
        pos:0,dur:0,hiz:1,seekTutuluyor:false};
     bagla(baslik||'',!!canli);
-    // Tam ekranı kutunun KENDİSİNE uygularız - iframe DOM'da YERİNDE KALIR. iframe'i başka
-    // bir kapsayıcıya TAŞIMAK onu yeniden yükler (video baştan başlar), bu yüzden bilerek
-    // taşımıyoruz; sadece kutuyu büyütüp üstüne kendi katmanımızı koyuyoruz.
-    // Native tam ekran DENENİR ama ZORUNLU DEĞİL - kabuk zaten kendi başına tüm ekranı
-    // kaplıyor (bkz. CSS'teki .ptf-on notu). Native alınırsa durum çubuğu da gizlenir,
-    // alınamazsa görünüm yine tam ekrandır.
-    try{
-      var req=b.requestFullscreen||b.webkitRequestFullscreen;
-      if(req){var pr=req.call(b);if(pr&&pr.catch)pr.catch(function(){});}
-    }catch(e){}
+    // Kabuk KÜÇÜK görünümde kurulur (TV kanallarındaki davranışın aynısı); tam ekrana
+    // yalnızca ⛶ ile ya da çağıran taraf açıkça istediğinde geçilir.
+    if(tamEkranIste)tamEkranDegistir();
     setTimeout(function(){
       olcuUygula();
       var e2=document.getElementById('ptfExpand');
@@ -20880,9 +20875,16 @@ window.PTFrame=(function(){
       window.addEventListener('resize',function(){if(A)olcuUygula();});
       window.addEventListener('orientationchange',function(){setTimeout(function(){if(A)olcuUygula();},180);});
       document.addEventListener('fullscreenchange',function(){
+        if(!A)return;
         var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
-        if(!fsEl&&A)kapat();          // Android geri jestiyle çıkıldığında kabuk da kalkar
-        else if(A)setTimeout(olcuUygula,120);
+        var b2=kutu();
+        // Android'in geri jestiyle native tam ekrandan çıkıldığında kabuk KAPANMAZ - yalnızca
+        // küçük görünüme döner. Eskiden burada kapat() çağrılıyordu, bu yüzden geri jesti
+        // oynatıcıyı tamamen yok ediyordu.
+        if(!fsEl&&b2)b2.classList.remove('ptf-fs');
+        var e3=document.getElementById('ptfExpand');
+        if(e3)e3.textContent=fsEl?'🔳':'⛶';
+        setTimeout(olcuUygula,120);
       });
     }
   }
@@ -20894,7 +20896,7 @@ window.PTFrame=(function(){
     if(A){clearTimeout(A.toastT);}
     A=null;
     temizleKabuk();
-    if(b){b.classList.remove('ptf-on','ptf-locked','fsbtn-ac');}
+    if(b){b.classList.remove('ptf-on','ptf-fs','ptf-locked','fsbtn-ac');}
     // iframe'in satır içi ölçüleri TEMİZLENİR - aksi halde küçük görünüme dönünce tam ekran
     // ölçüsünde kalıp taşardı.
     if(f){f.style.position='';f.style.left='';f.style.top='';f.style.width='';f.style.height='';
@@ -23523,12 +23525,10 @@ window.openVideoWatch=function(videoId){
   // dokununca belirir, tekrar dokununca kaybolur (oynatıcının kendi kontrolleriyle aynı
   // mantık). Dokunma alanı BİLEREK sadece o köşedir - görüntünün tamamını kaplayan bir katman,
   // ileride gömülü oynatıcıya geçmesi gereken dokunuşları da yutardı.
-  // NOT: Başlık, onclick'in İÇİNE tırnaklı bir JS dizesi olarak gömülmüyor. Gömülseydi,
-  // içinde kesme işareti olan bir yayın adı (Türkçede çok yaygın) dizeyi ortadan bölüp
-  // onclick'i tamamen bozardı - düğme sessizce çalışmaz hale gelirdi. Değerler data-* ile
-  // taşınıyor, okuma JS tarafında yapılıyor.
-  const fsBtn=isIframeLike?`<div class="ptf-corner" onclick="ptfKoseDegistir(this)"></div>`
-    +`<button class="ptf-fsbtn" onclick="ptfAcTikla(event,this)" data-t="${escAttr(v.title||'Video')}" data-l="${v.isLive?1:0}" data-v="${escAttr(videoId)}" title="Büyük Ekran Oynatıcı" aria-label="Büyük Ekran Oynatıcı">⛶</button>`:'';
+  // Gömülü kanallarda ayrı bir "büyük ekran" düğmesine gerek kalmadı: kabuk artık ekran
+  // açılır açılmaz KÜÇÜK görünümde kuruluyor (bkz. CSS'teki .ptf-on notu) ve tam ekran
+  // düğmesi de onun kendi üst çubuğunda - tıpkı TV kanallarındaki oynatıcıda olduğu gibi.
+  const fsBtn='';
   // Yedek bağlantı BİLEREK #videoPlayerBox'ın DIŞINDA tutulur - kutu tam ekrana geçtiğinde
   // (bkz. CSS: #videoPlayerBox:fullscreen iframe) sadece iframe genişler, bu küçük metin
   // tam ekran görünümüne karışmaz.
@@ -23566,18 +23566,18 @@ window.openVideoWatch=function(videoId){
   // hatırlanır; yeni kanal gömülü türdeyse kabuk O DURUMLA açılır. Böylece kullanıcı için
   // kanal geçişi, iki kanalın teknik olarak farklı motorlarla açılmasına rağmen KESİNTİSİZ
   // görünür - ekran modu, tam ekran ve kumanda aynen devam eder.
-  if(isIframeLike){
+  if(isIframeLike&&window.PTFrame){
     var _devam=window._ptGecisDurumu;
     window._ptGecisDurumu=null;
-    if(typeof window.ptfFsBtnTanit==='function')window.ptfFsBtnTanit();
-    if(_devam&&_devam.tamEkran&&window.PTFrame){
-      setTimeout(function(){
-        try{
-          PTFrame.ac(v.title||'Video',!!v.isLive,videoId);
-          if(_devam.kumanda)setTimeout(function(){try{PTFrame.kumandaAc();}catch(e){}},260);
-        }catch(e){}
-      },120);
-    }
+    // Kabuk HER ZAMAN kurulur - küçük görünümde de oynatıcı görünsün diye. Önceki kanalda
+    // tam ekrandaysak ya da kumanda açıksa o durum aynen sürdürülür; böylece TV kanalından
+    // YouTube kanalına geçiş, iki TV kanalı arasındaki geçişten farksız hissettirir.
+    setTimeout(function(){
+      try{
+        PTFrame.ac(v.title||'Video',!!v.isLive,videoId,!!(_devam&&_devam.tamEkran));
+        if(_devam&&_devam.kumanda)setTimeout(function(){try{PTFrame.kumandaAc();}catch(e){}},260);
+      }catch(e){}
+    },60);
   }
   // Özel oynatıcı, DOM hazır olduktan SONRA kurulur (kendi <video> etiketini kendisi yaratır).
   if(ozelOynatici&&window.PTPlayer){
