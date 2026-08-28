@@ -1093,7 +1093,8 @@ body.ptp-fs-active{overflow:hidden}
 .rcx-ico{flex-shrink:0;width:max(28px,calc(var(--rcu)*1.5));height:max(28px,calc(var(--rcu)*1.5));border-radius:calc(var(--rcu)*.55);
   border:1px solid var(--rcx-hair);background:var(--rcx-btn);font-size:calc(var(--rcu)*.84);cursor:pointer;
   display:flex;align-items:center;justify-content:center;font-family:inherit;opacity:.85;color:inherit;padding:0}
-.rcx-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;background:rgba(128,128,128,.1);
+.rcx-tabs{display:flex;gap:2px;background:rgba(128,128,128,.1);
+  overflow-x:auto;scrollbar-width:none;-ms-overflow-style:none;scroll-behavior:smooth;overscroll-behavior-x:contain;
   border-radius:calc(var(--rcu)*.7);padding:2px;margin-bottom:calc(var(--rcu)*.36);flex-shrink:0}
 /* TEŞHİS RAPORU DÜZELTMESİ ("Dokunma hedefi çok küçük · 100x19px" ve "Yazı okunamayacak
    kadar küçüldü · 8.5px" - .rcx-tabs>button): İnceltme isteğini oransal sistemle uygularken
@@ -1101,9 +1102,17 @@ body.ptp-fs-active{overflow:hidden}
    her DOKUNULABİLİR öğeye max() ile bir TABAN kondu: yükseklik en az 28px, yazı en az 9px.
    Böylece kumanda dar ekranda da ince görünür, ama hiçbir tuş parmakla ıskalanacak kadar
    küçülemez. Yalnızca dokunulmayan etiketler (başlık, süre) oransal kalır. */
-.rcx-tabs>button{height:max(28px,calc(var(--rcu)*1.36));border:none;border-radius:calc(var(--rcu)*.42);
-  background:transparent;cursor:pointer;font-family:inherit;font-size:max(9px,calc(var(--rcu)*.61));font-weight:800;
-  letter-spacing:.08em;overflow:hidden;white-space:nowrap;display:flex;align-items:center;justify-content:center;padding:0}
+/* KULLANICI BİLDİRDİ ("'Kumanda - Kanallar - Ayarlar' yazıları tam sığmıyor, kaydırılabilir
+   buton yap"): Sekmeler eşit üç sütuna BÖLÜNMÜŞ bir ızgaraydı - her sekme panelin üçte birine
+   sıkışıyor, "KANALLAR" gibi uzun etiketler kesiliyordu. Etiketleri kısaltmak anlamı
+   zayıflatır, yazıyı küçültmek okunabilirlik eşiğinin altına iner. Çubuk artık yatay
+   KAYDIRILABİLİR: her sekme kendi yazısı kadar yer kaplar ve seçili sekme kendiliğinden
+   görünür alana getirilir (bkz. rcxSekmeGorunurYap). */
+.rcx-tabs::-webkit-scrollbar{display:none}
+.rcx-tabs>button{flex:1 0 auto;height:max(28px,calc(var(--rcu)*1.36));border:none;
+  border-radius:calc(var(--rcu)*.42);background:transparent;cursor:pointer;font-family:inherit;
+  font-size:max(9px,calc(var(--rcu)*.61));font-weight:800;letter-spacing:.06em;white-space:nowrap;
+  display:flex;align-items:center;justify-content:center;padding:0 calc(var(--rcu)*.55)}
 .rcx-tabs>button.on{background:var(--rcx-ac);color:#fff}
 .rcx-now{display:flex;align-items:center;gap:calc(var(--rcu)*.36);border-radius:calc(var(--rcu)*.85);
   padding:calc(var(--rcu)*.5) calc(var(--rcu)*.65);margin-bottom:calc(var(--rcu)*.36);flex-shrink:0}
@@ -1830,7 +1839,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-28-H';
+window.APP_BUILD='2026-08-28-J';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -3129,7 +3138,11 @@ function ptOkunurYap(hex,bgHex,hedef){
   if(ptKontrastOrani(hex,bgHex)>=hedef)return hex;
   var zeminKoyu=ptKontrastOrani(bgHex,'#ffffff')>ptKontrastOrani(bgHex,'#000000');
   var adim=zeminKoyu?4:-4,son=hex;
-  for(var i=1;i<=24;i++){
+  // Adım sayısı 24'ten 48'e çıkarıldı: ana metin için hedef 7:1'e yükseltilince (bkz.
+  // applyTheme içindeki --tx notu) 24 adım bazı paletlerde yetmiyor ve renk gereksiz yere
+  // düz beyaz/siyaha düşüyordu - oysa birkaç adım daha ilerlemek tema tonunu koruyarak
+  // hedefi tutturuyor.
+  for(var i=1;i<=48;i++){
     son=lightenDarken(hex,adim*i);
     if(ptKontrastOrani(son,bgHex)>=hedef)return son;
   }
@@ -3156,6 +3169,14 @@ function applyTheme(){
     // --mu2 (en soluk metin) de aynı denetimden geçer. Başlık/etiket gibi küçük ama okunması
     // gereken yazılarda kullanıldığı için 4.5:1 hedeflenir.
     document.documentElement.style.setProperty('--mu2',ptOkunurYap(th.mu2||th.mu,th.s||th.bg,4.5));
+    // TEŞHİS RAPORU DÜZELTMESİ ("'Mazlumspor FK' · kontrast 1.78:1 · yazı rgb(0,0,0) /
+    // zemin rgb(69,52,46)"): ANA METİN rengi (--tx) bu denetimin dışında kalmıştı. Soluk
+    // metin ve bağlantı renkleri denetlenirken en çok kullanılan rengin denetlenmemesi bir
+    // eksiklikti: yönetici koyu bir yüzeyle AÇIK TEMA metnini (siyah) eşleştiren bir palet
+    // kaydettiğinde, uygulamadaki neredeyse HER yazı okunmaz hale geliyordu - rapordaki takım
+    // adı bunun tek bir örneğiydi. Ana metin için hedef daha yüksek tutulur (7:1), çünkü
+    // uzun metinlerde eşiği kıl payı geçmek yeterli değildir.
+    document.documentElement.style.setProperty('--tx',ptOkunurYap(th.tx,th.s||th.bg,7));
   }catch(e){}
   document.documentElement.dataset.theme=_curMode==='light'?'light':_curPalette;
   document.documentElement.dataset.mode=_curMode;
@@ -4965,7 +4986,26 @@ function listenToLeague(leagueId){
     const ligNameEl=document.getElementById('ptLigName');
     const ligNameStr=D.leagueName||'Lig';
     ligNameEl.textContent=ligNameStr;
+    // TEŞHİS RAPORU DÜZELTMESİ ("Yazı sıkıştı: yatay kesilme · div#ptLigName · 5px kesildi ·
+    // 'eFootball Süper Lig'"): Yukarıdaki KARAKTER SAYISINA dayalı küçültme bir yaklaşımdır -
+    // ama gerçek genişlik yazı tipine, kullanıcının yazı boyutu ayarına ve ekran genişliğine
+    // göre değişir. "eFootball Süper Lig" 19 karakter olduğu için .7rem'e düşürülüyor, o boyut
+    // da o cihazda 5px taşıyordu. Karakter tahmini yerine artık GERÇEK ÖLÇÜM yapılıyor: kutuya
+    // sığana kadar küçük adımlarla düşürülür. Okunabilirlik için 9px'te durur - orada bile
+    // sığmıyorsa isim üç noktayla kısaltılır (kesilmiş görünmesindense açıkça kısaltılmış
+    // görünmesi daha dürüsttür).
+    ligNameEl.textContent=ligNameStr;
     ligNameEl.style.fontSize=ligNameStr.length>22?'.62rem':ligNameStr.length>17?'.7rem':ligNameStr.length>13?'.78rem':'.85rem';
+    requestAnimationFrame(function(){
+      try{
+        var kutu=ligNameEl.clientWidth;
+        if(!kutu)return;
+        var px=parseFloat(getComputedStyle(ligNameEl).fontSize)||13;
+        var adim=0;
+        while(ligNameEl.scrollWidth>kutu+1&&px>9&&adim<24){px-=0.5;adim++;ligNameEl.style.fontSize=px+'px';}
+        if(ligNameEl.scrollWidth>kutu+1)ligNameEl.style.textOverflow='ellipsis';
+      }catch(e){}
+    });
     document.getElementById('ptSeason').textContent=D.season||'';
     // KULLANICI TALEBİ: Sürüm rozeti artık admin'in sürüm notları listesindeki EN ÜSTTEKİ
     // (güncel) sürüm numarasını gösterir - admin panelinden sabit kodlanmadan güncellenebilir.
@@ -19539,6 +19579,7 @@ function renderRemoteControllerScreen(){
   // taşıdığı yer KAYBOLMAZ.
   remoteCtrlInitDrag();
   remoteCtrlInitTabSwipe();
+  rcxSekmeGorunurYap(document.getElementById('sheetContent'));
 }
 // KULLANICI TALEBİ ("Bazı butonlar sağdan sola, soldan sağa kaydırılabilir olabilir"):
 // Düğme SATIRLARININ kaydırılabilir olmasının yanında, SEKMELERİN KENDİSİ de parmakla
@@ -20402,6 +20443,20 @@ function _ptHlsBagla(vid,url){
 //   d.k(ad)       : bir komutun HTML onclick metnini üretir (her kumanda kendi yolunu verir)
 //   d.ekstra      : gövdenin en altına eklenecek serbest HTML (ör. "Kumanda Yap" şeridi)
 // ══════════════════════════════════════════════════════════════════════════════════════
+// Seçili sekme kaydırılabilir çubuğun görünmeyen kısmındaysa görünür alana getirilir -
+// kullanıcı hangi sekmede olduğunu her zaman görmelidir (bkz. CSS'teki .rcx-tabs notu).
+function rcxSekmeGorunurYap(kok){
+  try{
+    var cb=kok&&kok.querySelector('.rcx-tabs');
+    if(!cb)return;
+    var akt=cb.querySelector('button.on');
+    if(!akt)return;
+    var sol=akt.offsetLeft,sag=sol+akt.offsetWidth;
+    if(sol<cb.scrollLeft)cb.scrollLeft=Math.max(0,sol-8);
+    else if(sag>cb.scrollLeft+cb.clientWidth)cb.scrollLeft=sag-cb.clientWidth+8;
+  }catch(e){}
+}
+window.rcxSekmeGorunurYap=rcxSekmeGorunurYap;
 function rcxGovde(d){
   var k=d.k;
   var fitAd={contain:'SIĞDIR',fill:'GENİŞLET',cover:'KIRP'};
@@ -22265,9 +22320,14 @@ window.PTPlayer=(function(){
       // birebir aynı davranış (bkz. buildPanelHtml notu).
       var ayarBtn=e.target.closest('.ptp-opt');
       if(ayarBtn&&S.chTab==='ayarlar'){e.stopPropagation();panelAction(ayarBtn.getAttribute('data-act')||'');return;}
-      var b=e.target.closest('[data-chk]');
-      if(!b)return;
-      var k=b.getAttribute('data-chk');
+      // HATA DÜZELTMESİ (kullanıcı bildirdi: "kanallar üzerinden video sekmesine geçiş
+      // yapılamıyor, buton çalışmıyor"): KÖK SEBEP - bu iki denetim, aşağıdaki
+      // "if(!b)return;" ERKEN ÇIKIŞININ ARKASINA yazılmıştı. O satır, üzerine dokunulan öğede
+      // data-chk niteliği yoksa fonksiyondan HEMEN çıkıyor. Mod (📡/🎬) ve kategori düğmeleri
+      // ise data-chk taşımaz (kendi nitelikleri var), dolayısıyla dokunuş erken çıkışa takılıp
+      // buraya HİÇ ULAŞMIYORDU - düğmeler sessizce çalışmıyordu. Denetimler erken çıkışın
+      // ÖNÜNE alındı. (Aynı sebeple kategori süzgeci de çalışmıyordu; o da bu düzeltmeyle
+      // birlikte devreye girdi.)
       var modBtn=e.target.closest('[data-chmode]');
       if(modBtn){
         e.stopPropagation();
@@ -22283,6 +22343,9 @@ window.PTPlayer=(function(){
         renderChannelListOverlay();
         return;
       }
+      var b=e.target.closest('[data-chk]');
+      if(!b)return;
+      var k=b.getAttribute('data-chk');
       if(k==='close'){closeChannelList();return;}
       if(k==='konumsifirla'){window.ptpChKonumSifirla();showToastMsg('⌖ Kumanda varsayılan konuma alındı');return;}
       if(k==='tab-kumanda'||k==='tab-kanallar'||k==='tab-ayarlar'){
@@ -22435,6 +22498,7 @@ window.PTPlayer=(function(){
     }
     ptpChSeekBagla(box);
     ptpChIlerlemeBaslat();
+    rcxSekmeGorunurYap(box);
     chBoxInitDrag();
   }
   // İki cihazlı kumanda ekranındaki (bkz. remoteCtrlInitDrag, index.html'in üst kısmında)
