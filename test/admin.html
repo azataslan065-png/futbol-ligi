@@ -967,6 +967,9 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
     </div>
     <div class="card" id="leagueDangerCard" style="border-color:rgba(239,68,68,.25)">
       <div style="font-size:.68rem;font-weight:800;color:#b91c1c;margin-bottom:.65rem;text-transform:uppercase;letter-spacing:.05em">🗑️ Tehlikeli</div>
+      <!-- Çöp kutusu, tehlikeli işlemlerin HEMEN yanında duruyor: bir şeyi yanlışlıkla silen
+           yönetici geri alma yolunu aramak zorunda kalmasın. -->
+      <button class="btn bg" style="width:100%;min-height:36px;margin-bottom:.6rem" onclick="openTrashSheet()">🗑️ Çöp Kutusu · silinenleri 30 gün içinde geri al</button>
       <div class="g2">
         <button class="btn br_" onclick="resetAllScores()" style="font-size:.76rem">🔄 Sıfırla</button>
         <button class="btn br_" onclick="deleteAllMatches()" style="font-size:.76rem">🗑️ Sil</button>
@@ -1300,7 +1303,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-28-J';
+window.APP_BUILD='2026-08-28-M';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -3431,14 +3434,155 @@ function addTeam(){
   });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════
+// ÇÖP KUTUSU - 30 GÜN SAKLAMA, 31. GÜN OTOMATİK SİLME
+// KULLANICI TALEBİ: "Beşinci seçenek çöp kutusu olsun. Silinen her şey 30 gün süreyle orada
+// dursun. Geri alınmazsa, 31. günün ilk saniyelerinde otomatik olarak silinsin."
+//
+// NEDEN: Panelde takım silme, maç silme, toplu silme gibi GERİ ALINAMAZ işlemler var ve
+// bunları yalnızca bir onay kutusu koruyor. Yanlış bir dokunuş bir sezonu götürebilir.
+// Çöp kutusu, "onaydan geçmiş ama yanlış" kararları da kurtarır.
+//
+// TASARIM KARARLARI:
+//  • Kayıt, silinen verinin TAM KOPYASINI ve nereye geri yazılacağını (yol) saklar. Böylece
+//    geri alma, "silmeyi geri sarmak" değil, veriyi AYNI yere geri yazmak olur - basit ve
+//    öngörülebilir.
+//  • Süre dolumu SUNUCU zamanına göre değil kaydın kendi damgasına göre hesaplanır; ama
+//    silme işlemi panel her açıldığında çalışır. Yani "31. günün ilk saniyesi" ifadesi
+//    pratikte "31. güne girdikten sonra panelin ilk açılışı" demektir - bir tarayıcı
+//    uygulamasında arka planda çalışan bir zamanlayıcı yoktur. Bunu kullanıcıya da yazıyoruz
+//    ki "silinmedi" diye şaşırmasın.
+//  • Otomatik silme, geri almayla YARIŞMASIN diye önce süresi dolanlar temizlenir, sonra
+//    liste çizilir.
+// ══════════════════════════════════════════════════════════════════════════════════════
+var COP_GUN=30;
+// KULLANICI TALEBİ ("1 Ağustos'ta silinen mesaj, son tarih 31 Ağustos ibaresi belirsin,
+// ardından adminin 31 Ağustos'taki girişinde direkt silinsin"):
+// Son tarih, silme anına 30 gün eklenip GÜNÜN BAŞINA yuvarlanır. Saat bilgisi bilerek
+// atılıyor: 1 Ağustos 23:50'de silinen bir kayıt için "31 Ağustos 23:50" demek kafa
+// karıştırırdı - kullanıcı gün üzerinden düşünür. Böylece kayıt, son tarih olarak yazan
+// günün İLK GİRİŞİNDE silinir; yani ekranda gördüğü tarih, silineceği gündür.
+function copSureSonu(ts){
+  var d=new Date(ts||0);
+  d.setDate(d.getDate()+COP_GUN);
+  d.setHours(0,0,0,0);
+  return d.getTime();
+}
+function copTarihYaz(ms){
+  try{return new Date(ms).toLocaleDateString('tr-TR',{day:'numeric',month:'long',year:'numeric'});}
+  catch(e){return '';}
+}
+// Silinen bir kaydı çöp kutusuna koyar. yol: geri yazılacağı Firebase yolu.
+function copaAt(tur,ad,yol,veri){
+  try{
+    return db.ref('trash').push({
+      tur:tur,ad:ad||'(isimsiz)',yol:yol,
+      veri:JSON.stringify(veri===undefined?null:veri),
+      ts:Date.now(),silen:(window.currentAdminEmail||'yönetici')
+    });
+  }catch(e){return Promise.resolve();}
+}
+// Süresi dolmuş kayıtları siler. Panel her açıldığında ve çöp kutusu her görüntülendiğinde
+// çalışır; kaç kayıt silindiğini döndürür.
+function copSuresiDolanlariSil(cb){
+  db.ref('trash').once('value').then(function(snap){
+    var upd={},n=0,simdi=Date.now();
+    snap.forEach(function(ch){
+      var v=ch.val()||{};
+      if(copSureSonu(v.ts)<=simdi){upd['trash/'+ch.key]=null;n++;}
+    });
+    if(!n){if(cb)cb(0);return;}
+    db.ref().update(upd).then(function(){
+      if(n)logAction('🗑️ Çöp kutusu: süresi dolan '+n+' kayıt otomatik silindi');
+      if(cb)cb(n);
+    },function(){if(cb)cb(0);});
+  },function(){if(cb)cb(0);});
+}
+function copKalanGun(ts){
+  var ms=copSureSonu(ts)-Date.now();
+  if(ms<=0)return 0;
+  return Math.ceil(ms/(24*60*60*1000));
+}
+function openTrashSheet(){
+  copSuresiDolanlariSil(function(){renderTrashSheet();});
+  openSheet('🗑️ Çöp Kutusu','<div id="trashList" style="font-size:.7rem;color:var(--mu)">Yükleniyor…</div>');
+}
+function renderTrashSheet(){
+  db.ref('trash').orderByChild('ts').once('value').then(function(snap){
+    var arr=[];snap.forEach(function(ch){arr.push([ch.key,ch.val()||{}]);});
+    arr.reverse();
+    var box=qs('trashList');if(!box)return;
+    if(!arr.length){
+      box.innerHTML='<div style="text-align:center;padding:1.4rem .6rem;color:var(--mu);font-size:.72rem;line-height:1.6">'
+        +'🗑️ Çöp kutusu boş.<br/><span style="font-size:.64rem">Silinen kayıtlar '+COP_GUN+' gün burada bekler,'
+        +' sonra kalıcı olarak silinir.</span></div>';
+      return;
+    }
+    box.innerHTML='<div style="font-size:.62rem;color:var(--mu);line-height:1.6;margin-bottom:.7rem">'
+      +'Silinen kayıtlar <b style="color:var(--tx)">'+COP_GUN+' gün</b> burada bekler. Süresi dolanlar, '
+      +'her kaydın kendi <b style="color:var(--tx)">son tarihi</b> yazılıdır. O tarihe gelindiğinde, '
+      +'panele yapılan İLK GİRİŞTE kalıcı olarak silinir (tarayıcı uygulamalarında arka planda '
+      +'çalışan bir zamanlayıcı bulunmaz - bu yüzden silme, siz paneli açtığınızda yapılır).</div>'
+      +arr.map(function(p){
+        var k=p[0],v=p[1],kalan=copKalanGun(v.ts);
+        var acil=kalan<=3;
+        var sonTs=copSureSonu(v.ts);
+        return '<div class="card" style="padding:.6rem;margin-bottom:.5rem">'
+          +'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">'
+            +'<span style="font-size:.62rem;font-weight:800;background:var(--s3);border-radius:6px;padding:.15rem .4rem;flex-shrink:0">'+escHtml(v.tur||'kayıt')+'</span>'
+            +'<b style="flex:1;min-width:0;font-size:.74rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(v.ad||'(isimsiz)')+'</b>'
+            +'<span style="flex-shrink:0;font-size:.6rem;font-weight:800;color:'+(acil?'#b91c1c':'var(--mu)')+'">'+(kalan?kalan+' gün':'bugün')+'</span>'
+          +'</div>'
+          +'<div style="font-size:.58rem;color:var(--mu);margin-bottom:.15rem">🗑️ Silindi: '+copTarihYaz(v.ts)+' · '+escHtml(v.silen||'')+'</div>'
+          +'<div style="font-size:.6rem;font-weight:800;color:'+(acil?'#b91c1c':'var(--tx)')+';margin-bottom:.5rem">⏳ Son tarih: '+copTarihYaz(sonTs)+' <span style="font-weight:600;color:var(--mu)">(o günkü ilk girişte silinir)</span></div>'
+          +'<div style="display:flex;gap:.4rem">'
+            +'<button class="btn bg" style="flex:1;min-height:32px;font-size:.66rem" onclick="copGeriAl(\''+k+'\')">↩️ Geri Al</button>'
+            +'<button class="btn bgh" style="flex:0 0 auto;min-height:32px;font-size:.66rem;color:#b91c1c" onclick="copKaliciSil(\''+k+'\')">🗑️ Kalıcı Sil</button>'
+          +'</div>'
+        +'</div>';
+      }).join('')
+      +'<button class="btn bgh" style="width:100%;min-height:34px;font-size:.68rem;color:#b91c1c;margin-top:.3rem" onclick="copTumunuSil()">🗑️ Çöp Kutusunu Tamamen Boşalt</button>';
+  });
+}
+window.copGeriAl=function(key){
+  db.ref('trash/'+key).once('value').then(function(snap){
+    var v=snap.val();if(!v)return;
+    var veri=null;try{veri=JSON.parse(v.veri);}catch(e){}
+    if(!v.yol){toast('❌ Bu kaydın geri yazılacağı yol bilinmiyor','er');return;}
+    db.ref(v.yol).set(veri).then(function(){
+      db.ref('trash/'+key).remove();
+      logAction('↩️ Çöp kutusundan geri alındı: '+(v.ad||v.yol));
+      toast('↩️ Geri alındı');
+      renderTrashSheet();
+      // Geri yazılan kayıt ekranda da görünsün diye ilgili liste tazelenir.
+      try{if(/^leagues\//.test(v.yol))setTimeout(function(){location.reload();},600);}catch(e){}
+    }).catch(function(e){toast('❌ Geri alınamadı: '+(e&&e.message?e.message:'hata'),'er');});
+  });
+};
+window.copKaliciSil=function(key){
+  dlg('🗑️','Kalıcı olarak silinsin mi?','Bu kayıt geri alınamaz biçimde silinecek.','Kalıcı Sil','dor').then(function(ok){
+    if(!ok)return;
+    db.ref('trash/'+key).remove().then(function(){renderTrashSheet();toast('🗑️ Silindi');});
+  });
+};
+window.copTumunuSil=function(){
+  dlg('🗑️','Çöp kutusu boşaltılsın mı?','İçindeki TÜM kayıtlar geri alınamaz biçimde silinecek.','Boşalt','dor').then(function(ok){
+    if(!ok)return;
+    db.ref('trash').remove().then(function(){renderTrashSheet();toast('🗑️ Çöp kutusu boşaltıldı');logAction('🗑️ Çöp kutusu boşaltıldı');});
+  });
+};
+window.openTrashSheet=openTrashSheet;
 function deleteTeam(id){
   if(!hasSubperm('teams_manage')){toast('🔒 Takım silme için yetkiniz yok','er');return;}
   dlg('🗑️','Takımı Sil','Bu takım silinecek.','Sil','dor').then(function(ok){
     if(!ok)return;
     var tName=(S.teams[id]||{}).name||'?';
+    var kopya=S.teams[id];
+    // Silmeden ÖNCE çöp kutusuna kopyalanır (bkz. çöp kutusu bölümündeki not).
+    copaAt('Takım',tName,'leagues/'+_curLeagueId+'/teams/'+id,kopya);
     delete S.teams[id];
-    logAction('🗑️ Takım silindi: '+tName);
-    save().then(function(){renderTeams();fillSelects();toast('✅ Silindi');});
+    logAction('🗑️ Takım silindi: '+tName+' (çöp kutusuna taşındı)');
+    save().then(function(){renderTeams();fillSelects();toast('🗑️ Çöp kutusuna taşındı · 30 gün içinde geri alınabilir');});
   });
 }
 
@@ -3910,8 +4054,11 @@ function deleteMatch(id){
   if(!hasSubperm('fixture_manage')){toast('🔒 Maç silme için yetkiniz yok','er');return;}
   dlg('🗑️','Maçı Sil','Bu maç silinecek.','Sil','dor').then(function(ok){
     if(!ok)return;
+    var mk=S.matches[id];
+    var mad=((S.teams[(mk||{}).home]||{}).name||'?')+' - '+((S.teams[(mk||{}).away]||{}).name||'?');
+    copaAt('Maç',mad,'leagues/'+_curLeagueId+'/matches/'+id,mk);
     delete S.matches[id];
-    save().then(function(){renderMatches();toast('✅ Silindi');});
+    save().then(function(){renderMatches();toast('🗑️ Çöp kutusuna taşındı · 30 gün içinde geri alınabilir');});
   });
 }
 
@@ -11375,6 +11522,9 @@ function deleteVersionEntry(idx){
   });
 }
 
+// Panel her açıldığında çöp kutusundaki süresi dolmuş kayıtlar temizlenir - "31. günün ilk
+// saniyesi" bir tarayıcı uygulamasında pratikte "31. güne girdikten sonraki ilk açılış"tır.
+try{setTimeout(function(){try{copSuresiDolanlariSil();}catch(e){}},4000);}catch(e){}
 function renderPremiumRequestList(){
   var el=qs('premiumRequestList');if(!el)return;
   var reqs=Object.entries(S.premiumRequests||{}).filter(function(e){return e[1].status==='pending';}).sort(function(a,b){return (b[1].ts||0)-(a[1].ts||0);});
