@@ -1839,7 +1839,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-28-J';
+window.APP_BUILD='2026-08-28-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22332,8 +22332,21 @@ window.PTPlayer=(function(){
       if(modBtn){
         e.stopPropagation();
         S.chMode=modBtn.getAttribute('data-chmode');
-        S.chCat='';S.chSearch='';   // mod değişince süzgeçler sıfırlanır, aksi halde boş liste çıkardı
+        S.chCat='';S.chSearch='';S.chSira=false;   // mod değişince süzgeçler ve sıralama modu sıfırlanır
         renderChannelListOverlay();
+        return;
+      }
+      var siraBtn=e.target.closest('[data-chsira]');
+      if(siraBtn){
+        e.stopPropagation();
+        S.chSira=!S.chSira;
+        renderChannelListOverlay();
+        return;
+      }
+      var tasiBtn=e.target.closest('[data-chtasi]');
+      if(tasiBtn){
+        e.stopPropagation();
+        ptpChSiraTasi(tasiBtn.getAttribute('data-chtasi'),Number(tasiBtn.getAttribute('data-yon'))||1);
         return;
       }
       var katBtn=e.target.closest('[data-cat]');
@@ -22343,6 +22356,7 @@ window.PTPlayer=(function(){
         renderChannelListOverlay();
         return;
       }
+      if(S.chSira&&e.target.closest('.ptp-ch-row')){e.stopPropagation();return;}
       var b=e.target.closest('[data-chk]');
       if(!b)return;
       var k=b.getAttribute('data-chk');
@@ -22476,13 +22490,21 @@ window.PTPlayer=(function(){
       // izlenen yayını DEĞİŞTİRMEZ, yalnızca listeyi değiştirir; kullanıcı bir satıra
       // dokunduğunda o yayına geçilir.
       var _cm=chModu();
+      // KULLANICI TALEBİ ("Kumandadaki kanal sıralama düzeneği yok, ekleyin"): TV/Video
+      // sekmesinde kişisel sıralama vardı ama kumandada yoktu - kullanıcı en çok izlediği
+      // kanalı listenin başına almak için sekmeye gitmek zorundaydı. Sıra, sekmedekiyle AYNI
+      // yerde saklanır (saveVideoScreenOrder), yani iki yerde de aynı sıra görünür ve kanal
+      // numaraları tutarlı kalır.
+      var _siraModu=!!S.chSira;
       var searchHtml='<div style="display:flex;gap:.25rem;margin-bottom:.3rem;flex-shrink:0">'
         +'<button data-chmode="tv" title="TV kanalları" style="flex:0 0 auto;min-height:32px;padding:0 .55rem;border-radius:9px;cursor:pointer;font-family:inherit;font-size:.7rem;font-weight:800;border:1.5px solid '+(_cm?'var(--ac)':'rgba(255,255,255,.14)')+';background:'+(_cm?'var(--ac)':'rgba(255,255,255,.08)')+';color:'+(_cm?'var(--ac-tx,#fff)':'#cbd5e1')+'">📡</button>'
         +'<button data-chmode="video" title="Videolar" style="flex:0 0 auto;min-height:32px;padding:0 .55rem;border-radius:9px;cursor:pointer;font-family:inherit;font-size:.7rem;font-weight:800;border:1.5px solid '+(!_cm?'var(--ac)':'rgba(255,255,255,.14)')+';background:'+(!_cm?'var(--ac)':'rgba(255,255,255,.08)')+';color:'+(!_cm?'var(--ac-tx,#fff)':'#cbd5e1')+'">🎬</button>'
         +'<input type="text" id="ptpChSearchInp" placeholder="'+(_cm?'🔍 Kanal ara…':'🔍 Video ara…')+'" autocomplete="off" '
         +'style="width:100%;box-sizing:border-box;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);'
         +'border-radius:8px;padding:.35rem .5rem;font-size:.62rem;color:#fff;outline:none;font-family:inherit;flex:1;min-width:0"/>'
-        +'</div>';
+        +'<button data-chsira="1" title="Sıralamayı düzenle" style="flex:0 0 auto;min-height:32px;min-width:32px;border-radius:9px;cursor:pointer;font-family:inherit;font-size:.72rem;font-weight:800;border:1.5px solid '+(_siraModu?'var(--ac)':'rgba(255,255,255,.14)')+';background:'+(_siraModu?'var(--ac)':'rgba(255,255,255,.08)')+';color:'+(_siraModu?'var(--ac-tx,#fff)':'#cbd5e1')+'">↕</button>'
+        +'</div>'
+        +(_siraModu?'<div style="font-size:.55rem;color:#94a3b8;margin:-.1rem 0 .3rem;line-height:1.4;flex-shrink:0">↕ Sıralama modu açık · ▲▼ ile taşıyın. Bu sıra TV/Video sekmesinde de geçerlidir.</div>':'');
       box.innerHTML=g.ust+searchHtml+buildChannelCats(pl)
         +'<div class="ptp-chlist-body" id="ptpChBodyList">'+buildChannelRows(pl,curIdx)+'</div>';
       var sInp=el('ptpChSearchInp');
@@ -22729,9 +22751,37 @@ window.PTPlayer=(function(){
           +'<div class="ptp-ch-title">'+(x.title||'İsimsiz yayın').replace(/</g,'&lt;')+'</div>'
           +'<div class="ptp-ch-sub">'+(x.isLive?'🔴 Canlı':'🎬 Video')+(x.category?' · '+x.category.replace(/</g,'&lt;'):'')+(kilitli?' · 🔒 Premium':'')+'</div>'
         +'</div>'
-        +(i===curIdx?'<span style="color:#a78bfa;font-size:.75rem;flex-shrink:0">▶</span>':'')
+        // Sıralama modunda satırın sağında ▲▼ belirir; kanala geçiş bu moddayken kapalıdır
+        // (yanlışlıkla kanal değiştirmeyi önler - taşımak isterken yayın değişmemeli).
+        +(S.chSira
+          ?'<span style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">'
+            +'<button data-chtasi="'+x.id+'" data-yon="-1" title="Yukarı taşı" style="width:30px;height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#e8eefb;font-size:.6rem;cursor:pointer;padding:0">▲</button>'
+            +'<button data-chtasi="'+x.id+'" data-yon="1" title="Aşağı taşı" style="width:30px;height:22px;border-radius:6px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.08);color:#e8eefb;font-size:.6rem;cursor:pointer;padding:0">▼</button>'
+          +'</span>'
+          :(i===curIdx?'<span style="color:#a78bfa;font-size:.75rem;flex-shrink:0">▶</span>':''))
         +'</div>';
     }).join('');
+  }
+  // Kanalı bir sıra yukarı/aşağı taşır. Sıra, TV/Video sekmesiyle AYNI depoda tutulur
+  // (saveVideoScreenOrder) - böylece iki yerde de aynı sıra ve aynı kanal numaraları görünür.
+  // Taşıma, SÜZÜLMÜŞ listede değil TAM listede yapılır: kullanıcı "Spor" kategorisindeyken
+  // bir kanalı bir üste aldığında, tam listede araya giren başka kategorideki kanalların
+  // üstüne çıkması gerekir - aksi halde süzgeç kapatılınca sıra beklenmedik görünürdü.
+  function ptpChSiraTasi(id,yon){
+    if(!S||!id)return;
+    var canli=chModu(),tab=canli?'tv':'video';
+    var tam=playlist(canli);
+    var i=-1;
+    for(var n=0;n<tam.length;n++)if(tam[n].id===id){i=n;break;}
+    if(i<0)return;
+    var j=i+(yon<0?-1:1);
+    if(j<0||j>=tam.length){showToastMsg(yon<0?'Zaten en üstte':'Zaten en altta');return;}
+    var ids=tam.map(function(x){return x.id;});
+    var tmp=ids[i];ids[i]=ids[j];ids[j]=tmp;
+    if(typeof saveVideoScreenOrder==='function')saveVideoScreenOrder(tab,ids);
+    renderChannelListOverlay();
+    // TV/Video sekmesi açıksa oradaki liste de anında güncellenir - iki görünüm ayrışmasın.
+    try{if(typeof renderVideoScreenList==='function'&&document.getElementById('videoScreenList'))renderVideoScreenList();}catch(e){}
   }
   // ── AYARLAR İÇERİĞİ: TEK KAYNAK ────────────────────────────────────────────────────────
   // KULLANICI TALEBİ ("bu kumanda tasarımını hem oynatıcı içi kumanda hem de iki cihazlı
@@ -23827,6 +23877,15 @@ window.PTPlayer=(function(){
     // "disabled" özniteliği İLK AÇILIŞTAKİ konuma göre SABİT KALIYORDU - kanal değiştikçe hiç
     // güncellenmiyordu. Artık her geçişte yeniden hesaplanır.
     updatePrevNextDisabled();
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "kanal ileri/geri tuşlarıyla değişim yapıldığında
+    // kumandadaki 'Şu an' bölümünde değişiklik olmuyor"): AYNI SINIF HATA, bir kez daha.
+    // switchSourceInPlace akıcı geçiş için DOM'u sıfırdan kurmaz - bu yüzden o DOM'a bağlı
+    // HİÇBİR şey kendiliğinden tazelenmez. Yukarıdaki not ⏮️/⏭️ düğmeleri için aynı sebebi
+    // yazıyor; kumandanın "ŞU AN" kutusu da (kanal adı, numarası, canlı rozeti) aynı sebeple
+    // eski kanalı göstermeye devam ediyordu. Kumanda açıksa yeniden çizilir.
+    // Ayarlar paneli de açıksa aynı sebeple tazelenir - orada da kanal adı geçiyor.
+    try{if(S.chOpen)renderChannelListOverlay();}catch(e){}
+    try{buildPanelIfOpen();}catch(e){}
     checkForOtherRemoteSession();
     return true;
   }
