@@ -1869,7 +1869,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-29-F';
+window.APP_BUILD='2026-08-29-G';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -26771,6 +26771,7 @@ window.voteMvp=function(matchId,player){
   var REDRAW_MS=400;         // aynı kapsayıcı bu süre içinde tekrar yazılırsa "aşırı çizim"
   var REDRAW_HITS=3;         // üst üste bu kadar olursa kayıt açılır
   var _clsKaynak={};         // kayan öğelerin dökümü (bkz. poKur içindeki not)
+  var _konumHaritasi=null;   // KENDİ kayma ölçümümüz (bkz. clsKendiOlc)
   var CLS_LIMIT=0.12;        // bu eşiği aşan layout-shift birikimi "içerik zıplaması"
   var STYLE_PER_SEC=10;      // saniyedeki TEMA UYGULAMA TURU bu sayıyı aşarsa "stil çırpınması"
                              // (özellik başına değil, tur başına - bkz. _sonStilTur notu)
@@ -26869,6 +26870,37 @@ window.voteMvp=function(matchId,player){
   function kendiMi(el){
     if(!el||el.nodeType!==1)return false;
     try{return !!(el.closest&&el.closest(DIAG_SELF_SEL));}catch(e){return false;}
+  }
+  // Tarayıcı kayma kaynağı bildirmediğinde devreye giren KENDİ ölçümümüz.
+  // Nasıl çalışır: ekrandaki ana kutuların (kart, bölüm, şerit) üst kenar konumu her turda
+  // kaydedilir. Bir sonraki turda aynı kutu farklı bir yerdeyse, aradaki fark o kutunun ne
+  // kadar kaydığıdır. Sadece BELİRGİN kaymalar (>8px) sayılır - birkaç pikselik oynamalar
+  // yazı tipi yüklenmesi gibi normal sebeplerden olur ve kullanıcıyı rahatsız etmez.
+  // Kapsam bilerek dardır (en fazla 120 kutu): amaç suçluyu göstermek, tam bir ölçüm yapmak
+  // değil - kesin ölçüm zaten tarayıcının kendi verisidir.
+  function clsKendiOlc(){
+    var sonuc={};
+    var yeni={};
+    var liste=[];
+    try{
+      liste=document.querySelectorAll('.card,[id^="pg-"],.topbar,#liveTicker,[class*="banner"],[id*="Banner"],[id*="Card"]');
+    }catch(e){return sonuc;}
+    var n=Math.min(liste.length,120);
+    for(var i=0;i<n;i++){
+      var el=liste[i];
+      if(kendiMi(el)||!el.getClientRects().length)continue;
+      var r=el.getBoundingClientRect();
+      var anahtar=yol(el)+'#'+i;
+      yeni[anahtar]=Math.round(r.top+(window.scrollY||0));
+      if(_konumHaritasi&&_konumHaritasi[anahtar]!==undefined){
+        var fark=yeni[anahtar]-_konumHaritasi[anahtar];
+        if(Math.abs(fark)>8){
+          sonuc[yol(el)]={p:Math.abs(fark)/1000,dx:0,dy:fark,or:ornek(el)};
+        }
+      }
+    }
+    _konumHaritasi=yeni;
+    return sonuc;
   }
   function ekranAdi(){
     try{
@@ -26998,7 +27030,28 @@ window.voteMvp=function(matchId,player){
             ||(cs.animationName&&cs.animationName!=='none');
         }catch(e){}
         if(!_kayanMi&&tasmaX>CLIP_TOL&&kaydirilamaz&&yatayKirpik.length<MAX_REPORT){
-          yatayKirpik.push(yol(el)+' · '+tasmaX+'px kesildi · "'+ornek(el)+'"');
+          // SENSÖR GELİŞTİRME: Kayıt şimdiye kadar yalnızca TAŞAN KUTUYU söylüyordu
+          // ("#appWrap · 15px kesildi"). Ama taşmaya sebep olan, kutunun kendisi değil
+          // İÇİNDEKİ bir çocuktur - hangisi olduğu yazılmadığı için kayıt okunup da
+          // düzeltilemiyordu. Artık kutunun sağ kenarını EN ÇOK AŞAN çocuk bulunup adıyla,
+          // taşma miktarıyla ve (varsa) yazısıyla birlikte bildirilir; yatay bir dizilimde
+          // hangi öğenin sığmadığı doğrudan görünür.
+          var _sucluMetin='';
+          try{
+            var _kr=el.getBoundingClientRect(),_enCok=null,_enCokPx=0;
+            var _cocuklar=el.children||[];
+            for(var _c=0;_c<_cocuklar.length;_c++){
+              var _ch=_cocuklar[_c];
+              if(kendiMi(_ch)||!_ch.getClientRects().length)continue;
+              var _cr=_ch.getBoundingClientRect();
+              var _asim=Math.round((_cr.right-_kr.right)+ (el.scrollLeft||0));
+              if(_asim>_enCokPx){_enCokPx=_asim;_enCok=_ch;}
+            }
+            if(_enCok)_sucluMetin=' · TAŞIRAN: '+yol(_enCok)+' ('+_enCokPx+'px dışarıda'
+              +(ornek(_enCok)?', "'+ornek(_enCok)+'"':'')+')';
+            else _sucluMetin=' · taşıran tek bir çocuk yok - yazı ya da iç boşluk kaynaklı';
+          }catch(e){}
+          yatayKirpik.push(yol(el)+' · '+tasmaX+'px kesildi · "'+ornek(el)+'"'+_sucluMetin);
         }
         // 2) DİKEY KIRPILMA: satırlar kutuya sığmıyor ve kutu dikey kaydırılamıyor.
         var tasmaY=el.scrollHeight-h;
@@ -27592,6 +27645,20 @@ window.voteMvp=function(matchId,player){
         anlami:'Tema değişkenleri (renk/yazı tipi) sürekli yeniden atanıyor - renk oynaması olarak görünür.'
       });
     }
+    // SENSÖR GELİŞTİRME (kullanıcı bildirdi: "birikim: 4.197 · kayanÖğeler: tarayıcı kaynak
+    // bildirmedi"): Kayan öğelerin listesi tarayıcının verdiği "sources" alanından geliyor -
+    // ama Chrome bu alanı HER KAYMADA doldurmuyor. Sonuç: eşiğin otuz katı bir kayma
+    // ölçülüyor ama hangi öğenin kaydığı bilinmiyor, yani kayıt düzeltilemez oluyordu.
+    // Artık tarayıcıya bağımlı olmayan KENDİ ölçümümüz var: belirli aralıklarla ekrandaki
+    // ana kutuların konumu kaydediliyor, bir sonraki turda yer değiştirenler bulunuyor.
+    // Tarayıcı kaynak bildirdiyse onunki kullanılır (daha kesindir); bildirmediyse bu ölçüm
+    // devreye girer ve kayıt asla "kaynak bilinmiyor" demek zorunda kalmaz.
+    if(_cls>CLS_LIMIT&&!Object.keys(_clsKaynak).length){
+      try{
+        var _y=clsKendiOlc();
+        for(var _k in _y)_clsKaynak[_k]=_y[_k];
+      }catch(e){}
+    }
     if(_cls>CLS_LIMIT){
       // En çok katkı yapan öğeler büyükten küçüğe sıralanır - ilk sıradaki, düzeltilmesi
       // gereken öğedir.
@@ -27603,13 +27670,16 @@ window.voteMvp=function(matchId,player){
       }).sort(function(a,b){return b.v.p-a.v.p;}).slice(0,6).map(function(o){return o.metin;});
       say('uyari','İçerik zıplaması (layout shift)',{
         ekran:ekranAdi(),birikim:_cls.toFixed(3),esik:CLS_LIMIT,
-        kayanOgeler:kaynaklar.length?kaynaklar:['(tarayıcı kaynak bildirmedi)'],
+        kayanOgeler:kaynaklar.length?kaynaklar:['(ne tarayıcı ne de kendi ölçümümüz kayan öğe bulabildi - kayma ölçüm turları ARASINDA olmuş olabilir)'],
         anlami:'İçerik yerleştikten SONRA yer değiştiriyor; kullanıcı okurken/dokunurken satır kayıyor. '
           +'Yukarıdaki liste, en çok katkı yapan öğeleri ne kadar ve hangi yöne kaydıklarıyla verir - '
           +'en sık sebep boyutu bildirilmemiş görsel, sonradan eklenen şerit/banner ya da içeriği '
           +'geç gelen bir kutudur.'
       });
     }
+    // Konum haritası HER turda tazelenir - yalnızca eşik aşılınca ölçseydik, ilk kayma
+    // anında karşılaştıracak bir önceki konum bulunmazdı.
+    try{clsKendiOlc();}catch(e){}
     _mutSayac=0;_stilSayac=0;_cls=0;_clsKaynak={};
   }
 
