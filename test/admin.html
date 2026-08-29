@@ -1303,7 +1303,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-28-M';
+window.APP_BUILD='2026-08-28-N';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -3504,10 +3504,19 @@ function copKalanGun(ts){
   return Math.ceil(ms/(24*60*60*1000));
 }
 function openTrashSheet(){
-  copSuresiDolanlariSil(function(){renderTrashSheet();});
+  // HATA DÜZELTMESİ (kullanıcı bildirdi: "çöp kutusuna tıklayınca 'Yükleniyor' dışında hiçbir
+  // şey görünmüyor"): SIRA YANLIŞTI. Temizleme işlemi ÖNCE başlatılıyor, bittiğinde
+  // renderTrashSheet çağrılıyordu - ama o an menü henüz açılmamış olabiliyor, dolayısıyla
+  // yazılacak kutu (#trashList) DOM'da YOK ve çizim sessizce hiçbir şey yapmadan çıkıyordu.
+  // Ekranda "Yükleniyor…" yazısı sonsuza kadar kalıyordu. Artık menü ÖNCE açılır, çizim
+  // ondan sonra yapılır.
   openSheet('🗑️ Çöp Kutusu','<div id="trashList" style="font-size:.7rem;color:var(--mu)">Yükleniyor…</div>');
+  setTimeout(function(){
+    copSuresiDolanlariSil(function(){renderTrashSheet();});
+  },60);
 }
 function renderTrashSheet(){
+  // Okuma başarısız olursa da kullanıcı boş bir ekranla kalmasın - sebebi yazılır.
   db.ref('trash').orderByChild('ts').once('value').then(function(snap){
     var arr=[];snap.forEach(function(ch){arr.push([ch.key,ch.val()||{}]);});
     arr.reverse();
@@ -3542,6 +3551,11 @@ function renderTrashSheet(){
         +'</div>';
       }).join('')
       +'<button class="btn bgh" style="width:100%;min-height:34px;font-size:.68rem;color:#b91c1c;margin-top:.3rem" onclick="copTumunuSil()">🗑️ Çöp Kutusunu Tamamen Boşalt</button>';
+  },function(err){
+    var box=qs('trashList');
+    if(box)box.innerHTML='<div style="color:#b91c1c;font-size:.7rem;line-height:1.6">❌ Çöp kutusu okunamadı: '
+      +escHtml((err&&err.message)||'bilinmeyen hata')+'<br/><span style="color:var(--mu);font-size:.62rem">'
+      +'Veritabanı kurallarında "trash" yoluna okuma/yazma izni verilmiş olmalı.</span></div>';
   });
 }
 window.copGeriAl=function(key){
