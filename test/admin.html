@@ -1303,7 +1303,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-28-N';
+window.APP_BUILD='2026-08-28-O';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -3456,6 +3456,15 @@ function addTeam(){
 //    liste çizilir.
 // ══════════════════════════════════════════════════════════════════════════════════════
 var COP_GUN=30;
+// HATA DÜZELTMESİ (kullanıcı ekran görüntüsü gönderdi: "permission_denied at /trash"):
+// Çöp kutusunu veritabanının KÖKÜNDE ayrı bir dal olarak açmıştım. Firebase güvenlik
+// kuralları yalnızca bilinen dallara izin verir; yeni bir kök dal, kurallar elle
+// güncellenmedikçe HERKESE kapalıdır - bu yüzden okuma da yazma da reddediliyordu.
+// Kullanıcıdan kural düzenlemesini istemek yerine çöp kutusu, yönetici panelinin zaten
+// yazma iznine sahip olduğu LİG DÜĞÜMÜNÜN altına taşındı. Böylece ek kural gerekmez ve
+// silinen veri, ait olduğu ligin yanında durur (lig silinirse çöpü de onunla gider - doğru
+// olan da budur).
+function copYolu(){return 'leagues/'+_curLeagueId+'/trash';}
 // KULLANICI TALEBİ ("1 Ağustos'ta silinen mesaj, son tarih 31 Ağustos ibaresi belirsin,
 // ardından adminin 31 Ağustos'taki girişinde direkt silinsin"):
 // Son tarih, silme anına 30 gün eklenip GÜNÜN BAŞINA yuvarlanır. Saat bilgisi bilerek
@@ -3475,7 +3484,7 @@ function copTarihYaz(ms){
 // Silinen bir kaydı çöp kutusuna koyar. yol: geri yazılacağı Firebase yolu.
 function copaAt(tur,ad,yol,veri){
   try{
-    return db.ref('trash').push({
+    return db.ref(copYolu()).push({
       tur:tur,ad:ad||'(isimsiz)',yol:yol,
       veri:JSON.stringify(veri===undefined?null:veri),
       ts:Date.now(),silen:(window.currentAdminEmail||'yönetici')
@@ -3485,11 +3494,11 @@ function copaAt(tur,ad,yol,veri){
 // Süresi dolmuş kayıtları siler. Panel her açıldığında ve çöp kutusu her görüntülendiğinde
 // çalışır; kaç kayıt silindiğini döndürür.
 function copSuresiDolanlariSil(cb){
-  db.ref('trash').once('value').then(function(snap){
+  db.ref(copYolu()).once('value').then(function(snap){
     var upd={},n=0,simdi=Date.now();
     snap.forEach(function(ch){
       var v=ch.val()||{};
-      if(copSureSonu(v.ts)<=simdi){upd['trash/'+ch.key]=null;n++;}
+      if(copSureSonu(v.ts)<=simdi){upd[copYolu()+'/'+ch.key]=null;n++;}
     });
     if(!n){if(cb)cb(0);return;}
     db.ref().update(upd).then(function(){
@@ -3517,7 +3526,7 @@ function openTrashSheet(){
 }
 function renderTrashSheet(){
   // Okuma başarısız olursa da kullanıcı boş bir ekranla kalmasın - sebebi yazılır.
-  db.ref('trash').orderByChild('ts').once('value').then(function(snap){
+  db.ref(copYolu()).orderByChild('ts').once('value').then(function(snap){
     var arr=[];snap.forEach(function(ch){arr.push([ch.key,ch.val()||{}]);});
     arr.reverse();
     var box=qs('trashList');if(!box)return;
@@ -3559,12 +3568,12 @@ function renderTrashSheet(){
   });
 }
 window.copGeriAl=function(key){
-  db.ref('trash/'+key).once('value').then(function(snap){
+  db.ref(copYolu()+'/'+key).once('value').then(function(snap){
     var v=snap.val();if(!v)return;
     var veri=null;try{veri=JSON.parse(v.veri);}catch(e){}
     if(!v.yol){toast('❌ Bu kaydın geri yazılacağı yol bilinmiyor','er');return;}
     db.ref(v.yol).set(veri).then(function(){
-      db.ref('trash/'+key).remove();
+      db.ref(copYolu()+'/'+key).remove();
       logAction('↩️ Çöp kutusundan geri alındı: '+(v.ad||v.yol));
       toast('↩️ Geri alındı');
       renderTrashSheet();
@@ -3576,13 +3585,13 @@ window.copGeriAl=function(key){
 window.copKaliciSil=function(key){
   dlg('🗑️','Kalıcı olarak silinsin mi?','Bu kayıt geri alınamaz biçimde silinecek.','Kalıcı Sil','dor').then(function(ok){
     if(!ok)return;
-    db.ref('trash/'+key).remove().then(function(){renderTrashSheet();toast('🗑️ Silindi');});
+    db.ref(copYolu()+'/'+key).remove().then(function(){renderTrashSheet();toast('🗑️ Silindi');});
   });
 };
 window.copTumunuSil=function(){
   dlg('🗑️','Çöp kutusu boşaltılsın mı?','İçindeki TÜM kayıtlar geri alınamaz biçimde silinecek.','Boşalt','dor').then(function(ok){
     if(!ok)return;
-    db.ref('trash').remove().then(function(){renderTrashSheet();toast('🗑️ Çöp kutusu boşaltıldı');logAction('🗑️ Çöp kutusu boşaltıldı');});
+    db.ref(copYolu()).remove().then(function(){renderTrashSheet();toast('🗑️ Çöp kutusu boşaltıldı');logAction('🗑️ Çöp kutusu boşaltıldı');});
   });
 };
 window.openTrashSheet=openTrashSheet;
