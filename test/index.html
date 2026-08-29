@@ -1869,7 +1869,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-29-D';
+window.APP_BUILD='2026-08-29-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -3787,7 +3787,12 @@ function renderTempPasswordHint(){
   try{alreadySeen=!!localStorage.getItem(seenKey);}catch(e){DiagSil('renderTempPasswordHint',e);}
   if(alreadySeen){
     hintEl.innerHTML=`<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:10px;padding:.5rem .6rem;margin-top:.4rem;text-align:center">
-      <div style="font-size:.64rem;font-weight:700;color:var(--mu)">🔑 Geçici şifreniz daha önce gösterildi - hatırlıyorsanız yukarıdan girin</div>
+      <!-- TEŞHİS RAPORU DÜZELTMESİ ("kontrast 3.56:1 · yazı rgb(136,136,187)"): rgb(136,136,187)
+           = --mu değişkeninin VARSAYILAN değeri. Yani applyTheme'in okunabilirlik düzeltmesi
+           bu yazıya hiç uygulanmamış - giriş ekranı, tema uygulanmadan ÖNCE çiziliyor ve o an
+           kök değişkenler hâlâ varsayılan. Bu ipucu okunması gereken bir yönlendirme; ana
+           metin rengini kullanır, orada varsayılan da düzeltilmiş değer de okunaklıdır. -->
+      <div style="font-size:.66rem;font-weight:700;color:var(--tx)">🔑 Geçici şifreniz daha önce gösterildi - hatırlıyorsanız yukarıdan girin</div>
     </div>`;
     return;
   }
@@ -15681,9 +15686,21 @@ window.ptDiagTumunuSil=function(){
   if(!n){showToast('Silinecek kayıt yok');return;}
   if(!confirm(n+' teşhis kaydı KALICI olarak silinecek.\n\nBu işlem geri alınamaz; kayıtlar hem bu cihazdan hem sunucudan kaldırılır.\n\nDevam edilsin mi?'))return;
   try{DiagCore.temizle();}catch(e){}
-  try{if(DiagCore.sunucudanSil)DiagCore.sunucudanSil();}catch(e){}
   ptDiagKopyaKutusuCiz();
-  showToast('🗑️ Teşhis kayıtları silindi');
+  // HATA DÜZELTMESİ (aynı bildirim): Sunucu silme işleminin SONUCU hiç beklenmiyordu -
+  // fonksiyon çağrılıp geçiliyor, hemen ardından koşulsuz "silindi" yazılıyordu. Sunucu
+  // tarafı başarısız olduğunda bile kullanıcıya başarılı denmiş oluyordu; bu yüzden
+  // "silinmiyor" belirtisi ancak bir sonraki açılışta fark ediliyordu. Artık sonuç beklenir
+  // ve DOĞRUSU yazılır.
+  try{
+    if(DiagCore.sunucudanSil){
+      DiagCore.sunucudanSil(function(ok,bilgi){
+        ptDiagKopyaKutusuCiz();
+        if(ok)showToast('🗑️ Teşhis kayıtları kalıcı olarak silindi');
+        else showToast('⚠️ Bu cihazdan silindi ama sunucudan silinemedi: '+(bilgi||'sebep bilinmiyor'));
+      });
+    }else showToast('🗑️ Bu cihazdaki teşhis kayıtları silindi');
+  }catch(e){showToast('🗑️ Bu cihazdaki kayıtlar silindi (sunucu silme hatası)');}
 };
 function categorizeNote(text){
   const t=(text||'').toLowerCase();
@@ -26495,12 +26512,23 @@ window.voteMvp=function(matchId,player){
     try{
       var db=(window.firebase&&firebase.database)?firebase.database():null;
       if(!db)return;
-      db.ref('diagnostics/logs').push({
+      // KAYIT ANAHTARINI SAKLA - bkz. sunucudanSil üzerindeki not: silme, sunucuyu OKUMADAN
+      // yapılabilsin diye kendi gönderdiğimiz kayıtların anahtarlarını yerelde tutuyoruz.
+      var _ref=db.ref('diagnostics/logs').push({
         app:APP,appLabel:APP_LABEL,mod:rec.m,modLabel:(modById(rec.m)||{}).label||rec.m,
         kind:rec.k,title:rec.t,detail:rec.d?JSON.stringify(rec.d).slice(0,900):null,
         user:whoAmI(),ts:rec.ts,ua:(navigator.userAgent||'').slice(0,140),
         dev:DEV_ID,rid:rec.rid||null
-      }).catch(function(){});
+      });
+      try{
+        if(_ref&&_ref.key){
+          var ak=JSON.parse(localStorage.getItem('diag_remote_keys_'+APP)||'[]');
+          ak.push(_ref.key);
+          if(ak.length>600)ak=ak.slice(-600);
+          localStorage.setItem('diag_remote_keys_'+APP,JSON.stringify(ak));
+        }
+      }catch(e){}
+      if(_ref&&_ref.catch)_ref.catch(function(){});
       // Kayıt gönderen her cihazın kimlik kartı da güncel tutulur (kullanıcı adı değişmiş
       // olabilir: anonim gezerken hata oluştu, sonra giriş yaptı).
       kaydetCihazKarti();
@@ -26640,17 +26668,36 @@ window.voteMvp=function(matchId,player){
     // cihazların kayıtlarına dokunmaz - bir kullanıcının kendi kaydını silmesi, başkasının
     // teşhisini yok etmemelidir. Kopyalanma damgaları da temizlenir, çünkü damgalar artık
     // var olmayan kayıtlara ait.
+    // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "daha önce kopyalanmış teşhis raporları
+    // kalıcı olarak silinmiyor"):
+    // Silme, önce SUNUCUYU OKUYUP kendi kayıtlarımızı bulmaya çalışıyordu
+    // (orderByChild('dev').equalTo(...)). İki ayrı sebeple bu okuma başarısız oluyordu:
+    //   1) Kullanıcı uygulaması 'diagnostics/logs' düğümüne YAZAR ama OKUMAZ - güvenlik
+    //      kuralları okumaya izin vermediğinde sorgu hata callback'ine düşüyor ve hiçbir şey
+    //      silinmiyordu.
+    //   2) 'dev' alanı için tanımlı bir dizin (.indexOn) yoksa Firebase sorguyu reddedebilir.
+    // Her iki durumda da fonksiyon sessizce başarısız oluyor, üstelik arayüz yine de
+    // "silindi" diyordu (bkz. ptDiagTumunuSil'deki ikinci düzeltme).
+    // ÇÖZÜM: Sunucuyu HİÇ OKUMUYORUZ. Bir kayıt gönderdiğimizde Firebase'in verdiği anahtarı
+    // zaten biliyoruz (bkz. sendRemote) ve yerelde saklıyoruz. Silerken o anahtarları
+    // doğrudan null'a çekiyoruz - okuma izni gerekmiyor, dizin gerekmiyor ve yalnızca BU
+    // CİHAZIN kayıtları siliniyor.
     sunucudanSil:function(cb){
       try{
         var db=(window.firebase&&firebase.database)?firebase.database():null;
-        if(!db){if(cb)cb(false);return;}
-        db.ref('diagnostics/logs').orderByChild('dev').equalTo(DEV_ID).once('value',function(snap){
-          var upd={};
-          snap.forEach(function(ch){upd['diagnostics/logs/'+ch.key]=null;});
-          upd['diagnostics/copied/'+DEV_ID]=null;
-          db.ref().update(upd).then(function(){if(cb)cb(true);},function(){if(cb)cb(false);});
-        },function(){if(cb)cb(false);});
-      }catch(e){if(cb)cb(false);}
+        if(!db){if(cb)cb(false,'veritabanı bağlantısı yok');return;}
+        var ak=[];
+        try{ak=JSON.parse(localStorage.getItem('diag_remote_keys_'+APP)||'[]');}catch(e){}
+        var upd={};
+        ak.forEach(function(k){if(k)upd['diagnostics/logs/'+k]=null;});
+        upd['diagnostics/copied/'+DEV_ID]=null;
+        db.ref().update(upd).then(function(){
+          try{localStorage.removeItem('diag_remote_keys_'+APP);}catch(e){}
+          if(cb)cb(true,ak.length);
+        },function(err){
+          if(cb)cb(false,(err&&err.message)||'sunucu reddetti');
+        });
+      }catch(e){if(cb)cb(false,(e&&e.message)||'bilinmeyen hata');}
     },
     rapor:function(){
       var L=['=== '+APP_LABEL+' · NOKTA ATIŞI TEŞHİS RAPORU ==='];
@@ -27129,6 +27176,17 @@ window.voteMvp=function(matchId,player){
             // çubuk kaynaklı örtmeler artık sayılmaz; gerçekten erişilemez hale getiren
             // SABİT (fixed) katmanlar - rozet, yüzen düğme, bant - sayılmaya devam eder.
             if(_pos==='sticky')continue;
+            // SENSÖR DÜZELTMESİ (yanlış alarm): Görünmez tutulan dosya seçiciler
+            // (opacity:0, 1x1px) ekranda hiç görünmez - üstlerine bir şey binmesi kullanıcı
+            // için bir kayıp değildir. Bunlar her raporun başını dolduruyordu.
+            try{
+              var _ecs=getComputedStyle(el);
+              if(_ecs.opacity==='0'||(el.tagName==='INPUT'&&(el.getAttribute('type')||'')==='file'))continue;
+            }catch(e){}
+            // Örten öğe TEŞHİS ARAYÜZÜNÜN KENDİSİYSE kayda geçmez: rozet yalnızca teşhis
+            // açıkken vardır, gerçek kullanıcıda hiç bulunmaz. Kendi gölgesini hata diye
+            // raporlamak, gerçek bulguları gürültüye boğuyordu.
+            if(kendiMi(fe))continue;
             ortulu.push(yol(el)+' · "'+ornek(el)+'" · %'+oran+' oranında ÖRTEN: '+yol(fe)+_kn+(kendiMi(fe)?'  ⚠️ (teşhis arayüzünün kendisi)':''));
             break;
           }
