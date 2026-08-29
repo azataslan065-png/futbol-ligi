@@ -1876,7 +1876,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-29-R';
+window.APP_BUILD='2026-08-29-S';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21988,6 +21988,59 @@ window.PTPlayer=(function(){
     setPref('volume',p);
     syncUI();
   }
+  // ── SES KANALI SEÇİMİ (çift-mono yayınlar için) ───────────────────────────────────────
+  // Neden gerekli olduğu için buildPanelHtml içindeki "Ses Kanalı" notuna bakın: yayın iki
+  // dili tek stereo parçanın iki kanalına koyduğunda, dil değiştirmek kanal seçmek demektir.
+  // NASIL: Web Audio ile ses akışı bölünür (ChannelSplitter), istenen kanal alınır ve İKİ
+  // hoparlöre birden verilir (ChannelMerger) - böylece seçilen dil tek kulaktan değil, normal
+  // şekilde duyulur.
+  // DİKKAT EDİLEN İKİ NOKTA:
+  //  1) Bir <video> için MediaElementSource YALNIZCA BİR KEZ oluşturulabilir. İkinci kez
+  //     denemek hata verir ve sesi tamamen kesebilir - bu yüzden bir kez kurulup saklanır.
+  //  2) Kurulum yapıldığı anda ses artık Web Audio'dan geçer; hedefe bağlanmazsa ses TAMAMEN
+  //     kesilir. Bu yüzden "stereo"ya dönüşte de bağlantı korunur, sadece yönlendirme değişir.
+  function sesKanaliKur(){
+    if(!S||!S.video)return false;
+    if(S._sesGraf)return true;
+    try{
+      var AC=window.AudioContext||window.webkitAudioContext;
+      if(!AC)return false;
+      var ctx=new AC();
+      var src=ctx.createMediaElementSource(S.video);
+      var splitter=ctx.createChannelSplitter(2);
+      var merger=ctx.createChannelMerger(2);
+      src.connect(splitter);
+      S._sesGraf={ctx:ctx,src:src,splitter:splitter,merger:merger};
+      sesKanaliUygula('stereo');
+      merger.connect(ctx.destination);
+      return true;
+    }catch(e){
+      // Kurulum başarısızsa hiçbir şey yapmadan çıkılır - ses akışına dokunulmamış olur.
+      S._sesGraf=null;
+      return false;
+    }
+  }
+  function sesKanaliUygula(mod){
+    var g=S&&S._sesGraf;
+    if(!g)return;
+    try{
+      g.splitter.disconnect();
+      if(mod==='sol'){g.splitter.connect(g.merger,0,0);g.splitter.connect(g.merger,0,1);}
+      else if(mod==='sag'){g.splitter.connect(g.merger,1,0);g.splitter.connect(g.merger,1,1);}
+      else{g.splitter.connect(g.merger,0,0);g.splitter.connect(g.merger,1,1);}
+    }catch(e){}
+  }
+  function sesKanaliSec(mod){
+    if(!S)return;
+    if(!sesKanaliKur()){showToastMsg('Bu tarayıcıda ses kanalı ayrımı desteklenmiyor');return;}
+    // Tarayıcılar ses bağlamını yalnızca kullanıcı dokunuşundan sonra başlatır; menüye
+    // dokunmak o dokunuş sayılır.
+    try{if(S._sesGraf.ctx.state==='suspended')S._sesGraf.ctx.resume();}catch(e){}
+    S.sesKanali=mod;
+    sesKanaliUygula(mod);
+    try{setPref('sesKanali',mod);}catch(e){}
+    showToastMsg({stereo:'🔊 Stereo',sol:'◀️ Sol kanal',sag:'▶️ Sağ kanal'}[mod]||'');
+  }
   function toggleMute(){
     if(!S)return;
     S.video.muted=!S.video.muted;
@@ -23045,6 +23098,16 @@ window.PTPlayer=(function(){
         var _at=S.hls.audioTracks[S.hls.audioTrack]||{};
         h+=opt('🗣️ Ses Dili · '+(_at.name||_at.lang||'?'),false,'tab:audio');
       }
+      // KULLANICI BİLDİRDİ ("iki dil seçeneği açılmıyor" - TRT Kurdî'de ekranda "1 KURMANCÎ"
+      // ve "2 TÜRKÇE" yazıyor ama menüde hiçbir seçenek çıkmıyor):
+      // ASIL SEBEP - bu yayın iki dili AYRI HLS ses parçası olarak sunmuyor. Türkiye'deki
+      // yayınlarda çok yaygın bir yöntem kullanılıyor: TEK bir stereo ses parçasının SOL
+      // kanalında bir dil, SAĞ kanalında öteki dil var (çift-mono). Ekrandaki "1/2" rozeti de
+      // TRT'nin kendi grafiği - hangi kanalın hangi dil olduğunu söylüyor.
+      // Bu yüzden hls.js hiçbir zaman birden fazla "ses parçası" göremez; parça sayısı 1'dir
+      // ve yukarıdaki madde haklı olarak çizilmez. Dil değiştirmenin tek yolu SES KANALINI
+      // seçmektir - aşağıdaki madde bunu yapar (Web Audio ile tek kanalı iki hoparlöre verir).
+      if(!gom&&!S.isEmbed)h+=opt('🔊 Ses Kanalı · '+({stereo:'Stereo',sol:'Sol (1)',sag:'Sağ (2)'}[S.sesKanali||'stereo']),false,'tab:achan');
       h+=opt('⏱ Sarma adımı · '+pref('skip',10)+' sn',false,'tab:skip');
       // KULLANICI TALEBİ ("kullanıcı canlı yayını sn/dk/saat bazlı geri veya ileri
       // sarabilsin"): Sadece CANLI yayın izlerken görünür - kayıtlı videoda zaten ilerleme
@@ -23067,6 +23130,16 @@ window.PTPlayer=(function(){
       h+='<h4>◀ OYNATMA HIZI</h4>';
       [0.25,0.5,0.75,1,1.25,1.5,1.75,2].forEach(function(r){h+=opt(r+'x',v.playbackRate===r,'speed:'+r);});
       h+=slider('ptpSpdC','Özel',25,300,5,Math.round(v.playbackRate*100),'%');
+      h+=opt('◀ Geri',false,'tab:main');
+    }else if(tab==='achan'){
+      h+='<h4>◀ SES KANALI</h4>';
+      h+='<div style="font-size:.62rem;color:var(--mu);line-height:1.6;padding:.2rem .5rem .5rem">'
+        +'Bazı yayınlar iki dili tek ses parçasının sol ve sağ kanalına koyar. Ekranda '
+        +'"1 …" / "2 …" gibi bir rozet görüyorsanız bu yayınlardan biridir - aşağıdan '
+        +'dilediğiniz kanalı seçin, iki hoparlörden de o dil duyulur.</div>';
+      h+=opt('🔊 Stereo (varsayılan)',(S.sesKanali||'stereo')==='stereo','achan:stereo');
+      h+=opt('◀️ Sol kanal · genelde 1. dil',S.sesKanali==='sol','achan:sol');
+      h+=opt('▶️ Sağ kanal · genelde 2. dil',S.sesKanali==='sag','achan:sag');
       h+=opt('◀ Geri',false,'tab:main');
     }else if(tab==='audio'){
       h+='<h4>◀ SES DİLİ</h4>';
@@ -23161,6 +23234,7 @@ window.PTPlayer=(function(){
     if(!S||!a)return;
     if(a.indexOf('tab:')===0){panelYenile(a.slice(4));return;}
       if(a.indexOf('speed:')===0){setSpeed(Number(a.slice(6)));return;}
+    if(a.indexOf('achan:')===0){sesKanaliSec(a.slice(6));panelYenile('achan');return;}
     if(a.indexOf('atrack:')===0){
       var _ai=Number(a.slice(7));
       try{
@@ -23526,6 +23600,9 @@ window.PTPlayer=(function(){
     }
     S={
       root:root,video:video,gomulu:gomulu,url:opt.url,title:opt.title||'',isLive:canli,videoId:opt.videoId,
+      // Kullanıcının seçtiği ses kanalı kanaldan kanala korunur (çift-mono yayınlarda dil
+      // tercihi her kanal değişiminde yeniden seçilmek zorunda kalmasın).
+      sesKanali:(function(){try{return pref('sesKanali','stereo');}catch(e){return 'stereo';}})(),
       hls:null,levels:[],zoom:1,brightness:1,contrast:1,saturation:1,rotate:0,fit:'contain',
       cueSync:0,locked:false,panelOpen:false,panelTab:'main',sleepMin:0,recoverCount:0
     };
@@ -24043,6 +24120,10 @@ window.PTPlayer=(function(){
       closeChannelList(); // KÖK SEBEP DÜZELTMESİ: kutu artık document.body'ye bağlı - oynatıcı DOM'u silinirken otomatik kalkmaz, açıkça kapatılması ŞART.
       stopRemoteHeartbeat(); // KULLANICI TALEBİ: Kumanda sistemi - oynatıcı kapanınca oturumu Firebase'den temizle.
       if(S.offlineHandler){window.removeEventListener('online',S.offlineHandler);S.offlineHandler=null;}
+      // Ses grafiği oynatıcıya bağlıdır; oynatıcı kapanınca ses bağlamı da kapatılır.
+      // Kapatılmazsa her açılışta yeni bir AudioContext birikir (tarayıcı sınırı vardır).
+      try{if(S._sesGraf&&S._sesGraf.ctx&&S._sesGraf.ctx.close)S._sesGraf.ctx.close();}catch(e){}
+      S._sesGraf=null;
       wakeLock(false);
       unbindOrientation();
       document.body.classList.remove('ptp-fs-active');
