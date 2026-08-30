@@ -1876,7 +1876,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-A';
+window.APP_BUILD='2026-08-30-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21521,7 +21521,26 @@ window.PTPlayer=(function(){
   // sunucumuz (bkz. Cloudflare Worker konuşmamız) olmadığından elimizdeki en pratik otomatik
   // deneme budur. Gerçekten çalışan bir çözüm için hâlâ kendi proxy'nizi kurmanız en
   // güvenilir yol olacaktır.
-  var CORS_PROXY_PREFIXES=['https://corsproxy.io/?url=','https://api.allorigins.win/raw?url='];
+  // KULLANICI DURUMU (HT Spor/Ekol Sport: "Sunucu ayakta ama erişime izin vermiyor - CORS"):
+  // Bu listedeki ÜCRETSİZ, HERKESE AÇIK proxy'ler bir CANLI YAYIN için pratikte yetersizdir:
+  // canlı HLS'te her 2-10 saniyede bir yeni parça indirilir ve bunların tamamı ücretsiz bir
+  // aracıdan geçmek zorunda kalır. Sonuç genelde şu olur: kanal listesi açılır ama görüntü
+  // ya hiç gelmez ya da sürekli donar. Bu proxy'ler ayrıca sık sık hız sınırı uygular.
+  // ÇÖZÜM: Yönetici KENDİ proxy adresini tanımlayabilir (bkz. admin panelindeki "Kendi CORS
+  // proxy adresiniz" alanı). Tanımlıysa listenin BAŞINA konur ve önce o denenir - kendi
+  // proxy'niz hız sınırı uygulamaz ve yayına yakın bir sunucuda çalışabilir.
+  function ptpProxyListesi(){
+    var liste=[];
+    try{
+      var ozel=(window.D&&D.corsProxy||'').trim();
+      if(ozel){
+        if(!/[?&=]$/.test(ozel)&&ozel.indexOf('{url}')<0)ozel+= (ozel.indexOf('?')>=0?'&url=':'?url=');
+        liste.push(ozel);
+      }
+    }catch(e){}
+    return liste.concat(['https://corsproxy.io/?url=','https://api.allorigins.win/raw?url=']);
+  }
+  var CORS_PROXY_PREFIXES=ptpProxyListesi();
   function buildProxiedLoader(prefix){
     var BaseLoader=window.Hls&&window.Hls.DefaultConfig&&window.Hls.DefaultConfig.loader;
     if(!BaseLoader)return null;
@@ -21562,6 +21581,8 @@ window.PTPlayer=(function(){
         proxyIdx=0;
       }
     }
+    // Yönetici proxy adresini sonradan tanımlamış olabilir - her denemede liste tazelenir.
+    try{CORS_PROXY_PREFIXES=ptpProxyListesi();}catch(e){}
     S.proxyIdx=(proxyIdx==null?null:proxyIdx);
     S.recoverCount=0; // Mod değişince (doğrudan↔proxy) sayaç sıfırdan başlar.
     var hlsMi=/\.(m3u8)(\?|#|$)/i.test(url);
