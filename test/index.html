@@ -1876,7 +1876,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-H';
+window.APP_BUILD='2026-08-30-I';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21502,6 +21502,12 @@ function ptpGomuluMedya(ifr){
     if(typeof i.playerState==='number'&&i.playerState>=0){
       var durakladYeni=!(i.playerState===1||i.playerState===3);
       if(durakladYeni!==D.duraklad){D.duraklad=durakladYeni;olay(durakladYeni?'pause':'play');}
+      // HATA DÜZELTMESİ (kullanıcı bildirdi: "video oynuyor fakat ortadaki sürekli dönüyor"):
+      // Yükleniyor halkası 'playing' ve 'canplay' olaylarıyla gizleniyor. Kabuk bu iki olayı
+      // HİÇ yaymıyordu - yalnızca 'play' vardı - bu yüzden video oynarken bile halka ekranda
+      // kalıyordu. Ayrıca 'waiting' yayılıp karşılığı gelmediği için halka bir kez açılınca
+      // bir daha kapanmıyordu. Oynatma başladığında ikisi de yayılır.
+      if(i.playerState===1){olay('playing');olay('canplay');}
       if(i.playerState===3)olay('waiting');
       if(i.playerState===0)olay('ended');
     }
@@ -22093,6 +22099,11 @@ window.PTPlayer=(function(){
   // dışına çıkamaz). Artık sadece kullanıcı GERÇEKTEN canlı uca (son birkaç saniyeye) çok
   // yakınsa ileri sarma engellenir - "zaten en güncel noktadasın" anlamında.
   function seekBy(sn){
+    // Aralık tanımlıysa ⏪/⏩ de sınır dışına çıkamaz (bkz. ptpAralikKirp).
+    if(S&&S.araliklar&&S.araliklar.length&&S.video){
+      try{S.video.currentTime=ptpAralikKirp((S.video.currentTime||0)+sn);}catch(e){}
+      return;
+    }
     if(!S)return;
     var v=S.video;
     if(S.isLive&&!isFinite(v.duration)){
@@ -22233,6 +22244,16 @@ window.PTPlayer=(function(){
   // veriyi ısıtmanın tek yolu. Yardımcı oynatıcı sessizdir, görünmez ve hiç oynatmaz.
   // SINIR: Bu bir garanti değil, bir hızlandırmadır. Tarayıcı önbelleği doluysa ya da sunucu
   // aralık isteğini reddediyorsa geçişte yine kısa bir yükleme olabilir.
+  // Bir zaman değerini, o an oynatılan bölümün sınırları içine kırpar. Aralık tanımlı
+  // değilse değer olduğu gibi döner - yani aralık kullanmayan videolarda davranış değişmez.
+  function ptpAralikKirp(t){
+    if(!S||!S.araliklar||!S.araliklar.length)return t;
+    var a=S.araliklar[S.aralikIdx];
+    if(!a)return t;
+    if(a.bas>0&&t<a.bas)return a.bas;
+    if(a.bit>0&&t>a.bit-0.3)return Math.max(a.bas||0,a.bit-0.3);
+    return t;
+  }
   function ptpSonrakiHazirla(saniye){
     if(!S||!S.url||saniye<=0)return;
     try{
@@ -23807,7 +23828,12 @@ window.PTPlayer=(function(){
     // aradaki farkı GÖRMEZ - bu yüzden düzen, görünüm ve davranış birebir aynıdır; çünkü
     // gerçekten AYNI KODDUR.
     var gomuluHtml=(!ptIsDirectMediaUrl(opt.url||'')&&typeof buildVideoEmbedHtml==='function')
-      ?buildVideoEmbedHtml(opt.url||'',opt.basSn,opt.bitSn):'';
+      // HATA DÜZELTMESİ ("video bitiş süresi girilmesine rağmen video devam ediyor"):
+      // Buraya opt.basSn/opt.bitSn geçiliyordu ama çoklu aralığa geçerken o alanlar kaldırıldı
+      // - undefined gidiyor, YouTube adresine start/end HİÇ yazılmıyordu. İlk bölümün
+      // başlangıcı adrese yazılır; bitiş ve sonraki bölümler bizim denetimimizle yürür
+      // (bkz. timeupdate içindeki aralık notu).
+      ?buildVideoEmbedHtml(opt.url||'',(opt.araliklar&&opt.araliklar[0]&&opt.araliklar[0].bas)||0,0):'';
     var gomulu=!!gomuluHtml;
     if(gomulu){
       var sar=document.createElement('div');
@@ -23875,7 +23901,18 @@ window.PTPlayer=(function(){
     seek.addEventListener('change',function(e){
       e.stopPropagation();
       var d=video.duration;
-      if(isFinite(d)){try{video.currentTime=d*Number(seek.value)/100;}catch(err){}}
+      if(isFinite(d)){
+        var hedef=d*Number(seek.value)/100;
+        // HATA DÜZELTMESİ (kullanıcı bildirdi: "video başlangıç ve bitiş süresi dışında
+        // kullanıcı sarabiliyor"): Aralık denetimi yalnızca timeupdate'te yapılıyordu - yani
+        // kullanıcı aralık dışına sarabiliyor, ancak bir sonraki timeupdate'te geri
+        // alınıyordu. Arada görüntü akıyor ve gizlenmesi istenen bölüm görülebiliyordu.
+        // Artık sarma İSTEĞİ, uygulanmadan önce geçerli bölümün sınırlarına kırpılır -
+        // aralık dışına hiç çıkılmaz. (timeupdate denetimi ikinci savunma hattı olarak kalır:
+        // klavye kısayolu, çift dokunma ile sarma gibi başka yollar da var.)
+        hedef=ptpAralikKirp(hedef);
+        try{video.currentTime=hedef;}catch(err){}
+      }
       S.seeking=false;
       showControls();
     });
