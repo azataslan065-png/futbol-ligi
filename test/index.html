@@ -1889,7 +1889,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-K';
+window.APP_BUILD='2026-08-30-N';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21974,29 +21974,63 @@ window.PTPlayer=(function(){
     updateTimes();
   }
   // KULLANICI TALEBİ ("oynatıcıda videonun tüm süre bilgisi görünmesin, sadece yöneticinin
-  // girdiği zaman aralığı görünsün"): Aralık tanımlıysa süre göstergeleri artık videonun
-  // GERÇEK/tam süresine göre değil, o an oynatılan BÖLÜMÜN kendi sınırlarına göre hesaplanır.
-  // Böylece kullanıcı videonun aslında çok daha uzun olduğunu ne geçen süreden ne de toplam
-  // süreden anlayabilir - sadece yöneticinin izin verdiği bölümün süresini görür.
-  function ptpAktifAralikSinirlari(d){
+  // girdiği zaman aralığı görünsün") + KULLANICI TALEBİ ("yönetici, girdiği birden fazla süre
+  // aralığını oynatıcıda TOPLAM süre olarak hesaplasın"): Süre göstergeleri artık videonun
+  // gerçek süresine göre DEĞİL, yöneticinin tanımladığı TÜM bölümlerin sürelerinin TOPLAMINA
+  // göre hesaplanır. Örneğin admin "10:00-15:00" ve "40:00-42:00" aralıklarını girdiyse,
+  // kullanıcı toplamda 5dk+2dk = 7dk'lık bir video izliyormuş gibi görür; ilk bölümü izlerken
+  // 0:00-5:00 arası, ikinci bölüme geçince (ekranda görünmeden, kesintisiz) 5:00-7:00 arası
+  // sayar - videonun gerçek/tam süresi hiçbir yerde görünmez.
+  function ptpAralikSegmentleri(d){
     if(!S||!S.araliklar||!S.araliklar.length)return null;
-    var a=S.araliklar[S.aralikIdx];
-    if(!a)return null;
-    var bas=a.bas>0?a.bas:0;
-    var bit=a.bit>0?a.bit:d;
-    if(!isFinite(bit)||bit<=bas)return null;
-    return {bas:bas,bit:bit};
+    return S.araliklar.map(function(a){
+      var bas=a.bas>0?a.bas:0;
+      var bit=(a.bit>0&&isFinite(a.bit))?a.bit:d;
+      if(!isFinite(bit)||bit<bas)bit=bas;
+      return {bas:bas,bit:bit,sure:Math.max(0,bit-bas)};
+    });
+  }
+  // Videonun HAM konumunu (t), tüm bölümlerin TOPLAM zaman çizelgesindeki karşılığına çevirir.
+  // 'once': şu anki bölümden ÖNCEKİ bölümlerin toplam süresi (kaydırma çubuğunda tampon
+  // hesabı için de kullanılır - bkz. updateTimes).
+  function ptpToplamAralikDurumu(d,t){
+    var liste=ptpAralikSegmentleri(d);
+    if(!liste||!liste.length)return null;
+    var toplam=0;for(var i=0;i<liste.length;i++)toplam+=liste[i].sure;
+    if(toplam<=0)return null;
+    var idx=(S.aralikIdx>=0&&S.aralikIdx<liste.length)?S.aralikIdx:0;
+    var once=0;for(var j=0;j<idx;j++)once+=liste[j].sure;
+    var seg=liste[idx];
+    var icinde=seg.sure>0?Math.max(0,Math.min(seg.sure,t-seg.bas)):0;
+    return {toplam:toplam,gecen:once+icinde,once:once,seg:seg,idx:idx,liste:liste};
+  }
+  // Kaydırma çubuğunda seçilen TOPLAM (bölümler-arası birleşik) konumu, gerçek video
+  // zamanına ve hangi bölüme denk geldiğine çevirir - kullanıcı çubuğu sürükleyip bırakınca
+  // doğru bölüme, doğru ham saniyeye sarılabilsin diye kullanılır.
+  function ptpAralikKonumEsle(d,hedefGecen){
+    var liste=ptpAralikSegmentleri(d);
+    if(!liste||!liste.length)return null;
+    var once=0;
+    for(var i=0;i<liste.length;i++){
+      var seg=liste[i];
+      if(hedefGecen<=once+seg.sure||i===liste.length-1){
+        var icinde=Math.max(0,Math.min(seg.sure,hedefGecen-once));
+        return {t:seg.bas+icinde,idx:i};
+      }
+      once+=seg.sure;
+    }
+    return null;
   }
   function updateTimes(){
     if(!S)return;
     var v=S.video,d=v.duration,t=v.currentTime;
     var canli=S.isLive||!isFinite(d)||d===Infinity;
     var cur=el('ptpCur'),rem=el('ptpRem'),tot=el('ptpTot'),sk=el('ptpSeek'),buf=el('ptpBuf');
-    // Aralık tanımlıysa gösterge/kaydırıcı hesaplarını bölüm-göreli değerlere çevir.
-    var _sn=canli?null:ptpAktifAralikSinirlari(d);
-    if(_sn){
-      d=_sn.bit-_sn.bas;
-      t=Math.max(0,Math.min(d,t-_sn.bas));
+    // Aralık(lar) tanımlıysa gösterge/kaydırıcı hesaplarını TÜM bölümlerin toplamına göre çevir.
+    var _tp=canli?null:ptpToplamAralikDurumu(d,t);
+    if(_tp){
+      d=_tp.toplam;
+      t=_tp.gecen;
     }
     // TEŞHİS RAPORU DÜZELTMESİ ("Titreme: aynı alan ard arda yeniden çiziliyor · alan:
     // div#ptpOv > div.ptp-bot > div.ptp-times > span#ptpCur · 3 kez / 400ms içinde"):
@@ -22029,7 +22063,10 @@ window.PTPlayer=(function(){
     if(buf&&d){
       try{
         var e2=v.buffered.length?v.buffered.end(v.buffered.length-1):0;
-        if(_sn)e2=Math.max(0,Math.min(d,e2-_sn.bas));
+        if(_tp){
+          var segBuf=Math.max(0,Math.min(_tp.seg.sure,e2-_tp.seg.bas));
+          e2=_tp.once+segBuf;
+        }
         buf.style.width=Math.min(100,e2/d*100)+'%';
       }catch(e){}
     }
@@ -22326,7 +22363,20 @@ window.PTPlayer=(function(){
         return true;
       }
       try{S.video.pause();S.video.currentTime=a.bit;}catch(e){}
-      if(!S._aralikBitti){S._aralikBitti=true;showToastMsg('⏹️ Video bitti');}
+      if(!S._aralikBitti){
+        S._aralikBitti=true;
+        showToastMsg('⏹️ Video bitti');
+        // HATA DÜZELTMESİ (kullanıcı bildirdi: "video bittikten sonra kasma oluyor"): Bu iki
+        // gözetleyici zamanlayıcı (250ms/400ms) video bittikten SONRA da hiç durmadan
+        // çalışmaya devam ediyordu - her turda pause()/currentTime yazma komutu tekrar tekrar
+        // gönderiliyordu. Kendi <video>'muzda bu ucuzdur ama GÖMÜLÜ (YouTube vb.) kaynakta her
+        // tekrar iframe'e bir postMessage komutu (pauseVideo/seekTo) gönderir - saniyede
+        // birkaç kez sürekli komut göndermek, özellikle düşük donanımlı cihazlarda gözle
+        // görülür bir kasmaya/titremeye yol açıyordu. Video gerçekten bittiğinde artık bu iki
+        // zamanlayıcı tamamen durduruluyor - tekrar gerekmiyor, çünkü konum zaten sabitlendi.
+        clearInterval(S._aralikT);S._aralikT=null;
+        clearInterval(S._aralikTimer);S._aralikTimer=null;
+      }
       return true;
     }
     if(a.bas>0&&t<a.bas-1){
@@ -22369,7 +22419,15 @@ window.PTPlayer=(function(){
           S._hazirlikYapildi=false;
         }else{
           try{S.video.pause();}catch(e){}
-          if(!S._aralikBitti){S._aralikBitti=true;showToastMsg('⏹️ Video bitti');}
+          if(!S._aralikBitti){
+            S._aralikBitti=true;
+            showToastMsg('⏹️ Video bitti');
+            // bkz. ptpAralikUygula() içindeki AYNI kök sebep düzeltmesi - iki zamanlayıcı da
+            // burada durdurulmalı çünkü bu bekçi, ptpAralikUygula'dan BAĞIMSIZ olarak da
+            // (timeupdate hiç gelmeden) tek başına tetiklenebilir.
+            clearInterval(S._aralikT);S._aralikT=null;
+            clearInterval(S._aralikTimer);S._aralikTimer=null;
+          }
         }
       }
     },400);
@@ -24037,11 +24095,12 @@ window.PTPlayer=(function(){
       S.seeking=true;
       var d=video.duration;
       if(isFinite(d)){
-        // KULLANICI TALEBİ: Aralık tanımlıysa kaydırıcı ve gösterge, videonun TAMAMINA değil
-        // o an oynatılan BÖLÜME göre hesaplanır - bkz. updateTimes() içindeki AYNI mantık.
-        var _sn=ptpAktifAralikSinirlari(d);
-        var segD=_sn?(_sn.bit-_sn.bas):d;
-        var t=segD*Number(seek.value)/100;
+        // KULLANICI TALEBİ: Aralık(lar) tanımlıysa kaydırıcı ve gösterge, videonun TAMAMINA
+        // değil TÜM bölümlerin TOPLAM süresine göre hesaplanır - bkz. updateTimes() içindeki
+        // AYNI mantık (ptpToplamAralikDurumu).
+        var _tp=ptpToplamAralikDurumu(d,video.currentTime||0);
+        var toplam=_tp?_tp.toplam:d;
+        var t=toplam*Number(seek.value)/100;
         var cur=el('ptpCur');if(cur)cur.textContent=fmt(t);
       }
     });
@@ -24049,9 +24108,24 @@ window.PTPlayer=(function(){
       e.stopPropagation();
       var d=video.duration;
       if(isFinite(d)){
-        var _sn=ptpAktifAralikSinirlari(d);
-        var segD=_sn?(_sn.bit-_sn.bas):d;
-        var hedef=(_sn?_sn.bas:0)+segD*Number(seek.value)/100;
+        var _tp=ptpToplamAralikDurumu(d,video.currentTime||0);
+        var toplam=_tp?_tp.toplam:d;
+        var hedefGecen=toplam*Number(seek.value)/100;
+        var hedef;
+        if(_tp){
+          // Kullanıcı çubuğu birleşik toplam zaman çizelgesinde bir yere bıraktı - bu konum
+          // hangi BÖLÜME denk geliyorsa (bkz. ptpAralikKonumEsle), aktif bölüm de ona göre
+          // güncellenir; böylece kullanıcı doğrudan ikinci/üçüncü bölüme de sarabilir.
+          var esle=ptpAralikKonumEsle(d,hedefGecen);
+          if(esle){
+            hedef=esle.t;S.aralikIdx=esle.idx;S._hazirlikYapildi=false;
+            // Video daha önce bittiyse (bkz. "video bittikten sonra kasma" düzeltmesi -
+            // gözetleyici zamanlayıcılar orada durdurulmuştu) ve kullanıcı şimdi geri sardıysa,
+            // sınır denetimi yeniden aktif hale getirilir.
+            if(S._aralikBitti){S._aralikBitti=false;ptpAralikDenetimBaslat();ptpAralikBekcisiBaslat();}
+          }
+          else hedef=hedefGecen;
+        }else hedef=hedefGecen;
         // HATA DÜZELTMESİ (kullanıcı bildirdi: "video başlangıç ve bitiş süresi dışında
         // kullanıcı sarabiliyor"): Aralık denetimi yalnızca timeupdate'te yapılıyordu - yani
         // kullanıcı aralık dışına sarabiliyor, ancak bir sonraki timeupdate'te geri
