@@ -1876,7 +1876,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-29-U';
+window.APP_BUILD='2026-08-29-V';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21543,6 +21543,25 @@ window.PTPlayer=(function(){
     // Gömülü kaynakta akış zaten iframe'in kendi içinde çözülür - burada yapılacak bir şey
     // yok. (HLS.js'i çalıştırmak boşuna hata üretirdi.)
     if(S.gomulu){var _sp=el('ptpSpin');if(_sp)_sp.style.display='none';return;}
+    // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "bunlar niye çalışmıyor" - biri http://
+    // adresliydi): Uygulama HTTPS üzerinden sunuluyor. Tarayıcılar, HTTPS bir sayfanın
+    // HTTP bir kaynağı yüklemesini KESİN olarak engeller ("mixed content") - bu bir ağ hatası
+    // değil, bir güvenlik kuralıdır ve yeniden denemekle, beklemekle açılmaz. Eski kod bunu
+    // sıradan bir bağlantı hatası sanıp defalarca deniyor, sonunda "yayın yanıt vermiyor"
+    // diyordu; oysa yayın gayet çalışıyor olabilir.
+    // ÇÖZÜM: Adres http:// ise ÖNCE https:// karşılığı denenir (çoğu yayıncıda ikisi de
+    // vardır). O da olmazsa doğrudan proxy'ye geçilir - proxy https konuştuğu için karışık
+    // içerik engeline takılmaz ve http kaynağı bizim adımıza indirir.
+    if(location.protocol==='https:'&&/^http:\/\//i.test(url)){
+      if(!S._httpsDenendi){
+        S._httpsDenendi=true;
+        S.url=url=url.replace(/^http:/i,'https:');
+        showToastMsg('🔒 Güvenli bağlantı deneniyor…');
+      }else if(proxyIdx==null){
+        // https karşılığı da tutmadı; doğrudan denemenin şansı yok, proxy'den başla.
+        proxyIdx=0;
+      }
+    }
     S.proxyIdx=(proxyIdx==null?null:proxyIdx);
     S.recoverCount=0; // Mod değişince (doğrudan↔proxy) sayaç sıfırdan başlar.
     var hlsMi=/\.(m3u8)(\?|#|$)/i.test(url);
@@ -21651,7 +21670,18 @@ window.PTPlayer=(function(){
             setTimeout(function(){if(S)attachSource();},2500);
             return;
           }
-          fail('Yayına ulaşılamıyor','Yayın kaynağı şu anda yanıt vermiyor ya da bu tarayıcıdan erişime izin vermiyor. Yayıncının sitesinden izlemeyi deneyebilirsiniz.');
+          // Başarısızlık mesajı artık SEBEBE göre ayrışıyor. "Yanıt vermiyor" demek, aslında
+          // izin sorunu olan bir durumda yöneticiyi yanlış yere bakmaya iter.
+          var _neden='Yayın kaynağı şu anda yanıt vermiyor.';
+          if(/^http:\/\//i.test(S.anaUrl||'')&&location.protocol==='https:')
+            _neden='Bu yayının adresi http:// ile başlıyor. Uygulama https üzerinden çalıştığı '
+              +'için tarayıcı bu bağlantıyı güvenlik gereği engelliyor. Yönetici panelinden '
+              +'adresi https:// olarak güncellemek çoğu yayında sorunu çözer.';
+          else if(S.proxyIdx!=null)
+            _neden='Yayın sunucusu bu siteden erişime izin vermiyor (CORS) ve yedek bağlantı '
+              +'yolları da yanıt vermedi. Bu, yayıncının sunucu ayarından kaynaklanır; '
+              +'uygulama tarafından aşılamaz.';
+          fail('Yayına ulaşılamıyor',_neden);
         });
       }catch(e){v.src=url;tryPlay();}
     });
