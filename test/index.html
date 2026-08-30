@@ -1004,6 +1004,18 @@ iframe.ptp-video{pointer-events:none}
 .ptp-spin{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:34px;height:34px;border-radius:50%;
   border:3px solid rgba(255,255,255,.25);border-top-color:#fff;animation:ptpSpin .8s linear infinite;z-index:5}
 @keyframes ptpSpin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+/* KULLANICI TALEBİ ("TV sekmesindeki video bölümünde videolar arası geçiş belli
+   ettirilmeden sağlansın, kullanıcı bu geçişi fark etmesin, tek sahneymiş gibi devam
+   etsin"): Kaynak değişiminde (bkz. PTPlayer.switchSourceInPlace/ptpFreezeCapture) <video>
+   elemanının src'si değişir değişmez ekran KISA SÜRELİĞİNE kararır/boşalır ve yükleniyor
+   halkası (.ptp-spin) döner - bu, "geçiş" olduğunu ELE VEREN görünür bir sıçramaydı. Çözüm:
+   kaynak değişmeden HEMEN ÖNCE eski karenin bir "dondurulmuş kare" görüntüsü (<canvas>) bu
+   katmana çizilip video elemanının TAM ÜSTÜNE (aynı boyut/oranla, .ptp-video sınıfı
+   paylaşılarak) yerleştirilir; yeni kaynak sahnenin ARKASINDA sessizce yüklenir, oynamaya
+   BAŞLADIĞI an (video 'playing') dondurulmuş kare yumuşakça (opacity geçişiyle) kaldırılır.
+   Kullanıcı hep dolu bir görüntü görür - kararma, halka veya boşluk hiç görünmez. */
+.ptp-freeze{position:absolute;inset:0;z-index:6;opacity:0;pointer-events:none;transition:opacity .28s ease}
+.ptp-freeze.ptp-freeze-on{opacity:1}
 /* Hata / bilgi katmanı */
 .ptp-err{position:absolute;inset:0;background:rgba(0,0,0,.86);color:#fff;display:flex;flex-direction:column;
   align-items:center;justify-content:center;text-align:center;padding:1.1rem;gap:.7rem;z-index:7}
@@ -1889,7 +1901,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-N';
+window.APP_BUILD='2026-08-30-P';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21576,6 +21588,43 @@ window.PTPlayer=(function(){
   }
   function el(id){return S&&S.root?S.root.querySelector('#'+id):null;}
 
+  // KULLANICI TALEBİ ("videolar arası geçiş belli ettirilmeden sağlansın... tek sahneymiş
+  // gibi devam etsin"): Kaynak (src) değişmeden HEMEN ÖNCE, o an ekranda duran karenin bir
+  // fotoğrafını (<canvas> üzerine drawImage) çekip video elemanının TAM ÜSTÜNE koyar. Yeni
+  // video bu "donmuş kare"nin ARKASINDA sessizce açılır/arabelleğe alınır; ekranda hiçbir
+  // kararma/halka/boşluk görünmez. Herhangi bir sebeple kare çekilemezse (ör. henüz hiç kare
+  // çizilmemiş ilk açılış, ya da CORS nedeniyle tuval "kirlenirse") sessizce false döner ve
+  // eski (spinner'lı) davranışa geri düşülür - hiçbir zaman kullanıcıya hata göstermez.
+  function ptpFreezeCapture(){
+    try{
+      if(!S||!S.video||!S.root)return false;
+      var v=S.video,cv=el('ptpFreeze');
+      if(!cv||!v.videoWidth||!v.videoHeight)return false;
+      cv.width=v.videoWidth;cv.height=v.videoHeight;
+      var ctx=cv.getContext('2d');
+      ctx.drawImage(v,0,0,cv.width,cv.height);
+      // Video'nun O ANKİ ekran modunu (Sığdır/Kırp/Genişlet) devral - aksi halde donmuş kare
+      // farklı bir oranda görünüp geçişin kendisini ele verebilirdi.
+      cv.setAttribute('data-fit',v.getAttribute('data-fit')||'contain');
+      cv.classList.add('ptp-freeze-on');
+      S.freezing=true;
+      var sp=el('ptpSpin');if(sp)sp.style.display='none';
+      // GÜVENLİK AĞI: 'playing'/'canplay' hiç gelmezse (ör. kaynak tamamen başarısız olursa)
+      // donmuş kare SONSUZA dek ekranda asılı kalmasın - birkaç saniye sonra otomatik kaldırılır,
+      // böylece altındaki gerçek durum (hata ekranı vb.) yine görünür olur.
+      if(S.freezeTimer)clearTimeout(S.freezeTimer);
+      S.freezeTimer=setTimeout(function(){ptpFreezeRelease();},6000);
+      return true;
+    }catch(e){return false;}
+  }
+  function ptpFreezeRelease(){
+    if(!S)return;
+    if(S.freezeTimer){clearTimeout(S.freezeTimer);S.freezeTimer=null;}
+    S.freezing=false;
+    var cv=el('ptpFreeze');
+    if(cv)cv.classList.remove('ptp-freeze-on');
+  }
+
   // ── HLS (canlı yayın) motoru ──
   function loadHlsLib(cb){
     if(window.Hls){cb(!!window.Hls.isSupported());return;}
@@ -23912,6 +23961,11 @@ window.PTPlayer=(function(){
         +'<div class="ptp-rot" id="ptpRot">'
         +'<video class="ptp-video" id="ptpVideo" playsinline webkit-playsinline preload="metadata" '
           +'crossorigin="anonymous" data-fit="contain" '+(airplayVar?'x-webkit-airplay="allow" ':'')+'></video>'
+        // KULLANICI TALEBİ: Geçiş donmuş karesi - bkz. .ptp-freeze CSS notu. Video ile AYNI
+        // sınıfı (.ptp-video) paylaşır ki boyutlandırma/object-fit kuralları otomatik uysun,
+        // ayrıca kendi konumlandırma/opaklık katmanı için .ptp-freeze eklenir. Varsayılan
+        // olarak görünmez (opacity:0) - sadece kaynak değişirken kısaca belirir.
+        +'<canvas class="ptp-video ptp-freeze" id="ptpFreeze" data-fit="contain" aria-hidden="true"></canvas>'
         +'<div class="ptp-spin" id="ptpSpin"></div>'
         +'<div class="ptp-toast" id="ptpToast"></div>'
         +'<div class="ptp-err" id="ptpErr" style="display:none">'
@@ -24186,6 +24240,11 @@ window.PTPlayer=(function(){
       syncUI();updateInfo();
     });
     video.addEventListener('waiting',function(){
+      // KULLANICI TALEBİ: Bir geçiş donmuş karesi ekrandayken (bkz. ptpFreezeCapture) yeni
+      // kaynağın arabelleğe alma halkası GÖRÜNMEZ - aksi halde donmuş karenin altından/
+      // üstünden dönen halka geçişi ele verirdi. Kare kaldırıldığında ('playing'/'canplay'
+      // veya güvenlik ağı zaman aşımı) normal 'waiting' davranışı zaten kaldığı yerden devam eder.
+      if(S&&S.freezing)return;
       var sp=el('ptpSpin');if(sp)sp.style.display='block';
       // KULLANICI TALEBİ (onaylanan öneri): Bağlantı sık sık arabelleğe düşüyorsa (kısa sürede
       // tekrar tekrar 'waiting') ve Veri Tasarrufu zaten kapalıysa, kullanıcıya BİR KEZ
@@ -24205,8 +24264,12 @@ window.PTPlayer=(function(){
       S.recoverCount=0;
       wakeLock(true);
       showControls();
+      // KULLANICI TALEBİ: Yeni kaynak GERÇEKTEN oynamaya başladı - donmuş kareyi (varsa)
+      // yumuşakça kaldır. Böylece kullanıcı hiçbir zaman boş/yüklenen bir kare görmez, kare
+      // dolu görüntüden dolu görüntüye akıcı biçimde geçer.
+      ptpFreezeRelease();
     });
-    video.addEventListener('canplay',function(){var sp=el('ptpSpin');if(sp)sp.style.display='none';});
+    video.addEventListener('canplay',function(){var sp=el('ptpSpin');if(sp)sp.style.display='none';ptpFreezeRelease();});
     video.addEventListener('play',syncUI);
     video.addEventListener('pause',function(){syncUI();showControls();wakeLock(false);});
     video.addEventListener('volumechange',function(){if(S)syncUI();});
@@ -24634,6 +24697,7 @@ window.PTPlayer=(function(){
     try{
       if(!S.isLive&&S.video)savePos(S.videoId,S.video.currentTime,S.video.duration);
       clearTimeout(S.hideT);clearTimeout(S.toastT);clearTimeout(S.sleepT);clearInterval(S.nextT);clearTimeout(S.chAutoT);
+      clearTimeout(S.freezeTimer);S.freezeTimer=null;
       closeChannelList(); // KÖK SEBEP DÜZELTMESİ: kutu artık document.body'ye bağlı - oynatıcı DOM'u silinirken otomatik kalkmaz, açıkça kapatılması ŞART.
       stopRemoteHeartbeat(); // KULLANICI TALEBİ: Kumanda sistemi - oynatıcı kapanınca oturumu Firebase'den temizle.
       if(S.offlineHandler){window.removeEventListener('online',S.offlineHandler);S.offlineHandler=null;}
@@ -24730,6 +24794,11 @@ window.PTPlayer=(function(){
   }
   function switchSourceInPlace(newUrl,newTitle,newIsLive,newVideoId){
     if(!S)return false;
+    // KULLANICI TALEBİ: Kaynak değişmeden HEMEN ÖNCE, o an ekranda olan kareyi dondurup
+    // üste koy - bkz. ptpFreezeCapture üzerindeki uzun not. Bu satırın attachSource()'tan
+    // ÖNCE çalışması ŞART: video.src DEĞİŞMEDEN yakalanan kare, geçişten hemen önceki GERÇEK
+    // görüntüdür - bir an bile gecikirse tuval boş/siyah bir kareyi dondurmüş olurdu.
+    ptpFreezeCapture();
     if(!S.isLive&&S.video)savePos(S.videoId,S.video.currentTime,S.video.duration);
     S.url=newUrl;S.title=newTitle||'';S.isLive=!!newIsLive;S.videoId=newVideoId;
     S.recoverCount=0;S.proxyIdx=null;
