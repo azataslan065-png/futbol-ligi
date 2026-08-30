@@ -1889,7 +1889,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-J';
+window.APP_BUILD='2026-08-30-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20496,14 +20496,14 @@ function buildVideoEmbedHtml(url,basSn,bitSn){
       // (çapraz kaynak), ama bu bayrak sayesinde iframe'e postMessage ile oynat/duraklat/sar
       // KOMUTU gönderebiliriz - kendi tam ekran kabuğumuzun (bkz. PTFrame) düğmeleri buna
       // dayanır. Bayrak olmadan YouTube bu komutları sessizce yok sayar.
-      if(kanal)return `<iframe src="https://www.youtube.com/embed/live_stream?channel=${kanal[1]}&autoplay=1&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      if(kanal)return `<iframe src="https://www.youtube.com/embed/live_stream?channel=${kanal[1]}&autoplay=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       const yt=url.match(/(?:watch\?v=|\/live\/|\/shorts\/|\/embed\/)([A-Za-z0-9_-]{6,})/)||url.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
       // İzleme aralığı: YouTube start/end parametrelerini kendi destekler. BİRDEN ÇOK bölüm
       // tanımlandığında yalnızca İLK bölümün başlangıcı adrese yazılır - bitiş yazılmaz,
       // çünkü YouTube "end"e gelince videoyu tamamen bitirir ve sonraki bölüme geçemezdik.
       // Bölüm zincirini bizim timeupdate denetimimiz yürütür (gömülü oynatıcı da S.video gibi
       // davrandığı için aynı kod çalışır - bkz. ptpGomuluMedya).
-      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1${basSn>0?'&start='+Math.floor(basSn):''}${bitSn>0?'&end='+Math.floor(bitSn):''}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1${basSn>0?'&start='+Math.floor(basSn):''}${bitSn>0?'&end='+Math.floor(bitSn):''}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       return '';
     }
     if(isKnownVideoHost(host,['twitch.tv'])){
@@ -22259,6 +22259,49 @@ window.PTPlayer=(function(){
   // aralık isteğini reddediyorsa geçişte yine kısa bir yükleme olabilir.
   // Bir zaman değerini, o an oynatılan bölümün sınırları içine kırpar. Aralık tanımlı
   // değilse değer olduğu gibi döner - yani aralık kullanmayan videolarda davranış değişmez.
+  // KULLANICI BİLDİRDİ (bitişin aşılması sürüyor): Aralık denetimi yalnızca 'timeupdate'
+  // olayına bağlıydı. Kendi <video>'muzda bu olay saniyede birkaç kez gelir ve yeterlidir;
+  // ama GÖMÜLÜ kaynakta olay, YouTube'un durum akışına bağlıdır ve bazen saniyeler boyunca
+  // hiç gelmez. O boşlukta video bitişi geçip oynamaya devam ediyordu.
+  // Bu yüzden aralık denetimi ayrıca 250ms'lik kendi zamanlayıcısıyla da yürütülür - iki yol
+  // birbirinin yedeği. Zamanlayıcı yalnızca aralık TANIMLIYSA çalışır, diğer videolara hiçbir
+  // maliyeti yoktur.
+  function ptpAralikDenetimBaslat(){
+    clearInterval(S&&S._aralikT);
+    if(!S||!S.araliklar||!S.araliklar.length)return;
+    S._aralikT=setInterval(function(){
+      if(!S||!S.video)return;
+      try{ptpAralikUygula(S.video.currentTime||0);}catch(e){}
+    },250);
+  }
+  // Aralık kurallarının TEK uygulama noktası - hem timeupdate hem zamanlayıcı burayı çağırır.
+  // Tek yerde tutulması, iki yolun farklı davranma ihtimalini ortadan kaldırır.
+  function ptpAralikUygula(t){
+    if(!S||!S.araliklar||!S.araliklar.length)return false;
+    var a=S.araliklar[S.aralikIdx];
+    if(!a)return false;
+    if(a.bit>0&&t>=a.bit){
+      if(S.aralikIdx+1<S.araliklar.length){
+        S.aralikIdx++;
+        var b=S.araliklar[S.aralikIdx].bas||0;
+        try{S.video.currentTime=b;}catch(e){}
+        S._hazirlikYapildi=false;
+        return true;
+      }
+      try{S.video.pause();S.video.currentTime=a.bit;}catch(e){}
+      if(!S._aralikBitti){S._aralikBitti=true;showToastMsg('⏹️ Video bitti');}
+      return true;
+    }
+    if(a.bas>0&&t<a.bas-1){
+      try{S.video.currentTime=a.bas;}catch(e){}
+      return true;
+    }
+    if(a.bit>0&&!S._hazirlikYapildi&&(a.bit-t)<10&&S.aralikIdx+1<S.araliklar.length){
+      S._hazirlikYapildi=true;
+      ptpSonrakiHazirla(S.araliklar[S.aralikIdx+1].bas||0);
+    }
+    return false;
+  }
   function ptpAralikKirp(t){
     if(!S||!S.araliklar||!S.araliklar.length)return t;
     var a=S.araliklar[S.aralikIdx];
@@ -22266,6 +22309,33 @@ window.PTPlayer=(function(){
     if(a.bas>0&&t<a.bas)return a.bas;
     if(a.bit>0&&t>a.bit-0.3)return Math.max(a.bas||0,a.bit-0.3);
     return t;
+  }
+  // KULLANICI BİLDİRDİ ("video bitişin dışına çıkıyor" - ikinci kez): Bitiş denetimi tek
+  // başına 'timeupdate'e bağlıydı. Kendi <video> elemanımızda bu olay güvenilirdir; ama GÖMÜLÜ
+  // kaynakta olay, YouTube'un durum akışından türetilir ve o akış hiç gelmezse denetim de hiç
+  // çalışmaz - sessizce. Bu yüzden ikinci, akıştan BAĞIMSIZ bir denetim daha kuruluyor:
+  // düzenli aralıklarla konum okunur ve sınır aşılmışsa aynı işlem uygulanır. Kendi
+  // oynatıcımızda bu ek denetim zararsızdır (zaten timeupdate önce yakalar), gömülüde ise
+  // tek çalışan yol olabilir.
+  function ptpAralikBekcisiBaslat(){
+    clearInterval(S&&S._aralikTimer);
+    if(!S||!S.araliklar||!S.araliklar.length)return;
+    S._aralikTimer=setInterval(function(){
+      if(!S||!S.video||!S.araliklar.length)return;
+      var a=S.araliklar[S.aralikIdx];
+      if(!a||!(a.bit>0))return;
+      var t=0;try{t=S.video.currentTime||0;}catch(e){return;}
+      if(t>=a.bit){
+        if(S.aralikIdx+1<S.araliklar.length){
+          S.aralikIdx++;
+          try{S.video.currentTime=S.araliklar[S.aralikIdx].bas||0;}catch(e){}
+          S._hazirlikYapildi=false;
+        }else{
+          try{S.video.pause();}catch(e){}
+          if(!S._aralikBitti){S._aralikBitti=true;showToastMsg('⏹️ Video bitti');}
+        }
+      }
+    },400);
   }
   function ptpSonrakiHazirla(saniye){
     if(!S||!S.url||saniye<=0)return;
@@ -23850,7 +23920,17 @@ window.PTPlayer=(function(){
       // - undefined gidiyor, YouTube adresine start/end HİÇ yazılmıyordu. İlk bölümün
       // başlangıcı adrese yazılır; bitiş ve sonraki bölümler bizim denetimimizle yürür
       // (bkz. timeupdate içindeki aralık notu).
-      ?buildVideoEmbedHtml(opt.url||'',(opt.araliklar&&opt.araliklar[0]&&opt.araliklar[0].bas)||0,0):'';
+      // HATA DÜZELTMESİ (kullanıcı bildirdi: "video adminin belirlediği bitişin dışına
+      // çıkıyor"): Bitiş, YouTube adresine HİÇ yazılmıyordu; sınırın tamamı bizim durum
+      // akışımıza (timeupdate) bırakılmıştı. O akış YouTube'un IFrame API'sinden gelir ve
+      // her koşulda güvenilir değildir - gelmezse sınır hiç uygulanmaz.
+      // ARTIK: TEK bölüm tanımlıysa bitiş de adrese yazılır; sınırı YouTube'un kendisi uygular
+      // ve bizim akışımıza hiç bağlı olmaz. BİRDEN ÇOK bölümde bitiş yazılamaz (YouTube
+      // "end"e gelince videoyu tamamen bitirir, sonraki bölüme geçemezdik) - orada zincir
+      // bizim denetimimizle yürür.
+      ?buildVideoEmbedHtml(opt.url||'',
+         (opt.araliklar&&opt.araliklar[0]&&opt.araliklar[0].bas)||0,
+         (opt.araliklar&&opt.araliklar.length===1&&opt.araliklar[0].bit)||0):'';
     var gomulu=!!gomuluHtml;
     if(gomulu){
       var sar=document.createElement('div');
@@ -23874,11 +23954,20 @@ window.PTPlayer=(function(){
       // İZLEME ARALIKLARI: yönetici bir video için birden çok bölüm tanımlayabilir; bunlar
       // arka arkaya, kesintisiz oynatılır. Canlı yayında anlamsız olduğu için yalnızca
       // videoda uygulanır.
-      araliklar:(!canli&&opt.araliklar&&opt.araliklar.length)?opt.araliklar:[],
+      // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "video adminin belirlediği bitişin dışına
+      // çıkıyor"): Aralıklar "canlı DEĞİLSE" koşuluna bağlıydı. Ama yönetici bir YouTube
+      // videosunu eklerken "Bu bir canlı yayın" kutusunu işaretli bırakmış olabilir - o zaman
+      // canli=true olur ve tanımlı aralıklar SESSİZCE yok sayılırdı. Oysa aralık tanımlanmış
+      // olması, o kaydın canlı bir yayın DEĞİL, sınırlanmış bir video olduğunun kendisi kadar
+      // güçlü bir işaretidir. Artık aralık varsa uygulanır; canlı bayrağı bunu iptal etmez.
+      araliklar:(opt.araliklar&&opt.araliklar.length)?opt.araliklar:[],
       aralikIdx:0,
       hls:null,levels:[],zoom:1,brightness:1,contrast:1,saturation:1,rotate:0,fit:'contain',
       cueSync:0,locked:false,panelOpen:false,panelTab:'main',sleepMin:0,recoverCount:0
     };
+
+    // Gömülü kaynakta 'loadedmetadata' hiç gelmeyebilir; denetim kurulum anında da başlatılır.
+    ptpAralikDenetimBaslat();
 
     // Kayıtlı tercihler
     video.volume=Math.max(0,Math.min(1,Number(pref('volume',100))/100));
@@ -23963,6 +24052,7 @@ window.PTPlayer=(function(){
         S._basUygulandi=true;
         var _ilk=S.araliklar[0].bas||0;
         if(_ilk>0){try{video.currentTime=_ilk;}catch(e){}}
+        ptpAralikDenetimBaslat();
       }
     });
     video.addEventListener('loadedmetadata',function(){
@@ -24013,41 +24103,15 @@ window.PTPlayer=(function(){
     // 'timeupdate' olayını yine de teslim edebiliyor. Dinleyici de S'nin hâlâ var olduğunu
     // varsayıp S.tick'e uzanınca çöküyordu. Aynı risk bu dosyadaki tüm video dinleyicileri
     // için geçerli; oynatıcı yok edildikten sonra gelen bir olay hiçbir şey yapmamalı.
+    ptpAralikBekcisiBaslat();
     video.addEventListener('timeupdate',function(){
       if(!S)return;
       // İZLEME ARALIKLARI: Yöneticinin tanımladığı bölümler arka arkaya oynatılır. Kontrol
       // zamanlayıcıyla değil timeupdate ile yapılır - kullanıcı ileri sarabilir ya da hızı
       // değiştirebilir, zamanlayıcı bunları kaçırırdı.
-      if(S.araliklar&&S.araliklar.length){
-        var _a=S.araliklar[S.aralikIdx]||null;
-        if(_a){
-          if(_a.bit>0&&video.currentTime>=_a.bit){
-            if(S.aralikIdx+1<S.araliklar.length){
-              // SONRAKİ BÖLÜME GEÇİŞ: Aynı video içinde konum değişimi olduğu için oynatma
-              // DURDURULMAZ - kullanıcı tek bir video izliyormuş gibi devam eder.
-              S.aralikIdx++;
-              var _s=S.araliklar[S.aralikIdx].bas||0;
-              try{video.currentTime=_s;}catch(e){}
-              S._hazirlikYapildi=false;
-              return;
-            }
-            try{video.pause();video.currentTime=_a.bit;}catch(e){}
-            if(!S._aralikBitti){S._aralikBitti=true;showToastMsg('⏹️ Video bitti');}
-            return;
-          }
-          // Kullanıcı bu bölümün ÖNCESİNE sardıysa başına geri alınır - aksi halde
-          // yöneticinin dışarıda bıraktığı kısım izlenebilirdi.
-          if(_a.bas>0&&video.currentTime<_a.bas-1){
-            try{video.currentTime=_a.bas;}catch(e){}
-          }
-          // HAZIRLIK: Bölümün bitmesine 10 saniye kala, SONRAKİ bölümün başlangıcı arka planda
-          // ısıtılır (bkz. ptpSonrakiHazirla). Böylece geçişte bekleme olmaz.
-          if(_a.bit>0&&!S._hazirlikYapildi&&(_a.bit-video.currentTime)<10&&S.aralikIdx+1<S.araliklar.length){
-            S._hazirlikYapildi=true;
-            ptpSonrakiHazirla(S.araliklar[S.aralikIdx+1].bas||0);
-          }
-        }
-      }
+      // Aralık kuralları tek bir yerde uygulanır (bkz. ptpAralikUygula) - burada ve 250ms'lik
+      // zamanlayıcıda aynı kod çalışır.
+      if(ptpAralikUygula(video.currentTime||0))return;
       updateTimes();
       if(!canli){
         S.tick=(S.tick||0)+1;
@@ -24449,6 +24513,8 @@ window.PTPlayer=(function(){
       if(S.offlineHandler){window.removeEventListener('online',S.offlineHandler);S.offlineHandler=null;}
       // Ses grafiği oynatıcıya bağlıdır; oynatıcı kapanınca ses bağlamı da kapatılır.
       // Kapatılmazsa her açılışta yeni bir AudioContext birikir (tarayıcı sınırı vardır).
+      clearInterval(S._aralikT);
+      try{clearInterval(S._aralikTimer);}catch(e){}
       try{if(S._hazirlikEl){S._hazirlikEl.removeAttribute('src');S._hazirlikEl.load();S._hazirlikEl.remove();}}catch(e){}
       S._hazirlikEl=null;
       try{if(S._sesGraf&&S._sesGraf.ctx&&S._sesGraf.ctx.close)S._sesGraf.ctx.close();}catch(e){}
