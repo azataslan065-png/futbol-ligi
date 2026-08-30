@@ -1876,7 +1876,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-29-T';
+window.APP_BUILD='2026-08-29-U';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22072,6 +22072,48 @@ window.PTPlayer=(function(){
     try{setPref('sesKanali',mod);}catch(e){}
     showToastMsg({stereo:'🔊 Stereo',sol:'◀️ Sol kanal',sag:'▶️ Sağ kanal'}[mod]||'');
   }
+  // ── AYRI AKIŞLI SES DİLLERİ ───────────────────────────────────────────────────────────
+  // Yöneticinin tanımladığı "Dil adı | adres" satırları okunur. Ana adres HER ZAMAN ilk dil
+  // olarak listenin başındadır - yönetici onu tekrar yazmak zorunda kalmasın.
+  function ptpDilListesi(){
+    if(S._dilCache)return S._dilCache;
+    var liste=[{ad:(S.dilAnaAd||'Varsayılan'),url:S.anaUrl||S.url}];
+    try{
+      String(S.sesDilleri||'').split(/\n+/).forEach(function(sat){
+        var p=sat.split('|');
+        if(p.length<2)return;
+        var ad=p[0].trim(),u=p.slice(1).join('|').trim();
+        if(ad&&/^https?:\/\//i.test(u))liste.push({ad:ad,url:u});
+      });
+    }catch(e){}
+    S._dilCache=liste;
+    return liste;
+  }
+  function ptpAktifDil(){
+    var l=ptpDilListesi();
+    for(var i=0;i<l.length;i++)if(l[i].url===S.url)return i;
+    return 0;
+  }
+  // Dil değiştirmek, aslında BAŞKA BİR AKIŞA geçmektir. Kullanıcı için kesintinin mümkün
+  // olduğunca küçük olması gerekir: video konumu korunur (canlıda zaten canlı uca gidilir),
+  // ekran modu, ses ve kumanda durumu değişmez - yalnızca kaynak değişir.
+  function ptpDilSec(i){
+    var l=ptpDilListesi();
+    if(!l[i]||l[i].url===S.url)return;
+    var konum=0;
+    try{if(!S.isLive)konum=S.video.currentTime||0;}catch(e){}
+    S.url=l[i].url;
+    S._dilKonum=konum;
+    showToastMsg('🗣️ '+l[i].ad);
+    try{
+      attachSource(S.proxyIdx);
+      if(konum>0){
+        var geri=function(){try{S.video.currentTime=konum;}catch(e){}S.video.removeEventListener('loadedmetadata',geri);};
+        S.video.addEventListener('loadedmetadata',geri);
+      }
+    }catch(e){}
+    panelYenile('altdil');
+  }
   function toggleMute(){
     if(!S)return;
     S.video.muted=!S.video.muted;
@@ -23129,6 +23171,13 @@ window.PTPlayer=(function(){
         var _at=S.hls.audioTracks[S.hls.audioTrack]||{};
         h+=opt('🗣️ Ses Dili · '+(_at.name||_at.lang||'?'),false,'tab:audio');
       }
+      // AYRI AKIŞLI DİLLER (bkz. admin.html'deki "Ek ses dilleri" alanı): Bazı yayınlar her
+      // dili ayrı bir adreste sunar; tek akışta ikinci ses parçası olmadığı için oynatıcı
+      // kendi başına dil bulamaz. Yönetici tanımlamışsa liste buradan gelir ve kullanıcı için
+      // görünüşte normal bir "Ses Dili" menüsü olur.
+      else if(!gom&&ptpDilListesi().length>1){
+        h+=opt('🗣️ Ses Dili · '+(ptpDilListesi()[ptpAktifDil()]||{}).ad,false,'tab:altdil');
+      }
       // KULLANICI BİLDİRDİ ("iki dil seçeneği açılmıyor" - TRT Kurdî'de ekranda "1 KURMANCÎ"
       // ve "2 TÜRKÇE" yazıyor ama menüde hiçbir seçenek çıkmıyor):
       // ASIL SEBEP - bu yayın iki dili AYRI HLS ses parçası olarak sunmuyor. Türkiye'deki
@@ -23161,6 +23210,10 @@ window.PTPlayer=(function(){
       h+='<h4>◀ OYNATMA HIZI</h4>';
       [0.25,0.5,0.75,1,1.25,1.5,1.75,2].forEach(function(r){h+=opt(r+'x',v.playbackRate===r,'speed:'+r);});
       h+=slider('ptpSpdC','Özel',25,300,5,Math.round(v.playbackRate*100),'%');
+      h+=opt('◀ Geri',false,'tab:main');
+    }else if(tab==='altdil'){
+      h+='<h4>◀ SES DİLİ</h4>';
+      ptpDilListesi().forEach(function(d,i){h+=opt(d.ad,ptpAktifDil()===i,'altdil:'+i);});
       h+=opt('◀ Geri',false,'tab:main');
     }else if(tab==='achan'){
       h+='<h4>◀ SES KANALI</h4>';
@@ -23265,6 +23318,7 @@ window.PTPlayer=(function(){
     if(!S||!a)return;
     if(a.indexOf('tab:')===0){panelYenile(a.slice(4));return;}
       if(a.indexOf('speed:')===0){setSpeed(Number(a.slice(6)));return;}
+    if(a.indexOf('altdil:')===0){ptpDilSec(Number(a.slice(7)));return;}
     if(a.indexOf('achan:')===0){sesKanaliSec(a.slice(6));panelYenile('achan');return;}
     if(a.indexOf('atrack:')===0){
       var _ai=Number(a.slice(7));
@@ -23634,6 +23688,8 @@ window.PTPlayer=(function(){
       // Kullanıcının seçtiği ses kanalı kanaldan kanala korunur (çift-mono yayınlarda dil
       // tercihi her kanal değişiminde yeniden seçilmek zorunda kalmasın).
       sesKanali:(function(){try{return pref('sesKanali','stereo');}catch(e){return 'stereo';}})(),
+      // Ayrı akışlı dil tanımları ve ana adres (dil değiştirince geri dönebilmek için).
+      anaUrl:opt.url,sesDilleri:opt.sesDilleri||'',dilAnaAd:opt.dilAnaAd||'',_dilCache:null,
       hls:null,levels:[],zoom:1,brightness:1,contrast:1,saturation:1,rotate:0,fit:'contain',
       cueSync:0,locked:false,panelOpen:false,panelTab:'main',sleepMin:0,recoverCount:0
     };
@@ -24455,7 +24511,9 @@ window.openVideoWatch=function(videoId){
   // kanal geçişi, iki kanalın teknik olarak farklı motorlarla açılmasına rağmen KESİNTİSİZ
   // görünür - ekran modu, tam ekran ve kumanda aynen devam eder.
   if(ozelOynatici&&window.PTPlayer){
-    PTPlayer.mount('ptPlayerHost',{url:url,title:v.title||'',isLive:!!v.isLive,videoId:videoId});
+    PTPlayer.mount('ptPlayerHost',{url:url,title:v.title||'',isLive:!!v.isLive,videoId:videoId,
+      // Yöneticinin tanımladığı ek ses dilleri (bkz. PTPlayer içindeki ptpDilListesi notu).
+      sesDilleri:v.sesDilleri||'',dilAnaAd:v.dilAnaAd||''});
     // Ters yön: gömülü bir YouTube kanalından kendi oynatıcımıza geçilirken de tam ekran ve
     // kumanda durumu korunur (bkz. "TÜR DEĞİŞİMİNDE SÜREKLİLİK" notu). İki motor arasında
     // gidip gelirken kullanıcı hiçbir kopukluk hissetmemeli.
