@@ -1901,7 +1901,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-P';
+window.APP_BUILD='2026-08-30-R';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21625,6 +21625,50 @@ window.PTPlayer=(function(){
     if(cv)cv.classList.remove('ptp-freeze-on');
   }
 
+  // KULLANICI TALEBİ ("bir sonraki video için inceden hazırlık yapılsın, veri toplama gibi
+  // ki video geçişi takılma olmasın"): Donmuş kare (bkz. yukarısı) geçişteki GÖRSEL sıçramayı
+  // gizliyordu, ama kaynağın kendisi geçiş ANINDA sıfırdan indirilmeye başlandığından, yavaş
+  // bir bağlantıda donmuş kare uzun süre ekranda kalabiliyor - bu da kendi başına bir
+  // "takılma" hissi yaratıyordu. Çözüm: listede SIRADAKİ videonun verisi, kullanıcı oraya
+  // geçmeden ÖNCE, gizli/sessiz bir <video preload="auto"> elemanıyla arka planda ısıtılır.
+  // Aynı adrese gerçek geçiş anında tekrar istek yapıldığında tarayıcı bunu (destekleyen
+  // sunucularda) kendi HTTP önbelleğinden karşılar - ağ gecikmesi çoğunlukla ortadan kalkar.
+  // SADECE doğrudan medya dosyaları (mp4/webm vb.) için yapılır - canlı HLS akışının "sıradaki
+  // parçası" diye sabit bir şey yoktur, gömülü (YouTube vb.) kaynaklarda da anlamsızdır; o
+  // durumlarda bu fonksiyon sessizce hiçbir şey yapmadan çıkar.
+  function ptpNextPrefetch(){
+    try{
+      if(!S||!S.url||S.gomulu)return;
+      // KULLANICI TERCİHİNE SAYGI: Veri Tasarrufu açıksa veya tarayıcı/işletim sistemi "Veri
+      // Tasarrufu" modunu bildiriyorsa, kullanıcının izni olmadan fazladan veri indirmeyiz.
+      if(pref('dataSaver',false))return;
+      try{if(navigator.connection&&navigator.connection.saveData)return;}catch(e){}
+      var list=playlist(!!S.isLive);
+      var i=list.findIndex(function(x){return x.id===S.videoId;});
+      if(i<0||i+1>=list.length)return;
+      var hedefId=list[i+1].id;
+      var v=(window.D&&D.videoLinks||[]).find(function(x){return x.id===hedefId;});
+      if(!v)return;
+      var url=ptExtractVideoUrl(v.url||'');
+      // BİLEREK sadece dosya-tabanlı (mp4/webm/ogg/m4v/mov) adresler ısıtılır - m3u8/mpd
+      // (canlı/parçalı akış) burada KASITLI olarak dışarıda bırakılır (bkz. yukarıdaki not).
+      if(!url||!/\.(mp4|webm|ogg|ogv|m4v|mov)(\?|#|$)/i.test(url))return;
+      if(S._prefetchUrl===url)return; // zaten ısıtılıyor/ısıtıldı, tekrar tetiklemeye gerek yok
+      var y=S._prefetchEl;
+      if(!y){
+        y=document.createElement('video');
+        y.muted=true;y.preload='auto';y.playsInline=true;
+        try{y.crossOrigin='anonymous';}catch(e){}
+        y.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none';
+        S.root.appendChild(y);
+        S._prefetchEl=y;
+      }
+      S._prefetchUrl=url;
+      y.src=url;
+      try{y.load();}catch(e){}
+    }catch(e){}
+  }
+
   // ── HLS (canlı yayın) motoru ──
   function loadHlsLib(cb){
     if(window.Hls){cb(!!window.Hls.isSupported());return;}
@@ -24263,11 +24307,25 @@ window.PTPlayer=(function(){
       var sp=el('ptpSpin');if(sp)sp.style.display='none';
       S.recoverCount=0;
       wakeLock(true);
-      showControls();
+      // KULLANICI TALEBİ ("oynatıcılar ekrana çıkamasın... dikkat dağıtıyor geçiş esnasında"):
+      // showControls() ÖNCEDEN her 'playing' olayında KOŞULSUZ çağrılıyordu - kullanıcı
+      // kontrolleri (başlık çubuğu, düğmeler) elle GİZLEMİŞ olsa bile, sessiz bir kaynak
+      // değişiminde (donmuş kare hâlâ ekrandayken, bkz. S.freezing) bu çubuk aniden geri
+      // beliriyor, bu da geçişin OLDUĞUNU ele veren ayrı bir sıçramaya dönüşüyordu. Artık bir
+      // geçiş SESSİZCE sürerken (S.freezing true) bu çağrı ATLANIR - kontrollerin görünürlüğü,
+      // kullanıcının kendi son tercihiyle (gösterili/gizli) AYNEN korunur. Gerçek bir ilk açılış
+      // veya elle oynat/duraklat gibi durumlarda S.freezing zaten false'tur, davranış değişmez.
+      if(!S.freezing)showControls();
       // KULLANICI TALEBİ: Yeni kaynak GERÇEKTEN oynamaya başladı - donmuş kareyi (varsa)
       // yumuşakça kaldır. Böylece kullanıcı hiçbir zaman boş/yüklenen bir kare görmez, kare
       // dolu görüntüden dolu görüntüye akıcı biçimde geçer.
       ptpFreezeRelease();
+      // KULLANICI TALEBİ ("bir sonraki video için inceden hazırlık yapılsın"): Şu an oynayan
+      // kaynak GÜVENLE akmaya başladıktan SONRA, sıradaki videonun verisi arka planda ısıtılır
+      // - böylece bu ısıtma, mevcut videonun kendi başlangıç bant genişliğiyle YARIŞMAZ. Kısa
+      // bir gecikmeyle (kaynak tamamen otursun diye) tetiklenir.
+      clearTimeout(S._prefetchT);
+      S._prefetchT=setTimeout(function(){if(S)ptpNextPrefetch();},1200);
     });
     video.addEventListener('canplay',function(){var sp=el('ptpSpin');if(sp)sp.style.display='none';ptpFreezeRelease();});
     video.addEventListener('play',syncUI);
@@ -24707,6 +24765,9 @@ window.PTPlayer=(function(){
       try{clearInterval(S._aralikTimer);}catch(e){}
       try{if(S._hazirlikEl){S._hazirlikEl.removeAttribute('src');S._hazirlikEl.load();S._hazirlikEl.remove();}}catch(e){}
       S._hazirlikEl=null;
+      clearTimeout(S._prefetchT);S._prefetchT=null;
+      try{if(S._prefetchEl){S._prefetchEl.removeAttribute('src');S._prefetchEl.load();S._prefetchEl.remove();}}catch(e){}
+      S._prefetchEl=null;S._prefetchUrl=null;
       try{if(S._sesGraf&&S._sesGraf.ctx&&S._sesGraf.ctx.close)S._sesGraf.ctx.close();}catch(e){}
       S._sesGraf=null;
       wakeLock(false);
