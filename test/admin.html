@@ -1344,7 +1344,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-B';
+window.APP_BUILD='2026-08-30-C';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6274,13 +6274,35 @@ window.testVideoLink=function(i){
       bitir();
     });
   }).catch(function(){
-    // Normal istek başarısız. Sunucunun ayakta olup olmadığını no-cors ile ayırt et.
-    fetch(url,{mode:'no-cors',cache:'no-store'}).then(function(){
-      yaz('#a16207','⚠️ <b>Sunucu ayakta ama erişime izin vermiyor (CORS).</b> Yayıncının sunucu ayarından kaynaklanır.<br/>Uygulama bu durumda yedek bağlantı yolu (proxy) dener; yayın yine de açılabilir. Oynatıcıda deneyip görün.');
-      bitir();
+    // Doğrudan istek başarısız. Şimdi iki şeyi ayrı ayrı öğrenmek gerekiyor:
+    //  1) Sunucu ayakta mı? (no-cors ile anlaşılır)
+    //  2) Tanımlıysa KENDİ PROXY'MİZ bu adresi getirebiliyor mu? Bu ikincisi kritik: proxy
+    //     çalışıyorsa yayın uygulamada AÇILIR; çalışmıyorsa proxy tarafında sorun var demektir
+    //     ve yöneticinin nereye bakacağı belli olur. Önceki sürümde bu sınanmıyordu, bu yüzden
+    //     "proxy kurdum ama yine açılmıyor" durumunda sebebi görmek mümkün değildi.
+    var ozel=(S.corsProxy||'').trim();
+    function sunucuKontrol(ekMesaj){
+      fetch(url,{mode:'no-cors',cache:'no-store'}).then(function(){
+        yaz('#a16207','⚠️ <b>Sunucu ayakta ama doğrudan erişime izin vermiyor (CORS).</b>'+(ekMesaj||''));
+        bitir();
+      }).catch(function(){
+        yaz('#b91c1c','❌ <b>Adres yanıt vermiyor.</b> Yayın kapanmış, taşınmış ya da adres yanlış olabilir.');
+        bitir();
+      });
+    }
+    if(!ozel){sunucuKontrol('<br/>Kendi proxy adresiniz tanımlı değil. Yukarıdaki "Kendi CORS Proxy Adresiniz" alanını doldurursanız bu yayın açılabilir.');return;}
+    fetch(ozel+encodeURIComponent(url),{cache:'no-store'}).then(function(r){
+      if(!r.ok){sunucuKontrol('<br/>Proxy denendi ama <b>'+r.status+'</b> döndü - proxy adresi yanlış olabilir.');return;}
+      return r.text().then(function(t){
+        if(/#EXTM3U/i.test(t)){
+          yaz('#15803d','✅ <b>Proxy üzerinden çalışıyor.</b> Doğrudan erişim engelli ama kendi proxy adresiniz yayını getirebiliyor - uygulamada açılması gerekir.');
+        }else{
+          sunucuKontrol('<br/>Proxy yanıt verdi ama içerik bir yayın listesi değil. Proxy adresinin sonunda <code>?url=</code> olduğundan emin olun.');
+        }
+        bitir();
+      });
     }).catch(function(){
-      yaz('#b91c1c','❌ <b>Adres yanıt vermiyor.</b> Yayın kapanmış, taşınmış ya da adres yanlış olabilir.');
-      bitir();
+      sunucuKontrol('<br/><b>Kendi proxy adresiniz de yanıt vermedi.</b> Worker dağıtılmamış ya da adres yanlış olabilir.');
     });
   });
 };
