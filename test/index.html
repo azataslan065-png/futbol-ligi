@@ -1876,7 +1876,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-D';
+window.APP_BUILD='2026-08-30-H';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20361,6 +20361,41 @@ function ptIsPlayerOnlyUrl(url){
 }
 window.ptIsPlayerOnlyUrl=ptIsPlayerOnlyUrl;
 // Doğrudan medya dosyası mı? (m3u8/mpd = canlı yayın akışı - bunlar da <video> ile oynatılır)
+// KULLANICI TALEBİ ("başlangıç ve bitiş süresi girmesi gerekiyor"): Yönetici süreyi serbest
+// biçimde yazabilir - "90", "1:30", "01:02:03" hepsi kabul edilir ve saniyeye çevrilir.
+// Boş ya da anlamsız değer 0 döner; çağıran taraf 0'ı "belirtilmemiş" sayar.
+function ptSureCoz(metin){
+  var t=String(metin||'').trim();
+  if(!t)return 0;
+  if(/^\d+$/.test(t))return Number(t);
+  var p=t.split(':').map(function(x){return Number(x.trim())||0;});
+  if(p.length===2)return p[0]*60+p[1];
+  if(p.length===3)return p[0]*3600+p[1]*60+p[2];
+  return 0;
+}
+window.ptSureCoz=ptSureCoz;
+// Yöneticinin yazdığı aralık listesini çözer. Her satır "başlangıç - bitiş" biçimindedir.
+// Geriye dönük uyumluluk: eski kayıtlarda tek bir basSure/bitSure alanı vardı; onlar da tek
+// elemanlı bir liste gibi ele alınır, böylece mevcut videolar davranışını korur.
+function ptAraliklariCoz(metin,eskiBas,eskiBit){
+  var out=[];
+  String(metin||'').split(/\n+/).forEach(function(sat){
+    var t=sat.trim();
+    if(!t)return;
+    var p=t.split(/\s*[-–]\s*/);
+    // "1:23:14" gibi tek değer de kabul edilir: o andan sona kadar demektir.
+    var b=ptSureCoz(p[0]||''),e=ptSureCoz(p[1]||'');
+    if(b>0||e>0)out.push({bas:b,bit:e});
+  });
+  if(!out.length){
+    var b2=ptSureCoz(eskiBas),e2=ptSureCoz(eskiBit);
+    if(b2>0||e2>0)out.push({bas:b2,bit:e2});
+  }
+  // Bölümler yazıldıkları sırayla oynatılır - yönetici sırayı bilerek seçmiş olabilir,
+  // zaman sırasına göre yeniden dizmek onun kararını bozardı.
+  return out;
+}
+window.ptAraliklariCoz=ptAraliklariCoz;
 function ptIsDirectMediaUrl(url){
   return /\.(mp4|webm|ogg|ogv|m4v|mov)(\?|#|$)/i.test(url||'')||ptIsStreamUrl(url);
 }
@@ -20424,7 +20459,12 @@ function isEmbeddableVideoUrl(url){
 // bu fonksiyonun KENDİ ürettiği resmi platform adresinden kurulur, orijinal URL asla doğrudan
 // bir iframe'e verilmez (Facebook eklentisi hariç - onda da iframe HER ZAMAN facebook.com'un
 // KENDİ plugin sayfasına gider, orijinal link sadece bir PARAMETRE olarak taşınır).
-function buildVideoEmbedHtml(url){
+// KULLANICI TALEBİ (izleme aralığı): YouTube bu işi kendi başına yapabiliyor - gömme
+// adresine start/end verilirse oynatıcı o aralığı oynatır. Kendi kodumuzla zorlamaktan
+// daha güvenilir: kullanıcı YouTube'un kendi kontrolleriyle sarsa bile sınır korunur.
+// Ayrıca doğrudan medya (m3u8/mp4) tarafında da kendi denetimimiz var (bkz. timeupdate),
+// yani iki yol da kapalı.
+function buildVideoEmbedHtml(url,basSn,bitSn){
   try{
     const host=getUrlHostname(url);
     if(isKnownVideoHost(host,['youtube.com','youtube-nocookie.com','youtu.be'])){
@@ -20445,7 +20485,12 @@ function buildVideoEmbedHtml(url){
       // dayanır. Bayrak olmadan YouTube bu komutları sessizce yok sayar.
       if(kanal)return `<iframe src="https://www.youtube.com/embed/live_stream?channel=${kanal[1]}&autoplay=1&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       const yt=url.match(/(?:watch\?v=|\/live\/|\/shorts\/|\/embed\/)([A-Za-z0-9_-]{6,})/)||url.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
-      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      // İzleme aralığı: YouTube start/end parametrelerini kendi destekler. BİRDEN ÇOK bölüm
+      // tanımlandığında yalnızca İLK bölümün başlangıcı adrese yazılır - bitiş yazılmaz,
+      // çünkü YouTube "end"e gelince videoyu tamamen bitirir ve sonraki bölüme geçemezdik.
+      // Bölüm zincirini bizim timeupdate denetimimiz yürütür (gömülü oynatıcı da S.video gibi
+      // davrandığı için aynı kod çalışır - bkz. ptpGomuluMedya).
+      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1${basSn>0?'&start='+Math.floor(basSn):''}${bitSn>0?'&end='+Math.floor(bitSn):''}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       return '';
     }
     if(isKnownVideoHost(host,['twitch.tv'])){
@@ -22179,6 +22224,34 @@ window.PTPlayer=(function(){
     }catch(e){}
     panelYenile('altdil');
   }
+  // KULLANICI TALEBİ ("ikinci ve sonraki süre aralıkları hızlı geçiş için hazırlansın"):
+  // Bir sonraki bölümün başlangıcı, GİZLİ bir yardımcı oynatıcıda önceden yüklenir. Aynı
+  // adresi kullandığı için tarayıcı ve CDN o bölümü önbelleğe alır; asıl oynatıcı oraya
+  // atladığında veri hazır olur ve bekleme görünmez.
+  // NEDEN BÖYLE: Bir <video> elemanını ileri bir konuma "önceden sardırmak" mümkün değildir -
+  // sarmak oynatmayı da oraya taşır. Ayrı bir eleman kullanmak, asıl oynatmaya dokunmadan
+  // veriyi ısıtmanın tek yolu. Yardımcı oynatıcı sessizdir, görünmez ve hiç oynatmaz.
+  // SINIR: Bu bir garanti değil, bir hızlandırmadır. Tarayıcı önbelleği doluysa ya da sunucu
+  // aralık isteğini reddediyorsa geçişte yine kısa bir yükleme olabilir.
+  function ptpSonrakiHazirla(saniye){
+    if(!S||!S.url||saniye<=0)return;
+    try{
+      var y=S._hazirlikEl;
+      if(!y){
+        y=document.createElement('video');
+        y.muted=true;y.preload='auto';y.playsInline=true;
+        y.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none';
+        // HLS akışlarında ham <video src> çalışmaz; orada hazırlık atlanır (aşağıdaki koşul).
+        if(/\.m3u8(\?|#|$)/i.test(S.url))return;
+        y.src=S.url;
+        S.root.appendChild(y);
+        S._hazirlikEl=y;
+      }
+      var uygula=function(){try{y.currentTime=saniye;}catch(e){}};
+      if(y.readyState>0)uygula();
+      else y.addEventListener('loadedmetadata',uygula,{once:true});
+    }catch(e){}
+  }
   function toggleMute(){
     if(!S)return;
     S.video.muted=!S.video.muted;
@@ -23734,7 +23807,7 @@ window.PTPlayer=(function(){
     // aradaki farkı GÖRMEZ - bu yüzden düzen, görünüm ve davranış birebir aynıdır; çünkü
     // gerçekten AYNI KODDUR.
     var gomuluHtml=(!ptIsDirectMediaUrl(opt.url||'')&&typeof buildVideoEmbedHtml==='function')
-      ?buildVideoEmbedHtml(opt.url||''):'';
+      ?buildVideoEmbedHtml(opt.url||'',opt.basSn,opt.bitSn):'';
     var gomulu=!!gomuluHtml;
     if(gomulu){
       var sar=document.createElement('div');
@@ -23755,6 +23828,11 @@ window.PTPlayer=(function(){
       sesKanali:(function(){try{return pref('sesKanali','stereo');}catch(e){return 'stereo';}})(),
       // Ayrı akışlı dil tanımları ve ana adres (dil değiştirince geri dönebilmek için).
       anaUrl:opt.url,sesDilleri:opt.sesDilleri||'',dilAnaAd:opt.dilAnaAd||'',_dilCache:null,
+      // İZLEME ARALIKLARI: yönetici bir video için birden çok bölüm tanımlayabilir; bunlar
+      // arka arkaya, kesintisiz oynatılır. Canlı yayında anlamsız olduğu için yalnızca
+      // videoda uygulanır.
+      araliklar:(!canli&&opt.araliklar&&opt.araliklar.length)?opt.araliklar:[],
+      aralikIdx:0,
       hls:null,levels:[],zoom:1,brightness:1,contrast:1,saturation:1,rotate:0,fit:'contain',
       cueSync:0,locked:false,panelOpen:false,panelTab:'main',sleepMin:0,recoverCount:0
     };
@@ -23823,6 +23901,16 @@ window.PTPlayer=(function(){
     function syncStageAspect(){/* kasıtlı olarak devre dışı - bkz. yukarıdaki not */}
     video.addEventListener('resize',syncStageAspect);
     // Video olayları
+    // İZLEME ARALIĞI - BAŞLANGIÇ: Üstveri gelir gelmez başlangıç anına atlanır. Daha erken
+    // denemek işe yaramaz (süre henüz bilinmez), daha geç denemek ilk saniyelerin izlenmesine
+    // yol açardı.
+    video.addEventListener('loadedmetadata',function(){
+      if(S&&S.araliklar&&S.araliklar.length&&!S._basUygulandi){
+        S._basUygulandi=true;
+        var _ilk=S.araliklar[0].bas||0;
+        if(_ilk>0){try{video.currentTime=_ilk;}catch(e){}}
+      }
+    });
     video.addEventListener('loadedmetadata',function(){
       var sp=el('ptpSpin');if(sp)sp.style.display='none';
       syncStageAspect();
@@ -23873,6 +23961,39 @@ window.PTPlayer=(function(){
     // için geçerli; oynatıcı yok edildikten sonra gelen bir olay hiçbir şey yapmamalı.
     video.addEventListener('timeupdate',function(){
       if(!S)return;
+      // İZLEME ARALIKLARI: Yöneticinin tanımladığı bölümler arka arkaya oynatılır. Kontrol
+      // zamanlayıcıyla değil timeupdate ile yapılır - kullanıcı ileri sarabilir ya da hızı
+      // değiştirebilir, zamanlayıcı bunları kaçırırdı.
+      if(S.araliklar&&S.araliklar.length){
+        var _a=S.araliklar[S.aralikIdx]||null;
+        if(_a){
+          if(_a.bit>0&&video.currentTime>=_a.bit){
+            if(S.aralikIdx+1<S.araliklar.length){
+              // SONRAKİ BÖLÜME GEÇİŞ: Aynı video içinde konum değişimi olduğu için oynatma
+              // DURDURULMAZ - kullanıcı tek bir video izliyormuş gibi devam eder.
+              S.aralikIdx++;
+              var _s=S.araliklar[S.aralikIdx].bas||0;
+              try{video.currentTime=_s;}catch(e){}
+              S._hazirlikYapildi=false;
+              return;
+            }
+            try{video.pause();video.currentTime=_a.bit;}catch(e){}
+            if(!S._aralikBitti){S._aralikBitti=true;showToastMsg('⏹️ Video bitti');}
+            return;
+          }
+          // Kullanıcı bu bölümün ÖNCESİNE sardıysa başına geri alınır - aksi halde
+          // yöneticinin dışarıda bıraktığı kısım izlenebilirdi.
+          if(_a.bas>0&&video.currentTime<_a.bas-1){
+            try{video.currentTime=_a.bas;}catch(e){}
+          }
+          // HAZIRLIK: Bölümün bitmesine 10 saniye kala, SONRAKİ bölümün başlangıcı arka planda
+          // ısıtılır (bkz. ptpSonrakiHazirla). Böylece geçişte bekleme olmaz.
+          if(_a.bit>0&&!S._hazirlikYapildi&&(_a.bit-video.currentTime)<10&&S.aralikIdx+1<S.araliklar.length){
+            S._hazirlikYapildi=true;
+            ptpSonrakiHazirla(S.araliklar[S.aralikIdx+1].bas||0);
+          }
+        }
+      }
       updateTimes();
       if(!canli){
         S.tick=(S.tick||0)+1;
@@ -24274,6 +24395,8 @@ window.PTPlayer=(function(){
       if(S.offlineHandler){window.removeEventListener('online',S.offlineHandler);S.offlineHandler=null;}
       // Ses grafiği oynatıcıya bağlıdır; oynatıcı kapanınca ses bağlamı da kapatılır.
       // Kapatılmazsa her açılışta yeni bir AudioContext birikir (tarayıcı sınırı vardır).
+      try{if(S._hazirlikEl){S._hazirlikEl.removeAttribute('src');S._hazirlikEl.load();S._hazirlikEl.remove();}}catch(e){}
+      S._hazirlikEl=null;
       try{if(S._sesGraf&&S._sesGraf.ctx&&S._sesGraf.ctx.close)S._sesGraf.ctx.close();}catch(e){}
       S._sesGraf=null;
       wakeLock(false);
@@ -24508,7 +24631,9 @@ window.openVideoWatch=function(videoId){
   // Böylece üst çubuk, orta tuşlar, alt satır, ayarlar paneli, kanal listesi ve kumanda -
   // hepsi TEK bir koddan gelir; iki yayın türü arasında görünüm farkı kalmaz ve TV kanalından
   // YouTube kanalına geçiş, iki TV kanalı arasındaki geçişten ayırt edilemez.
-  if(ptIsDirectMediaUrl(url)||(embeddable&&buildVideoEmbedHtml(url))){
+  var _ar=ptAraliklariCoz(v.araliklar,v.basSure,v.bitSure);
+  var _basSn=_ar.length?_ar[0].bas:0,_bitSn=(_ar.length===1?_ar[0].bit:0);
+  if(ptIsDirectMediaUrl(url)||(embeddable&&buildVideoEmbedHtml(url,_basSn,_bitSn))){
     playerHtml='<div id="ptPlayerHost"></div>';
     ozelOynatici=true;
   }else if(embeddable){
@@ -24578,7 +24703,9 @@ window.openVideoWatch=function(videoId){
   if(ozelOynatici&&window.PTPlayer){
     PTPlayer.mount('ptPlayerHost',{url:url,title:v.title||'',isLive:!!v.isLive,videoId:videoId,
       // Yöneticinin tanımladığı ek ses dilleri (bkz. PTPlayer içindeki ptpDilListesi notu).
-      sesDilleri:v.sesDilleri||'',dilAnaAd:v.dilAnaAd||''});
+      sesDilleri:v.sesDilleri||'',dilAnaAd:v.dilAnaAd||'',
+      // Yöneticinin belirlediği izleme aralığı (bkz. PTPlayer içindeki aralık notu).
+      araliklar:ptAraliklariCoz(v.araliklar,v.basSure,v.bitSure)});
     // Ters yön: gömülü bir YouTube kanalından kendi oynatıcımıza geçilirken de tam ekran ve
     // kumanda durumu korunur (bkz. "TÜR DEĞİŞİMİNDE SÜREKLİLİK" notu). İki motor arasında
     // gidip gelirken kullanıcı hiçbir kopukluk hissetmemeli.

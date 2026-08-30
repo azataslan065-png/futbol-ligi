@@ -1010,7 +1010,7 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
       <div style="font-size:.68rem;font-weight:800;color:#b91c1c;margin-bottom:.65rem;text-transform:uppercase;letter-spacing:.05em">🗑️ Tehlikeli</div>
       <!-- Çöp kutusu, tehlikeli işlemlerin HEMEN yanında duruyor: bir şeyi yanlışlıkla silen
            yönetici geri alma yolunu aramak zorunda kalmasın. -->
-      <button class="btn bg" style="width:100%;min-height:36px;margin-bottom:.6rem" onclick="openTrashSheet()">🗑️ Çöp Kutusu · silinenleri 30 gün içinde geri al</button>
+      <button class="btn bg" style="width:100%;min-height:36px;margin-bottom:.6rem" onclick="openTrashGuard()">🗑️ Çöp Kutusu · silinenleri 30 gün içinde geri al</button>
       <div class="g2">
         <button class="btn br_" onclick="resetAllScores()" style="font-size:.76rem">🔄 Sıfırla</button>
         <button class="btn br_" onclick="deleteAllMatches()" style="font-size:.76rem">🗑️ Sil</button>
@@ -1344,7 +1344,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-D';
+window.APP_BUILD='2026-08-30-H';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -3608,6 +3608,66 @@ function copKalanGun(ts){
   if(ms<=0)return 0;
   return Math.ceil(ms/(24*60*60*1000));
 }
+// ══════════════════════════════════════════════════════════════════════════════════════
+// ÇÖP KUTUSU ŞİFRESİ
+// KULLANICI TALEBİ ("Çöp kutusu için de giriş şifresi olmalı"):
+// Çöp kutusu, silinmiş her şeyin tam kopyasını barındırır - takım kadroları, maç geçmişi,
+// kullanıcı verisi. Panele erişebilen ama bu verileri görmemesi gereken bir yardımcı
+// yönetici için burası açık bir kasa olurdu. Bu yüzden ayrı bir şifreyle korunuyor.
+// TASARIM KARARLARI:
+//  • Şifre İLK AÇILIŞTA belirlenir - önceden bir varsayılan koymak (herkesin bildiği "1234"
+//    gibi) korumayı anlamsız kılardı.
+//  • Şifre düz metin olarak DEĞİL, basit bir özet (hash) olarak saklanır. Veritabanını
+//    görebilen biri şifreyi doğrudan okuyamaz. Bu güçlü bir kriptografi değildir - amaç,
+//    kazara görülmeye ve omuz üstünden okumaya karşı koruma; yönetici paneli zaten kendi
+//    kimlik doğrulamasının arkasında.
+//  • Doğrulama oturum boyunca hatırlanır, her açılışta tekrar sorulmaz.
+function copSifreOzet(metin){
+  var h=0,t=String(metin||'')+'::pt-trash';
+  for(var i=0;i<t.length;i++){h=((h<<5)-h+t.charCodeAt(i))|0;}
+  return 'h'+Math.abs(h).toString(36);
+}
+function copSifreVar(){return !!(S&&S.trashPass);}
+window.copSifreKur=function(){
+  var a=(qs('copPass1')||{}).value||'',b=(qs('copPass2')||{}).value||'';
+  if(a.length<4){toast('Şifre en az 4 karakter olmalı','er');return;}
+  if(a!==b){toast('İki şifre aynı değil','er');return;}
+  S.trashPass=copSifreOzet(a);
+  save().then(function(){
+    window._copDogrulandi=true;
+    logAction('🔒 Çöp kutusu şifresi belirlendi');
+    toast('🔒 Şifre belirlendi');
+    openTrashSheet();
+  });
+};
+window.copSifreGir=function(){
+  var a=(qs('copPassIn')||{}).value||'';
+  if(copSifreOzet(a)!==S.trashPass){toast('❌ Şifre yanlış','er');return;}
+  window._copDogrulandi=true;
+  openTrashSheet();
+};
+function copSifreEkrani(){
+  if(!copSifreVar()){
+    openSheet('🔒 Çöp Kutusu Şifresi',
+      '<div style="font-size:.72rem;line-height:1.7;color:var(--tx);margin-bottom:.8rem">'
+      +'Çöp kutusu, silinmiş her kaydın tam kopyasını barındırır. İlk kullanımda bir şifre '
+      +'belirlemeniz gerekiyor - bu şifre yönetici giriş şifrenizden ayrıdır.</div>'
+      +'<input id="copPass1" type="password" placeholder="Yeni şifre (en az 4 karakter)" style="width:100%;box-sizing:border-box;min-height:38px;padding:.5rem .6rem;margin-bottom:.5rem;background:var(--s3);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-family:Outfit,sans-serif"/>'
+      +'<input id="copPass2" type="password" placeholder="Şifreyi tekrar yazın" style="width:100%;box-sizing:border-box;min-height:38px;padding:.5rem .6rem;margin-bottom:.7rem;background:var(--s3);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-family:Outfit,sans-serif"/>'
+      +'<button class="btn bp" style="width:100%;min-height:40px" onclick="copSifreKur()">🔒 Şifreyi Belirle</button>');
+    return;
+  }
+  openSheet('🔒 Çöp Kutusu',
+    '<div style="font-size:.72rem;line-height:1.7;color:var(--mu);margin-bottom:.8rem">'
+    +'Devam etmek için çöp kutusu şifresini girin.</div>'
+    +'<input id="copPassIn" type="password" placeholder="Şifre" style="width:100%;box-sizing:border-box;min-height:38px;padding:.5rem .6rem;margin-bottom:.7rem;background:var(--s3);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-family:Outfit,sans-serif"/>'
+    +'<button class="btn bp" style="width:100%;min-height:40px" onclick="copSifreGir()">🔓 Aç</button>');
+}
+// Çöp kutusuna giden TEK kapı - şifre doğrulanmadan içerik hiç çizilmez.
+window.openTrashGuard=function(){
+  if(window._copDogrulandi){openTrashSheet();return;}
+  copSifreEkrani();
+};
 function openTrashSheet(){
   // HATA DÜZELTMESİ (kullanıcı bildirdi: "çöp kutusuna tıklayınca 'Yükleniyor' dışında hiçbir
   // şey görünmüyor"): SIRA YANLIŞTI. Temizleme işlemi ÖNCE başlatılıyor, bittiğinde
@@ -6252,11 +6312,21 @@ window._editVideoLinks=null;
 //  • İkisi de başarısızsa → adres yanıt vermiyor (kapanmış, taşınmış ya da DNS yok).
 //  • Normal fetch başarılıysa → içerik gerçekten bir HLS listesi mi diye bakılır; değilse
 //    adres bir video değil, bir web sayfası olabilir.
-window.testVideoLink=function(i){
+// KULLANICI TALEBİ ("Admin, yeni kanal eklerken bu adresi test etsin. Ek ses dilleri gibi
+// bütün ayarları kanalı eklemeden önce tam kapasite kontrol edebilsin."):
+// Adres alanından çıkıldığı anda sınama KENDİLİĞİNDEN çalışır (otomatik=true). Böylece
+// yönetici adresi yapıştırıp bir sonraki alana geçtiğinde sonucu zaten görmüş olur -
+// "Test Et"e basmayı hatırlamak zorunda kalmaz. Elle basıldığında da aynı fonksiyon
+// çalışır; tek fark, otomatik çağrıda boş/kısa adres için uyarı gösterilmemesidir
+// (yönetici daha yazmayı bitirmemiş olabilir, erken uyarı rahatsız edici olurdu).
+window.testVideoLink=function(i,otomatik){
   var v=(window._editVideoLinks||[])[i];
   var kutu=qs('vlTestSonuc'+i),btn=qs('vlTest'+i);
   if(!v||!kutu)return;
   var url=(v.url||'').trim();
+  if(otomatik&&url.length<12)return;
+  if(otomatik&&kutu._sonUrl===url)return;   // aynı adres için tekrar tekrar sınama yapma
+  kutu._sonUrl=url;
   function yaz(renk,metin){kutu.innerHTML='<div style="color:'+renk+'">'+metin+'</div>';}
   if(!url){yaz('var(--mu)','Önce bir adres girin.');return;}
   if(!/^https?:\/\//i.test(url)){yaz('var(--mu)','ℹ️ Bu bir doğrudan akış adresi değil (gömme kodu / platform linki olabilir) - sınama yalnızca http(s) adresleri için yapılır.');return;}
@@ -6322,7 +6392,16 @@ function addVideoLinkEntry(){
   // görür. isLive değeri, o an hangi sekmedeyse (📡 Canlı Yayın / 🎬 Video) ona göre baştan
   // doğru ayarlanır - admin "Canlı Yayın Ekle"ye bastıysa zaten canlı olarak eklenir.
   window._editVideoLinks.unshift({id:uid(),title:'',url:'',isLive:(window._adminTvTab||'live')==='live',category:'',logo:'',createdAt:Date.now()});
+  // Yeni kayıt listenin başına eklendiği için ekranda zaten görünür; adres alanına odaklanmak
+  // yöneticiyi doğrudan yapılacak işe götürür ve adres girilip çıkıldığında sınama
+  // kendiliğinden çalışır (bkz. testVideoLink üzerindeki not).
   renderVideoLinkAdmin();
+  setTimeout(function(){
+    try{
+      var kutu=qs('vlTestSonuc0');
+      if(kutu)kutu.innerHTML='<div style="color:var(--mu)">ℹ️ Adresi yapıştırıp alandan çıkın - bağlantı kendiliğinden sınanır. Ek ses dilleri, kategori ve premium ayarlarını da kaydetmeden önce buradan yapabilirsiniz.</div>';
+    }catch(e){}
+  },60);
 }
 // KULLANICI TALEBİ ("canlı yayın ayrı, video ayrı sekmelerde olsun"): TV yönetim ekranı artık
 // Puan Tablosu tarafındaki AYNI ayrımı (📡 Canlı Yayın / 🎬 Video) sekmeler halinde gösterir -
@@ -6361,7 +6440,7 @@ function renderVideoLinkAdmin(){
       +'<input value="'+(v.title||'').replace(/"/g,'&quot;')+'" placeholder="Başlık (kullanıcı bunu görecek)" oninput="setVideoLinkField('+i+',\'title\',this.value);clearVlRowWarning('+i+')" style="flex:1;font-size:.74rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif"/>'
       +'<button onclick="removeVideoLink('+i+')" style="flex-shrink:0;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:.3rem .6rem;font-size:.7rem;font-weight:700;cursor:pointer">✕</button>'
       +'</div>'
-      +'<input value="'+(v.url||'').replace(/"/g,'&quot;')+'" placeholder="YouTube/Twitch/Kick/Vimeo/Dailymotion/Facebook/Instagram/X/TikTok/Rumble/Streamable linki, gömme (embed) adresi, &lt;iframe&gt; kodu veya doğrudan video/m3u8 linki" oninput="setVideoLinkField('+i+',\'url\',this.value)" style="width:100%;font-size:.7rem;padding:.35rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;margin-bottom:.4rem"/>'
+      +'<input value="'+(v.url||'').replace(/"/g,'&quot;')+'" placeholder="YouTube/Twitch/Kick/Vimeo/Dailymotion/Facebook/Instagram/X/TikTok/Rumble/Streamable linki, gömme (embed) adresi, &lt;iframe&gt; kodu veya doğrudan video/m3u8 linki" oninput="setVideoLinkField('+i+',\'url\',this.value)" onblur="testVideoLink('+i+',true)" style="width:100%;font-size:.7rem;padding:.35rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;margin-bottom:.4rem"/>'
       // KULLANICI TALEBİ (TRT Kurdî'de "iki dil seçeneği açılmıyor" sorununun çözümü):
       // Bazı yayınlar her dil için AYRI bir akış adresi verir - tek akışta iki ses parçası
       // yoktur, dolayısıyla oynatıcı kendi başına dil seçeneği üretemez. Burada yöneticinin
@@ -6373,6 +6452,20 @@ function renderVideoLinkAdmin(){
       // neden açılmadığını anlamak için oynatıcıyı açıp hata mesajını beklemek gerekiyordu.
       // Bu düğme adresi BURADA sınayıp sebebi doğrudan söyler - yönetici kanalı eklemeden
       // önce çalışıp çalışmayacağını bilir.
+      // KULLANICI TALEBİ ("admin linki ekleyince kullanıcının videonun neresini izleyeceğini
+      // ve ne zaman biteceğini belirlemesi gerekiyor"): Normalde bir video baştan sona
+      // izlenir. Bu iki alan doldurulursa oynatıcı BAŞLANGIÇ saniyesinden başlar ve BİTİŞ
+      // saniyesinde durur - kullanıcı ileri sarsa bile aralık dışına çıkamaz. Boş bırakılırsa
+      // video eskisi gibi baştan sona oynar; yani varsayılan davranış değişmez.
+      // Biçim serbest: "90" da yazılabilir, "1:30" da - ikisi de 90 saniye demektir.
+      // KULLANICI TALEBİ ("admin aynı videoya birden fazla süre aralığı girebilir; ilk aralık
+      // bitince otomatik ve aralıksız diğerine geçsin"): Tek bir başlangıç/bitiş çifti yerine
+      // SATIR SATIR aralık listesi. Her satır bir bölüm; kullanıcı bunları arka arkaya, tek
+      // bir video izler gibi görür - aradaki atlamalar yapılır ama oynatma durmaz.
+      // Biçim serbest: "1:23:14 - 1:43:56" ya da "83 - 120" ya da "1:30-2:00".
+      +'<div style="font-size:.64rem;color:var(--mu);margin-bottom:.25rem">⏱️ İzleme aralıkları (her satıra bir bölüm)</div>'
+      +'<textarea rows="3" placeholder="1:23:14 - 1:43:56&#10;2:05:00 - 2:12:30" oninput="setVideoLinkField('+i+',\'araliklar\',this.value)" style="width:100%;box-sizing:border-box;font-size:.68rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;margin-bottom:.25rem;resize:vertical">'+(v.araliklar||(v.basSure||v.bitSure?((v.basSure||'0')+' - '+(v.bitSure||'')):'')).replace(/</g,'&lt;')+'</textarea>'
+      +'<div style="font-size:.6rem;color:var(--mu);line-height:1.5;margin-bottom:.4rem">Boş bırakılırsa video baştan sona oynar. Birden fazla satır yazarsanız bölümler <b>arka arkaya, kesintisiz</b> oynatılır - kullanıcı tek bir video izliyormuş gibi görür. Bitişi boş bırakılan satır (ör. "1:30 -") videonun sonuna kadar oynar.</div>'
       +'<button onclick="testVideoLink('+i+')" id="vlTest'+i+'" style="width:100%;min-height:32px;margin-bottom:.4rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-size:.68rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">🔍 Bu Adresi Test Et</button>'
       +'<div id="vlTestSonuc'+i+'" style="font-size:.66rem;line-height:1.6;margin-bottom:.4rem"></div>'
       +'<details style="margin-bottom:.4rem"><summary style="font-size:.66rem;color:var(--mu);cursor:pointer;min-height:30px;display:flex;align-items:center">🗣️ Ek ses dilleri (ayrı akış adresi olan yayınlar için)</summary>'
@@ -6741,11 +6834,14 @@ function saveChannelPoolEntry(){
 function deleteChannelPoolEntry(pid){
   db.ref('channelPool/'+pid).once('value').then(function(snap){
     var c=snap.val()||{};
-    dlg('🗑️','Havuz Kanalını Sil',(c.title||'Bu kanal')+' kalıcı havuzdan silinecek. Bu işlem geri alınamaz (TV tarafındaki ayrı kopyası etkilenmez).','Sil','dor').then(function(ok){
+    // Havuz kaydı da çöp kutusuna kopyalanır - "geri alınamaz" uyarısı artık geçerli değil,
+    // 30 gün içinde geri alınabilir.
+    dlg('🗑️','Havuz Kanalını Sil',(c.title||'Bu kanal')+' kalıcı havuzdan silinecek. Çöp kutusuna taşınır, 30 gün içinde geri alınabilir (TV tarafındaki ayrı kopyası etkilenmez).','Sil','dor').then(function(ok){
       if(!ok)return;
+      copaAt('Havuz Kanalı',(c.title||pid),'channelPool/'+pid,c);
       db.ref('channelPool/'+pid).remove().then(function(){
-        logAction('🗑️ Havuz kanalı silindi: '+(c.title||''));
-        toast('✅ Silindi');
+        logAction('🗑️ Havuz kanalı çöp kutusuna taşındı: '+(c.title||''));
+        toast('🗑️ Çöp kutusuna taşındı');
         openChannelPool();
       });
     });
@@ -6764,7 +6860,9 @@ function deleteChannelPoolEntry(pid){
 function sendChannelPoolEntryToTv(pid){
   db.ref('channelPool/'+pid).once('value').then(function(snap){
     var c=snap.val();if(!c)return;
-    var mevcutListe=window._editVideoLinks!=null?window._editVideoLinks:(S.videoLinks||[]);
+    // Denetim HER İKİ listeye birden bakar: kaydedilmemiş taslak ve kalıcı liste. Yalnızca
+    // birine bakmak, ikisi ayrıştığında yanlış cevap üretiyordu (bkz. removeVideoLink notu).
+    var mevcutListe=(window._editVideoLinks||[]).concat(S.videoLinks||[]);
     var cTitle=(c.title||'').trim().toLowerCase();
     var cUrl=(c.url||'').trim().toLowerCase();
     var zatenVar=mevcutListe.some(function(v){
@@ -6903,13 +7001,33 @@ function deleteOwnSupabaseFileIfAny(url){
 function removeVideoLink(i){
   // Kaldırılan linkte KENDİ yüklediğimiz bir dosya varsa, Supabase'ten de gerçekten silinir -
   // aksi halde liste temiz görünür ama depolama alanı hâlâ dolu kalırdı.
-  if(window._editVideoLinks&&window._editVideoLinks[i])deleteOwnSupabaseFileIfAny(window._editVideoLinks[i].url);
+  if(window._editVideoLinks&&window._editVideoLinks[i]){
+    // Kanal kaydı çöp kutusuna kopyalanır. Geri alma, kanalı listeye geri yazar.
+    var _k=window._editVideoLinks[i];
+    copaAt('TV/Video Kanalı',(_k.title||'İsimsiz'),'leagues/'+_curLeagueId+'/videoLinks',JSON.parse(JSON.stringify(window._editVideoLinks)));
+    deleteOwnSupabaseFileIfAny(_k.url);
+  }
   // KULLANICI TALEBİ ("aynı şekilde puan sistemi ve fiyatlar bölümünde de geçerlidir"):
   // Premium işaretli bir kanal kalıcı olarak kaldırılırsa, ona ait fiyat kaydı da (font/tema
   // silinince yapıldığı gibi) öksüz kalmasın diye temizlenir.
   if(window._editVideoLinks&&window._editVideoLinks[i]&&window._editVideoLinks[i].premium&&S.premiumPrices)delete S.premiumPrices['ch_'+window._editVideoLinks[i].id];
   window._editVideoLinks.splice(i,1);
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "TV/Video sekmesinde kanal kaldırılıyor fakat
+  // Puan Tablosu tarafında görünmeye devam ediyor. Havuzda 'ekle' deyince 'zaten mevcut'
+  // diyor ama mevcut değil."):
+  // Kaldırma YALNIZCA taslak listeyi (_editVideoLinks) değiştiriyordu. Kalıcı liste
+  // (S.videoLinks) ve save()'in videoLinks'i yazmasını sağlayan _videoLinksDirty bayrağı
+  // ellenmiyordu. Sonuç iki farklı yanlış: (a) yönetici "Kaydet"e basmadan ekrandan
+  // çıkarsa silme HİÇ kalıcı olmuyor - kullanıcı tarafında kanal durmaya devam ediyor;
+  // (b) iki liste birbirinden ayrışıyor, havuz denetimi hangisine baktığına göre farklı
+  // cevap veriyor - "zaten mevcut" derken aslında yalnızca ESKİ listede mevcut oluyordu.
+  // Artık kaldırma her iki listeyi de aynı anda günceller ve kaydedilmeyi işaretler.
+  S.videoLinks=window._editVideoLinks.slice();
+  window._videoLinksDirty=true;
   renderVideoLinkAdmin();
+  // Silme kalıcı olsun diye hemen yazılır - "Kaydet"i beklemek, yukarıdaki (a) durumunu
+  // yeniden üretirdi.
+  save().then(function(){toast('🗑️ Kanal kaldırıldı');});
 }
 function saveVideoLinkSettings(){
   var links=(window._editVideoLinks||[]).slice();
@@ -7814,8 +7932,13 @@ function addTickerAnnouncement(){
   }).catch(function(e){toast('❌ Eklenemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
 }
 function deleteTickerAnnouncement(id){
-  db.ref('leagues/'+_curLeagueId+'/tickerAnnouncements/'+id).remove().then(function(){
-    toast('✅ Silindi');
+  var _yol='leagues/'+_curLeagueId+'/tickerAnnouncements/'+id;
+  db.ref(_yol).once('value').then(function(sn){
+    // Önce kopyala, sonra sil - sıra tersse silinen veri geri alınamaz olurdu.
+    copaAt('Şerit Duyurusu',((sn.val()||{}).text||id),_yol,sn.val());
+  }).catch(function(){});
+  db.ref(_yol).remove().then(function(){
+    toast('🗑️ Çöp kutusuna taşındı');
     renderTickerAnnList();
   }).catch(function(e){toast('❌ Silinemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');});
 }
@@ -8306,8 +8429,12 @@ function addRankNote(){
 function removeRankNote(noteId){
   dlg('🗑️','Notu Sil','Bu sıralama notu silinecek.','Sil','dor').then(function(ok){
     if(!ok)return;
+    // KULLANICI TALEBİ ("ne silerse silsin çöp kutusuna taşınmalı"): Silinen kayıt önce
+    // çöp kutusuna kopyalanır; geri alma bu kopyayı aynı yere geri yazar.
+    var _n=(S.rankNotes||[]).filter(function(n){return n.id===noteId;})[0];
+    copaAt('Sıralama Notu',(_n&&_n.label)||noteId,'leagues/'+_curLeagueId+'/rankNotes',JSON.parse(JSON.stringify(S.rankNotes||[])));
     S.rankNotes=(S.rankNotes||[]).filter(function(n){return n.id!==noteId;});
-    save().then(function(){renderRankNoteList();toast('✅ Silindi');});
+    save().then(function(){renderRankNoteList();toast('🗑️ Çöp kutusuna taşındı');});
   });
 }
 
@@ -8498,8 +8625,10 @@ function applyPenalty(){
 function removePenalty(penId){
   dlg('🗑️','Cezayı Kaldır','Bu ceza kaldırılacak.','Kaldır','dor').then(function(ok){
     if(!ok)return;
+    var _p=(S.penalties||[]).filter(function(p){return p.id===penId;})[0];
+    copaAt('Puan Cezası',(_p&&_p.teamName)||penId,'leagues/'+_curLeagueId+'/penalties',JSON.parse(JSON.stringify(S.penalties||[])));
     S.penalties=(S.penalties||[]).filter(function(p){return p.id!==penId;});
-    save().then(function(){renderPenaltyList();toast('✅ Ceza kaldırıldı');});
+    save().then(function(){renderPenaltyList();toast('🗑️ Çöp kutusuna taşındı');});
   });
 }
 
@@ -13387,6 +13516,7 @@ function toggleCustomFontPremiumStatus(fid){
 function deleteCustomFont(fid){
   dlg('🗑️','Yazı Tipini Sil','Bu özel yazı tipi kalıcı olarak silinecek. Emin misiniz?','Sil','dor').then(function(ok){
     if(!ok)return;
+    if(S.customFonts&&S.customFonts[fid])copaAt('Yazı Tipi',(S.customFonts[fid].label||fid),'leagues/'+_curLeagueId+'/customFonts/'+fid,S.customFonts[fid]);
     if(S.customFonts)delete S.customFonts[fid];
     // HATA DÜZELTMESİ: Bkz. deleteReactionPack - font siliniyor ama fiyat kaydı
     // (premiumPrices['font_'+fid]) geride kalıp Premium Fiyatları ekranında görünüyordu.
@@ -13583,6 +13713,7 @@ function toggleReactionPackPublished(pid){
 function deleteReactionPack(pid){
   dlg('🗑️','Paketi Sil','Bu tepki paketi kalıcı olarak silinecek. Emin misiniz?','Sil','dor').then(function(ok){
     if(!ok)return;
+    if(S.reactionPacks&&S.reactionPacks[pid])copaAt('Tepki Paketi',(S.reactionPacks[pid].name||pid),'leagues/'+_curLeagueId+'/reactionPacks/'+pid,S.reactionPacks[pid]);
     if(S.reactionPacks)delete S.reactionPacks[pid];
     // HATA DÜZELTMESİ (kullanıcı bildirdi: "admin sildiği bazı unsurlar 'Puan Sistemi ve
     // Fiyatlar' sekmesinde görünüyor"): Paket siliniyordu ama ONA AİT FİYAT KAYDI
@@ -14494,6 +14625,7 @@ function toggleThemePublished(tid){
 function deleteCustomTheme(tid){
   dlg('🗑️','Temayı Sil','Bu tema kalıcı olarak silinecek. Emin misiniz?','Sil','dor').then(function(ok){
     if(!ok)return;
+    if(S.customThemes&&S.customThemes[tid])copaAt('Tema',(S.customThemes[tid].name||tid),'leagues/'+_curLeagueId+'/customThemes/'+tid,S.customThemes[tid]);
     if(S.customThemes)delete S.customThemes[tid];
     // HATA DÜZELTMESİ: Bkz. deleteReactionPack - tema siliniyor ama ona atanmış puan fiyatı
     // veride kalıp "öksüz" bir kayda dönüşüyordu.
@@ -17325,6 +17457,9 @@ function listenToLeague(leagueId){
       // sessizce boşalıyordu. (Bu, "alan alan kopyalama" deseninin bilinen tuzağı: yeni bir
       // alan eklerken hem yazma hem OKUMA tarafına eklenmesi gerekir.)
       S.corsProxy=d.corsProxy||'';
+      // Çöp kutusu şifresi de "alan alan kopyalama" listesine eklenmeli - aksi halde
+      // kaydedilir ama bir sonraki senkronda kaybolurdu (bkz. corsProxy'deki aynı tuzak).
+      S.trashPass=d.trashPass||'';
       S.season=d.season||'1. Sezon';
       S.teams=d.teams||{};
       S.matches=d.matches||{};
