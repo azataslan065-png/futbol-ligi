@@ -1327,7 +1327,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-29-V';
+window.APP_BUILD='2026-08-30-A';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6225,6 +6225,48 @@ function saveSponsorSettings(){
 // girdiği BAŞLIĞI görüp izler. Mimari, Sponsor Yönetimi ile BİREBİR AYNI (window._editSponsors
 // deseni) - taslak yerelde tutulur, "💾 Kaydet" denene kadar Firebase'e yazılmaz.
 window._editVideoLinks=null;
+// ── ADRES SINAYICI ────────────────────────────────────────────────────────────────────
+// Bir yayın adresinin neden açılmadığını, oynatıcıyı hiç açmadan söyler. Ayrımı şöyle yapar:
+//  • Sayfa https ise ve adres http:// ise → tarayıcı bunu KESİN engeller (karışık içerik).
+//    Denemeye bile gerek yok, sonuç bellidir.
+//  • Normal fetch başarısız ama mode:'no-cors' başarılıysa → sunucu AYAKTA, sadece bu siteden
+//    erişime izin vermiyor (CORS). Bu ikisini ayırmak önemli: birincisi yayıncının sunucu
+//    ayarı, ikincisi adresin ölmüş olması demek ve çözümleri tamamen farklı.
+//  • İkisi de başarısızsa → adres yanıt vermiyor (kapanmış, taşınmış ya da DNS yok).
+//  • Normal fetch başarılıysa → içerik gerçekten bir HLS listesi mi diye bakılır; değilse
+//    adres bir video değil, bir web sayfası olabilir.
+window.testVideoLink=function(i){
+  var v=(window._editVideoLinks||[])[i];
+  var kutu=qs('vlTestSonuc'+i),btn=qs('vlTest'+i);
+  if(!v||!kutu)return;
+  var url=(v.url||'').trim();
+  function yaz(renk,metin){kutu.innerHTML='<div style="color:'+renk+'">'+metin+'</div>';}
+  if(!url){yaz('var(--mu)','Önce bir adres girin.');return;}
+  if(!/^https?:\/\//i.test(url)){yaz('var(--mu)','ℹ️ Bu bir doğrudan akış adresi değil (gömme kodu / platform linki olabilir) - sınama yalnızca http(s) adresleri için yapılır.');return;}
+  if(location.protocol==='https:'&&/^http:\/\//i.test(url)){
+    yaz('#b91c1c','❌ <b>Karışık içerik engeli.</b> Adres http:// ile başlıyor, uygulama https üzerinden çalışıyor. Tarayıcı bu bağlantıyı güvenlik gereği engeller.<br/><b>Çözüm:</b> Adresi https:// yapıp tekrar test edin.');
+    return;
+  }
+  if(btn){btn.disabled=true;btn.textContent='⏳ Sınanıyor…';}
+  function bitir(){if(btn){btn.disabled=false;btn.textContent='🔍 Bu Adresi Test Et';}}
+  fetch(url,{method:'GET',cache:'no-store'}).then(function(r){
+    if(!r.ok){yaz('#b91c1c','❌ Sunucu <b>'+r.status+'</b> döndürdü. Adres artık geçerli olmayabilir.');bitir();return;}
+    return r.text().then(function(t){
+      if(/#EXTM3U/i.test(t))yaz('#15803d','✅ <b>Çalışıyor.</b> Adres erişilebilir ve geçerli bir HLS listesi döndürüyor.');
+      else yaz('#a16207','⚠️ Adrese ulaşıldı ama içerik bir yayın listesi gibi görünmüyor. Bu bir web sayfası adresi olabilir - doğrudan .m3u8 adresini kullanın.');
+      bitir();
+    });
+  }).catch(function(){
+    // Normal istek başarısız. Sunucunun ayakta olup olmadığını no-cors ile ayırt et.
+    fetch(url,{mode:'no-cors',cache:'no-store'}).then(function(){
+      yaz('#a16207','⚠️ <b>Sunucu ayakta ama erişime izin vermiyor (CORS).</b> Yayıncının sunucu ayarından kaynaklanır.<br/>Uygulama bu durumda yedek bağlantı yolu (proxy) dener; yayın yine de açılabilir. Oynatıcıda deneyip görün.');
+      bitir();
+    }).catch(function(){
+      yaz('#b91c1c','❌ <b>Adres yanıt vermiyor.</b> Yayın kapanmış, taşınmış ya da adres yanlış olabilir.');
+      bitir();
+    });
+  });
+};
 function addVideoLinkEntry(){
   if(window._editVideoLinks===null)window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
   // KULLANICI TALEBİ ("yapılan son işlem en üste olacak"): Yeni eklenen link artık listenin
@@ -6279,6 +6321,12 @@ function renderVideoLinkAdmin(){
       // Oynatıcı bu listeyi görünce "🗣️ Ses Dili" menüsünü kendiliğinden gösterir ve seçim
       // yapıldığında arka planda öteki akışa geçer - kullanıcı için gerçek bir ses dili
       // menüsünden farkı olmaz.
+      // KULLANICI TALEBİ (birkaç kanal "niye çalışmıyor" diye sorulduktan sonra): Bir adresin
+      // neden açılmadığını anlamak için oynatıcıyı açıp hata mesajını beklemek gerekiyordu.
+      // Bu düğme adresi BURADA sınayıp sebebi doğrudan söyler - yönetici kanalı eklemeden
+      // önce çalışıp çalışmayacağını bilir.
+      +'<button onclick="testVideoLink('+i+')" id="vlTest'+i+'" style="width:100%;min-height:32px;margin-bottom:.4rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-size:.68rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">🔍 Bu Adresi Test Et</button>'
+      +'<div id="vlTestSonuc'+i+'" style="font-size:.66rem;line-height:1.6;margin-bottom:.4rem"></div>'
       +'<details style="margin-bottom:.4rem"><summary style="font-size:.66rem;color:var(--mu);cursor:pointer;min-height:30px;display:flex;align-items:center">🗣️ Ek ses dilleri (ayrı akış adresi olan yayınlar için)</summary>'
       +'<textarea rows="3" placeholder="Her satıra bir dil:&#10;Türkçe | https://.../master.m3u8&#10;Kurmancî | https://.../master.m3u8" oninput="setVideoLinkField('+i+',\'sesDilleri\',this.value)" style="width:100%;box-sizing:border-box;font-size:.68rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;margin-top:.3rem;resize:vertical">'+(v.sesDilleri||'').replace(/</g,'&lt;')+'</textarea>'
       +'<div style="font-size:.6rem;color:var(--mu);line-height:1.5;margin-top:.25rem">Yukarıdaki ana adres ilk dil olarak kullanılır; buraya yalnızca EK dilleri yazın. Yayının kendi akışında zaten birden fazla ses parçası varsa buraya bir şey yazmanıza gerek yoktur - oynatıcı onları kendiliğinden bulur.</div>'
