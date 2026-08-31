@@ -1965,7 +1965,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-A';
+window.APP_BUILD='2026-09-01-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21739,9 +21739,16 @@ window.PTPlayer=(function(){
       if(S.araliklar&&S.araliklar.length){
         var a=S.araliklar[S.aralikIdx];
         if(a){
+          // YANLIŞ ALARM DÜZELTMESİ: Gömülü oynatıcı açılışta ve sarma sırasında konumu 0
+          // bildiriyor. Bu, kullanıcının aralık dışına çıkması DEĞİL, konumun henüz
+          // bilinmemesidir - kayıt "konumSn: 0 · asimSn: 7635" gibi anlamsız değerler
+          // üretiyordu. Oynatma gerçekten akmaya başlayana kadar sınır denetimi yapılmaz.
           var asim=0;
-          if(a.bit>0&&t>a.bit+1.5)asim=t-a.bit;
-          else if(a.bas>0&&t<a.bas-1.5)asim=a.bas-t;
+          var _konumGuvenilir=(!duraklad&&t>0.5);
+          if(_konumGuvenilir){
+            if(a.bit>0&&t>a.bit+1.5)asim=t-a.bit;
+            else if(a.bas>0&&t<a.bas-1.5)asim=a.bas-t;
+          }
           if(asim>0&&simdi-sonDurum.sinirUyari>10000){
             sonDurum.sinirUyari=simdi;
             ptpGecisKaydet('hata','İzleme aralığının dışına çıkıldı',
@@ -22051,6 +22058,13 @@ window.PTPlayer=(function(){
         if(!S){clearInterval(S._akisT);return;}
         var t=0;try{t=S.video.currentTime||0;}catch(e){}
         var akiyor=(oncekiT>=0&&t>oncekiT+0.02);
+        // Aralıklı videoda ek koşul: akış yetmez, konumun aralığın İÇİNDE olması da gerekir.
+        // Aksi halde örtü, video henüz 0. saniyede akarken kalkıyor ve kullanıcı aralık dışı
+        // görüntüyü bir an görüyordu (bkz. açılış örtüsü notu).
+        if(akiyor&&S.araliklar&&S.araliklar.length){
+          var _a0=S.araliklar[S.aralikIdx];
+          if(_a0&&_a0.bas>0&&t<_a0.bas-1)akiyor=false;
+        }
         oncekiT=t;
         // ÖLÇÜMDEN GELEN DÜZELTME: Üst sınır 100 tur (5 sn) idi ve tanı kayıtlarında geçişin
         // tam 5 saniye siyah kaldığı görüldü. İlerleme ölçülemediğinde 5 saniye beklemek,
