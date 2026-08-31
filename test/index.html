@@ -985,8 +985,12 @@ iframe.ptp-video{pointer-events:none}
 .ptp-mid .ptp-btn{width:48px;height:48px;min-width:48px;font-size:1.15rem;background:rgba(0,0,0,.5)}
 .ptp-mid .ptp-play{width:60px;height:60px;min-width:60px;font-size:1.5rem}
 .ptp-bot{padding:.35rem .6rem .5rem}
+/* TEŞHİS RAPORU DÜZELTMESİ ("ptpCur · genişlik 20px / 4 karakter · '2:02'"): Süre yazıları
+   flex satırında sıkışıp kırpılıyordu - "2:02" yerine "2:0" görünüyordu. Flex öğeleri
+   varsayılan olarak içeriklerinden dar olabilir; bu satırlara küçülmeme talimatı verildi. */
 .ptp-times{display:flex;align-items:center;gap:.5rem;color:#fff;font-size:.62rem;font-weight:700;
   text-shadow:0 1px 2px rgba(0,0,0,.9);margin-bottom:.15rem}
+.ptp-times>span{flex-shrink:0;white-space:nowrap}
 .ptp-times .ptp-sp{flex:1}
 .ptp-seekwrap{position:relative;height:22px;display:flex;align-items:center}
 .ptp-buf{position:absolute;left:0;height:4px;border-radius:3px;background:rgba(255,255,255,.32);pointer-events:none}
@@ -1961,7 +1965,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-31-M';
+window.APP_BUILD='2026-08-31-N';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21941,17 +21945,21 @@ window.PTPlayer=(function(){
       clearTimeout(S._ortuT);
       S._ortuT=setTimeout(function(){
         if(S&&S.freezing){
+          // Zorla kaldırırken boş bırakmıyoruz: oynatma bir kez daha denenir ve duraklama
+          // örtüsü hemen güncellenir - böylece altındaki platform arayüzü açıkta kalmaz.
+          try{if(S.video&&S.video.play)S.video.play().catch(function(){});}catch(e){}
           ptpFreezeRelease();
+          try{ptpDuraklatOrtusuGuncelle();}catch(e){}
           // Teşhis: örtü zaman aşımına uğradıysa geçiş takılmış demektir - bu, sessizce
           // geçilmemesi gereken bir durum.
           try{
             if(typeof DiagCore!=='undefined'&&DiagCore.kaydet)
               DiagCore.kaydet('pt_gecis','hata','Geçiş zaman aşımına uğradı',
                 {aralikIdx:S.aralikIdx,videoId:S.videoId,gomulu:!!S.gomulu,
-                 anlami:'Örtü 5 saniyede kalkmadı - oynatma geri gelmedi. Kullanıcı bu sırada siyah ekran gördü ve örtü zorla kaldırıldı; altındaki platform arayüzü görünmüş olabilir.'});
+                 anlami:'Örtü 2 saniyede kalkmadı - oynatma geri gelmedi. Örtü zorla kaldırıldı ve duraklama örtüsü devreye alındı; platform arayüzü yine de görünmemeli.'});
           }catch(e){}
         }
-      },5000);
+      },2000);
     }catch(e){}
   }
   function ptpFreezeCapture(){
@@ -22027,7 +22035,12 @@ window.PTPlayer=(function(){
         var t=0;try{t=S.video.currentTime||0;}catch(e){}
         var akiyor=(oncekiT>=0&&t>oncekiT+0.02);
         oncekiT=t;
-        if(akiyor||++tur>100){
+        // ÖLÇÜMDEN GELEN DÜZELTME: Üst sınır 100 tur (5 sn) idi ve tanı kayıtlarında geçişin
+        // tam 5 saniye siyah kaldığı görüldü. İlerleme ölçülemediğinde 5 saniye beklemek,
+        // gizlemeye çalıştığımız arayüzü göstermekten daha kötü bir kullanıcı deneyimi.
+        // Sınır 1,5 saniye: bu süre içinde akış başlamadıysa örtü kalkar, oynatma denenir ve
+        // duraklama örtüsü devreye girer - kullanıcı en fazla 1,5 saniye siyah görür.
+        if(akiyor||++tur>30){
           clearInterval(S._akisT);
           S._akisBekliyor=false;
           ptpFreezeRelease();
@@ -22913,7 +22926,18 @@ window.PTPlayer=(function(){
         // iframe, autoplay+mute ile açıldığında hiçbir arayüz göstermez - ilk açılışta
         // olduğu gibi doğrudan görüntü gelir. Kurulum örtünün ALTINDA yapıldığı için
         // kullanıcı yalnızca kısa bir siyah görür.
-        if(S.gomulu&&ptpGomuluAralikYenile(b))return true;
+        // GERİ ALINDI (ölçümle doğrulandı): Bu satır, gömülü oynatıcıyı yeni başlangıçla
+        // BAŞTAN KURUYORDU. Tanı kayıtları yöntemin işe yaramadığını gösterdi:
+        //   "Geçiş zaman aşımına uğradı" · sureMs: 5003 · aralikIdx: 1 · üst üste üç kez
+        //   "İzleme aralığının dışına çıkıldı" · konumSn 7737 / aralikBit 4974
+        // Sebebi şu: iframe yeniden yüklendiğinde YouTube ile kurulan komut/durum bağlantısı
+        // (listening el sıkışması) kopuyor. Kabuk yeni oynatıcıdan konum alamıyor, ilerleme
+        // ölçülemiyor, örtü 5 saniye asılı kalıp zorla kaldırılıyor - kullanıcı tam da
+        // gizlemek istediğimiz arayüzü görüyor. Konumun 7737 çıkması da aynı kopukluğun
+        // sonucu: bildirilen değer artık gerçek oynatıcıya ait değil.
+        // Sarma yöntemine dönüldü; yenileme işlevi ileride el sıkışma yeniden kurulursa
+        // kullanılabilsin diye duruyor ama ÇAĞRILMIYOR.
+        // if(S.gomulu&&ptpGomuluAralikYenile(b))return true;
         // KULLANICI TALEBİ ("geçiş sonrası YouTube oynatıcıları görünüyor, bunu engelle"):
         // Sarma sırasında gömülü oynatıcı kısa süre DURAKLAR ve YouTube tam o anda kendi
         // başlık/öneri katmanını açar. Sarmadan hemen sonra oynatma komutu göndermek, o
