@@ -1031,7 +1031,13 @@ iframe.ptp-video{pointer-events:none}
 /* Gömülü kaynakta (YouTube) geçiş örtüsü: kare yakalanamadığı için düz, opak bir katman
    kullanılır - bkz. ptpFreezeCapture içindeki not. Tuvalin kendi çizimi olmadığından arka
    plan rengiyle doldurulur. */
-.ptp-freeze.ptp-freeze-duz{background:#000;opacity:1}
+/* KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "Kesintisiz Geçiş açık olmasına rağmen faydasını
+   göremedim - geçiş sonrası YouTube oynatıcısı görünüyor"):
+   Örtü doğru çalışıyordu ama YUMUŞAK GEÇİŞLE (280 ms) beliriyor, yine 280 ms'de kayboluyordu.
+   Yani örtü tam opak olana kadar ~0,3 saniye YARI SAYDAM kalıyor - gizlemesi gereken YouTube
+   katmanı tam o aralıkta içinden görünüyordu; aynısı kalkarken de oluyordu. Bir geçiş
+   örtüsünde yumuşak açılış estetik değil kusurdur: örtünün işi ANINDA kapatmaktır. */
+.ptp-freeze.ptp-freeze-duz{background:#000;opacity:1;transition:none}
 /* Hata / bilgi katmanı */
 .ptp-err{position:absolute;inset:0;background:rgba(0,0,0,.86);color:#fff;display:flex;flex-direction:column;
   align-items:center;justify-content:center;text-align:center;padding:1.1rem;gap:.7rem;z-index:7}
@@ -1917,7 +1923,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-31-E';
+window.APP_BUILD='2026-08-31-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21784,9 +21790,29 @@ window.PTPlayer=(function(){
     // bir an gösterir. Örtüyü tam o anda kaldırmak, gizlemeye çalıştığımız şeyin yarım saniye
     // görünmesine yol açıyordu. Örtü, oynatma başladıktan kısa bir süre SONRA kaldırılır -
     // kullanıcı yalnızca akan görüntüyü görür.
-    if(S.gomulu&&!S._freezeGecikti){
-      S._freezeGecikti=true;
-      setTimeout(function(){if(S){S._freezeGecikti=false;ptpFreezeRelease();}},900);
+    // KULLANICI TALEBİ ("siyah ekran süresini daha da azalt" + "geçiş sonrası YouTube
+    // oynatıcısı görünüyor"):
+    // Önceden örtü, oynatma olayından 900 ms SONRA sabit gecikmeyle kalkıyordu. İki sorunu
+    // vardı: (a) hazır olsa bile 900 ms boyunca siyah kalıyordu, (b) 'playing' olayı
+    // görüntünün GERÇEKTEN aktığı anlamına gelmiyor - YouTube o sırada hâlâ kendi
+    // başlık/öneri katmanını gösterebiliyor ve örtü kalkınca o katman görünüyordu.
+    // ARTIK sabit gecikme yok: konumun ilerlediği ÖLÇÜLÜYOR. Konum bir kez bile arttıysa
+    // görüntü akıyor demektir ve örtü o an kalkar. 50 ms'de bir bakılır, en fazla 5 saniye.
+    if(S.gomulu&&!S._akisBekliyor){
+      S._akisBekliyor=true;
+      var oncekiT=-1,tur=0;
+      clearInterval(S._akisT);
+      S._akisT=setInterval(function(){
+        if(!S){clearInterval(S._akisT);return;}
+        var t=0;try{t=S.video.currentTime||0;}catch(e){}
+        var akiyor=(oncekiT>=0&&t>oncekiT+0.02);
+        oncekiT=t;
+        if(akiyor||++tur>100){
+          clearInterval(S._akisT);
+          S._akisBekliyor=false;
+          ptpFreezeRelease();
+        }
+      },50);
       return;
     }
     if(S.freezeTimer){clearTimeout(S.freezeTimer);S.freezeTimer=null;}
@@ -22658,7 +22684,14 @@ window.PTPlayer=(function(){
         ptpGecisOrtusuAc();
         S.aralikIdx++;
         var b=S.araliklar[S.aralikIdx].bas||0;
+        // KULLANICI TALEBİ ("geçiş sonrası YouTube oynatıcıları görünüyor, bunu engelle"):
+        // Sarma sırasında gömülü oynatıcı kısa süre DURAKLAR ve YouTube tam o anda kendi
+        // başlık/öneri katmanını açar. Sarmadan hemen sonra oynatma komutu göndermek, o
+        // katmanın açılmasına fırsat bırakmadan akışı geri başlatır. Örtü zaten üstte
+        // olduğundan kullanıcı hiçbirini görmez - bu, katmanın DOM'da bile belirmesini
+        // olabildiğince kısaltmak içindir.
         try{S.video.currentTime=b;}catch(e){}
+        try{if(S.video.play)S.video.play().catch(function(){});}catch(e){}
         S._hazirlikYapildi=false;
         return true;
       }
@@ -22722,6 +22755,7 @@ window.PTPlayer=(function(){
           ptpGecisOrtusuAc();   // bkz. ptpAralikUygula içindeki aynı düzeltme
           S.aralikIdx++;
           try{S.video.currentTime=S.araliklar[S.aralikIdx].bas||0;}catch(e){}
+          try{if(S.video.play)S.video.play().catch(function(){});}catch(e){}
           S._hazirlikYapildi=false;
         }else{
           // Aynı gerekçe: geçiş varsa duraklatmadan geçilir (bkz. ptpAralikUygula notu).
