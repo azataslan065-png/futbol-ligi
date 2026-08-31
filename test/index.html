@@ -918,7 +918,9 @@ body.ptp-fs-active{overflow:hidden}
 .ptp.ptp-fs .ptp-stage{height:100%;aspect-ratio:auto;max-height:none}
 /* Döndürme sarmalayıcısı - sahnenin tamamını kaplar, döndürme BUNA uygulanır (video ve
    kontroller birlikte döner). Döndürme yokken tamamen etkisizdir. */
-.ptp-rot{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;transform-origin:50% 50%}
+/* Yakınlaştırma hilesi (bkz. .ptp-chrome-gizle notu) taşan kısmın GÖRÜNMEMESİ gerekir -
+   aksi halde büyütülen iframe kutunun dışına taşar ve arayüz yine görünürdü. */
+.ptp-rot{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;transform-origin:50% 50%;overflow:hidden}
 /* Döndürülmüş kapsayıcının içinde 'fixed' artık ekrana değil kapsayıcıya göre çözümlenir;
    vh/vw ölçüleri de anlamsızlaşır. Bu yüzden kanal listesi katmanı yüzdeye çevrilir. */
 .ptp-rot.ptp-rotated .ptp-chlist{position:absolute;left:5%;right:5%;top:12%;bottom:12%}
@@ -1085,9 +1087,16 @@ iframe.ptp-video{pointer-events:none}
    ARAYÜZÜN BULUNDUĞU ŞERİTLER kapatılıyor: YouTube başlık/kanal bilgisini ÜSTTE, "Diğer
    videolar" ve logoyu ALTTA gösterir; ortadaki görüntü boş kalır. Bu iki şerit kısa süre
    maskelenince kullanıcı videoyu kesintisiz görür, platformun arayüzünü hiç görmez. */
-.ptp-chrome-mask{position:absolute;left:0;right:0;z-index:59;background:#000;pointer-events:none}
-.ptp-chrome-mask.ust{top:0;height:22%}
-.ptp-chrome-mask.alt{bottom:0;height:26%}
+/* KULLANICI İTİRAZI ("ekranın 3/2'si kararıyor, bu böyle olmaz"): Haklı - üst %22 + alt %26
+   siyah bant, çareyi hastalıktan beter yapıyordu.
+   DAHA İYİ YOL: Platformun arayüzü iframe'in KENDİ KENARLARINA yapışıktır - başlık sol üstte,
+   logo ve öneriler altta. iframe kısa süreliğine BÜYÜTÜLÜRSE o kenarlar görünür alanın
+   DIŞINA taşar ve arayüz ekranda kalmaz; ortadaki görüntü ise görünmeye devam eder.
+   Yani hiçbir yeri karartmıyoruz, yalnızca birkaç saniye hafifçe yakınlaştırıyoruz.
+   Ölçü %118: başlık ve alt şerit dışarı çıkmaya yeter, görüntüdeki kırpma zar zor fark edilir.
+   Geçiş yumuşak yapılır ki yakınlaşma sıçrama gibi görünmesin. */
+.ptp-rot.ptp-chrome-gizle iframe.ptp-video{transform:scale(1.18);transform-origin:center center}
+.ptp-rot iframe.ptp-video{transition:transform .35s ease}
 .ptp-bitis{position:absolute;inset:0;z-index:62;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.92)}
 .ptp-bitis-ic{text-align:center;color:#fff;padding:1rem}
 .ptp-bitis-b{font-size:.95rem;font-weight:800;margin-bottom:.8rem;letter-spacing:.02em}
@@ -1978,7 +1987,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-E';
+window.APP_BUILD='2026-09-01-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21891,11 +21900,9 @@ window.PTPlayer=(function(){
   function ptpChromeMaskeAc(ms){
     try{
       if(!S||!S.gomulu||!S.root)return;
-      var kap=S.root.querySelector('#ptpRot')||S.root;
-      if(!kap.querySelector('.ptp-chrome-mask.ust')){
-        var u=document.createElement('div');u.className='ptp-chrome-mask ust';kap.appendChild(u);
-        var a=document.createElement('div');a.className='ptp-chrome-mask alt';kap.appendChild(a);
-      }
+      var kap=S.root.querySelector('#ptpRot');
+      if(!kap)return;
+      kap.classList.add('ptp-chrome-gizle');
       clearTimeout(S._maskeT);
       S._maskeT=setTimeout(function(){ptpChromeMaskeKapat();},ms||3600);
     }catch(e){}
@@ -21903,8 +21910,8 @@ window.PTPlayer=(function(){
   function ptpChromeMaskeKapat(){
     try{
       if(!S||!S.root)return;
-      var kap=S.root.querySelector('#ptpRot')||S.root;
-      kap.querySelectorAll('.ptp-chrome-mask').forEach(function(x){x.remove();});
+      var kap=S.root.querySelector('#ptpRot');
+      if(kap)kap.classList.remove('ptp-chrome-gizle');
     }catch(e){}
   }
   function ptpDuraklatOrtusuGuncelle(){
