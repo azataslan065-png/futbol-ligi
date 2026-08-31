@@ -1028,6 +1028,10 @@ iframe.ptp-video{pointer-events:none}
    Kullanıcı hep dolu bir görüntü görür - kararma, halka veya boşluk hiç görünmez. */
 .ptp-freeze{position:absolute;inset:0;z-index:6;opacity:0;pointer-events:none;transition:opacity .28s ease}
 .ptp-freeze.ptp-freeze-on{opacity:1}
+/* Gömülü kaynakta (YouTube) geçiş örtüsü: kare yakalanamadığı için düz, opak bir katman
+   kullanılır - bkz. ptpFreezeCapture içindeki not. Tuvalin kendi çizimi olmadığından arka
+   plan rengiyle doldurulur. */
+.ptp-freeze.ptp-freeze-duz{background:#000;opacity:1}
 /* Hata / bilgi katmanı */
 .ptp-err{position:absolute;inset:0;background:rgba(0,0,0,.86);color:#fff;display:flex;flex-direction:column;
   align-items:center;justify-content:center;text-align:center;padding:1.1rem;gap:.7rem;z-index:7}
@@ -1913,7 +1917,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-T';
+window.APP_BUILD='2026-08-31-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21611,10 +21615,26 @@ window.PTPlayer=(function(){
     try{
       if(!S||!S.video||!S.root)return false;
       var v=S.video,cv=el('ptpFreeze');
-      if(!cv||!v.videoWidth||!v.videoHeight)return false;
-      cv.width=v.videoWidth;cv.height=v.videoHeight;
-      var ctx=cv.getContext('2d');
-      ctx.drawImage(v,0,0,cv.width,cv.height);
+      if(!cv)return false;
+      // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "video geçiş sonrası böyle olmasın, tek
+      // sahneymiş gibi devam etsin" - ekranda YouTube'un kendi başlık/kanal/"Diğer videolar"
+      // katmanı çıkıyordu):
+      // Geçişi gizleyen donmuş kare, o anki görüntüyü bir TUVALE çizerek üretiliyor. Ama
+      // gömülü kaynakta (YouTube) medya bir <iframe>'dir ve bir iframe tuvale ÇİZİLEMEZ -
+      // drawImage sessizce hata veriyor, fonksiyon false dönüyor ve geçiş HİÇ gizlenmiyordu.
+      // Kullanıcı da aradaki duraklamada YouTube'un kendi arayüzünü görüyordu.
+      // ÇÖZÜM: Gömülü kaynakta kare yakalanamayacağı için DÜZ, opak bir örtü kullanılır.
+      // Amaç zaten "önceki kareyi göstermek" değil, ARADAKİ HER ŞEYİ gizlemek - düz örtü bunu
+      // aynı ölçüde yapar ve YouTube'un başlık katmanı da görünmez.
+      if(S.gomulu){
+        cv.classList.add('ptp-freeze-duz');
+      }else{
+        cv.classList.remove('ptp-freeze-duz');
+        if(!v.videoWidth||!v.videoHeight)return false;
+        cv.width=v.videoWidth;cv.height=v.videoHeight;
+        var ctx=cv.getContext('2d');
+        ctx.drawImage(v,0,0,cv.width,cv.height);
+      }
       // Video'nun O ANKİ ekran modunu (Sığdır/Kırp/Genişlet) devral - aksi halde donmuş kare
       // farklı bir oranda görünüp geçişin kendisini ele verebilirdi.
       cv.setAttribute('data-fit',v.getAttribute('data-fit')||'contain');
@@ -21631,10 +21651,19 @@ window.PTPlayer=(function(){
   }
   function ptpFreezeRelease(){
     if(!S)return;
+    // GÖMÜLÜDE KISA GECİKME: YouTube, oynatma başlar başlamaz kendi başlık/kanal katmanını
+    // bir an gösterir. Örtüyü tam o anda kaldırmak, gizlemeye çalıştığımız şeyin yarım saniye
+    // görünmesine yol açıyordu. Örtü, oynatma başladıktan kısa bir süre SONRA kaldırılır -
+    // kullanıcı yalnızca akan görüntüyü görür.
+    if(S.gomulu&&!S._freezeGecikti){
+      S._freezeGecikti=true;
+      setTimeout(function(){if(S){S._freezeGecikti=false;ptpFreezeRelease();}},900);
+      return;
+    }
     if(S.freezeTimer){clearTimeout(S.freezeTimer);S.freezeTimer=null;}
     S.freezing=false;
     var cv=el('ptpFreeze');
-    if(cv)cv.classList.remove('ptp-freeze-on');
+    if(cv){cv.classList.remove('ptp-freeze-on');cv.classList.remove('ptp-freeze-duz');}
   }
 
   // KULLANICI TALEBİ ("bir sonraki video için inceden hazırlık yapılsın, veri toplama gibi
@@ -22467,13 +22496,14 @@ window.PTPlayer=(function(){
         S._hazirlikYapildi=false;
         return true;
       }
+      // KULLANICI TALEBİ ("tek sahneymiş gibi devam etsin"): Sıradaki videoya geçilecekse
+      // ÖNCE geçiş denenir, duraklatma YAPILMAZ. Duraklatmak gömülü oynatıcıda YouTube'un
+      // kendi başlık/öneri katmanını açıyor ve geçiş ele veriliyordu; sıra doğru olunca
+      // kullanıcı yalnızca akan görüntüyü görür.
+      if(!S._aralikBitti&&ptpSonrakiVarsaGec()){S._aralikBitti=true;return true;}
       try{S.video.pause();S.video.currentTime=a.bit;}catch(e){}
       if(!S._aralikBitti){
         S._aralikBitti=true;
-        // KULLANICI TALEBİ ("tek sahneymiş gibi devam etsin"): Son bölüm bittiğinde video
-        // durup beklemek yerine, listede sıradaki videoya kesintisiz geçilir. Böylece
-        // aralıklarla kırpılmış birden çok video, kullanıcı için tek bir akış olur.
-        if(ptpSonrakiVarsaGec())return true;
         showToastMsg('⏹️ Video bitti');
         // HATA DÜZELTMESİ (kullanıcı bildirdi: "video bittikten sonra kasma oluyor"): Bu iki
         // gözetleyici zamanlayıcı (250ms/400ms) video bittikten SONRA da hiç durmadan
@@ -22527,10 +22557,11 @@ window.PTPlayer=(function(){
           try{S.video.currentTime=S.araliklar[S.aralikIdx].bas||0;}catch(e){}
           S._hazirlikYapildi=false;
         }else{
+          // Aynı gerekçe: geçiş varsa duraklatmadan geçilir (bkz. ptpAralikUygula notu).
+          if(!S._aralikBitti&&ptpSonrakiVarsaGec()){S._aralikBitti=true;return;}
           try{S.video.pause();}catch(e){}
           if(!S._aralikBitti){
             S._aralikBitti=true;
-            if(ptpSonrakiVarsaGec())return;
             showToastMsg('⏹️ Video bitti');
             // bkz. ptpAralikUygula() içindeki AYNI kök sebep düzeltmesi - iki zamanlayıcı da
             // burada durdurulmalı çünkü bu bekçi, ptpAralikUygula'dan BAĞIMSIZ olarak da
