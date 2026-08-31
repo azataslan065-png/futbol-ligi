@@ -1965,7 +1965,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-31-N';
+window.APP_BUILD='2026-09-01-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21716,8 +21716,17 @@ window.PTPlayer=(function(){
       // (1) Beklenmedik duraklama
       if(!S.freezing&&duraklad&&!S.kullaniciDuraklatti&&!S._aralikBitti){
         if(!S._durakBas)S._durakBas=simdi;
-        else if(simdi-S._durakBas>1200&&simdi-sonDurum.durakUyari>15000){
+        else if(simdi-S._durakBas>400&&simdi-sonDurum.durakUyari>15000){
           sonDurum.durakUyari=simdi;
+          // KULLANICI TALEBİ ("amaç sebebi görmek"): Tanı örneklemesi şimdiye kadar YALNIZCA
+          // bölümler arası atlamada başlıyordu. Ama son kayıt gösterdi ki arayüz, atlama
+          // olmayan bir anda beliriyor - sınıra bir saniye kala, örtü yokken. Örnekleme
+          // artık BU AN için de başlar; arayüzün göründüğü asıl durum böylece kaydedilir.
+          ptpTaniKaydet('beklenmedik duraklama · konum '+Math.round(t));
+          // Ve sebebi beklemeden sonucu kapatıyoruz: örtü konur, oynatma sürdürülmeye
+          // çalışılır. Kullanıcı platformun arayüzünü görmez.
+          try{ptpDuraklatOrtusuGuncelle();}catch(e){}
+          try{if(!S.kullaniciDuraklatti&&S.video.play)S.video.play().catch(function(){});}catch(e){}
           ptpGecisKaydet('uyari','Beklenmedik duraklama - platform arayüzü görünüyor olabilir',
             {konumSn:Math.round(t),
              anlami:'Oynatma, kullanıcı duraklatmadığı hâlde durdu ve ekranda geçiş örtüsü yok. '
@@ -21768,7 +21777,10 @@ window.PTPlayer=(function(){
           }
         }else S._halkaBas=0;
       }catch(e){}
-    },600);
+    // Tur süresi 600 → 200 ms: platform arayüzünün belirmesi ile örtünün konması arasındaki
+    // boşluk, kullanıcının onu görmesine yetiyordu. Bu döngü yalnızca birkaç bayrak okuyor,
+    // sıklaştırmanın maliyeti ihmal edilebilir.
+    },200);
   }
   // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "sahne geçişi sonrası YouTube oynatıcı
   // arayüzleri hâlâ görünüyor" - ekran görüntüsünde ORTADA DURAKLAMA İKONU var):
@@ -21846,6 +21858,9 @@ window.PTPlayer=(function(){
   }
   function ptpDuraklatOrtusuGuncelle(){
     try{
+      // NOT: Bu örtü, "Kesintisiz Geçiş" anahtarından BAĞIMSIZ çalışır. O anahtar geçişlerin
+      // gizlenmesini yönetir; buradaki iş ise platformun arayüzünün hiçbir koşulda
+      // görünmemesi - anahtarı kapatan yönetici de bunu istemez.
       if(!S||!S.root||!S.gomulu)return;
       var v=S.video,duraklad=true;
       try{duraklad=!!v.paused;}catch(e){}
@@ -21902,7 +21917,9 @@ window.PTPlayer=(function(){
   function ptpTaniKaydet(etiket){
     try{
       if(!S||typeof DiagCore==='undefined'||!DiagCore.kaydet)return;
-      if(!DiagCore.isOn||!DiagCore.isOn('pt_gecis'))return;
+      // Modül kapalıysa kaydet() zaten hiçbir şey yazmaz; burada erken çıkmak yerine
+      // örneklemeyi çalıştırıp kaydı denemek, modülün sonradan açıldığı durumları da kapsar.
+      if(DiagCore.isOn&&!DiagCore.isOn('pt_gecis'))return;
       var ornekler=[],bas=Date.now();
       clearInterval(S._taniT);
       S._taniT=setInterval(function(){
