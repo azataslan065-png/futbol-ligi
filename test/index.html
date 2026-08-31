@@ -1917,7 +1917,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-31-A';
+window.APP_BUILD='2026-08-31-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21611,6 +21611,28 @@ window.PTPlayer=(function(){
   // kararma/halka/boşluk görünmez. Herhangi bir sebeple kare çekilemezse (ör. henüz hiç kare
   // çizilmemiş ilk açılış, ya da CORS nedeniyle tuval "kirlenirse") sessizce false döner ve
   // eski (spinner'lı) davranışa geri düşülür - hiçbir zaman kullanıcıya hata göstermez.
+  // Bölümler arası atlamada kullanılan örtü. Video→video geçişinde zaten ptpFreezeCapture
+  // çağrılıyor; burada aynı örtü, atlama için açılır. Yöneticinin kapatabildiği bir tercihe
+  // bağlıdır (kesintisizGecis) - kapatıldığında hiçbir örtü konmaz ve geçiş ham hâliyle
+  // görünür; sorun ayıklarken ya da örtünün kendisi sorun çıkarırsa işe yarar.
+  function ptpGecisOrtusuAc(){
+    try{
+      if(!S)return;
+      if(window.D&&D.kesintisizGecis===false)return;
+      ptpFreezeCapture();
+      // GÜVENLİK AĞI: Atlama sonrası oynatma hiç geri gelmezse örtü asılı kalmasın. Normal
+      // yolda 'playing'/'canplay' onu zaten kaldırır; bu yalnızca son çare.
+      clearTimeout(S._ortuT);
+      S._ortuT=setTimeout(function(){
+        if(S&&S.freezing){
+          ptpFreezeRelease();
+          // Teşhis: örtü zaman aşımına uğradıysa geçiş takılmış demektir - bu, sessizce
+          // geçilmemesi gereken bir durum.
+          try{if(typeof ptDiagPlayer==='function')ptDiagPlayer('Bölüm geçişi zaman aşımına uğradı',{aralikIdx:S.aralikIdx,videoId:S.videoId});}catch(e){}
+        }
+      },5000);
+    }catch(e){}
+  }
   function ptpFreezeCapture(){
     try{
       if(!S||!S.video||!S.root)return false;
@@ -21626,6 +21648,17 @@ window.PTPlayer=(function(){
       // ÇÖZÜM: Gömülü kaynakta kare yakalanamayacağı için DÜZ, opak bir örtü kullanılır.
       // Amaç zaten "önceki kareyi göstermek" değil, ARADAKİ HER ŞEYİ gizlemek - düz örtü bunu
       // aynı ölçüde yapar ve YouTube'un başlık katmanı da görünmez.
+      // Örtü açılırken kontroller gizlenir ve o anki görünürlük durumu saklanır - örtü
+      // kalkınca kullanıcı geçişten önce neredeyse oraya döner.
+      try{
+        var _ov=el('ptpOv');
+        if(_ov){
+          S._ortuOncesiKontrol=!_ov.classList.contains('ptp-hide');
+          _ov.classList.add('ptp-hide');
+        }
+        var _lb=S.root&&S.root.querySelector('.ptp-lockbar');
+        if(_lb)_lb.classList.add('ptp-hide');
+      }catch(e){}
       if(S.gomulu){
         cv.classList.add('ptp-freeze-duz');
       }else{
@@ -21661,9 +21694,13 @@ window.PTPlayer=(function(){
       return;
     }
     if(S.freezeTimer){clearTimeout(S.freezeTimer);S.freezeTimer=null;}
+    if(S._ortuT){clearTimeout(S._ortuT);S._ortuT=null;}
     S.freezing=false;
     var cv=el('ptpFreeze');
     if(cv){cv.classList.remove('ptp-freeze-on');cv.classList.remove('ptp-freeze-duz');}
+    // Kontroller geçişten ÖNCE açıksa geri getirilir; kapalıysa kapalı kalır - kullanıcının
+    // geçiş öncesi tercihi korunur.
+    if(S._ortuOncesiKontrol){S._ortuOncesiKontrol=false;showControls();}
   }
 
   // KULLANICI TALEBİ ("bir sonraki video için inceden hazırlık yapılsın, veri toplama gibi
@@ -22262,6 +22299,11 @@ window.PTPlayer=(function(){
   // hiçbir zamanlayıcı kurmaz - önceki sürümdeki 3 saniyelik otomatik gizleme kaldırıldı.
   function showControls(){
     if(!S)return;
+    // KULLANICI TALEBİ ("bizim oynatıcıda çıkmamalı"): Geçiş örtüsü ekrandayken KENDİ
+    // kontrollerimiz de gösterilmez. Amaç geçişi tamamen görünmez kılmak; örtü platformun
+    // arayüzünü gizlerken bizimkinin belirmesi, geçişi yine ele verirdi. Örtü kalkınca
+    // kontroller normal davranışına döner.
+    if(S.freezing)return;
     var ov=el('ptpOv');
     if(ov)ov.classList.remove('ptp-hide');
     var lb=S.root&&S.root.querySelector('.ptp-lockbar');
@@ -22490,6 +22532,14 @@ window.PTPlayer=(function(){
     if(!a)return false;
     if(a.bit>0&&t>=a.bit){
       if(S.aralikIdx+1<S.araliklar.length){
+        // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "1:21:30'dan 1:40:30'a geçişte oynatıcı
+        // çıkıyor"): Geçiş örtüsü YALNIZCA video→video değişiminde (switchSourceInPlace)
+        // uygulanıyordu. BÖLÜMDEN BÖLÜME atlama ise sadece currentTime yazıyor - örtü yok.
+        // Gömülü oynatıcı bu sırada kısa süre arabelleğe alır ve o anda KENDİ başlık/öneri
+        // katmanını gösterir; kullanıcının gördüğü buydu. Artık bölüm atlaması da aynı örtüyle
+        // gizleniyor: atlamadan önce kapat, oynatma geri geldiğinde ('playing'/'canplay')
+        // kendiliğinden aç.
+        ptpGecisOrtusuAc();
         S.aralikIdx++;
         var b=S.araliklar[S.aralikIdx].bas||0;
         try{S.video.currentTime=b;}catch(e){}
@@ -22553,6 +22603,7 @@ window.PTPlayer=(function(){
       var t=0;try{t=S.video.currentTime||0;}catch(e){return;}
       if(t>=a.bit){
         if(S.aralikIdx+1<S.araliklar.length){
+          ptpGecisOrtusuAc();   // bkz. ptpAralikUygula içindeki aynı düzeltme
           S.aralikIdx++;
           try{S.video.currentTime=S.araliklar[S.aralikIdx].bas||0;}catch(e){}
           S._hazirlikYapildi=false;
