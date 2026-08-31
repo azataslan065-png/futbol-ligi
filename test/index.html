@@ -1961,7 +1961,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-31-L';
+window.APP_BUILD='2026-08-31-M';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21622,6 +21622,7 @@ function ptpGomuluMedya(ifr){
       // HİÇ yaymıyordu - yalnızca 'play' vardı - bu yüzden video oynarken bile halka ekranda
       // kalıyordu. Ayrıca 'waiting' yayılıp karşılığı gelmediği için halka bir kez açılınca
       // bir daha kapanmıyordu. Oynatma başladığında ikisi de yayılır.
+      try{ifr._ytState=i.playerState;}catch(e){}   // tanı kaydı için (bkz. ptpTaniKaydet)
       if(i.playerState===1){olay('playing');olay('canplay');}
       if(i.playerState===3)olay('waiting');
       if(i.playerState===0)olay('ended');
@@ -21860,6 +21861,73 @@ window.PTPlayer=(function(){
         });
         S.root.appendChild(d);
       }else if(mevcut)mevcut.remove();
+    }catch(e){}
+  }
+  // ── GEÇİŞ TANI KAYDEDİCİ ──────────────────────────────────────────────────────────────
+  // KULLANICI TALEBİ ("sırf bunun için bir hata yakalama kodu yerleştir, amaç sebebi görmek"):
+  // Geçiş anında ekranda ne olduğunu TAHMİN etmeyi bırakıp ÖLÇÜYORUZ. Geçişten hemen önce
+  // başlayıp 3 saniye boyunca 100 ms'de bir durum örneği alınır; sonra tek bir kayıt olarak
+  // yazılır. Kayıtta her örnek için şunlar bulunur:
+  //   t     : videonun o anki konumu (saniye)
+  //   drk   : duraklamış mı (YouTube arayüzü en çok burada beliriyor)
+  //   ort   : bizim geçiş örtümüz ekranda mı
+  //   drtOrt: duraklama örtümüz ekranda mı
+  //   halka : yükleniyor göstergesi görünür mü
+  //   ptpOv : KENDİ kontrollerimiz görünür mü
+  //   pe    : gömülü oynatıcı dokunuş alıyor mu (pointer-events)
+  //   yt    : YouTube'un bildirdiği oynatıcı durumu (1=oynuyor, 2=duraklamış, 3=arabellek)
+  // Bu dizi, "arayüz hangi anda ve hangi durumda belirdi" sorusunu kesin olarak cevaplar.
+  // Gömülü oynatıcıyı yeni bir başlangıç saniyesiyle baştan kurar (bkz. yukarıdaki not).
+  // Başarılı olursa true döner; olmazsa çağıran taraf eski yola (sarma) düşer.
+  function ptpGomuluAralikYenile(bas){
+    try{
+      if(!S||!S.gomulu||!S.root)return false;
+      var ifr=S.root.querySelector('iframe.ptp-video');
+      if(!ifr||!ifr.src)return false;
+      var yeni=ifr.src
+        .replace(/([?&])start=\d+/,'$1start='+Math.floor(bas))
+        .replace(/([?&])t=\d+/,'$1t='+Math.floor(bas));
+      if(yeni.indexOf('start=')<0)yeni+=(yeni.indexOf('?')>=0?'&':'?')+'start='+Math.floor(bas);
+      // Aynı adresi tekrar atamak bazı tarayıcılarda yeniden yüklemez; kısa bir fark ekleyip
+      // yüklemenin gerçekten olmasını garantiliyoruz.
+      yeni=yeni.replace(/([?&])_r=\d+/,'')+((yeni.indexOf('?')>=0?'&':'?')+'_r='+Date.now());
+      ifr.src=yeni;
+      return true;
+    }catch(e){return false;}
+  }
+  function ptpTaniKaydet(etiket){
+    try{
+      if(!S||typeof DiagCore==='undefined'||!DiagCore.kaydet)return;
+      if(!DiagCore.isOn||!DiagCore.isOn('pt_gecis'))return;
+      var ornekler=[],bas=Date.now();
+      clearInterval(S._taniT);
+      S._taniT=setInterval(function(){
+        if(!S){clearInterval(S._taniT);return;}
+        var o={};
+        try{o.t=Math.round((S.video.currentTime||0)*10)/10;}catch(e){o.t=null;}
+        try{o.drk=!!S.video.paused?1:0;}catch(e){o.drk=null;}
+        o.ort=S.freezing?1:0;
+        try{o.drtOrt=S.root.querySelector('.ptp-duraklat-ortu')?1:0;}catch(e){}
+        try{var sp=el('ptpSpin');o.halka=(sp&&sp.style.display!=='none')?1:0;}catch(e){}
+        try{var ov=el('ptpOv');o.ptpOv=(ov&&!ov.classList.contains('ptp-hide'))?1:0;}catch(e){}
+        try{
+          var ifr=S.root.querySelector('iframe.ptp-video');
+          o.pe=ifr?(getComputedStyle(ifr).pointerEvents==='none'?'kapali':'ACIK'):'-';
+        }catch(e){}
+        try{o.yt=(S.video&&S.video._ytState!==undefined)?S.video._ytState:'-';}catch(e){}
+        o.ms=Date.now()-bas;
+        ornekler.push(o);
+        if(ornekler.length>=30){
+          clearInterval(S._taniT);
+          DiagCore.kaydet('pt_gecis','bilgi','Geçiş tanı örneklemesi · '+etiket,{
+            gomulu:!!S.gomulu,videoId:S.videoId,aralikIdx:S.aralikIdx,
+            ornekler:ornekler,
+            anlami:'Geçişten sonraki 3 saniye, 100 ms aralıklarla. drk=1 duraklama, ort=1 bizim örtümüz, '
+              +'pe=ACIK ise gömülü oynatıcı dokunuş alıyor demektir. Platform arayüzünün belirdiği anı '
+              +'bu dizide drk/yt sütunlarından bulabilirsiniz.'
+          });
+        }
+      },100);
     }catch(e){}
   }
   function ptpGecisOrtusuAc(){
@@ -22834,8 +22902,18 @@ window.PTPlayer=(function(){
         // gizleniyor: atlamadan önce kapat, oynatma geri geldiğinde ('playing'/'canplay')
         // kendiliğinden aç.
         ptpGecisOrtusuAc();
+        ptpTaniKaydet('bölüm '+S.aralikIdx+'→'+(S.aralikIdx+1));
         S.aralikIdx++;
         var b=S.araliklar[S.aralikIdx].bas||0;
+        // KULLANICI TALEBİ ("zaman aralığı güncellendiği gibi YouTube oynatıcısı devreye
+        // giriyor"): Gömülü kaynakta SARMA (seekTo) YouTube'un kendi arayüzünü tetikliyor -
+        // platform, konum değişimini kullanıcı etkileşimi sayıyor ve kontrol katmanını
+        // açıyor. Bunu dışarıdan kapatmanın bir yolu yok.
+        // ÇÖZÜM: Sarmak yerine gömülü oynatıcı YENİ BAŞLANGIÇLA baştan kuruluyor. Yeni bir
+        // iframe, autoplay+mute ile açıldığında hiçbir arayüz göstermez - ilk açılışta
+        // olduğu gibi doğrudan görüntü gelir. Kurulum örtünün ALTINDA yapıldığı için
+        // kullanıcı yalnızca kısa bir siyah görür.
+        if(S.gomulu&&ptpGomuluAralikYenile(b))return true;
         // KULLANICI TALEBİ ("geçiş sonrası YouTube oynatıcıları görünüyor, bunu engelle"):
         // Sarma sırasında gömülü oynatıcı kısa süre DURAKLAR ve YouTube tam o anda kendi
         // başlık/öneri katmanını açar. Sarmadan hemen sonra oynatma komutu göndermek, o
@@ -22910,6 +22988,7 @@ window.PTPlayer=(function(){
       if(t>=a.bit){
         if(S.aralikIdx+1<S.araliklar.length){
           ptpGecisOrtusuAc();   // bkz. ptpAralikUygula içindeki aynı düzeltme
+          ptpTaniKaydet('bekçi · bölüm '+S.aralikIdx+'→'+(S.aralikIdx+1));
           S.aralikIdx++;
           try{S.video.currentTime=S.araliklar[S.aralikIdx].bas||0;}catch(e){}
           try{if(S.video.play)S.video.play().catch(function(){});}catch(e){}
