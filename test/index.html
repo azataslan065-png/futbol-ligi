@@ -937,6 +937,18 @@ body.ptp-fs-active{overflow:hidden}
    görünür olur hem de aralık sınırı gerçekten uygulanır. (Aynı yaklaşım tam ekran kabuğunda
    da kullanılmıştı - orada da sebep buydu.) */
 iframe.ptp-video{pointer-events:none}
+/* HATA DÜZELTMESİ (kullanıcı bildirdi: "video oynatılamıyor, ortadaki yuvarlak sürekli
+   kalıyor"): Mobil tarayıcılar SESLİ otomatik oynatmayı engeller - gömülü oynatıcı duraklamış
+   açılır ve kendi büyük oynat düğmesini gösterir. Dokunuşları tamamen kestiğimiz için kullanıcı
+   o düğmeye basamıyordu; bizim düğmemiz de ancak YouTube'un komut arayüzü çalışıyorsa iş
+   görüyor. İkisi birden olmayınca video hiç başlamıyordu.
+   ÇÖZÜM: Oynatma birkaç saniyede başlamazsa gömülü oynatıcı GEÇİCİ olarak dokunulabilir olur;
+   kullanıcı bir kez dokunup başlatır, oynatma başlar başlamaz kilit geri gelir. Böylece hem
+   video başlar hem aralık koruması sürer. */
+.ptp.ptp-gomulu-serbest iframe.ptp-video{pointer-events:auto}
+.ptp-gomulu-ipucu{position:absolute;left:50%;bottom:18%;transform:translateX(-50%);z-index:7;
+  background:rgba(0,0,0,.72);color:#fff;border-radius:12px;padding:.5rem .8rem;font-size:.72rem;
+  font-weight:700;pointer-events:none;text-align:center;max-width:80%}
 /* Görüntü oranı seçenekleri: object-fit ile, videoyu bozmadan. */
 .ptp-video[data-fit="contain"]{object-fit:contain}
 .ptp-video[data-fit="cover"]{object-fit:cover}
@@ -1901,7 +1913,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-30-R';
+window.APP_BUILD='2026-08-30-T';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20508,14 +20520,14 @@ function buildVideoEmbedHtml(url,basSn,bitSn){
       // (çapraz kaynak), ama bu bayrak sayesinde iframe'e postMessage ile oynat/duraklat/sar
       // KOMUTU gönderebiliriz - kendi tam ekran kabuğumuzun (bkz. PTFrame) düğmeleri buna
       // dayanır. Bayrak olmadan YouTube bu komutları sessizce yok sayar.
-      if(kanal)return `<iframe src="https://www.youtube.com/embed/live_stream?channel=${kanal[1]}&autoplay=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      if(kanal)return `<iframe src="https://www.youtube.com/embed/live_stream?channel=${kanal[1]}&autoplay=1&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       const yt=url.match(/(?:watch\?v=|\/live\/|\/shorts\/|\/embed\/)([A-Za-z0-9_-]{6,})/)||url.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
       // İzleme aralığı: YouTube start/end parametrelerini kendi destekler. BİRDEN ÇOK bölüm
       // tanımlandığında yalnızca İLK bölümün başlangıcı adrese yazılır - bitiş yazılmaz,
       // çünkü YouTube "end"e gelince videoyu tamamen bitirir ve sonraki bölüme geçemezdik.
       // Bölüm zincirini bizim timeupdate denetimimiz yürütür (gömülü oynatıcı da S.video gibi
       // davrandığı için aynı kod çalışır - bkz. ptpGomuluMedya).
-      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&origin=${encodeURIComponent(location.origin)}&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1${basSn>0?'&start='+Math.floor(basSn):''}${bitSn>0?'&end='+Math.floor(bitSn):''}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1${basSn>0?'&start='+Math.floor(basSn):''}${bitSn>0?'&end='+Math.floor(bitSn):''}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       return '';
     }
     if(isKnownVideoHost(host,['twitch.tv'])){
@@ -22458,6 +22470,10 @@ window.PTPlayer=(function(){
       try{S.video.pause();S.video.currentTime=a.bit;}catch(e){}
       if(!S._aralikBitti){
         S._aralikBitti=true;
+        // KULLANICI TALEBİ ("tek sahneymiş gibi devam etsin"): Son bölüm bittiğinde video
+        // durup beklemek yerine, listede sıradaki videoya kesintisiz geçilir. Böylece
+        // aralıklarla kırpılmış birden çok video, kullanıcı için tek bir akış olur.
+        if(ptpSonrakiVarsaGec())return true;
         showToastMsg('⏹️ Video bitti');
         // HATA DÜZELTMESİ (kullanıcı bildirdi: "video bittikten sonra kasma oluyor"): Bu iki
         // gözetleyici zamanlayıcı (250ms/400ms) video bittikten SONRA da hiç durmadan
@@ -22514,6 +22530,7 @@ window.PTPlayer=(function(){
           try{S.video.pause();}catch(e){}
           if(!S._aralikBitti){
             S._aralikBitti=true;
+            if(ptpSonrakiVarsaGec())return;
             showToastMsg('⏹️ Video bitti');
             // bkz. ptpAralikUygula() içindeki AYNI kök sebep düzeltmesi - iki zamanlayıcı da
             // burada durdurulmalı çünkü bu bekçi, ptpAralikUygula'dan BAĞIMSIZ olarak da
@@ -22524,6 +22541,37 @@ window.PTPlayer=(function(){
         }
       }
     },400);
+  }
+  // Gömülü oynatıcının GERÇEKTEN başlayıp başlamadığını izler. Mobilde sesli otomatik oynatma
+  // engellendiği için video duraklamış açılabilir; bunu ancak kullanıcı bir dokunuşla
+  // başlatabilir. Dokunuşları kestiğimizden bu mümkün olmuyordu (bkz. CSS'teki not).
+  // 3 saniye içinde oynatma başlamazsa kilit açılır ve kısa bir yönlendirme gösterilir;
+  // oynatma başlar başlamaz kilit geri gelir, böylece aralık koruması yeniden devrede olur.
+  function ptpGomuluBaslatmaBekcisi(){
+    if(!S||!S.gomulu)return;
+    clearInterval(S._basTimer);
+    var t0=Date.now();
+    S._basTimer=setInterval(function(){
+      if(!S||!S.root){clearInterval(S._basTimer);return;}
+      var oynuyor=false;
+      try{oynuyor=!S.video.paused&&(S.video.currentTime||0)>0;}catch(e){}
+      if(oynuyor){
+        S.root.classList.remove('ptp-gomulu-serbest');
+        var ip=S.root.querySelector('.ptp-gomulu-ipucu');
+        if(ip)ip.remove();
+        clearInterval(S._basTimer);
+        return;
+      }
+      if(Date.now()-t0>3000&&!S.root.classList.contains('ptp-gomulu-serbest')){
+        S.root.classList.add('ptp-gomulu-serbest');
+        if(!S.root.querySelector('.ptp-gomulu-ipucu')){
+          var d=document.createElement('div');
+          d.className='ptp-gomulu-ipucu';
+          d.textContent='▶ Başlatmak için görüntüye bir kez dokunun';
+          S.root.appendChild(d);
+        }
+      }
+    },500);
   }
   function ptpSonrakiHazirla(saniye){
     if(!S||!S.url||saniye<=0)return;
@@ -23025,16 +23073,60 @@ window.PTPlayer=(function(){
     guncelle();
     S.nextT=setInterval(function(){
       kalan--;
-      if(kalan<=0){cancelNext();if(typeof window.openVideoWatch==='function')window.openVideoWatch(nextItem.id);return;}
+      if(kalan<=0){cancelNext();ptpSonrakiyeGec(nextItem);return;}
       guncelle();
     },1000);
+  }
+  // KULLANICI TALEBİ ("videolar arası geçiş belli ettirmeden sağlansın, kullanıcı geçişi fark
+  // etmesin; oynatıcı geçiş sırasında çıkıyor olmasın, tek sahneymiş gibi devam etsin"):
+  // Sıradaki videoya geçiş openVideoWatch() ile yapılıyordu - o fonksiyon izleme ekranını
+  // SIFIRDAN kurar: oynatıcı yok edilir, DOM yeniden yazılır, yeni oynatıcı kurulur. Kullanıcı
+  // bu arada boş ekran, yükleniyor halkası ve yeniden açılan kontroller görür. Oysa aynı
+  // oynatıcının KAYNAĞINI değiştirmek için hazır bir yol zaten var (switchSourceInPlace) -
+  // orada son kare dondurulup üste konuyor, yeni kaynak arkada hazırlanıyor ve hazır olunca
+  // donmuş kare kaldırılıyor; ekranda kesinti görünmüyor.
+  // Bu yol yalnızca aynı TÜRDE kaynaklarda güvenli (ikisi de doğrudan medya ya da ikisi de
+  // gömülü); tür değişiyorsa oynatıcının kendisi değişmek zorunda, orada eski yola düşülür.
+  // Listede sıradaki video varsa kesintisiz geçer; yoksa false döner ve çağıran taraf
+  // normal "bitti" davranışını uygular. Otomatik oynatma kapalıysa geçiş yapılmaz -
+  // kullanıcının tercihi geçişten önce gelir.
+  function ptpSonrakiVarsaGec(){
+    try{
+      if(!S||S.isLive)return false;
+      if(!pref('autoplay',true))return false;
+      var list=playlist(false);
+      var i=list.findIndex(function(x){return x.id===S.videoId;});
+      if(i<0||i>=list.length-1)return false;
+      ptpSonrakiyeGec(list[i+1]);
+      return true;
+    }catch(e){return false;}
+  }
+  function ptpSonrakiyeGec(hedef){
+    if(!S||!hedef)return;
+    clearInterval(S.nextT);S.nextT=null;
+    var yeniUrl=(typeof ptExtractVideoUrl==='function')?ptExtractVideoUrl(hedef.url||''):(hedef.url||'');
+    var eskiGomulu=!!S.gomulu;
+    var yeniGomulu=!ptIsDirectMediaUrl(yeniUrl);
+    if(eskiGomulu===yeniGomulu&&typeof switchSourceInPlace==='function'){
+      // Yeni videonun kendi izleme aralıkları da devralınır - aksi halde sonraki video
+      // sınırsız oynardı.
+      try{
+        S.araliklar=(typeof ptAraliklariCoz==='function')?ptAraliklariCoz(hedef.araliklar,hedef.basSure,hedef.bitSure):[];
+        S.aralikIdx=0;S._aralikBitti=false;S._basUygulandi=false;S._hazirlikYapildi=false;
+      }catch(e){}
+      if(switchSourceInPlace(yeniUrl,hedef.title||'',!!hedef.isLive,hedef.id)){
+        try{ptpAralikBekcisiBaslat();}catch(e){}
+        return;
+      }
+    }
+    if(typeof window.openVideoWatch==='function')window.openVideoWatch(hedef.id);
   }
   function playNextNow(){
     if(!S)return;
     var list=playlist(!!S.isLive);
     var i=list.findIndex(function(x){return x.id===S.videoId;});
     clearInterval(S.nextT);S.nextT=null;
-    if(i>=0&&i<list.length-1&&typeof window.openVideoWatch==='function')window.openVideoWatch(list[i+1].id);
+    if(i>=0&&i<list.length-1)ptpSonrakiyeGec(list[i+1]);
   }
   function cancelNext(){
     if(!S)return;
@@ -24342,6 +24434,7 @@ window.PTPlayer=(function(){
     // varsayıp S.tick'e uzanınca çöküyordu. Aynı risk bu dosyadaki tüm video dinleyicileri
     // için geçerli; oynatıcı yok edildikten sonra gelen bir olay hiçbir şey yapmamalı.
     ptpAralikBekcisiBaslat();
+    ptpGomuluBaslatmaBekcisi();
     video.addEventListener('timeupdate',function(){
       if(!S)return;
       // İZLEME ARALIKLARI: Yöneticinin tanımladığı bölümler arka arkaya oynatılır. Kontrol
@@ -24375,10 +24468,14 @@ window.PTPlayer=(function(){
         try{localStorage.setItem(posKey(opt.videoId),JSON.stringify({t:0,d:Math.floor(video.duration||0),done:1,ts:Date.now()}));}catch(e){}
       }
       syncUI();
-      // KULLANICI TALEBİ (onaylanan öneri): "Sıradaki yayına ÖNCEDEN sessizce/görünmeden
-      // atlanıyordu" - artık görünür bir geri sayım kutusu (bkz. .ptp-next) gösterilir,
-      // kullanıcı isterse hemen izleyebilir ya da iptal edip mevcut ekranda kalabilir.
-      if(!video.loop&&pref('autoplay',true)&&idx>=0&&idx<list.length-1)startNextCountdown(list[idx+1]);
+      // KULLANICI TALEBİ (güncellendi: "videolar arası geçiş belli ettirmeden sağlansın,
+      // kullanıcı geçişi fark etmesin - tek sahneymiş gibi devam etsin"):
+      // Önceden 5 saniyelik görünür bir geri sayım kutusu çıkıyordu. Bu, kullanıcıya seçim
+      // sunuyordu ama akışı da kesiyordu - istenen artık kesintisiz devam. Geri sayım
+      // kaldırıldı, sıradaki videoya DOĞRUDAN ve yerinde geçiliyor (bkz. ptpSonrakiyeGec).
+      // Kutu ve "Şimdi izle / İptal" düğmeleri kodda duruyor; ileride "geçişte sor" gibi bir
+      // tercih eklenmek istenirse yeniden kullanılabilir.
+      if(!video.loop&&pref('autoplay',true)&&idx>=0&&idx<list.length-1)ptpSonrakiyeGec(list[idx+1]);
     });
     video.addEventListener('error',function(){
       if(!S)return;
@@ -24763,6 +24860,7 @@ window.PTPlayer=(function(){
       // Kapatılmazsa her açılışta yeni bir AudioContext birikir (tarayıcı sınırı vardır).
       clearInterval(S._aralikT);
       try{clearInterval(S._aralikTimer);}catch(e){}
+      try{clearInterval(S._basTimer);}catch(e){}
       try{if(S._hazirlikEl){S._hazirlikEl.removeAttribute('src');S._hazirlikEl.load();S._hazirlikEl.remove();}}catch(e){}
       S._hazirlikEl=null;
       clearTimeout(S._prefetchT);S._prefetchT=null;
