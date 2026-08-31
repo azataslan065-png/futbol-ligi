@@ -1930,7 +1930,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-31-H';
+window.APP_BUILD='2026-08-31-J';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -9620,7 +9620,13 @@ function renderStats(){
       <div style="font-size:2rem">${icon}</div>
       <div style="flex:1;min-width:0">
         <div style="font-size:.64rem;color:var(--mu);font-weight:700;text-transform:uppercase">${label}</div>
-        <div style="font-size:.92rem;font-weight:900;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name||'—'}</div>
+        <!-- TEŞHİS RAPORU DÜZELTMESİ ("'Mazlumspor FK' · kontrast 1.78:1 · yazı rgb(0,0,0) /
+             zemin rgb(69,52,46)"): Bu satırın rengi belirtilmemişti, ÜST ÖĞEDEN devralıyordu.
+             Devralınan renk bazı temalarda siyah kalıyor, kartın zemini ise koyu - yan yana
+             gelince okunmuyordu. Denetlenen ana metin rengi açıkça veriliyor.
+             (Not: Daha önce st_seasonsummary içindeki BENZER bir satırı düzeltmiştim; bu
+             kartlar ayrı bir fonksiyondan üretiliyor, o düzeltme buraya ulaşmamıştı.) -->
+        <div style="font-size:.92rem;font-weight:900;color:var(--tx);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name||'—'}</div>
         ${teamName?`<div style="font-size:.66rem;color:var(--mu)">${teamName}</div>`:''}
       </div>
       ${value!=null?`<div style="text-align:right;flex-shrink:0"><div style="font-size:1.3rem;font-weight:900;color:#fbbf24">${value}</div><div style="font-size:.58rem;color:var(--mu)">${valueLabel||''}</div></div>`:''}
@@ -20544,7 +20550,15 @@ function buildVideoEmbedHtml(url,basSn,bitSn){
       // çünkü YouTube "end"e gelince videoyu tamamen bitirir ve sonraki bölüme geçemezdik.
       // Bölüm zincirini bizim timeupdate denetimimiz yürütür (gömülü oynatıcı da S.video gibi
       // davrandığı için aynı kod çalışır - bkz. ptpGomuluMedya).
-      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1${basSn>0?'&start='+Math.floor(basSn):''}${bitSn>0?'&end='+Math.floor(bitSn):''}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1${basSn>0?'&start='+Math.floor(basSn):''}${''/* KÖK SEBEP DÜZELTMESİ (kullanıcı: "sahne geçişi sonrası YouTube arayüzleri kendiliğinden
+        birden beliriyor"): Buraya &end=... yazıyorduk. YouTube o saniyeye gelince videoyu
+        KENDİ BİTİRİYOR ve bitiş ekranını açıyor - başlık, kanal, "Diğer videolar", öneri
+        küçük resimleri. Bu bizim geçişimiz değil, PLATFORMUN kendi davranışı; örtüyle
+        gizlenemez çünkü örtü kalktıktan sonra da orada durur ve bizim kodumuz o noktada hiç
+        çalışmaz (geçiş kaydı da bu yüzden hiç oluşmadı).
+        ARTIK bitiş adrese YAZILMIYOR. Videonun nerede duracağına yalnızca biz karar veriyoruz:
+        bitiş anına gelindiğinde önce örtü kapanıyor, sonra duraklatılıyor ve kendi bitiş
+        ekranımız gösteriliyor. YouTube "video bitti" durumuna hiç girmiyor. */}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       return '';
     }
     if(isKnownVideoHost(host,['twitch.tv'])){
@@ -22755,6 +22769,9 @@ window.PTPlayer=(function(){
       // kendi başlık/öneri katmanını açıyor ve geçiş ele veriliyordu; sıra doğru olunca
       // kullanıcı yalnızca akan görüntüyü görür.
       if(!S._aralikBitti&&ptpSonrakiVarsaGec()){S._aralikBitti=true;return true;}
+      // SIRA ÖNEMLİ: önce örtü, sonra duraklatma. Ters sırada, duraklatma ile örtü arasındaki
+      // bir kare bile platformun bitiş arayüzünün görünmesine yetiyor.
+      if(!S._aralikBitti)ptpBitisEkraniGoster();
       try{S.video.pause();S.video.currentTime=a.bit;}catch(e){}
       if(!S._aralikBitti){
         S._aralikBitti=true;
@@ -22817,6 +22834,7 @@ window.PTPlayer=(function(){
         }else{
           // Aynı gerekçe: geçiş varsa duraklatmadan geçilir (bkz. ptpAralikUygula notu).
           if(!S._aralikBitti&&ptpSonrakiVarsaGec()){S._aralikBitti=true;return;}
+          if(!S._aralikBitti)ptpBitisEkraniGoster();   // önce örtü, sonra duraklatma
           try{S.video.pause();}catch(e){}
           if(!S._aralikBitti){
             S._aralikBitti=true;
@@ -24759,6 +24777,17 @@ window.PTPlayer=(function(){
     }catch(e){}
     video.addEventListener('ended',function(){
       if(!S)return;
+      // KULLANICI TALEBİ ("YouTube arayüzleri kendiliğinden beliriyor"): Video kendi doğal
+      // sonuna ulaştığında da platform bitiş ekranını açar. Sıradaki videoya geçilmiyorsa
+      // kendi bitiş ekranımız hemen üstüne konur - hiçbir durumda altındaki oynatıcı
+      // görünmez.
+      try{
+        if(!S.isLive&&!S._aralikBitti){
+          var _l=playlist(false),_i=_l.findIndex(function(x){return x.id===S.videoId;});
+          var _sonraki=(_i>=0&&_i<_l.length-1&&pref('autoplay',true));
+          if(!_sonraki){S._aralikBitti=true;ptpBitisEkraniGoster();}
+        }
+      }catch(e){}
       if(!canli){
         try{localStorage.setItem(posKey(opt.videoId),JSON.stringify({t:0,d:Math.floor(video.duration||0),done:1,ts:Date.now()}));}catch(e){}
       }
@@ -28098,7 +28127,10 @@ window.voteMvp=function(matchId,player){
   function clsHizliBaslat(){
     if(window._clsHizliKuruldu)return;
     window._clsHizliKuruldu=true;
-    var bitis=Date.now()+12000;
+    // Yoğun ölçüm penceresi 12 → 25 saniyeye çıkarıldı: yönetici panelinde veri birden çok
+    // dinleyiciden parça parça geliyor ve yerleşme 12 saniyeyi aşabiliyor. Kaynağın
+    // bulunamamasının bir sebebi buydu - kayma, ölçüm penceresi kapandıktan sonra oluyordu.
+    var bitis=Date.now()+25000;
     var t=setInterval(function(){
       if(Date.now()>bitis){clearInterval(t);return;}
       try{
@@ -28112,9 +28144,14 @@ window.voteMvp=function(matchId,player){
     var yeni={};
     var liste=[];
     try{
-      liste=document.querySelectorAll('.card,[id^="pg-"],.topbar,#liveTicker,[class*="banner"],[id*="Banner"],[id*="Card"]');
+      // SENSÖR GELİŞTİRME (kullanıcı: "kayanÖğeler bulunamadı" ısrarla çıkıyor): İzlenen
+      // öğe kümesi fazla dardı - yalnızca kartlar ve bölümler bakılıyordu. Oysa kayma çoğu
+      // zaman bir kartın İÇİNDEKİ listenin büyümesinden doğuyor ve o liste bu kümede yok.
+      // Küme, kimliği olan tüm kutuları ve liste kapsayıcılarını da içerecek şekilde
+      // genişletildi; sınır 120'den 250'ye çıkarıldı.
+      liste=document.querySelectorAll('.card,[id^="pg-"],.topbar,#liveTicker,[class*="banner"],[id*="Banner"],[id*="Card"],[id$="List"],[id$="Box"],[id$="Grid"],[id$="Wrap"],#appWrap>div,#app>div');
     }catch(e){return sonuc;}
-    var n=Math.min(liste.length,120);
+    var n=Math.min(liste.length,250);
     for(var i=0;i<n;i++){
       var el=liste[i];
       if(kendiMi(el)||!el.getClientRects().length)continue;
