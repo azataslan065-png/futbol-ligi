@@ -1075,6 +1075,19 @@ iframe.ptp-video{pointer-events:none}
   background:rgba(0,0,0,.78);color:#fff;border:1.5px solid rgba(255,255,255,.3);border-radius:22px;
   padding:.55rem 1rem;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;
   display:flex;align-items:center;gap:.45rem}
+/* KÖK SEBEP - EKRAN KAYDINDAN BULUNDU:
+   Kayıt kare kare incelendiğinde şu görüldü: geçişte SİYAH ÖRTÜ HİÇ GÖRÜNMÜYOR, sahne
+   anında değişiyor ve YouTube'un katmanı YENİ SAHNE OYNARKEN ~4 saniye ekranda kalıyor.
+   Yani örtümüz konuyor ama hemen kalkıyor - çünkü kalkma koşulumuz "görüntü akıyor mu".
+   Sarma anında YouTube görüntüyü hemen akıtıyor, dolayısıyla örtü açılıyor; ama YouTube'un
+   KENDİ arayüzü akıştan bağımsız olarak birkaç saniye daha ekranda duruyor.
+   Örtüyü 4 saniye tutmak siyah ekran demek olurdu - kabul edilemez. Onun yerine yalnızca
+   ARAYÜZÜN BULUNDUĞU ŞERİTLER kapatılıyor: YouTube başlık/kanal bilgisini ÜSTTE, "Diğer
+   videolar" ve logoyu ALTTA gösterir; ortadaki görüntü boş kalır. Bu iki şerit kısa süre
+   maskelenince kullanıcı videoyu kesintisiz görür, platformun arayüzünü hiç görmez. */
+.ptp-chrome-mask{position:absolute;left:0;right:0;z-index:59;background:#000;pointer-events:none}
+.ptp-chrome-mask.ust{top:0;height:22%}
+.ptp-chrome-mask.alt{bottom:0;height:26%}
 .ptp-bitis{position:absolute;inset:0;z-index:62;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.92)}
 .ptp-bitis-ic{text-align:center;color:#fff;padding:1rem}
 .ptp-bitis-b{font-size:.95rem;font-weight:800;margin-bottom:.8rem;letter-spacing:.02em}
@@ -1965,7 +1978,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-D';
+window.APP_BUILD='2026-09-01-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21872,6 +21885,28 @@ window.PTPlayer=(function(){
       }else if(mevcut&&!sessiz){S._sesAcildi=true;mevcut.remove();}
     }catch(e){}
   }
+  // Platform arayüzünün bulunduğu üst/alt şeritleri belirli bir süre maskeler.
+  // Neden süreli: YouTube'un arayüzü kendiliğinden ~3 saniyede kayboluyor; maskeyi kalıcı
+  // tutmak videonun kenarlarını sürekli örtmek olurdu.
+  function ptpChromeMaskeAc(ms){
+    try{
+      if(!S||!S.gomulu||!S.root)return;
+      var kap=S.root.querySelector('#ptpRot')||S.root;
+      if(!kap.querySelector('.ptp-chrome-mask.ust')){
+        var u=document.createElement('div');u.className='ptp-chrome-mask ust';kap.appendChild(u);
+        var a=document.createElement('div');a.className='ptp-chrome-mask alt';kap.appendChild(a);
+      }
+      clearTimeout(S._maskeT);
+      S._maskeT=setTimeout(function(){ptpChromeMaskeKapat();},ms||3600);
+    }catch(e){}
+  }
+  function ptpChromeMaskeKapat(){
+    try{
+      if(!S||!S.root)return;
+      var kap=S.root.querySelector('#ptpRot')||S.root;
+      kap.querySelectorAll('.ptp-chrome-mask').forEach(function(x){x.remove();});
+    }catch(e){}
+  }
   function ptpDuraklatOrtusuGuncelle(){
     try{
       // NOT: Bu örtü, "Kesintisiz Geçiş" anahtarından BAĞIMSIZ çalışır. O anahtar geçişlerin
@@ -21893,6 +21928,8 @@ window.PTPlayer=(function(){
         // düğmesiyle aynı işi görür, ama arayüzü bizim denetimimizde kalır.
         d.addEventListener('click',function(e){
           e.stopPropagation();
+          // Duraklamadan çıkarken de platform arayüzü kısa süre beliriyor - şeritler maskelenir.
+          try{ptpChromeMaskeAc(3200);}catch(err){}
           try{S.kullaniciDuraklatti=false;if(v.play)v.play().catch(function(){});}catch(err){}
         });
         // KÖK SEBEP DÜZELTMESİ (kullanıcı: "geçiş sonrası YouTube görünüyor" - örtü konuyor
@@ -21980,6 +22017,9 @@ window.PTPlayer=(function(){
       if(!S)return;
       if(window.D&&D.kesintisizGecis===false)return;
       S._ortuBas=Date.now();
+      // Şerit maskesi örtüyle BİRLİKTE açılır ve örtü kalktıktan sonra da bir süre durur -
+      // platformun arayüzü tam o aralıkta görünüyor (bkz. CSS'teki kök sebep notu).
+      ptpChromeMaskeAc(3600);
       ptpFreezeCapture();
       // GÜVENLİK AĞI: Atlama sonrası oynatma hiç geri gelmezse örtü asılı kalmasın. Normal
       // yolda akış ölçümü onu zaten kaldırır; bu yalnızca son çare.
@@ -25423,6 +25463,7 @@ window.PTPlayer=(function(){
       try{clearInterval(S._aralikTimer);}catch(e){}
       try{clearInterval(S._basTimer);}catch(e){}
       try{clearInterval(S._gecisDenetT);}catch(e){}
+      try{clearTimeout(S._maskeT);}catch(e){}
       try{var _do=S.root&&S.root.querySelector('.ptp-duraklat-ortu');if(_do)_do.remove();}catch(e){}
       try{var _sa=S.root&&S.root.querySelector('.ptp-ses-ac');if(_sa)_sa.remove();}catch(e){}
       try{clearInterval(S._akisT);}catch(e){}
