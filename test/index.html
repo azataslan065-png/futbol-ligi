@@ -1040,6 +1040,19 @@ iframe.ptp-video{pointer-events:none}
 .ptp-freeze.ptp-freeze-duz{background:#000;opacity:1;transition:none}
 /* Kendi bitiş ekranımız - gömülü oynatıcı duraklatıldığında platformun açtığı arayüzü
    tamamen örter (bkz. ptpBitisEkraniGoster). Örtünün ÜSTÜNDE durur. */
+/* KÖK SEBEP DÜZELTMESİ (kullanıcı defalarca bildirdi: "sahne geçişi sonrası YouTube
+   oynatıcı arayüzleri hâlâ görünüyor"):
+   Şimdiye kadar tek tek DURUMLARI kapatmaya çalıştım - geçiş anı, bölüm atlaması, video
+   sonu, &end= parametresi. Her seferinde bir yol kapandı, başka bir yol açık kaldı.
+   ASIL KURAL şu: gömülü oynatıcı HANGİ SEBEPLE OLURSA OLSUN duraklarsa YouTube kendi
+   arayüzünü (başlık, kanal, "Diğer videolar", öneriler) açar. Sebebi saymak yerine SONUCU
+   kapatmak gerekiyordu: duraklama varsa üstü örtülür. Bu, sebebi ne olursa olsun çalışır -
+   kullanıcı dokunmuş, ağ kesilmiş, platform kendi kararıyla durmuş, fark etmez.
+   Örtü kendi duraklama göstergemizi taşır, böylece kullanıcı ekranın donmadığını görür. */
+.ptp-duraklat-ortu{position:absolute;inset:0;z-index:7;display:flex;align-items:center;
+  justify-content:center;background:rgba(0,0,0,.55);cursor:pointer}
+.ptp-duraklat-ortu .ic{width:64px;height:64px;border-radius:50%;background:rgba(0,0,0,.55);
+  display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff}
 .ptp-bitis{position:absolute;inset:0;z-index:8;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.92)}
 .ptp-bitis-ic{text-align:center;color:#fff;padding:1rem}
 .ptp-bitis-b{font-size:.95rem;font-weight:800;margin-bottom:.8rem;letter-spacing:.02em}
@@ -1930,7 +1943,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-08-31-J';
+window.APP_BUILD='2026-08-31-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21672,6 +21685,7 @@ window.PTPlayer=(function(){
     var sonDurum={durakUyari:0,sinirUyari:0,halkaUyari:0,tetikUyari:0};
     S._gecisDenetT=setInterval(function(){
       if(!S||!S.video)return;
+      ptpDuraklatOrtusuGuncelle();
       var simdi=Date.now(),t=0,duraklad=true;
       try{t=S.video.currentTime||0;duraklad=!!S.video.paused;}catch(e){return;}
 
@@ -21777,6 +21791,31 @@ window.PTPlayer=(function(){
       var d=S.root.querySelector('.ptp-bitis');
       if(d)d.remove();
       ptpFreezeRelease();
+    }catch(e){}
+  }
+  // Duraklama örtüsü - bkz. CSS'teki .ptp-duraklat-ortu notu. Yalnızca GÖMÜLÜ kaynakta
+  // gerekir; kendi <video>'muz duraklayınca hiçbir şey göstermez.
+  function ptpDuraklatOrtusuGuncelle(){
+    try{
+      if(!S||!S.root||!S.gomulu)return;
+      var v=S.video,duraklad=true;
+      try{duraklad=!!v.paused;}catch(e){}
+      var mevcut=S.root.querySelector('.ptp-duraklat-ortu');
+      // Bitiş ekranı ya da geçiş örtüsü zaten üstteyse ikinci bir katmana gerek yok.
+      if(S._bitisModu||S.freezing){if(mevcut)mevcut.remove();return;}
+      if(duraklad){
+        if(mevcut)return;
+        var d=document.createElement('div');
+        d.className='ptp-duraklat-ortu';
+        d.innerHTML='<div class="ic">▶</div>';
+        // Örtüye dokunmak oynatmayı sürdürür - kullanıcı için platformun kendi oynat
+        // düğmesiyle aynı işi görür, ama arayüzü bizim denetimimizde kalır.
+        d.addEventListener('click',function(e){
+          e.stopPropagation();
+          try{S.kullaniciDuraklatti=false;if(v.play)v.play().catch(function(){});}catch(err){}
+        });
+        S.root.appendChild(d);
+      }else if(mevcut)mevcut.remove();
     }catch(e){}
   }
   function ptpGecisOrtusuAc(){
@@ -24734,6 +24773,11 @@ window.PTPlayer=(function(){
     video.addEventListener('play',syncUI);
     video.addEventListener('pause',function(){syncUI();showControls();wakeLock(false);});
     video.addEventListener('volumechange',function(){if(S)syncUI();});
+    // Duraklama örtüsü OLAY anında da güncellenir - 600 ms'lik denetim turunu beklemek,
+    // platformun arayüzünün o aralıkta görünmesine yeterdi.
+    video.addEventListener('pause',function(){if(S)ptpDuraklatOrtusuGuncelle();});
+    video.addEventListener('play',function(){if(S)ptpDuraklatOrtusuGuncelle();});
+    video.addEventListener('playing',function(){if(S)ptpDuraklatOrtusuGuncelle();});
     video.addEventListener('ratechange',function(){
       var b=el('ptpSpeed');if(b)b.textContent=(Math.round(video.playbackRate*100)/100)+'x';
     });
@@ -25186,6 +25230,7 @@ window.PTPlayer=(function(){
       try{clearInterval(S._aralikTimer);}catch(e){}
       try{clearInterval(S._basTimer);}catch(e){}
       try{clearInterval(S._gecisDenetT);}catch(e){}
+      try{var _do=S.root&&S.root.querySelector('.ptp-duraklat-ortu');if(_do)_do.remove();}catch(e){}
       try{clearInterval(S._akisT);}catch(e){}
       try{if(S._hazirlikEl){S._hazirlikEl.removeAttribute('src');S._hazirlikEl.load();S._hazirlikEl.remove();}}catch(e){}
       S._hazirlikEl=null;
