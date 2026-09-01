@@ -2083,7 +2083,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-W';
+window.APP_BUILD='2026-09-01-X';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22176,7 +22176,13 @@ window.PTPlayer=(function(){
       // zaten yeni bölümün gerçek görüntüsü akıyor, gizlenecek bir şey yok.
       if(S._gecisKilit||(S._gecisAni&&Date.now()-S._gecisAni<1600)){if(mevcut)mevcut.remove();return;}
       if(!oynamiyor){
-        // Oynatma geri geldi - örtü GECİKMESİZ kalkar ve sayaç sıfırlanır.
+        // AYNI DÜZELTME BURADA DA (bkz. ptpFreezeRelease içindeki "gecikmeli kaldırma" notu):
+        // Oynatma geri döndüğünde platformun arayüzü ekrandan hemen silinmiyor. Örtüyü aynı
+        // karede çekersek butonlar bir an görünür. Kısa bir bekleme tanınır.
+        if(mevcut&&!S._ortuKalkBas){S._ortuKalkBas=Date.now();return;}
+        if(mevcut&&Date.now()-S._ortuKalkBas<320)return;
+        S._ortuKalkBas=0;
+        // Oynatma geri geldi - örtü kalkar ve sayaç sıfırlanır.
         // Ayrıca "ilk oynatma gerçekleşti" işaretlenir: bundan sonra 500 ms'lik titreme
         // eşiği devreye girer (bkz. aşağıdaki açılış notu).
         S._ilkOynatmaOldu=true;
@@ -22222,6 +22228,7 @@ window.PTPlayer=(function(){
         return;
       }
       {
+        S._ortuKalkBas=0;
         var d=document.createElement('div');
         d.className='ptp-duraklat-ortu';
         d.setAttribute('data-bekliyor',bekliyor?'1':'0');
@@ -22491,6 +22498,7 @@ window.PTPlayer=(function(){
     if(S.gomulu&&!S._akisBekliyor){
       S._akisBekliyor=true;
       var oncekiT=-1,tur=0;
+      S._akisBekleme=false;S._akisOnay=false;   // her geçiş kendi beklemesini yapar
       clearInterval(S._akisT);
       S._akisT=setInterval(function(){
         if(!S){clearInterval(S._akisT);return;}
@@ -22503,6 +22511,24 @@ window.PTPlayer=(function(){
         // Erken kaldırma riski yok: durum 1 değilse örtü zaten devreye giriyor
         // (bkz. ptpDuraklatOrtusuGuncelle), yani boşta kalan bir an oluşmuyor.
         if(!akiyor){try{if(S.video._ytState===1)akiyor=true;}catch(e){}}
+        // ══════════════════════════════════════════════════════════════════════════════
+        // KULLANICI BİLDİRDİ ("YouTube butonları hâlâ görünüyor") - GECİKMELİ KALDIRMA:
+        // Örtüyü, oynatıcı "oynuyorum" (durum 1) der demez ANINDA kaldırıyordum; bunu siyah
+        // süresini kısaltmak için eklemiştim. Ama platformun kendi arayüzü, oynatma
+        // başladığı anda ekrandan HEMEN silinmiyor - kendi sönme animasyonu var ve birkaç
+        // yüz milisaniye daha duruyor. Yani örtüyü tam da arayüzün henüz silinmediği anda
+        // çekiyordum: geçişin son anında butonlar bir an görünüyordu.
+        // ÇÖZÜM: Akış doğrulandıktan sonra kısa bir süre daha beklenir. Bu bekleme siyahı
+        // uzatmaz - o an ekranda zaten videonun ilk kareleri akıyor, örtü ise sönerek
+        // kalkıyor; yalnızca platformun arayüzünün silinmesine zaman tanınır.
+        // ══════════════════════════════════════════════════════════════════════════════
+        if(akiyor&&S.gomulu&&!S._akisBekleme){
+          S._akisBekleme=true;
+          setTimeout(function(){try{if(S)S._akisOnay=true;}catch(e){}},320);
+          akiyor=false;
+        }else if(akiyor&&S.gomulu&&!S._akisOnay){
+          akiyor=false;
+        }
         // Aralıklı videoda ek koşul: akış yetmez, konumun aralığın İÇİNDE olması da gerekir.
         // Aksi halde örtü, video henüz 0. saniyede akarken kalkıyor ve kullanıcı aralık dışı
         // görüntüyü bir an görüyordu (bkz. açılış örtüsü notu).
