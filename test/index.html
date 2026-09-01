@@ -1097,7 +1097,16 @@ iframe.ptp-video{pointer-events:none}
    Yani örtü tam opak olana kadar ~0,3 saniye YARI SAYDAM kalıyor - gizlemesi gereken YouTube
    katmanı tam o aralıkta içinden görünüyordu; aynısı kalkarken de oluyordu. Bir geçiş
    örtüsünde yumuşak açılış estetik değil kusurdur: örtünün işi ANINDA kapatmaktır. */
+/* ÖLÇÜMDEN GELEN İNCE AYAR (tanı dökümü: 0-683 ms arası ort=1, 701 ms'de yt=1):
+   Örtü AÇILIRKEN anında opak olmalı - sarma komutu örtüyle aynı anda gidiyor ve örtü yarı
+   saydamken YouTube'un katmanı içinden görünürdü (daha önce bu yüzden yumuşak açılış
+   kaldırılmıştı, o karar doğru). Ama KAPANIRKEN durum farklı: örtü, oynatma zaten başladığı
+   an (yt=1) kalkıyor - yani altında akan gerçek görüntü var, gizlenecek bir arayüz yok.
+   Sert kesme, 0,7 saniyelik siyahın bir "sıçrama" gibi hissedilmesine yol açıyordu; kısa bir
+   sönme onu kasıtlı bir sahne geçişine benzetir. Siyahın SÜRESİ değişmiyor, sadece bitişi
+   yumuşuyor. */
 .ptp-freeze.ptp-freeze-duz{background:#000;opacity:1;transition:none}
+.ptp-freeze.ptp-freeze-duz.ptp-freeze-sonlan{opacity:0;transition:opacity .22s ease}
 /* Kendi bitiş ekranımız - gömülü oynatıcı duraklatıldığında platformun açtığı arayüzü
    tamamen örter (bkz. ptpBitisEkraniGoster). Örtünün ÜSTÜNDE durur. */
 /* KÖK SEBEP DÜZELTMESİ (kullanıcı defalarca bildirdi: "sahne geçişi sonrası YouTube
@@ -2054,7 +2063,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-P';
+window.APP_BUILD='2026-09-01-R';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22346,6 +22355,10 @@ window.PTPlayer=(function(){
         if(_lb)_lb.classList.add('ptp-hide');
       }catch(e){}
       if(S.gomulu){
+        // Önceki geçişin sönmesi yarım kaldıysa temizlenir - aksi halde yeni örtü saydam
+        // başlar ve gizlemesi gereken katman içinden görünürdü.
+        clearTimeout(S&&S._sonlanT);
+        cv.classList.remove('ptp-freeze-sonlan');
         cv.classList.add('ptp-freeze-duz');
       }else{
         cv.classList.remove('ptp-freeze-duz');
@@ -22423,7 +22436,19 @@ window.PTPlayer=(function(){
     if(S._ortuT){clearTimeout(S._ortuT);S._ortuT=null;}
     S.freezing=false;
     var cv=el('ptpFreeze');
-    if(cv){cv.classList.remove('ptp-freeze-on');cv.classList.remove('ptp-freeze-duz');}
+    if(cv){
+      // Gömülü kaynakta örtü SÖNEREK kalkar (bkz. CSS'teki ince ayar notu). Sönme bitince
+      // sınıflar temizlenir - yarım kalırsa bir sonraki geçişte örtü hiç görünmezdi.
+      if(cv.classList.contains('ptp-freeze-duz')){
+        cv.classList.add('ptp-freeze-sonlan');
+        clearTimeout(S._sonlanT);
+        S._sonlanT=setTimeout(function(){
+          try{cv.classList.remove('ptp-freeze-on','ptp-freeze-duz','ptp-freeze-sonlan');}catch(e){}
+        },240);
+      }else{
+        cv.classList.remove('ptp-freeze-on');cv.classList.remove('ptp-freeze-duz');
+      }
+    }
     // Kontroller geçişten ÖNCE açıksa geri getirilir; kapalıysa kapalı kalır - kullanıcının
     // geçiş öncesi tercihi korunur.
     S.spinKilit=false;
