@@ -1353,7 +1353,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-A';
+window.APP_BUILD='2026-09-02-B';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6387,10 +6387,32 @@ window.testVideoLink=function(i,otomatik){
     });
   });
 };
+// KULLANICI TALEBİ ("bunu ben admin ayağından yapacağım"): Kenar büyütme oranı artık kodda
+// sabit değil, buradan yönetiliyor. Oynatıcı, platformun kendi başlık/paylaş/logo şeritlerini
+// görüş alanının dışına itmek için gömülü pencereyi büyütüyor; bu değer o büyütmenin oranı.
+// Büyütme videonun BULUNMADIĞI boş yönde yapıldığı için görüntüden bir şey kaybedilmez -
+// değeri yükseltmenin görüntü maliyeti yoktur.
+window.setKenarBuyutme=function(v){
+  var n=Number(v);
+  if(!isFinite(n))n=1.6;
+  n=Math.max(0,Math.min(4,n));          // 0 = kapalı, üst sınır 4 (%400)
+  S.kenarBuyutme=Math.round(n*100)/100;
+  save().then(function(){
+    kbEtiketTazele();
+    toast(S.kenarBuyutme>0?('✂️ Kenar büyütme: %'+Math.round(S.kenarBuyutme*100)):'⛔ Kenar büyütme kapalı');
+  });
+};
+function kbEtiketTazele(){
+  var v=(S.kenarBuyutme===undefined||S.kenarBuyutme===null)?1.6:Number(S.kenarBuyutme);
+  var kay=qs('kbRange'),et=qs('kbDeger');
+  if(kay&&document.activeElement!==kay)kay.value=String(v);
+  if(et)et.textContent=(v>0?('%'+Math.round(v*100)):'kapalı');
+}
 window.setKesintisizGecis=function(v){
   S.kesintisizGecis=!!v;
   save().then(function(){
     kgButonlariTazele();
+  try{kbEtiketTazele();}catch(e){}
     toast(v?'🎬 Kesintisiz geçiş açık':'⛔ Kesintisiz geçiş kapalı');
   });
 };
@@ -17486,6 +17508,10 @@ function listenToLeague(leagueId){
       S.trashPass=d.trashPass||'';
       // Kesintisiz geçiş tercihi - varsayılan AÇIK (alan hiç yoksa true sayılır).
       S.kesintisizGecis=(d.kesintisizGecis!==false);
+      // Kenar büyütme oranı - OKUMA tarafına da eklenmeli. Yukarıdaki corsProxy notunda
+      // anlatılan tuzak: yalnızca yazma tarafına eklenen alan, ilk senkronda sessizce silinir.
+      // Alan hiç yoksa varsayılan 1.6 (%160).
+      S.kenarBuyutme=(d.kenarBuyutme===undefined||d.kenarBuyutme===null)?1.6:Number(d.kenarBuyutme);
       S.season=d.season||'1. Sezon';
       S.teams=d.teams||{};
       S.matches=d.matches||{};
@@ -21039,6 +21065,23 @@ function openDiagnosticsManager(){
       +'<div style="display:flex;gap:.4rem">'
         +'<button id="kgOn" onclick="setKesintisizGecis(true)" style="flex:1;min-height:36px;border-radius:9px;cursor:pointer;font-family:Outfit,sans-serif;font-size:.7rem;font-weight:700;border:1.5px solid var(--br);background:var(--s2);color:var(--tx)">✅ Açık</button>'
         +'<button id="kgOff" onclick="setKesintisizGecis(false)" style="flex:1;min-height:36px;border-radius:9px;cursor:pointer;font-family:Outfit,sans-serif;font-size:.7rem;font-weight:700;border:1.5px solid var(--br);background:var(--s2);color:var(--tx)">⛔ Kapalı</button>'
+      +'</div>'
+      +'<div style="height:1px;background:var(--br);margin:.7rem 0"></div>'
+      +'<div style="font-size:.7rem;font-weight:800;margin-bottom:.25rem">✂️ Kenar Büyütme <span id="kbDeger" style="font-weight:700;color:var(--ac3)">%160</span></div>'
+      +'<div style="font-size:.62rem;color:var(--mu);line-height:1.6;margin-bottom:.5rem">'
+        +'YouTube\'un kendi ba\u015fl\u0131k, payla\u015f, saat, logo ve "Di\u011fer videolar" \u015feritleri g\u00f6m\u00fcl\u00fc '
+        +'pencerenin KENARLARINA yap\u0131\u015f\u0131kt\u0131r. Pencere g\u00f6r\u00fcnen alandan b\u00fcy\u00fck yap\u0131l\u0131p ta\u015fan k\u0131s\u0131m '
+        +'k\u0131rp\u0131l\u0131nca o \u015feritler d\u0131\u015far\u0131da kal\u0131r ve hi\u00e7bir anda g\u00f6r\u00fcnmez.'
+        +'<br/><b style="color:var(--tx)">G\u00f6r\u00fcnt\u00fcden kay\u0131p olmaz:</b> b\u00fcy\u00fctme, videonun bulunmad\u0131\u011f\u0131 '
+        +'siyah bant y\u00f6n\u00fcnde yap\u0131l\u0131r. De\u011feri y\u00fckseltmenin g\u00f6r\u00fcnt\u00fc maliyeti yoktur.'
+        +'<br/><b style="color:var(--tx)">Ucundan g\u00f6r\u00fcnen kal\u0131rsa</b> de\u011feri art\u0131r\u0131n. 0 yaparsan\u0131z \u00f6zellik kapan\u0131r.'
+      +'</div>'
+      +'<input id="kbRange" type="range" min="0" max="4" step="0.1" value="1.6" '
+        +'oninput="(function(e){var t=document.getElementById(\'kbDeger\');if(t)t.textContent=(e.value>0?(\'%\'+Math.round(e.value*100)):\'kapal\u0131\');})(this)" '
+        +'onchange="setKenarBuyutme(this.value)" '
+        +'style="width:100%;min-height:32px;accent-color:var(--ac)"/>'
+      +'<div style="display:flex;justify-content:space-between;font-size:.58rem;color:var(--mu);margin-top:-.15rem">'
+        +'<span>kapal\u0131</span><span>%200</span><span>%400</span>'
       +'</div>'
     +'</div>'
     +'<div id="diagModuleList"></div>'
