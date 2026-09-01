@@ -1003,7 +1003,13 @@ iframe.ptp-video{pointer-events:none}
 .ptp-video[data-fit="contain"]{object-fit:contain}
 .ptp-video[data-fit="cover"]{object-fit:cover}
 .ptp-video[data-fit="fill"]{object-fit:fill}
-.ptp-ov{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;
+/* KULLANICI TALEBİ ("kullanıcı ekrana tıklayınca BİZİM oynatıcı çıksın"): Kontrol katmanının
+   z-index'i yoktu (auto). Platform arayüzünü gizleyen örtü ise 60'ta duruyor - yani örtü
+   ekrandayken (duraklama, arabellek, video sonu) kullanıcı ekrana dokunsa bile kontroller
+   örtünün ALTINDA kalıyor ve görünmüyordu. Oysa örtünün olduğu anlar, kullanıcının oynatıcıya
+   EN ÇOK ihtiyaç duyduğu anlar (devam ettirmek, sarmak, ayar açmak).
+   Kontrol katmanı ve ona bağlı yüzeyler (kilit çubuğu, ayar paneli) örtünün ÜSTÜNE alındı. */
+.ptp-ov{z-index:70;position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;
   background:linear-gradient(to bottom,rgba(0,0,0,.55) 0%,rgba(0,0,0,0) 22%,rgba(0,0,0,0) 62%,rgba(0,0,0,.72) 100%);
   opacity:1;transition:opacity .25s ease}
 .ptp-ov.ptp-hide{opacity:0;pointer-events:none}
@@ -1176,7 +1182,7 @@ iframe.ptp-video{pointer-events:none}
 .ptp-next-t{font-size:.78rem;color:#e2e8f0;line-height:1.6}
 /* Ayar paneli */
 .ptp-panel{position:absolute;right:.5rem;bottom:3.6rem;background:rgba(15,23,42,.97);border:1px solid rgba(255,255,255,.14);
-  border-radius:12px;padding:.5rem;min-width:196px;max-width:min(86%,300px);max-height:66%;overflow-y:auto;z-index:8;
+  border-radius:12px;padding:.5rem;min-width:196px;max-width:min(86%,300px);max-height:66%;overflow-y:auto;z-index:72;
   box-shadow:0 10px 30px rgba(0,0,0,.5)}
 /* KULLANICI TALEBİ ("kumanda çok büyük bir görünüme sahip, direkt oynatıcıya dokununca
    görsün"): .ptp-panel'den (ayarlar menüsü) AYRI, kendi kompakt boyutlandırmasına sahip bir
@@ -1427,7 +1433,7 @@ iframe.ptp-video{pointer-events:none}
    Artık kilitliyken de aynı göster/gizle mantığı geçerli - ikon .ptp-hide sınıfına göre
    görünür/gizlenir, kilitli OLMASI onu zorla görünür yapmaz. Görünürlüğü tek dokunuşla
    (bkz. bindGestures'daki S.locked dalı) kullanıcı kontrol eder. */
-.ptp-lockbar{position:absolute;top:3.4rem;right:.5rem;z-index:9;opacity:1;pointer-events:auto;transition:opacity .25s ease}
+.ptp-lockbar{position:absolute;top:3.4rem;right:.5rem;z-index:71;opacity:1;pointer-events:auto;transition:opacity .25s ease}
 .ptp-lockbar.ptp-hide{opacity:0;pointer-events:none}
 .ptp-locked .ptp-ov{opacity:0;pointer-events:none}
 /* Altyazı görünümü kullanıcı ayarlarına göre */
@@ -2048,7 +2054,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-M';
+window.APP_BUILD='2026-09-01-N';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -23530,10 +23536,25 @@ window.PTPlayer=(function(){
   // eski (örtü + sarma) yolu uygular, yani davranış hiçbir koşulda kötüleşmez.
   function ptpYedegeGec(){
     try{
-      if(!S||!S.gomulu||!S._yedekHazir||!S._yedekIfr)return false;
-      if(S._yedekIdx!==S.aralikIdx+1)return false;
+      // TEŞHİS: Geçişin HANGİ yoldan gittiği artık tahmin edilmiyor, yazılıyor. Yedek yol
+      // kullanılamadıysa SEBEBİ de kaydedilir - "neden hâlâ YouTube arayüzü çıkıyor"
+      // sorusunun cevabı doğrudan burada görünür.
+      var _neden=null;
+      if(!S||!S.gomulu)_neden='gömülü kaynak değil';
+      else if(!S._yedekIfr)_neden='yedek pencere hiç kurulmadı (bölüm 10 sn\'den kısa ya da adres üretilemedi)';
+      else if(!S._yedekHazir)_neden='yedek pencere kuruldu ama hazır olmadı (oynamaya başladığını hiç bildirmedi)';
+      else if(S._yedekIdx!==S.aralikIdx+1)_neden='yedek başka bölüm için hazırlanmış (yedekIdx '+S._yedekIdx+', beklenen '+(S.aralikIdx+1)+')';
+      else if(!S.video||typeof S.video._ptpIframeDegistir!=='function')_neden='kapsayıcı pencere değiştirmeyi desteklemiyor';
+      if(_neden){
+        try{
+          if(typeof DiagCore!=='undefined'&&DiagCore.kaydet)
+            DiagCore.kaydet('pt_gecis','uyari','Yedek oynatıcı kullanılamadı - sarma yoluna düşüldü',
+              {sebep:_neden,aralikIdx:(S&&S.aralikIdx),videoId:(S&&S.videoId),
+               anlami:'Bu geçiş ESKİ yolla (sarma) yapıldı. Sarma sırasında YouTube kendi arayüzünü açar ve kısa bir siyah ekran oluşur - kullanıcının gördüğü sorun bu satırla birebir eşleşir. Sebep alanı, yedeğin neden devreye giremediğini söyler.'});
+        }catch(e){}
+        return false;
+      }
       var kap=S.video,y=S._yedekIfr;
-      if(!kap||typeof kap._ptpIframeDegistir!=='function')return false;
       var eski=kap._ptpAktifIfr;
       // GEÇİŞ KİLİDİ: Bu andan itibaren aralık denetimi ve 400 ms'lik bekçi devre dışı.
       // Aksi halde eski pencere hâlâ "bölüm bitişi" konumunu bildirirken yeni bölüm indeksi
@@ -25423,6 +25444,18 @@ window.PTPlayer=(function(){
       // Geçiş örtüsü ekrandayken halka HİÇ gösterilmemeli - gizlenmesi gereken şeyin üstünde
       // duruyor ve geçişi ele veriyor. Örtü kalkınca kilit de kalkar.
       if(S&&S.spinKilit)return;
+      // TEŞHİS RAPORU DÜZELTMESİ ("Yükleniyor göstergesi uzun süre açık kaldı · sureMs 2600 ·
+      // görüntü akıyor ama halka hâlâ ekranda"):
+      // Halka 'waiting' ile açılıp 'canplay'/'playing' ile kapanıyor. GÖMÜLÜ kaynakta bu iki
+      // olay gerçek medya olayları değil, YouTube'un durum akışından TÜRETİLİYOR - akış
+      // gecikince ya da bir paket düşünce kapanma olayı hiç gelmiyor ve halka ekranda asılı
+      // kalıyor. Kullanıcı bunu "takılma" olarak görüyor; ekran görüntüsündeki dönen halka da
+      // buydu.
+      // ÇÖZÜM: Gömülü kaynakta KENDİ halkamız hiç gösterilmiyor. Buna artık gerek de yok -
+      // oynatma durmuşsa üstünü zaten örtü kapatıyor ve kendi halkasını o taşıyor
+      // (bkz. ptpDuraklatOrtusuGuncelle). Tek bir gösterge, tek bir kapanma yolu: asılı
+      // kalabileceği bir durum kalmıyor.
+      if(S&&S.gomulu){var _sp0=el('ptpSpin');if(_sp0)_sp0.style.display='none';return;}
       var sp=el('ptpSpin');if(sp)sp.style.display='block';
       // KULLANICI TALEBİ (onaylanan öneri): Bağlantı sık sık arabelleğe düşüyorsa (kısa sürede
       // tekrar tekrar 'waiting') ve Veri Tasarrufu zaten kapalıysa, kullanıcıya BİR KEZ
