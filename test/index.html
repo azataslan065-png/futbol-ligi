@@ -968,6 +968,9 @@ iframe.ptp-video{pointer-events:none}
    NOT: 'isolation:isolate' de aynı işi görür ama eski WebView sürümlerinde desteklenmez -
    projeksiyon cihazındaki tarayıcı eski olduğu için evrensel olan z-index tercih edildi. */
 .ptp-gomulu-kap{position:relative;z-index:0;overflow:hidden;background:#000;pointer-events:none}
+/* Başlangıç değeri. Gerçek konum/boyut ptpGomuluKenarKirp() tarafından, kutunun o anki
+   en-boy oranına göre yazılır - bkz. oradaki "letterbox boşluğu" notu. Buradaki kural
+   yalnızca ilk kare için geçerlidir. */
 .ptp-gomulu-kap>iframe{position:absolute;left:0;top:0;width:100%;height:100%;border:none;
   display:block;pointer-events:none}
 /* Görünen oynatıcı üstte, hazırlanan yedek onun ARKASINDA durur. Yedek gizlenmez (gizlenen
@@ -2083,7 +2086,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-X';
+window.APP_BUILD='2026-09-01-Z';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21931,6 +21934,7 @@ window.PTPlayer=(function(){
       // düzeltmesi) ve üstelik eski pencereye play() göndermeye çalışırdı.
       if(S._gecisKilit)return;
       ptpDuraklatOrtusuGuncelle();
+      ptpGomuluKenarKirp();   // kenar şeritlerini görüş alanı dışında tut
       ptpSesAcDugmesi();      // eski sürümden kalan yüzen düğme varsa temizler
       ptpSesiOtomatikAc();    // oynatma başladıysa sesi kendiliğinden açar
       var simdi=Date.now(),t=0,duraklad=true;
@@ -22124,6 +22128,68 @@ window.PTPlayer=(function(){
   // ileride farklı bir platform için geçici bir maske gerekirse tek yerden açılabilsin.
   function ptpChromeMaskeAc(){}
   function ptpChromeMaskeKapat(){}
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // YAPISAL ÇÖZÜM - PLATFORM ARAYÜZÜNÜ GÖRÜŞ ALANININ DIŞINA TAŞIMA
+  //
+  // NEDEN GEREKLİ: Bugüne kadarki bütün düzeltmeler TEPKİSELDİ - bir durumu algılayıp üstüne
+  // örtü koyuyorduk. Algılama her zaman bir gecikmeyle gelir (durum akışı ~250 ms'de bir), o
+  // gecikme kadar da boşluk kalır. Kullanıcı defalarca "hâlâ çıkıyor" dedi ve haklıydı:
+  // tepkisel yöntemle boşluğu SIFIRLAMAK mümkün değil.
+  //
+  // FİKİR: Platformun butonları iframe'in KENARLARINA yapışıktır - başlık ve kanal adı üst
+  // kenarda, paylaş/saat sol altta, logo ve öneri küçük resmi sağ altta. Ortada yalnızca
+  // yükleniyor halkası vardır. Eğer iframe'i görünen alandan BÜYÜK yapar ve taşan kısmı
+  // kırparsak, o kenarlar görüş alanının dışında kalır. Hiçbir algılamaya gerek kalmaz -
+  // butonlar hiçbir koşulda, hiçbir anda görünemez.
+  //
+  // BEDELSİZ OLMASININ SEBEBİ - LETTERBOX BOŞLUĞU: Video 16:9'dur; kutu 16:9 değilse
+  // platform videoyu ortalar ve artan yöne siyah bant koyar. İşte o bant BOŞ ALANDIR.
+  // Büyütmeyi BOŞ OLAN YÖNDE yaparsak video hiç büyümez, sadece kenarlar dışarı taşar:
+  //   • Kutu 16:9'dan DAR ise  (telefon dikey) → boşluk ÜST/ALT'ta → YÜKSEKLİĞİ büyüt
+  //   • Kutu 16:9'dan GENİŞ ise (yatay/sayfa)  → boşluk SAĞ/SOL'da → GENİŞLİĞİ büyüt
+  // Her iki durumda da video aynı boyutta ve aynı merkezde kalır. Görüntüden hiçbir şey
+  // kaybedilmez - kırpılan yer zaten siyah banttı.
+  //
+  // YANLIŞ YÖN SEÇİLİRSE görüntü GERÇEKTEN kırpılır; bu yüzden yön her seferinde kutunun
+  // o anki en-boy oranından hesaplanır (ekran döndürme, tam ekran, panel açılması hepsi
+  // oranı değiştirir). Hesap 200 ms'lik denetim turunda tazelenir ve yalnızca DEĞİŞTİĞİNDE
+  // yazılır - boş yere biçem güncellemesi yapılmaz.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  var PT_KENAR_BUYUTME=0.60;   // %60 büyütme: kenar şeritleri rahatça dışarıda kalır
+  function ptpGomuluKenarKirp(){
+    try{
+      if(!S||!S.gomulu)return;
+      var kap=S.video;
+      if(!kap||!kap.getBoundingClientRect||!kap.querySelectorAll)return;
+      var r=kap.getBoundingClientRect();
+      if(!(r.width>4&&r.height>4))return;
+      var B=PT_KENAR_BUYUTME,yuzde=100+B*100,kaydir=-(B*50);
+      var st;
+      // KULLANICI BİLDİRDİ ("ekran oranları çalışmıyor") - AYRI BİR HATA, KÖK SEBEBİ ŞU:
+      // Ekran modu (⬜ sığdır / ✂️ doldur) 'object-fit' kuralıyla uygulanıyor. O özellik yalnızca
+      // <video>/<img> gibi DEĞİŞTİRİLMİŞ öğelerde geçerlidir; iframe'de hiçbir etkisi yoktur.
+      // Yani gömülü kaynakta o düğme HER ZAMAN işlevsizdi - düğmenin simgesi değişiyor ama
+      // görüntüde hiçbir şey olmuyordu.
+      // ÇÖZÜM: Ekran modu artık iframe'in BOYUTUYLA uygulanır - kenar kırpma hesabı zaten burada.
+      var mod=(S.fit==='cover'||S.fit==='fill')?'doldur':'sigdir';
+      if(mod==='doldur'){
+        // DOLDUR: Görüntü kutuyu tamamen kaplasın, taşan yer kırpılsın. iframe her iki yönde
+        // birden büyütülür; böylece hem video kutuyu doldurur hem de kenar şeritleri dışarıda
+        // kalır. Bu modda kırpma zaten istenen davranıştır.
+        st='position:absolute;left:'+kaydir+'%;top:'+kaydir+'%;width:'+yuzde+'%;height:'+yuzde+'%;border:none;display:block;pointer-events:none';
+      }else if((r.width/r.height)<=(16/9)){
+        // SIĞDIR + kutu 16:9'dan dar → video genişlikle sınırlı, boşluk üst/altta.
+        st='position:absolute;left:0;width:100%;top:'+kaydir+'%;height:'+yuzde+'%;border:none;display:block;pointer-events:none';
+      }else{
+        // SIĞDIR + kutu 16:9'dan geniş → video yükseklikle sınırlı, boşluk sağ/solda.
+        st='position:absolute;top:0;height:100%;left:'+kaydir+'%;width:'+yuzde+'%;border:none;display:block;pointer-events:none';
+      }
+      if(kap._ptpKirpBicem===st)return;   // değişmediyse dokunma
+      kap._ptpKirpBicem=st;
+      var l=kap.querySelectorAll('iframe');
+      for(var i=0;i<l.length;i++)l[i].style.cssText=st;
+    }catch(e){}
+  }
   function ptpDuraklatOrtusuGuncelle(){
     try{
       // NOT: Bu örtü, "Kesintisiz Geçiş" anahtarından BAĞIMSIZ çalışır. O anahtar geçişlerin
@@ -22964,6 +23030,9 @@ window.PTPlayer=(function(){
       }
     }
     v.setAttribute('data-fit',S.fit);
+    // Gömülü kaynakta ekran modu object-fit ile değil iframe boyutuyla uygulanır
+    // (bkz. ptpGomuluKenarKirp içindeki not). Beklemeden, dokunulur dokunulmaz yazılır.
+    try{if(S&&S.gomulu){if(S.video)S.video._ptpKirpBicem=null;ptpGomuluKenarKirp();}}catch(e){}
     var fb=el('ptpFit');
     if(fb)fb.textContent=({contain:'⬜',cover:'✂️',fill:'↔️'})[S.fit]||'⬜';
   }
@@ -25738,6 +25807,7 @@ window.PTPlayer=(function(){
         }
       }
     }catch(e){}
+    try{ptpGomuluKenarKirp();}catch(e){}   // ilk kareden itibaren geçerli olmalı
     ptpGecisDenetimBaslat();
     // KULLANICI BİLDİRDİ ("İLK GİRİŞTE YouTube butonları görünüyor"): Örnekleme şimdiye kadar
     // yalnızca bölüm geçişlerinde başlıyordu - ilk açılış hiç ölçülmemişti, o yüzden orada ne
