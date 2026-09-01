@@ -2054,7 +2054,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-O';
+window.APP_BUILD='2026-09-01-P';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22243,28 +22243,46 @@ window.PTPlayer=(function(){
       clearInterval(S._taniT);
       S._taniT=setInterval(function(){
         if(!S){clearInterval(S._taniT);return;}
-        var o={};
-        try{o.t=Math.round((S.video.currentTime||0)*10)/10;}catch(e){o.t=null;}
-        try{o.drk=!!S.video.paused?1:0;}catch(e){o.drk=null;}
-        o.ort=S.freezing?1:0;
-        try{o.drtOrt=S.root.querySelector('.ptp-duraklat-ortu')?1:0;}catch(e){}
-        try{var sp=el('ptpSpin');o.halka=(sp&&sp.style.display!=='none')?1:0;}catch(e){}
-        try{var ov=el('ptpOv');o.ptpOv=(ov&&!ov.classList.contains('ptp-hide'))?1:0;}catch(e){}
+        // ══════════════════════════════════════════════════════════════════════════════
+        // KÖK SEBEP DÜZELTMESİ (raporda görüldü: "ornekler: [object Object] | [object
+        // Object] | ..." - 30 örneğin TAMAMI okunamaz):
+        // Örnekler NESNE olarak saklanıyordu. Raporu yazan kod diziyi join(' | ') ile
+        // birleştiriyor; JavaScript'te bir nesneyi metne çevirmek "[object Object]" verir.
+        // Yani teşhisin en değerli verisi - geçişin 100 ms'lik kare kare dökümü - üretiliyor
+        // ama okunamadan çöpe gidiyordu. Aylardır bu kayıtlara bakıp hiçbir şey öğrenememiş
+        // olmamızın sebebi buydu.
+        // ÇÖZÜM: Örnek, DOĞDUĞU ANDA tek satırlık okunur bir metne çevrilir. Böylece raporu
+        // yazan kod ne yaparsa yapsın veri okunur kalır - biçimlendirmeyi rapor katmanına
+        // bırakmıyoruz.
+        // Satır düzeni:  ms | t=konum | yt=YouTube durumu | drk | ort | drtOrt | halka | ov | pe
+        //   yt : 1 oynuyor · 3 arabellek · 2 duraklatıldı · 0 bitti · 5 sıraya alındı · - bilinmiyor
+        //   drk: 1 ise oynatıcı duraklamış   ort: 1 ise geçiş örtümüz ekranda
+        //   drtOrt: 1 ise platform örtümüz ekranda   halka: 1 ise kendi yükleniyor halkamız açık
+        //   ov : 1 ise KENDİ kontrollerimiz görünür   pe: ACIK ise iframe dokunuş alıyor
+        // ══════════════════════════════════════════════════════════════════════════════
+        var _t='?',_drk='?',_ort=S.freezing?1:0,_drt='?',_halka='?',_ov='?',_pe='-',_yt='-';
+        try{_t=Math.round((S.video.currentTime||0)*10)/10;}catch(e){}
+        try{_drk=S.video.paused?1:0;}catch(e){}
+        try{_drt=S.root.querySelector('.ptp-duraklat-ortu')?1:0;}catch(e){}
+        try{var sp=el('ptpSpin');_halka=(sp&&sp.style.display!=='none')?1:0;}catch(e){}
+        try{var ov=el('ptpOv');_ov=(ov&&!ov.classList.contains('ptp-hide'))?1:0;}catch(e){}
         try{
-          var ifr=S.root.querySelector('iframe.ptp-video');
-          o.pe=ifr?(getComputedStyle(ifr).pointerEvents==='none'?'kapali':'ACIK'):'-';
+          var ifr=S.root.querySelector('.ptp-gomulu-kap iframe')||S.root.querySelector('iframe.ptp-video');
+          _pe=ifr?(getComputedStyle(ifr).pointerEvents==='none'?'kapali':'ACIK'):'-';
         }catch(e){}
-        try{o.yt=(S.video&&S.video._ytState!==undefined)?S.video._ytState:'-';}catch(e){}
-        o.ms=Date.now()-bas;
-        ornekler.push(o);
+        try{if(S.video&&S.video._ytState!==undefined)_yt=S.video._ytState;}catch(e){}
+        ornekler.push((Date.now()-bas)+'ms t='+_t+' yt='+_yt+' drk'+_drk+' ort'+_ort
+          +' drtOrt'+_drt+' halka'+_halka+' ov'+_ov+' pe='+_pe);
         if(ornekler.length>=30){
           clearInterval(S._taniT);
           DiagCore.kaydet('pt_gecis','bilgi','Geçiş tanı örneklemesi · '+etiket,{
             gomulu:!!S.gomulu,videoId:S.videoId,aralikIdx:S.aralikIdx,
             ornekler:ornekler,
-            anlami:'Geçişten sonraki 3 saniye, 100 ms aralıklarla. drk=1 duraklama, ort=1 bizim örtümüz, '
-              +'pe=ACIK ise gömülü oynatıcı dokunuş alıyor demektir. Platform arayüzünün belirdiği anı '
-              +'bu dizide drk/yt sütunlarından bulabilirsiniz.'
+            anlami:'Geçişten sonraki 3 saniye, 100 ms aralıklarla. Sütunlar: '
+              +'t=konum(sn) · yt=YouTube durumu (1 oynuyor, 3 arabellek, 2 duraklatıldı, 0 bitti, 5 sırada) · '
+              +'drk=1 duraklamış · ort=1 geçiş örtümüz ekranda · drtOrt=1 platform örtümüz ekranda · '
+              +'halka=1 kendi yükleniyor halkamız açık · ov=1 KENDİ kontrollerimiz görünür · pe=ACIK iframe dokunuş alıyor. '
+              +'YouTube arayüzünün göründüğü an: yt 1 DEĞİL ve drtOrt 0 olan satırlardır - o satırlarda ekranı hiçbir örtü kapatmıyor demektir.'
           });
         }
       },100);
@@ -28114,7 +28132,7 @@ window.voteMvp=function(matchId,player){
       lines.push('['+fmtTime(l.ts)+']'+cdOturumNotu(l.ts)+' '+l.k.toUpperCase()+' · '+l.t+(l.n>1?' (×'+l.n+')':''));
       if(l.d)Object.keys(l.d).forEach(function(k){
         var v=l.d[k];
-        if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' | '):JSON.stringify(v);
+        if(v&&typeof v==='object')v=Array.isArray(v)?v.map(function(_x){return (_x&&typeof _x==='object')?JSON.stringify(_x):String(_x);}).join(' | '):JSON.stringify(v);
         lines.push('    '+k+': '+v);
       });
     });
@@ -28770,7 +28788,7 @@ window.voteMvp=function(matchId,player){
         var m=modById(r.m);
         L.push('['+tamTarih(r.ts)+']'+oturumEtiketi(r.ts)+' '+(m?m.label:r.m)+' · '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
         if(r.d)Object.keys(r.d).forEach(function(k){
-          var v=r.d[k];if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' | '):JSON.stringify(v);
+          var v=r.d[k];if(v&&typeof v==='object')v=Array.isArray(v)?v.map(function(_x){return (_x&&typeof _x==='object')?JSON.stringify(_x):String(_x);}).join(' | '):JSON.stringify(v);
           L.push('    '+k+': '+v);
         });
       });
@@ -30472,7 +30490,7 @@ window.voteMvp=function(matchId,player){
     kL.slice().reverse().forEach(function(r){
       L.push('['+fmt(r.ts)+oturumNotu(r.ts)+'] '+r.k.toUpperCase()+' · '+r.t+(r.n>1?' (×'+r.n+')':''));
       if(r.d)Object.keys(r.d).forEach(function(k){
-        var v=r.d[k];if(v&&typeof v==='object')v=Array.isArray(v)?v.join(' | '):JSON.stringify(v);
+        var v=r.d[k];if(v&&typeof v==='object')v=Array.isArray(v)?v.map(function(_x){return (_x&&typeof _x==='object')?JSON.stringify(_x):String(_x);}).join(' | '):JSON.stringify(v);
         L.push('    '+k+': '+v);
       });
     });
