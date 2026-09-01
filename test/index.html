@@ -2093,7 +2093,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-C';
+window.APP_BUILD='2026-09-02-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21779,8 +21779,25 @@ function ptpGomuluMedya(kap,ilkIfr){
   // ÇÖZÜM: Komutu GÖNDEREN biziz - beklemeye gerek yok. Komutla AYNI ANDA merkeze küçük bir
   // maske konur. Maske aynı zamanda bizim kendi geri bildirimimizdir, yani ekranda fazladan
   // bir leke gibi durmaz.
-  ifr.play=function(){ptpMerkezMaske('▶');komut('playVideo');return Promise.resolve();};
-  ifr.pause=function(){ptpMerkezMaske('⏸');komut('pauseVideo');};
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KÖK SEBEP DÜZELTMESİ - BU HATAYI BEN EKLEDİM (kullanıcı: "bizim duraklat tuşu
+  // çalışmıyor" + "video yöneticinin belirlediği sürenin dışına çıkıyor"):
+  // Merkez maskesi fonksiyonunu PTPlayer modülÜNÜN İÇİNE yazdım, ama burası modülün DIŞI.
+  // Dolayısıyla çağrı "tanımsız fonksiyon" hatası fırlatıyor ve HEMEN ARDINDAKİ
+  // komut('pauseVideo') satırı HİÇ ÇALIŞMIYORDU. Duraklat tuşu bu yüzden ölsüz kaldı.
+  // İKİNCİ VE DAHA CİDDİ SONUCU: Aralık sınırını uygulayan satır
+  //     try{S.video.pause();S.video.currentTime=a.bit;}catch(e){}
+  // şeklinde yazılmış. pause() hata fırlatınca catch onu yutuyor ve ARDINDAKİ sarma komutu da
+  // çalışmıyordu - video, yöneticinin belirlediği bitiş saniyesini aşıp devam ediyordu.
+  // DERS: Bir yan işlem (görsel geri bildirim), ana komutu ASLA engelleyememeli. Maske
+  // çağrısı kendi try/catch'i içine alındı ve pencere üzerinden erişiliyor; fonksiyon hiç
+  // bulunamasa bile oynat/duraklat komutu her koşulda gider.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  function maske(simge){
+    try{if(typeof window.ptpMerkezMaske==='function')window.ptpMerkezMaske(simge);}catch(e){}
+  }
+  ifr.play=function(){maske('▶');komut('playVideo');return Promise.resolve();};
+  ifr.pause=function(){maske('⏸');komut('pauseVideo');};
   ifr.load=function(){};
   ifr.requestPictureInPicture=function(){return Promise.reject(new Error('gömülü oynatıcıda desteklenmiyor'));};
   // Durum akışı: YouTube'a "dinliyorum" dedikten sonra sürekli bilgi gönderir. Gelen her
@@ -22146,6 +22163,7 @@ window.PTPlayer=(function(){
   // Merkezdeki platform parlamasını kapatan küçük maske - bkz. ifr.play/ifr.pause üzerindeki not.
   // Boyutu kutunun kısa kenarına göre ölçeklenir: platformun simgesi de oynatıcı boyutuyla
   // birlikte büyüyüp küçüldüğü için sabit piksel değeri küçük ekranda taşar, büyükte yetmezdi.
+  // Kabuk (ptpGomuluMedya) bu modülün DIŞINDA tanımlı olduğu için pencere üzerinden açılır.
   function ptpMerkezMaske(simge){
     try{
       if(!S||!S.gomulu||!S.root)return;
@@ -22169,6 +22187,7 @@ window.PTPlayer=(function(){
       },900);
     }catch(e){}
   }
+  window.ptpMerkezMaske=ptpMerkezMaske;
   // ══════════════════════════════════════════════════════════════════════════════════════
   // YAPISAL ÇÖZÜM - PLATFORM ARAYÜZÜNÜ GÖRÜŞ ALANININ DIŞINA TAŞIMA
   //
@@ -23155,7 +23174,14 @@ window.PTPlayer=(function(){
     if(!S)return;
     // KULLANICI TALEBİ ("Ekran modları sırayla 'Ekrana Sığdır - Genişlet - Sığdırmak İçin
     // Kırp'"): Döngü sırası bu şekilde değiştirildi (önceden Sığdır → Kırp → Genişlet idi).
-    var order=['contain','fill','cover'];
+    // KULLANICI BİLDİRDİ ("ekran modları tutarlı değil"): Gömülü kaynakta üç moddan İKİSİ
+    // aynı görünüyordu. Sebebi: "Genişlet" (fill) videoyu en-boy oranını BOZARAK esnetmek
+    // demek; bunu ancak <video> öğesi yapabilir. Platform kendi oynatıcısında oranı her zaman
+    // korur, dolayısıyla "Genişlet" ile "Kırp" aynı sonucu veriyordu - kullanıcı düğmeye
+    // basıyor, etiket değişiyor ama görüntü aynı kalıyordu.
+    // ÇÖZÜM: Gömülü kaynakta uygulanamayan mod döngüye hiç alınmıyor. Böylece her dokunuş
+    // görünür bir değişiklik yapar; etiket ile ekrandaki sonuç birbirini tutar.
+    var order=(S.gomulu)?['contain','cover']:['contain','fill','cover'];
     var i=order.indexOf(S.fit);
     S.fit=order[(i+1)%order.length];
     applyVisual();
@@ -23650,7 +23676,11 @@ window.PTPlayer=(function(){
       // SIRA ÖNEMLİ: önce örtü, sonra duraklatma. Ters sırada, duraklatma ile örtü arasındaki
       // bir kare bile platformun bitiş arayüzünün görünmesine yetiyor.
       if(!S._aralikBitti)ptpBitisEkraniGoster();
-      try{S.video.pause();S.video.currentTime=a.bit;}catch(e){}
+      // Tek try içinde iki iş yapılmaz: ilki hata verirse ikincisi sessizce atlanır ve
+      // aralık sınırı uygulanmamış olur (bkz. yukarıdaki "duraklat tuşu" kök sebep notu).
+      // Sarma, sınırın uygulanması için ŞART olan işlemdir - kendi başına korunur.
+      try{S.video.pause();}catch(e){}
+      try{S.video.currentTime=a.bit;}catch(e){}
       if(!S._aralikBitti){
         S._aralikBitti=true;
         // Bitişte oynatıcı DURAKLAR ve gömülü kaynakta YouTube kendi arayüzünü açar. Kendi
