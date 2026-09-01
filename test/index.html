@@ -1147,6 +1147,13 @@ iframe.ptp-video{pointer-events:none}
    işi platformun arayüzünü GİZLEMEK; %55 bunu yapmıyor, sadece soluklaştırıyordu.
    %96'ya çıkarıldı: YouTube'un beyaz yazıları görünmez olur, videonun karesi ise hâlâ çok
    hafif seçilir - kullanıcı ekranın donmadığını anlar. */
+/* Merkez maskesi - platformun ortadaki ▶/⏸ parlamasını kapatır (bkz. ptpMerkezMaske).
+   Duraklama örtüsünün (60) ÜSTÜNDE ama kendi denetimlerimizin (70) ALTINDA durur. */
+.ptp-merkez-maske{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) scale(.86);
+  z-index:62;border-radius:50%;background:rgba(0,0,0,.82);color:#fff;display:flex;
+  align-items:center;justify-content:center;line-height:1;pointer-events:none;
+  opacity:0;visibility:hidden;transition:opacity .16s ease,transform .16s ease}
+.ptp-merkez-maske.ptp-mm-on{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
 .ptp-duraklat-ortu{position:absolute;inset:0;z-index:60;display:flex;align-items:center;
   justify-content:center;background:rgba(0,0,0,.96);cursor:pointer}
 /* Arabelleğe alma sırasında ▶ değil dönen halka gösterilir - bkz. ptpDuraklatOrtusuGuncelle
@@ -2086,7 +2093,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-B';
+window.APP_BUILD='2026-09-02-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21764,8 +21771,16 @@ function ptpGomuluMedya(kap,ilkIfr){
   tanim('audioTracks',function(){return {length:0};});
   tanim('buffered',function(){return {length:1,start:function(){return 0;},end:function(){return D.pos;}};});
   tanim('src',function(){return (kap._ptpAktifIfr&&kap._ptpAktifIfr.getAttribute('src'))||'';},function(){/* kaynak iframe'in kendi adresidir */});
-  ifr.play=function(){komut('playVideo');return Promise.resolve();};
-  ifr.pause=function(){komut('pauseVideo');};
+  // KULLANICI TALEBİ ("ortadaki butonu halledersen"): Platform, oynat/duraklat komutu aldığı
+  // anda ekranın TAM ORTASINDA büyük bir ▶/⏸ parlaması gösteriyor. Bu simge merkeze yapışık
+  // olduğu için kenar kırpmayla dışarı itilemez.
+  // Neden örtüyle yakalanamıyordu: Parlama, komutun GÖNDERİLDİĞİ anda çiziliyor; durum
+  // bildirimi ise ~250 ms sonra geliyor. Yani duruma bakarak örtü koyan her yöntem geç kalır.
+  // ÇÖZÜM: Komutu GÖNDEREN biziz - beklemeye gerek yok. Komutla AYNI ANDA merkeze küçük bir
+  // maske konur. Maske aynı zamanda bizim kendi geri bildirimimizdir, yani ekranda fazladan
+  // bir leke gibi durmaz.
+  ifr.play=function(){ptpMerkezMaske('▶');komut('playVideo');return Promise.resolve();};
+  ifr.pause=function(){ptpMerkezMaske('⏸');komut('pauseVideo');};
   ifr.load=function(){};
   ifr.requestPictureInPicture=function(){return Promise.reject(new Error('gömülü oynatıcıda desteklenmiyor'));};
   // Durum akışı: YouTube'a "dinliyorum" dedikten sonra sürekli bilgi gönderir. Gelen her
@@ -22128,6 +22143,32 @@ window.PTPlayer=(function(){
   // ileride farklı bir platform için geçici bir maske gerekirse tek yerden açılabilsin.
   function ptpChromeMaskeAc(){}
   function ptpChromeMaskeKapat(){}
+  // Merkezdeki platform parlamasını kapatan küçük maske - bkz. ifr.play/ifr.pause üzerindeki not.
+  // Boyutu kutunun kısa kenarına göre ölçeklenir: platformun simgesi de oynatıcı boyutuyla
+  // birlikte büyüyüp küçüldüğü için sabit piksel değeri küçük ekranda taşar, büyükte yetmezdi.
+  function ptpMerkezMaske(simge){
+    try{
+      if(!S||!S.gomulu||!S.root)return;
+      var kap=S.root.querySelector('#ptpRot')||S.root;
+      var r=kap.getBoundingClientRect();
+      var c=Math.max(56,Math.round(Math.min(r.width,r.height)*0.30));
+      var m=kap.querySelector('.ptp-merkez-maske');
+      if(!m){
+        m=document.createElement('div');
+        m.className='ptp-merkez-maske';
+        kap.appendChild(m);
+      }
+      m.style.width=c+'px';m.style.height=c+'px';
+      m.style.fontSize=Math.round(c*0.40)+'px';
+      m.textContent=simge||'';
+      m.classList.add('ptp-mm-on');
+      clearTimeout(S._merkezMaskeT);
+      // Platformun parlaması ~600-800 ms sürüyor; maske ondan biraz daha uzun durur.
+      S._merkezMaskeT=setTimeout(function(){
+        try{m.classList.remove('ptp-mm-on');}catch(e){}
+      },900);
+    }catch(e){}
+  }
   // ══════════════════════════════════════════════════════════════════════════════════════
   // YAPISAL ÇÖZÜM - PLATFORM ARAYÜZÜNÜ GÖRÜŞ ALANININ DIŞINA TAŞIMA
   //
@@ -22166,6 +22207,8 @@ window.PTPlayer=(function(){
   // Varsayılan değer. Gerçek değer yönetici panelinden gelir (bkz. ptpKenarBuyutmeOrani);
   // ayar hiç kaydedilmemişse bu kullanılır.
   var PT_KENAR_BUYUTME=1.60;
+  // Atlama bu süreden kısa sürerse örtü hiç konmaz - bkz. ptpGecisOrtusuAc "gecikmeli örtü".
+  var PT_ORTU_GECIKME=220;
   // KULLANICI TALEBİ ("bunu ben admin ayağından yapacağım"): Oran artık kodda sabit değil.
   // Yönetici panelindeki kaydıraçtan geliyor ve ayarlar senkronuyla anında yayılıyor;
   // 0 verilirse özellik tamamen kapanır (pencere görünen alanla aynı boyutta kalır).
@@ -22267,11 +22310,12 @@ window.PTPlayer=(function(){
         // AYNI DÜZELTME BURADA DA (bkz. ptpFreezeRelease içindeki "gecikmeli kaldırma" notu):
         // Oynatma geri döndüğünde platformun arayüzü ekrandan hemen silinmiyor. Örtüyü aynı
         // karede çekersek butonlar bir an görünür. Kısa bir bekleme tanınır.
+        // AYNI GEREKÇEYLE KISALTILDI: 450 → 120 ms. Devam anındaki ▶ parlamasını artık merkez
+        // maskesi kapatıyor; örtüyü uzun tutmak gereksiz yere ekranı kapalı bırakıyordu.
+        // Küçük bir pay yine de bırakılıyor - durum bildirimi ile ilk karenin çizilmesi arasında
+        // bir kare boşluk olabiliyor.
         if(mevcut&&!S._ortuKalkBas){S._ortuKalkBas=Date.now();return;}
-        // 320 → 450 ms: Devam ettirildiğinde platform ortada bir ▶ parlaması gösteriyor;
-        // örtüyü biraz daha tutmak o parlamayı da kapatır. Siyah eklemez - alttaki görüntü
-        // zaten akıyor ve örtü sönerek kalkıyor.
-        if(mevcut&&Date.now()-S._ortuKalkBas<450)return;
+        if(mevcut&&Date.now()-S._ortuKalkBas<120)return;
         S._ortuKalkBas=0;
         // Oynatma geri geldi - örtü kalkar ve sayaç sıfırlanır.
         // Ayrıca "ilk oynatma gerçekleşti" işaretlenir: bundan sonra 500 ms'lik titreme
@@ -22503,10 +22547,27 @@ window.PTPlayer=(function(){
       if(!S)return;
       if(window.D&&D.kesintisizGecis===false)return;
       S._ortuBas=Date.now();
-      // Şerit maskesi örtüyle BİRLİKTE açılır ve örtü kalktıktan sonra da bir süre durur -
-      // platformun arayüzü tam o aralıkta görünüyor (bkz. CSS'teki kök sebep notu).
       ptpChromeMaskeAc(3600);
-      ptpFreezeCapture();
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // SİYAH EKRANI KISALTMA (kullanıcı talebi) - GECİKMELİ ÖRTÜ:
+      // Ölçümler atlamaların çoğu zaman 165-200 ms'de bittiğini gösterdi. Örtüyü atlamayla
+      // AYNI ANDA koyduğumuz için, o kısa atlamalarda bile kullanıcı tam bir siyah ekran
+      // görüyordu - oysa gizlenecek bir şey oluşmadan iş bitiyordu.
+      // ARTIK: örtü hemen konmaz, kısa bir süre beklenir. Atlama o süre dolmadan biterse
+      // örtü HİÇ konmaz ve kullanıcı siyah ekran GÖRMEZ. Uzun süren atlamalarda ise örtü
+      // devreye girip altını kapatır.
+      // Bekleme sırasında platformun kenar arayüzü görünmez - o zaten kırpmayla dışarıda
+      // (bkz. ptpGomuluKenarKirp). Görülebilecek tek şey donmuş son kare ya da ortadaki
+      // yükleniyor halkasıdır; ikisi de siyah ekrandan iyidir.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      clearTimeout(S._ortuGecikmeT);
+      if(S.gomulu){
+        S._ortuGecikmeT=setTimeout(function(){
+          try{if(S&&S._ortuBas)ptpFreezeCapture();}catch(e){}
+        },PT_ORTU_GECIKME);
+      }else{
+        ptpFreezeCapture();
+      }
       // GÜVENLİK AĞI: Atlama sonrası oynatma hiç geri gelmezse örtü asılı kalmasın. Normal
       // yolda akış ölçümü onu zaten kaldırır; bu yalnızca son çare.
       clearTimeout(S._ortuT);
@@ -22584,6 +22645,9 @@ window.PTPlayer=(function(){
   }
   function ptpFreezeRelease(){
     if(!S)return;
+    // Henüz konmamış (gecikmede bekleyen) örtü varsa iptal edilir - atlama zaten bitti,
+    // örtüyü şimdi koymak ekranı boşuna karartırdı (bkz. ptpGecisOrtusuAc "gecikmeli örtü").
+    try{clearTimeout(S._ortuGecikmeT);}catch(e){}
     // GÖMÜLÜDE KISA GECİKME: YouTube, oynatma başlar başlamaz kendi başlık/kanal katmanını
     // bir an gösterir. Örtüyü tam o anda kaldırmak, gizlemeye çalıştığımız şeyin yarım saniye
     // görünmesine yol açıyordu. Örtü, oynatma başladıktan kısa bir süre SONRA kaldırılır -
@@ -22624,13 +22688,12 @@ window.PTPlayer=(function(){
         // uzatmaz - o an ekranda zaten videonun ilk kareleri akıyor, örtü ise sönerek
         // kalkıyor; yalnızca platformun arayüzünün silinmesine zaman tanınır.
         // ══════════════════════════════════════════════════════════════════════════════
-        if(akiyor&&S.gomulu&&!S._akisBekleme){
-          S._akisBekleme=true;
-          setTimeout(function(){try{if(S)S._akisOnay=true;}catch(e){}},450);
-          akiyor=false;
-        }else if(akiyor&&S.gomulu&&!S._akisOnay){
-          akiyor=false;
-        }
+        // KALDIRILDI (kullanıcı: "siyah ekranın süresini kısıtlayabildiğin kadar kısıtla"):
+        // Burada, oynatma doğrulandıktan sonra 450 ms daha bekleniyordu. Amacı, platformun
+        // devam anında gösterdiği arayüzü gizlemekti - ama artık kenar şeritleri KIRPMAYLA
+        // görüş alanının dışında (bkz. ptpGomuluKenarKirp), ortadaki parlamayı da merkez
+        // maskesi kapatıyor (bkz. ptpMerkezMaske). Yani bekleme artık hiçbir şey gizlemiyor,
+        // yalnızca siyah ekranı 450 ms UZATIYORDU. Kaldırıldı.
         // Aralıklı videoda ek koşul: akış yetmez, konumun aralığın İÇİNDE olması da gerekir.
         // Aksi halde örtü, video henüz 0. saniyede akarken kalkıyor ve kullanıcı aralık dışı
         // görüntüyü bir an görüyordu (bkz. açılış örtüsü notu).
