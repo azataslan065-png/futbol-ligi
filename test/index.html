@@ -2070,7 +2070,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-T';
+window.APP_BUILD='2026-09-01-U';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22334,9 +22334,28 @@ window.PTPlayer=(function(){
           _ust=_ad(_r.left+_r.width/2,_r.top+_r.height/2);
           _kose=_ad(_r.left+14,_r.top+14)+','+_ad(_r.right-14,_r.bottom-14);
         }catch(e){}
+        // "ort=1 ama ust=#ptpRot" çelişkisini çözmek için örtünün KENDİ durumu okunur.
+        // Bayrak (S.freezing) örtünün konduğunu söylüyor, en-üstteki-öğe ölçümü ise onu hiç
+        // görmüyordu. İkisi aynı anda doğru olamaz - bu alan hangisinin yanıldığını söyler:
+        //   frz=yok            → tuval elemanı bulunamıyor
+        //   frz=...op0...      → tuval ekranda ama SAYDAM, yani hiçbir şeyi gizlemiyor
+        //   frz=...0x0         → tuvalin boyutu sıfır, ekranda yer kaplamıyor
+        //   frz=duz,on op1 peauto 384x216 → örtü gerçekten opak ve tam boyutta; o hâlde sorun
+        //                                    başka yerde (ör. iframe daha üstte çiziliyor)
+        var _frz='yok';
+        try{
+          var _c=el('ptpFreeze');
+          if(_c){
+            var _cs=getComputedStyle(_c),_cr=_c.getBoundingClientRect();
+            _frz=(_c.className||'').replace(/ptp-(video|freeze)-?/g,'').replace(/\s+/g,',').replace(/^,|,$/g,'')
+              +' op'+Math.round(parseFloat(_cs.opacity||'0')*100)/100
+              +' z'+_cs.zIndex+' pe'+(_cs.pointerEvents==='none'?'none':'auto')
+              +' '+Math.round(_cr.width)+'x'+Math.round(_cr.height);
+          }
+        }catch(e){}
         ornekler.push((Date.now()-bas)+'ms t='+_t+' yt='+_yt+' drk'+_drk+' ort'+_ort
           +' drtOrt'+_drt+' halka'+_halka+' ov'+_ov+' pe='+_pe
-          +' ust='+_ust+' kose='+_kose);
+          +' ust='+_ust+' kose='+_kose+' frz['+_frz+']');
         if(ornekler.length>=30){
           clearInterval(S._taniT);
           DiagCore.kaydet('pt_gecis','bilgi','Geçiş tanı örneklemesi · '+etiket,{
@@ -25655,6 +25674,28 @@ window.PTPlayer=(function(){
     try{ptpBitisEkraniKaldir();}catch(e){}
     ptpAralikBekcisiBaslat();
     ptpGomuluBaslatmaBekcisi();
+    // ÖLÇÜMLE DEVAM (tanı dökümü): Eşiği kaldırınca örtü 1206 ms'den 604 ms'ye indi ama
+    // SIFIRA inmedi - çünkü örtüyü koyan sensör 200 ms'de bir dönüyor ve mount'tan sonra
+    // birkaç tur geçiyor. Yani örtü hâlâ yarım saniye geç geliyordu; YouTube da tam o yarım
+    // saniyede açılış arayüzünü gösteriyor.
+    // ÇÖZÜM: Açılış örtüsü sensöre HİÇ bağlı değil. Oynatıcı kurulur kurulmaz, iframe daha
+    // yüklenmeden ekran kapatılıyor. Sensör sonradan devralıp normal kurallarla yönetiyor.
+    try{
+      if(S&&S.gomulu&&S.root){
+        var _ak=S.root.querySelector('#ptpRot')||S.root;
+        if(!_ak.querySelector('.ptp-duraklat-ortu')){
+          var _d0=document.createElement('div');
+          _d0.className='ptp-duraklat-ortu';
+          _d0.setAttribute('data-bekliyor','1');
+          _d0.innerHTML='<div class="ptp-ort-spin"></div>';
+          _d0.addEventListener('click',function(e){
+            e.stopPropagation();
+            try{if(S&&S.video&&S.video.play)S.video.play().catch(function(){});}catch(err){}
+          });
+          _ak.appendChild(_d0);
+        }
+      }
+    }catch(e){}
     ptpGecisDenetimBaslat();
     // KULLANICI BİLDİRDİ ("İLK GİRİŞTE YouTube butonları görünüyor"): Örnekleme şimdiye kadar
     // yalnızca bölüm geçişlerinde başlıyordu - ilk açılış hiç ölçülmemişti, o yüzden orada ne
