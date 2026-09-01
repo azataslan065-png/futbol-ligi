@@ -1088,13 +1088,26 @@ iframe.ptp-video{pointer-events:none}
    kapatmak gerekiyordu: duraklama varsa üstü örtülür. Bu, sebebi ne olursa olsun çalışır -
    kullanıcı dokunmuş, ağ kesilmiş, platform kendi kararıyla durmuş, fark etmez.
    Örtü kendi duraklama göstergemizi taşır, böylece kullanıcı ekranın donmadığını görür. */
+/* KULLANICI TALEBİ ("YouTube oynatıcısı veya butonları hiç çıkmasın"): Örtü %55 saydamdı -
+   altındaki YouTube başlığı, "Diğer videolar" kutusu ve logosu bu saydamlıktan RAHATLIKLA
+   okunuyordu (kullanıcının gönderdiği ekran görüntüsünde tam olarak bu görülüyor). Örtünün
+   işi platformun arayüzünü GİZLEMEK; %55 bunu yapmıyor, sadece soluklaştırıyordu.
+   %96'ya çıkarıldı: YouTube'un beyaz yazıları görünmez olur, videonun karesi ise hâlâ çok
+   hafif seçilir - kullanıcı ekranın donmadığını anlar. */
 .ptp-duraklat-ortu{position:absolute;inset:0;z-index:60;display:flex;align-items:center;
-  justify-content:center;background:rgba(0,0,0,.55);cursor:pointer}
+  justify-content:center;background:rgba(0,0,0,.96);cursor:pointer}
+/* Arabelleğe alma sırasında ▶ değil dönen halka gösterilir - bkz. ptpDuraklatOrtusuGuncelle
+   içindeki "yanlış simge" notu. */
+.ptp-ort-spin{width:40px;height:40px;border-radius:50%;border:3px solid rgba(255,255,255,.25);
+  border-top-color:#fff;animation:ptpSpin .8s linear infinite}
 .ptp-duraklat-ortu .ic{width:64px;height:64px;border-radius:50%;background:rgba(0,0,0,.55);
   display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff}
 /* Gömülü video SESSİZ başlar (bkz. mute=1 notu) - sesi açmak kullanıcı dokunuşu gerektirir
    ve o dokunuş BİZİM katmanımızda olmalı, yoksa platforma gider. Bu düğme tam bunun için. */
-.ptp-ses-ac{position:absolute;left:50%;bottom:14%;transform:translateX(-50%);z-index:61;
+/* KULLANICI TALEBİ ("ekrandaki sabitlenmiş ses ikonunu kaldır"): Bu düğme artık hiç
+   oluşturulmuyor (bkz. ptpSesAcDugmesi) - ses kendiliğinden açılıyor. Kural, eski bir
+   önbellekten gelen bir düğme kalırsa diye GÖRÜNMEZ bırakılacak şekilde duruyor. */
+.ptp-ses-ac{display:none !important;position:absolute;left:50%;bottom:14%;transform:translateX(-50%);z-index:61;
   background:rgba(0,0,0,.78);color:#fff;border:1.5px solid rgba(255,255,255,.3);border-radius:22px;
   padding:.55rem 1rem;font-family:inherit;font-size:.76rem;font-weight:800;cursor:pointer;
   display:flex;align-items:center;gap:.45rem}
@@ -2020,7 +2033,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-J';
+window.APP_BUILD='2026-09-01-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21676,11 +21689,23 @@ function ptpGomuluMedya(kap,ilkIfr){
   tanim('readyState',function(){return 4;});
   tanim('videoWidth',function(){return 1280;});
   tanim('videoHeight',function(){return 720;});
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "geçiş sonrası ses gelmiyor"):
+  // Ses/sessizlik durumu tek bir yerde (D) tutuluyordu ve oraya İKİ taraf yazıyordu: bizim
+  // ayarlarımız ve YouTube'un durum akışı. Yedek pencere zorunlu olarak SESSİZ kurulduğu
+  // için (mute=1 olmadan otomatik oynatma engellenir), geçişten hemen sonra o pencerenin
+  // akışı "muted:true" bildiriyor ve D.mut'u EZİYORDU. Sonra ses geri yüklenmek istendiğinde
+  // okunan değer artık kullanıcının tercihi değil, yedeğin zorunlu sessizliğiydi - bu yüzden
+  // ses açılmıyordu.
+  // ÇÖZÜM: Kullanıcının/uygulamanın İSTEĞİ ayrı tutulur (İSTEK). Durum akışı yalnızca D'yi
+  // (o anki gerçek durum) tazeler, İSTEK'e hiç dokunamaz. Pencere değişiminde geri yüklenen
+  // şey İSTEK'tir.
+  var ISTEK={vol:1,mut:false,rate:1};
+  kap._ptpIstek=ISTEK;
   tanim('volume',function(){return D.vol;},function(v){
-    D.vol=Math.max(0,Math.min(1,Number(v)||0));komut('setVolume',[Math.round(D.vol*100)]);
+    D.vol=Math.max(0,Math.min(1,Number(v)||0));ISTEK.vol=D.vol;komut('setVolume',[Math.round(D.vol*100)]);
   });
-  tanim('muted',function(){return D.mut;},function(v){D.mut=!!v;komut(D.mut?'mute':'unMute');});
-  tanim('playbackRate',function(){return D.rate;},function(v){D.rate=Number(v)||1;komut('setPlaybackRate',[D.rate]);});
+  tanim('muted',function(){return D.mut;},function(v){D.mut=!!v;ISTEK.mut=D.mut;komut(D.mut?'mute':'unMute');});
+  tanim('playbackRate',function(){return D.rate;},function(v){D.rate=Number(v)||1;ISTEK.rate=D.rate;komut('setPlaybackRate',[D.rate]);});
   tanim('loop',function(){return D.loop;},function(v){D.loop=!!v;});
   tanim('textTracks',function(){return {length:0,addEventListener:function(){},removeEventListener:function(){}};});
   tanim('audioTracks',function(){return {length:0};});
@@ -21711,14 +21736,20 @@ function ptpGomuluMedya(kap,ilkIfr){
     if(typeof baslangicSn==='number'&&isFinite(baslangicSn)&&baslangicSn>=0)D.pos=baslangicSn;
     dinle();
     [120,400,900,1800].forEach(function(ms){setTimeout(function(){if(kap._ptpAktifIfr===yeni)dinle();},ms);});
-    setTimeout(function(){
+    // Ses/hız tercihi YENİ pencereye taşınır. Okunan değer D DEĞİL, ISTEK - sebebi için
+    // yukarıdaki "geçiş sonrası ses gelmiyor" notuna bakın.
+    // Tek komut yetmez: YouTube açılış sırasında ses durumunu birkaç kez kendi tazeliyor ve
+    // erken gelen komutu yutabiliyor. Bu yüzden birkaç kez tekrarlanır.
+    var sesUygula=function(){
       if(kap._ptpAktifIfr!==yeni)return;
       try{
-        komut('setVolume',[Math.round(D.vol*100)]);
-        komut(D.mut?'mute':'unMute');
-        if(D.rate&&D.rate!==1)komut('setPlaybackRate',[D.rate]);
+        komut('setVolume',[Math.round((ISTEK.vol>0?ISTEK.vol:1)*100)]);
+        komut(ISTEK.mut?'mute':'unMute');
+        if(ISTEK.rate&&ISTEK.rate!==1)komut('setPlaybackRate',[ISTEK.rate]);
+        D.mut=ISTEK.mut;D.vol=ISTEK.vol;
       }catch(e){}
-    },260);
+    };
+    [80,300,700,1400,2400].forEach(function(ms){setTimeout(sesUygula,ms);});
   };
   function olay(ad){try{ifr.dispatchEvent(new Event(ad));}catch(e){}}
   function mesaj(e){
@@ -21850,7 +21881,8 @@ window.PTPlayer=(function(){
       // düzeltmesi) ve üstelik eski pencereye play() göndermeye çalışırdı.
       if(S._gecisKilit)return;
       ptpDuraklatOrtusuGuncelle();
-      ptpSesAcDugmesi();
+      ptpSesAcDugmesi();      // eski sürümden kalan yüzen düğme varsa temizler
+      ptpSesiOtomatikAc();    // oynatma başladıysa sesi kendiliğinden açar
       var simdi=Date.now(),t=0,duraklad=true;
       try{t=S.video.currentTime||0;duraklad=!!S.video.paused;}catch(e){return;}
 
@@ -21992,26 +22024,51 @@ window.PTPlayer=(function(){
   // Sessiz başlayan gömülü videoda sesi açma düğmesi. Video akmaya başladıktan sonra
   // gösterilir; kullanıcı dokununca ses açılır ve düğme kalkar. Bir kez açıldıktan sonra
   // bir daha çıkmaz - aynı oturumda tekrar tekrar sormak rahatsız edici olurdu.
+  // KULLANICI TALEBİ ("ekrandaki sabitlenmiş ses ikonunu kaldır"): Ekranın ortasında duran
+  // "🔇 Sesi aç" düğmesi KALDIRILDI. Görüntünün üstünde sürekli duran, kapatılamayan bir
+  // düğmeydi - kullanıcı onu izlemeye engel bir leke olarak görüyordu.
+  // YERİNE NE KONDU: Ses artık KENDİLİĞİNDEN açılıyor (bkz. ptpSesiOtomatikAc). Düğmeye
+  // gerek kalmamasının sebebi şu: oynatıcı zaten kullanıcının bir DOKUNUŞUYLA açılıyor;
+  // tarayıcının otomatik oynatma kuralları açısından bu dokunuş "izin" sayılır ve sesi
+  // program yoluyla açmaya yeter. Sessiz başlangıç (mute=1) yalnızca videonun ilk karesinin
+  // engellenmeden başlaması için gerekli - başladıktan hemen sonra ses açılıyor.
+  // Ses seviyesini değiştirmek isteyen kullanıcı için oynatıcının kendi ses düğmesi/kaydırıcısı
+  // zaten var; ayrı bir yüzen düğmeye ihtiyaç yok.
   function ptpSesAcDugmesi(){
     try{
-      if(!S||!S.root||!S.gomulu||S._sesAcildi)return;
-      var v=S.video,sessiz=true;
-      try{sessiz=!!v.muted;}catch(e){}
-      var mevcut=S.root.querySelector('.ptp-ses-ac');
-      var akiyor=false;try{akiyor=!v.paused&&(v.currentTime||0)>0;}catch(e){}
-      if(sessiz&&akiyor){
-        if(mevcut)return;
-        var b=document.createElement('button');
-        b.className='ptp-ses-ac';
-        b.innerHTML='<span>🔇</span><span>Sesi aç</span>';
-        b.addEventListener('click',function(e){
-          e.stopPropagation();
-          try{v.muted=false;if(v.volume!==undefined&&v.volume<0.1)v.volume=1;}catch(err){}
-          S._sesAcildi=true;
-          b.remove();
-        });
-        (S.root.querySelector('#ptpRot')||S.root).appendChild(b);   // bkz. yığın bağlamı notu
-      }else if(mevcut&&!sessiz){S._sesAcildi=true;mevcut.remove();}
+      // Önceki sürümden kalmış bir düğme varsa (ör. eski bir sekme açık kaldıysa) temizlenir.
+      if(!S||!S.root)return;
+      var m=S.root.querySelector('.ptp-ses-ac');
+      if(m)m.remove();
+    }catch(e){}
+  }
+  // Gömülü oynatıcı sessiz başlar (mute=1 - otomatik oynatmanın engellenmemesi için ŞART).
+  // Oynatma gerçekten başladığı doğrulandığında ses açılır. Tek seferlik bir komut YETMEZ:
+  // YouTube, açılış sırasında kendi ses durumunu birkaç kez tazeliyor ve erken gönderilen
+  // komutu yutabiliyor - bu yüzden komut birkaç kez tekrarlanır.
+  // GÜVENLİK AĞI: Tarayıcı sesi açmayı yine de kabul etmezse oynatmayı DURDURABİLİR. Böyle
+  // bir durumda (ses açıldıktan sonraki 1,5 saniye içinde duraklama) sessize geri dönülür ve
+  // oynatma sürdürülür - kullanıcı sessiz de olsa videoyu izlemeye devam eder, ekran donmaz.
+  function ptpSesiOtomatikAc(){
+    try{
+      if(!S||!S.gomulu||S._sesAcildi)return;
+      var v=S.video,akiyor=false;
+      try{akiyor=!v.paused&&(v.currentTime||0)>0;}catch(e){return;}
+      if(!akiyor)return;
+      if(S._sesKapatKilit)return;             // güvenlik ağı devreye girdiyse bir daha denenmez
+      S._sesAcildi=true;
+      S._sesAcmaAni=Date.now();
+      var hedefSes=Math.max(0,Math.min(1,Number(pref('volume',100))/100));
+      if(hedefSes<=0)hedefSes=1;              // kayıtlı ses 0 ise sessiz kalmasın
+      var uygula=function(){
+        try{
+          if(!S||!S.gomulu||S._sesKapatKilit)return;
+          v.volume=hedefSes;
+          v.muted=false;
+        }catch(e){}
+      };
+      uygula();
+      [250,700,1500].forEach(function(ms){setTimeout(uygula,ms);});
     }catch(e){}
   }
   // Platform arayüzünün bulunduğu üst/alt şeritleri belirli bir süre maskeler.
@@ -22028,8 +22085,30 @@ window.PTPlayer=(function(){
       // gizlenmesini yönetir; buradaki iş ise platformun arayüzünün hiçbir koşulda
       // görünmemesi - anahtarı kapatan yönetici de bunu istemez.
       if(!S||!S.root||!S.gomulu)return;
-      var v=S.video,duraklad=true;
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KÖK SEBEP DÜZELTMESİ - EKRAN GÖRÜNTÜSÜNDEN BULUNDU (kullanıcı: "video boyunca
+      // YouTube oynatıcısı veya butonları hiç çıkmasın"):
+      // Gönderilen görüntüde YouTube'un TAM arayüzü açıktı (başlık, kanal adı, paylaş,
+      // saat, "Diğer videolar", YouTube logosu) ve ortada YouTube'un KENDİ yükleniyor
+      // halkası dönüyordu. Bizim örtümüz ise ortada YOKTU.
+      // SEBEBİ: Örtü yalnızca "duraklamış mı" (paused) sorusuna bakıyordu. Oysa durum akışı
+      // ARABELLEĞE ALMA (playerState 3) durumunu BİLEREK "oynuyor" sayıyor:
+      //     var durakladYeni=!(i.playerState===1||i.playerState===3);
+      // Yani video arabelleğe alırken paused=false kalıyor, örtü konmuyor - ama YouTube tam
+      // o anda kendi arayüzünü açıyor. Ekran görüntüsündeki durum birebir buydu.
+      // DOĞRU KURAL: "duraklamış mı" değil, "GERÇEKTEN OYNUYOR MU". Oynatma durumu 1
+      // (PLAYING) DIŞINDA ne olursa olsun (başlamadı -1, bitti 0, duraklattı 2, arabellek 3,
+      // sıraya alındı 5) üstü örtülür. Böylece sebebi saymaya gerek kalmaz - platformun
+      // arayüzünü açabildiği HER durum tek kuralla kapanır.
+      // TİTREMEYE KARŞI: Kısa durum sıçramalarında örtünün bir kare görünüp kaybolması
+      // rahatsız edici olurdu; örtü ancak durum 220 ms boyunca sürerse konur. Oynatma geri
+      // geldiğinde ise GECİKMESİZ kalkar.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      var v=S.video,duraklad=true,ytDurum=null;
       try{duraklad=!!v.paused;}catch(e){}
+      try{ytDurum=(v._ytState===undefined?null:v._ytState);}catch(e){}
+      // Durum akışı hiç gelmediyse (ytDurum null) eski ölçüte, yani paused'a düşülür.
+      var oynamiyor=(ytDurum===null)?duraklad:(ytDurum!==1);
       var kap=S.root.querySelector('#ptpRot')||S.root;
       var mevcut=kap.querySelector('.ptp-duraklat-ortu');
       // Bitiş ekranı ya da geçiş örtüsü zaten üstteyse ikinci bir katmana gerek yok.
@@ -22040,16 +22119,56 @@ window.PTPlayer=(function(){
       // olarak görüyordu. Geçişin hemen ardındaki bu pencerede örtü konmaz - o an ekranda
       // zaten yeni bölümün gerçek görüntüsü akıyor, gizlenecek bir şey yok.
       if(S._gecisKilit||(S._gecisAni&&Date.now()-S._gecisAni<1600)){if(mevcut)mevcut.remove();return;}
-      if(duraklad){
-        if(mevcut)return;
+      if(!oynamiyor){
+        // Oynatma geri geldi - örtü GECİKMESİZ kalkar ve sayaç sıfırlanır.
+        S._ortsuzBas=0;
+        if(mevcut)mevcut.remove();
+        return;
+      }
+      // GÜVENLİK AĞI (bkz. ptpSesiOtomatikAc): Tarayıcı sesli oynatmayı kabul etmezse
+      // oynatmayı durdurur. Sesi açtıktan sonraki 1,5 saniye içinde duraklama olduysa sebep
+      // büyük olasılıkla budur - sessize dönülür ve oynatma sürdürülür. Bir daha denenmez;
+      // kullanıcı isterse oynatıcının kendi ses düğmesinden açabilir.
+      // Yalnızca GERÇEK duraklamada (durum 2) tetiklenir. Arabelleğe alma (3) sıradan bir ağ
+      // olayıdır; onu "ses reddedildi" sanıp sessize dönmek, sesi boş yere kapatırdı.
+      if(S._sesAcmaAni&&!S._sesKapatKilit&&(ytDurum===2||ytDurum===null)&&
+         Date.now()-S._sesAcmaAni<1500&&!S.kullaniciDuraklatti){
+        S._sesKapatKilit=true;S._sesAcmaAni=0;
+        try{v.muted=true;}catch(e){}
+        try{if(v.play)v.play().catch(function(){});}catch(e){}
+        try{showToastMsg('\ud83d\udd07 Taray\u0131c\u0131 sesli ba\u015flatmaya izin vermedi - sesi oynat\u0131c\u0131dan a\u00e7abilirsiniz',3200);}catch(e){}
+        return;
+      }
+      // Durum 220 ms'den kısa sürdüyse henüz örtme - kısa sıçramalarda ekran titremesin.
+      if(!S._ortsuzBas)S._ortsuzBas=Date.now();
+      if(Date.now()-S._ortsuzBas<220){if(mevcut)mevcut.remove();return;}
+      // Arabelleğe alma (3) ya da henüz başlamamış (-1) durumda ▶ değil DÖNEN HALKA gösterilir:
+      // orada beklenen şey kullanıcının bir şeye basması değil, verinin gelmesidir. Yanlış
+      // simge kullanıcıyı "basayım mı?" diye tereddütte bırakıyordu.
+      // Durum akışı henüz hiç gelmediyse (ytDurum null) de beklemedeyiz: video daha
+      // başlamamıştır. Orada ▶ göstermek "bir şeye basmam mı lazım?" izlenimi verirdi.
+      var bekliyor=(ytDurum===3||ytDurum===-1||ytDurum===null);
+      if(mevcut){
+        // Örtü zaten duruyor - yalnızca simgesi güncellenir (halka ↔ ▶).
+        try{
+          var _bek=mevcut.getAttribute('data-bekliyor')==='1';
+          if(_bek!==bekliyor){
+            mevcut.setAttribute('data-bekliyor',bekliyor?'1':'0');
+            mevcut.innerHTML=bekliyor?'<div class="ptp-ort-spin"></div>':'<div class="ic">▶</div>';
+          }
+        }catch(e){}
+        return;
+      }
+      {
         var d=document.createElement('div');
         d.className='ptp-duraklat-ortu';
+        d.setAttribute('data-bekliyor',bekliyor?'1':'0');
         // KULLANICI TALEBİ ("orijinal YouTube ile beraber diğer bütün platformlardaki
         // bağlantılar desteklensin"): Bu örtü platforma özel DEĞİL - gömülü olan her kaynakta
         // (YouTube, Vimeo, Dailymotion, Twitch, Facebook…) aynı şekilde çalışır. Hepsinin
         // duraklamada kendi arayüzünü açma davranışı var; örtü hangisinin ne gösterdiğini
         // bilmek zorunda kalmadan üstünü kapatır.
-        d.innerHTML='<div class="ic">▶</div>';
+        d.innerHTML=bekliyor?'<div class="ptp-ort-spin"></div>':'<div class="ic">▶</div>';
         // Örtüye dokunmak oynatmayı sürdürür - kullanıcı için platformun kendi oynat
         // düğmesiyle aynı işi görür, ama arayüzü bizim denetimimizde kalır.
         d.addEventListener('click',function(e){
@@ -22066,7 +22185,7 @@ window.PTPlayer=(function(){
         // güvenilir biçimde çıkamaz. Yani örtü DOM'da vardı ama iframe'in altında kalıyordu.
         // Örtü artık iframe ile AYNI sarmalayıcıya ekleniyor - aynı yığın bağlamı, sorun yok.
         (S.root.querySelector('#ptpRot')||S.root).appendChild(d);
-      }else if(mevcut)mevcut.remove();
+      }
     }catch(e){}
   }
   // ── GEÇİŞ TANI KAYDEDİCİ ──────────────────────────────────────────────────────────────
@@ -23319,6 +23438,7 @@ window.PTPlayer=(function(){
     S._yedekT=null;
     try{if(S._yedekIfr&&S._yedekIfr.parentNode)S._yedekIfr.parentNode.removeChild(S._yedekIfr);}catch(e){}
     S._yedekIfr=null;S._yedekHazir=false;S._yedekIdx=-1;S._yedekBas=0;
+    S._yedekOynatIstendi=false;S._yedekOynuyor=false;
   }
   function ptpYedekHazirla(saniye){
     try{
@@ -23359,6 +23479,9 @@ window.PTPlayer=(function(){
         // OYNAMAYA BAŞLADIĞI AN duraklat: pencere artık doğru sahnenin gerçek karesini
         // gösteriyor ve arabelleği dolu. Ardından tam başlangıç saniyesine sarılır (açılış
         // birkaç yüz milisaniye ileride olabilir) ve yeniden duraklatılır.
+        // Geçiş komutu gönderildikten sonra: yedek GERÇEKTEN oynamaya başladığı an işaretlenir.
+        // Öne alma bu işarete bakar - bkz. ptpYedegeGec içindeki "arabellek" notu.
+        if(typeof i.playerState==='number'&&S._yedekOynatIstendi&&i.playerState===1)S._yedekOynuyor=true;
         if(typeof i.playerState==='number'&&i.playerState===1&&!yakalandi){
           yakalandi=true;
           komut('mute');
@@ -23399,8 +23522,17 @@ window.PTPlayer=(function(){
       S._gecisAni=Date.now();
       S.aralikIdx++;
       S._hazirlikYapildi=false;
-      // ÖNCE oynat, SONRA öne al: bir kare sonra öne alındığında pencere çoktan oynuyor
-      // olur; platformun duraklama arayüzü ekrana hiç düşmez.
+      // ÖNCE oynat, SONRA öne al.
+      // KULLANICI EKRAN GÖRÜNTÜSÜNDEN DÜZELTME ("geçiş sonrası YouTube arayüzü çıkıyor"):
+      // Önceden öne alma tek bir kare (rAF) sonra KOŞULSUZ yapılıyordu. Ama duraklatılmış bir
+      // pencere oynatma komutunu alınca kısa süre ARABELLEĞE ALIYOR ve tam o anda YouTube
+      // kendi arayüzünü açıyor - biz de onu öne alıp kullanıcıya gösteriyorduk. Gönderilen
+      // ekran görüntüsündeki (başlık + "Diğer videolar" + dönen halka) durum buydu.
+      // ARTIK: pencere GERÇEKTEN oynamaya başladığını bildirene kadar öne alınmaz. En fazla
+      // 700 ms beklenir; o süre içinde oynamazsa yine de geçilir (bu durumda örtü devreye
+      // girer, bkz. ptpDuraklatOrtusuGuncelle) - geçiş hiçbir koşulda asılı kalmaz.
+      S._yedekOynuyor=false;
+      S._yedekOynatIstendi=true;
       try{y.contentWindow.postMessage(JSON.stringify({event:'command',func:'playVideo',args:[]}),'*');}catch(e){}
       var gecir=function(){
         try{
@@ -23425,7 +23557,10 @@ window.PTPlayer=(function(){
           }catch(e){}
         }catch(e){}
       };
-      if(window.requestAnimationFrame)requestAnimationFrame(gecir);else setTimeout(gecir,16);
+      var t0=Date.now(),bekle=setInterval(function(){
+        if(!S){clearInterval(bekle);return;}
+        if(S._yedekOynuyor||Date.now()-t0>700){clearInterval(bekle);gecir();}
+      },30);
       clearTimeout(S._gecisKilitT);
       S._gecisKilitT=setTimeout(function(){if(S)S._gecisKilit=false;},1500);
       return true;
