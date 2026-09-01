@@ -1099,7 +1099,16 @@ iframe.ptp-video{pointer-events:none}
    Kalıcı bir düzen olduğu için zamanlayıcıya da gerek kalmaz - arayüz hiçbir anda,
    hiçbir sebeple görünmez. Yükseklik %250: üstte ve altta %75'er pay bırakır, YouTube'un
    en yüksek arayüz katmanı bile bu payın içinde kalır. */
-.ptp-rot iframe.ptp-video{height:250%;top:-75%;position:relative}
+/* GERİ ALINDI (kullanıcı ekran görüntüsü gönderdi: ortada YouTube'un oynat düğmesi duruyor,
+   bizim oynatıcı çalışmıyor):
+   iframe'i uzatma hilesi başlık ve alt şeridi dışarı itiyordu ama YouTube'un BÜYÜK ORTA
+   OYNAT DÜĞMESİ iframe'in MERKEZİNE bağlı - iframe uzasa da merkez yerinde kalıyor, düğme
+   tam ortada duruyor. Üstelik uzayan iframe kendi kutusunu aşınca kendi kontrol katmanımızın
+   yerleşimi de bozuldu.
+   Kenar hilesi bu yüzden yetersiz: arayüzün bir kısmı kenarda, bir kısmı merkezde.
+   Çerçeve normal ölçüsüne döndürüldü; merkezdeki düğme dahil TÜM arayüz, duraklama örtüsüyle
+   kapatılıyor (bkz. ptpDuraklatOrtusuGuncelle) - o örtü zaten tam ekranı kaplıyor ve kendi
+   oynat düğmemizi taşıyor. */
 .ptp-bitis{position:absolute;inset:0;z-index:62;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.92)}
 .ptp-bitis-ic{text-align:center;color:#fff;padding:1rem}
 .ptp-bitis-b{font-size:.95rem;font-weight:800;margin-bottom:.8rem;letter-spacing:.02em}
@@ -1990,7 +1999,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-G';
+window.APP_BUILD='2026-09-01-I';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -20569,6 +20578,16 @@ function isEmbeddableVideoUrl(url){
   if(isKnownVideoHost(host,['ok.ru','odnoklassniki.ru'])){
     return /\/video\/(\d+)/.test(url);
   }
+  // KULLANICI TALEBİ ("YouTube ile beraber diğer bütün platformlardaki bağlantılar
+  // desteklensin"): Aşağıdakiler bu turda eklendi. Her biri kendi resmi gömme adresine
+  // çevrilir; orijinal adres hiçbir zaman doğrudan bir iframe'e verilmez.
+  if(isKnownVideoHost(host,['bitchute.com']))return /\/video\/[\w-]+/i.test(url);
+  if(isKnownVideoHost(host,['odysee.com','lbry.tv']))return true;
+  if(isKnownVideoHost(host,['vk.com','vkvideo.ru']))return /video(-?\d+)_(\d+)/i.test(url);
+  if(isKnownVideoHost(host,['bilibili.com']))return /\/(BV[\w]+)/i.test(url);
+  if(isKnownVideoHost(host,['soundcloud.com']))return true;
+  if(isKnownVideoHost(host,['mixcloud.com']))return true;
+  if(isKnownVideoHost(host,['archive.org']))return /\/(details|embed)\//i.test(url);
   if(ptIsDirectMediaUrl(url))return true; // Doğrudan video/akış dosyası - platformdan bağımsız.
   return false;
 }
@@ -20674,6 +20693,40 @@ function buildVideoEmbedHtml(url,basSn,bitSn){
     if(isKnownVideoHost(host,['tiktok.com'])){
       const tk=url.match(/\/video\/(\d{6,})/);
       if(tk)return `<iframe src="https://www.tiktok.com/embed/v2/${tk[1]}" style="width:100%;aspect-ratio:9/16;max-height:70vh;border:none;border-radius:14px;background:#000" allow="autoplay;encrypted-media;fullscreen" allowfullscreen></iframe>`;
+      return '';
+    }
+    // KULLANICI TALEBİ ("diğer bütün platformlardaki bağlantılar desteklensin") - bu turda
+    // eklenen platformlar. Hepsi aynı kalıpta: adresten kimlik çıkarılır, platformun KENDİ
+    // resmi gömme adresi kurulur. Ortak stil/izinler diğerleriyle birebir aynı tutuldu ki
+    // oynatıcı kabuğu, aralık denetimi ve duraklama örtüsü hepsinde aynı şekilde çalışsın.
+    var _gomStil='style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen';
+    if(isKnownVideoHost(host,['bitchute.com'])){
+      const bc=url.match(/bitchute\.com\/video\/([\w-]+)/i);
+      if(bc)return `<iframe src="https://www.bitchute.com/embed/${bc[1]}/" ${_gomStil}></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['odysee.com','lbry.tv'])){
+      const od=url.match(/odysee\.com\/(.+)$/i);
+      if(od)return `<iframe src="https://odysee.com/$/embed/${od[1]}" ${_gomStil}></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['vk.com','vkvideo.ru'])){
+      const vk=url.match(/video(-?\d+)_(\d+)/i);
+      if(vk)return `<iframe src="https://vk.com/video_ext.php?oid=${vk[1]}&id=${vk[2]}&hd=2&autoplay=1" ${_gomStil}></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['bilibili.com'])){
+      const bi=url.match(/\/(BV[\w]+)/i);
+      if(bi)return `<iframe src="https://player.bilibili.com/player.html?bvid=${bi[1]}&autoplay=1" ${_gomStil}></iframe>`;
+      return '';
+    }
+    if(isKnownVideoHost(host,['soundcloud.com']))
+      return `<iframe src="https://w.soundcloud.com/player/?url=${encodeURIComponent(url)}&auto_play=true" ${_gomStil}></iframe>`;
+    if(isKnownVideoHost(host,['mixcloud.com']))
+      return `<iframe src="https://player.mixcloud.com/widget/iframe/?feed=${encodeURIComponent(url)}&autoplay=1" ${_gomStil}></iframe>`;
+    if(isKnownVideoHost(host,['archive.org'])){
+      const ar=url.match(/archive\.org\/(?:details|embed)\/([^/?#]+)/i);
+      if(ar)return `<iframe src="https://archive.org/embed/${ar[1]}&autoplay=1" ${_gomStil}></iframe>`;
       return '';
     }
     if(isKnownVideoHost(host,['ok.ru','odnoklassniki.ru'])){
@@ -21921,6 +21974,11 @@ window.PTPlayer=(function(){
         if(mevcut)return;
         var d=document.createElement('div');
         d.className='ptp-duraklat-ortu';
+        // KULLANICI TALEBİ ("orijinal YouTube ile beraber diğer bütün platformlardaki
+        // bağlantılar desteklensin"): Bu örtü platforma özel DEĞİL - gömülü olan her kaynakta
+        // (YouTube, Vimeo, Dailymotion, Twitch, Facebook…) aynı şekilde çalışır. Hepsinin
+        // duraklamada kendi arayüzünü açma davranışı var; örtü hangisinin ne gösterdiğini
+        // bilmek zorunda kalmadan üstünü kapatır.
         d.innerHTML='<div class="ic">▶</div>';
         // Örtüye dokunmak oynatmayı sürdürür - kullanıcı için platformun kendi oynat
         // düğmesiyle aynı işi görür, ama arayüzü bizim denetimimizde kalır.
@@ -25023,6 +25081,9 @@ window.PTPlayer=(function(){
     ptpAralikBekcisiBaslat();
     ptpGomuluBaslatmaBekcisi();
     ptpGecisDenetimBaslat();
+    // Oynatıcı kurulur kurulmaz bir kez çalıştırılır: gömülü kaynak duraklamış açılıyorsa
+    // (mobilde sık) platformun orta oynat düğmesi ilk karede görünürdü.
+    try{ptpDuraklatOrtusuGuncelle();}catch(e){}
     video.addEventListener('timeupdate',function(){
       if(!S)return;
       // İZLEME ARALIKLARI: Yöneticinin tanımladığı bölümler arka arkaya oynatılır. Kontrol
