@@ -952,7 +952,22 @@ iframe.ptp-video{pointer-events:none}
    ekranda tek bir siyah kare bile oluşmaz.
    Kapsayıcı, oynatıcının "medya elemanı"dır (bkz. ptpGomuluMedya) - iframe'ler onun İÇİNDE
    yer değiştirir, böylece dışarıdaki hiçbir dinleyici/kod bu değişimi görmez. */
-.ptp-gomulu-kap{position:relative;overflow:hidden;background:#000;pointer-events:none}
+/* KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "bizim oynatıcı hiç çıkmıyor") - BU HATAYI BEN
+   EKLEDİM, sebebi tam olarak şu:
+   Kapsayıcıya 'position:relative' verilmiş ama 'z-index' verilmemişti. Bu haliyle kapsayıcı
+   KENDİ yığın bağlamını (stacking context) KURMAZ. Dolayısıyla içindeki iframe'lere verdiğim
+   z-index:2 değeri kapsayıcının içinde kalmıyor, DIŞARIYA - .ptp-rot'un bağlamına - taşıyor.
+   Kontrol katmanımız (.ptp-ov) ise z-index taşımıyor (auto = 0). Sonuç: iframe, kendi
+   oynatıcımızın ÜSTÜNDE çiziliyordu. Katman DOM'da vardı, tıklama da çalışıyordu, ama
+   görünmüyordu - kullanıcının "hiç çıkmıyor" dediği durum buydu.
+   ÇÖZÜM: 'z-index:0'. Kapsayıcı böylece kendi bağlamını kurar; iframe'lerin 1/2 değerleri
+   yalnızca KENDİ ARALARINDA geçerli olur (yedek ↔ aktif sıralaması korunur) ve kapsayıcı
+   dışarıda, eskiden iframe'in durduğu yerde (auto seviyesinde) kalır. .ptp-ov DOM'da daha
+   sonra geldiği için doğal olarak üste çıkar; .ptp-freeze (58) ve .ptp-duraklat-ortu (60)
+   zaten üsttedir.
+   NOT: 'isolation:isolate' de aynı işi görür ama eski WebView sürümlerinde desteklenmez -
+   projeksiyon cihazındaki tarayıcı eski olduğu için evrensel olan z-index tercih edildi. */
+.ptp-gomulu-kap{position:relative;z-index:0;overflow:hidden;background:#000;pointer-events:none}
 .ptp-gomulu-kap>iframe{position:absolute;left:0;top:0;width:100%;height:100%;border:none;
   display:block;pointer-events:none}
 /* Görünen oynatıcı üstte, hazırlanan yedek onun ARKASINDA durur. Yedek gizlenmez (gizlenen
@@ -2033,7 +2048,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-L';
+window.APP_BUILD='2026-09-01-M';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22103,15 +22118,18 @@ window.PTPlayer=(function(){
       try{duraklad=!!v.paused;}catch(e){}
       try{ytDurum=(v._ytState===undefined?null:v._ytState);}catch(e){}
       // Durum akışı hiç gelmediyse (ytDurum null) eski ölçüte, yani paused'a düşülür.
-      // GERİ ALINDI (kullanıcı bildirdi: "bunlar düzenleme değil, bozulma var"):
-      // Bir önceki sürümde kural "durum 1 DEĞİLSE ört" idi. Bu, ARABELLEĞE ALMAYI (durum 3)
-      // da kapsıyordu - yani her ağ takılmasında ekran opak siyaha dönüyordu. YouTube'u
-      // gizlerken videonun kendisi de gizlenmiş oluyordu; bu bir düzeltme değil, kusurdu.
-      // DOĞRUSU: Arabelleğe alma sırasında YouTube TAM arayüzünü (başlık, "Diğer videolar",
-      // logo) AÇMAZ - yalnızca kendi yükleniyor halkasını gösterir. Örtülmesi gereken durum
-      // arabellek değil, oynatıcının GERÇEKTEN DURDUĞU durumdur: duraklatıldı (2), bitti (0),
-      // sıraya alındı (5). Tam arayüzünü bu üçünde açıyor.
-      var oynamiyor=(ytDurum===null)?duraklad:(ytDurum===2||ytDurum===0||ytDurum===5);
+      // ÖLÇÜMLE DÜZELTİLDİ - kullanıcının gönderdiği ekran görüntüsü varsayımımı çürüttü:
+      // "Arabelleğe alma sırasında YouTube tam arayüzünü açmaz, sadece halkasını gösterir"
+      // diye düşünmüştüm ve durum 3'ü örtme kapsamından çıkarmıştım. Görüntüde ise ortada
+      // YouTube'un yükleniyor halkası VE tam arayüzü (başlık, kanal, paylaş, saat, öneri
+      // küçük resmi, logo) BİRLİKTE duruyor. Yani varsayım yanlıştı: yüklenirken de tam
+      // arayüz açılıyor.
+      // KURAL: Oynatma durumu 1 (PLAYING) DEĞİLSE üstü örtülür. Sebebi saymaya gerek yok.
+      // "Ekran kararır mı" endişesi yersizdi: durum 1 değilken görüntü ZATEN akmıyor, yani
+      // örtünün gizlediği bir hareket yok - gizlediği tek şey YouTube'un arayüzü.
+      // Kısa sıçramalarda titremesin diye eşik 220 ms'den 500 ms'ye çıkarıldı; yarım saniyeden
+      // kısa duraksamalarda hiçbir şey görünmez.
+      var oynamiyor=(ytDurum===null)?duraklad:(ytDurum!==1);
       var kap=S.root.querySelector('#ptpRot')||S.root;
       var mevcut=kap.querySelector('.ptp-duraklat-ortu');
       // Bitiş ekranı ya da geçiş örtüsü zaten üstteyse ikinci bir katmana gerek yok.
@@ -22128,9 +22146,9 @@ window.PTPlayer=(function(){
         if(mevcut)mevcut.remove();
         return;
       }
-      // Durum 220 ms'den kısa sürdüyse henüz örtme - kısa sıçramalarda ekran titremesin.
+      // Durum 500 ms'den kısa sürdüyse henüz örtme - kısa sıçramalarda ekran titremesin.
       if(!S._ortsuzBas)S._ortsuzBas=Date.now();
-      if(Date.now()-S._ortsuzBas<220){if(mevcut)mevcut.remove();return;}
+      if(Date.now()-S._ortsuzBas<500){if(mevcut)mevcut.remove();return;}
       // Arabelleğe alma (3) ya da henüz başlamamış (-1) durumda ▶ değil DÖNEN HALKA gösterilir:
       // orada beklenen şey kullanıcının bir şeye basması değil, verinin gelmesidir. Yanlış
       // simge kullanıcıyı "basayım mı?" diye tereddütte bırakıyordu.
@@ -23310,7 +23328,21 @@ window.PTPlayer=(function(){
       return true;
     }
     if(a.bas>0&&t<a.bas-1){
-      try{S.video.currentTime=a.bas;}catch(e){}
+      // KULLANICI BİLDİRDİ ("sahne bitince ikinci sahneyi başa sarıyor" + o esnada YouTube
+      // arayüzü ve yükleniyor halkası duruyor) - KÖK SEBEP:
+      // Pencere değiştikten sonra yeni oynatıcı, durum akışı oturana kadar konumu 0 (ya da
+      // çok küçük bir değer) bildiriyor. Bu kural onu "kullanıcı aralığın öncesine kaçtı"
+      // sanıp SARMA komutu gönderiyordu. Sarma da YouTube'un arayüzünü açıyor, oynatma
+      // duruyor, konum yine 0 kalıyor ve aynı komut tekrar gönderiliyordu - kısır döngü.
+      // Ekrandaki "sahne bitene kadar süren oynatıcı + halka" tam olarak buydu.
+      // ÇÖZÜM: Konum 0'a çok yakınken (henüz bildirilmemiş demektir) ve pencere değişiminin
+      // hemen ardındaki 4 saniyede bu kural uygulanmaz. Gerçek bir aralık ihlali zaten
+      // devam ederse, akış oturduktan sonra normal şekilde yakalanır.
+      var _guvenilir=(t>1);
+      var _yeniPencere=(S._gecisAni&&Date.now()-S._gecisAni<4000);
+      if(_guvenilir&&!_yeniPencere){
+        try{S.video.currentTime=a.bas;}catch(e){}
+      }
       return true;
     }
     if(a.bit>0&&!S._hazirlikYapildi&&(a.bit-t)<10&&S.aralikIdx+1<S.araliklar.length){
@@ -23537,6 +23569,19 @@ window.PTPlayer=(function(){
           setTimeout(function(){
             try{if(eski&&eski.parentNode)eski.parentNode.removeChild(eski);}catch(e){}
           },500);
+          // OYNATMA GARANTİSİ: Öne alınan pencere, ilk playVideo komutunu yutmuş olabilir
+          // (komut, YouTube'un kendi durum geçişine denk gelirse yok sayılabiliyor). Oynatma
+          // gerçekten başlayana kadar komut birkaç kez tekrarlanır - "geçişten sonra video
+          // duruyor, ses yok" durumunun ikinci sebebi buydu.
+          [400,1000,1800,2800].forEach(function(ms){
+            setTimeout(function(){
+              try{
+                if(!S||kap._ptpAktifIfr!==y)return;
+                if(S.video&&S.video._ytState===1)return;   // zaten oynuyor
+                y.contentWindow.postMessage(JSON.stringify({event:'command',func:'playVideo',args:[]}),'*');
+              }catch(e){}
+            },ms);
+          });
           ptpTaniKaydet('yedek oynatıcıyla bölüm '+(S.aralikIdx-1)+'→'+S.aralikIdx);
           try{
             if(typeof DiagCore!=='undefined'&&DiagCore.kaydet)
