@@ -1154,6 +1154,9 @@ iframe.ptp-video{pointer-events:none}
   align-items:center;justify-content:center;line-height:1;pointer-events:none;
   opacity:0;visibility:hidden;transition:opacity .16s ease,transform .16s ease}
 .ptp-merkez-maske.ptp-mm-on{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
+/* Simgeler CSS ile çizilir - emoji karakterleri Android'de renkli (sarı) görünüyordu. */
+.ptp-mm-bar{display:inline-block;background:#fff;border-radius:2px;margin:0 3px}
+.ptp-mm-play{display:inline-block;border-style:solid;border-color:transparent transparent transparent #fff;margin-left:12%}
 .ptp-duraklat-ortu{position:absolute;inset:0;z-index:60;display:flex;align-items:center;
   justify-content:center;background:rgba(0,0,0,.96);cursor:pointer}
 /* Arabelleğe alma sırasında ▶ değil dönen halka gösterilir - bkz. ptpDuraklatOrtusuGuncelle
@@ -2093,7 +2096,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-D';
+window.APP_BUILD='2026-09-02-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21796,8 +21799,13 @@ function ptpGomuluMedya(kap,ilkIfr){
   function maske(simge){
     try{if(typeof window.ptpMerkezMaske==='function')window.ptpMerkezMaske(simge);}catch(e){}
   }
-  ifr.play=function(){maske('▶');komut('playVideo');return Promise.resolve();};
-  ifr.pause=function(){maske('⏸');komut('pauseVideo');};
+  // KULLANICI BİLDİRDİ ("video sonundaki sarı simge ve geçiş esnasındaki oynat butonu
+  // çıkmasın"): Maske çağrıları BURADAN kaldırıldı. Burası her TÜRLÜ oynat/duraklat komutunun
+  // geçtiği yer - video sonu, bölüm geçişi, kurtarma, kumanda... hepsinde maske çiziliyordu.
+  // Oysa maskenin tek amacı KULLANICI düğmeye bastığında platformun kendi parlamasını
+  // kapatmaktı. Artık yalnızca togglePlay() içinden, yani gerçek bir dokunuşta çağrılıyor.
+  ifr.play=function(){komut('playVideo');return Promise.resolve();};
+  ifr.pause=function(){komut('pauseVideo');};
   ifr.load=function(){};
   ifr.requestPictureInPicture=function(){return Promise.reject(new Error('gömülü oynatıcıda desteklenmiyor'));};
   // Durum akışı: YouTube'a "dinliyorum" dedikten sonra sürekli bilgi gönderir. Gelen her
@@ -22177,8 +22185,14 @@ window.PTPlayer=(function(){
         kap.appendChild(m);
       }
       m.style.width=c+'px';m.style.height=c+'px';
-      m.style.fontSize=Math.round(c*0.40)+'px';
-      m.textContent=simge||'';
+      // EMOJİ KULLANILMIYOR: ⏸/▶ karakterleri Android'de RENKLİ emoji olarak çiziliyor -
+      // kullanıcının "sarı simge" dediği şey buydu. Simge artık CSS ile çiziliyor; oynatıcının
+      // geri kalanıyla aynı dilde, beyaz ve yalın.
+      var ic=Math.round(c*0.34);
+      m.innerHTML=(simge==='oynat')
+        ? '<i class="ptp-mm-play" style="border-width:'+Math.round(ic*0.55)+'px 0 '+Math.round(ic*0.55)+'px '+Math.round(ic*0.92)+'px"></i>'
+        : '<i class="ptp-mm-bar" style="width:'+Math.round(ic*0.28)+'px;height:'+ic+'px"></i>'
+         +'<i class="ptp-mm-bar" style="width:'+Math.round(ic*0.28)+'px;height:'+ic+'px"></i>';
       m.classList.add('ptp-mm-on');
       clearTimeout(S._merkezMaskeT);
       // Platformun parlaması ~600-800 ms sürüyor; maske ondan biraz daha uzun durur.
@@ -22231,6 +22245,22 @@ window.PTPlayer=(function(){
   // KULLANICI TALEBİ ("bunu ben admin ayağından yapacağım"): Oran artık kodda sabit değil.
   // Yönetici panelindeki kaydıraçtan geliyor ve ayarlar senkronuyla anında yayılıyor;
   // 0 verilirse özellik tamamen kapanır (pencere görünen alanla aynı boyutta kalır).
+  // KULLANICI TALEBİ ("ortadaki oynatıcı için yukarı veya aşağı kaydırma yapabilir miyiz,
+  // yönetici ayarında eklenebilir mi"): Platformun ORTADAKİ simgesi merkeze yapışık olduğu
+  // için kenar kırpmayla dışarı itilemez - ama pencerenin tamamını kaydırırsak o simge de
+  // görüş alanının dışına çıkar.
+  // DİKKAT - bu ayarın bir BEDELİ vardir: kenar büyütmenin aksine, kaydırma videoyu da
+  // birlikte taşır. Kutuda boş bant varsa o bant kadarı bedelsizdir; ötesinde görüntünün
+  // bir kenarı kırpılır. Bu yüzden varsayılanı 0'dır ve kararı yöneticiye bırakılır.
+  function ptpKenarKaydirmaY(){
+    try{
+      var v=(window.D&&D.kenarKaydirmaY);
+      if(v===undefined||v===null||v==='')return 0;
+      v=Number(v);
+      if(!isFinite(v))return 0;
+      return Math.max(-45,Math.min(45,v));
+    }catch(e){return 0;}
+  }
   function ptpKenarBuyutmeOrani(){
     try{
       var v=(window.D&&D.kenarBuyutme);
@@ -22248,26 +22278,38 @@ window.PTPlayer=(function(){
       var r=kap.getBoundingClientRect();
       if(!(r.width>4&&r.height>4))return;
       var B=ptpKenarBuyutmeOrani(),yuzde=100+B*100,kaydir=-(B*50);
-      var st;
-      // KULLANICI BİLDİRDİ ("ekran oranları çalışmıyor") - AYRI BİR HATA, KÖK SEBEBİ ŞU:
-      // Ekran modu (⬜ sığdır / ✂️ doldur) 'object-fit' kuralıyla uygulanıyor. O özellik yalnızca
-      // <video>/<img> gibi DEĞİŞTİRİLMİŞ öğelerde geçerlidir; iframe'de hiçbir etkisi yoktur.
-      // Yani gömülü kaynakta o düğme HER ZAMAN işlevsizdi - düğmenin simgesi değişiyor ama
-      // görüntüde hiçbir şey olmuyordu.
-      // ÇÖZÜM: Ekran modu artık iframe'in BOYUTUYLA uygulanır - kenar kırpma hesabı zaten burada.
-      var mod=(S.fit==='cover'||S.fit==='fill')?'doldur':'sigdir';
-      if(mod==='doldur'){
-        // DOLDUR: Görüntü kutuyu tamamen kaplasın, taşan yer kırpılsın. iframe her iki yönde
-        // birden büyütülür; böylece hem video kutuyu doldurur hem de kenar şeritleri dışarıda
-        // kalır. Bu modda kırpma zaten istenen davranıştır.
-        st='position:absolute;left:'+kaydir+'%;top:'+kaydir+'%;width:'+yuzde+'%;height:'+yuzde+'%;border:none;display:block;pointer-events:none';
-      }else if((r.width/r.height)<=(16/9)){
-        // SIĞDIR + kutu 16:9'dan dar → video genişlikle sınırlı, boşluk üst/altta.
-        st='position:absolute;left:0;width:100%;top:'+kaydir+'%;height:'+yuzde+'%;border:none;display:block;pointer-events:none';
-      }else{
-        // SIĞDIR + kutu 16:9'dan geniş → video yükseklikle sınırlı, boşluk sağ/solda.
-        st='position:absolute;top:0;height:100%;left:'+kaydir+'%;width:'+yuzde+'%;border:none;display:block;pointer-events:none';
-      }
+      // Ekran modu 'object-fit' ile uygulanamıyor: o özellik yalnızca <video>/<img> gibi
+      // değiştirilmiş öğelerde geçerli, iframe'de hiçbir etkisi yok. Gömülü kaynakta o düğme
+      // bu yüzden baştan beri işlevsizdi. Çözüm aşağıda.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // EKRAN MODLARI (kullanıcı: "TV sekmesindeki canlı yayın kanalları gibi birebir aynı"):
+      // Canlı yayında kaynak bir <video> öğesidir ve üç mod object-fit ile doğrudan alınır.
+      // Gömülüde object-fit çalışmaz; üçü de iframe'in BOYUTU ve ÖLÇEKLEMESİ ile kurulur:
+      //   Sığdır (contain) : video kutuya sığar, oran korunur, artan yönde bant kalır
+      //   Kırp   (cover)   : video kutuyu kaplayana kadar EŞİT oranda büyür, taşan yer kırpılır
+      //   Genişlet(fill)  : video kutuya tam oturana kadar iki yönde AYRI ölçeklenir (oran bozulur)
+      // Daha önce "Genişlet" ile "Kırp" aynı sonucu veriyordu çünkü ikisini de tek bir büyütmeye
+      // bağlamıştım. Artık oranı BOZAN esnetme, iki eksende farklı ölçek çarpanıyla yapılıyor -
+      // canlı yayındaki davranışın birebir karşılığı.
+      // Ölçekleme kutu MERKEZİNE göre yapılır ve çarpanların ikisi de 1'den büyüktür; yani
+      // kenar şeritleri daha da dışarı çıkar, gizleme bozulmaz.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      var VID=16/9,W=r.width,H=r.height,dar=(W/H)<=VID;
+      var st=dar
+        ? 'position:absolute;left:0;width:100%;top:'+kaydir+'%;height:'+yuzde+'%;'
+        : 'position:absolute;top:0;height:100%;left:'+kaydir+'%;width:'+yuzde+'%;';
+      // Sığdır modunda videonun ekranda kapladığı ölçü:
+      var vw,vh;
+      if(dar){vw=W;vh=W/VID;}else{vh=H;vw=H*VID;}
+      var sx=1,sy=1;
+      if(S.fit==='cover'){var sc=Math.max(W/vw,H/vh);sx=sc;sy=sc;}
+      else if(S.fit==='fill'){sx=W/vw;sy=H/vh;}
+      // Dikey kaydırma - yönetici ayarı (bkz. ptpKenarKaydirmaY). Piksel cinsinden verilir
+      // çünkü yüzde, iframe'in KENDİ yüksekliğine göre hesaplanır ve o büyütülmüş olandır.
+      var dy=Math.round(ptpKenarKaydirmaY()/100*H);
+      st+='transform-origin:50% 50%;transform:translateY('+dy+'px) scale('+
+          (Math.round(sx*1000)/1000)+','+(Math.round(sy*1000)/1000)+');';
+      st+='border:none;display:block;pointer-events:none';
       if(kap._ptpKirpBicem===st)return;   // değişmediyse dokunma
       kap._ptpKirpBicem=st;
       var l=kap.querySelectorAll('iframe');
@@ -22885,7 +22927,44 @@ window.PTPlayer=(function(){
     var v=S.video,url=S.url;
     // Gömülü kaynakta akış zaten iframe'in kendi içinde çözülür - burada yapılacak bir şey
     // yok. (HLS.js'i çalıştırmak boşuna hata üretirdi.)
-    if(S.gomulu){var _sp=el('ptpSpin');if(_sp)_sp.style.display='none';return;}
+    if(S.gomulu){
+      var _sp=el('ptpSpin');if(_sp)_sp.style.display='none';
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KÖK SEBEP DÜZELTMESİ (kullanıcı: "kumanda üzerinden videolar arası değişim olmuyor"):
+      // Burası kaynak değiştiğinde çağrılan yerdir. Gömülü kaynakta ise HEMEN return ediliyordu -
+      // "iframe akışı kendi çözüyor" gerekçesiyle. Ama o gerekçe yalnızca AYNI video için
+      // doğru: video DEĞİŞTİĞİNDE iframe'in adresi de değişmeli. Değişmediği için ekranda
+      // eski video oynamaya devam ediyordu - kumandadan ya da listeden yapılan her geçiş
+      // başlığı değiştiriyor ama görüntüyü değiştirmiyordu.
+      // Artık adres gerçekten değiştiyse yeni bir pencere kurulup eskisinin yerine geçiriliyor.
+      // Aynı adres için hiçbir şey yapılmaz - açılışta pencereyi boşuna yeniden kurmamak için.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      try{
+        var kapE=S.video;
+        if(kapE&&typeof kapE._ptpIframeDegistir==='function'&&kapE._ptpUrl!==S.url
+           &&typeof buildVideoEmbedHtml==='function'){
+          var bas0=(S.araliklar&&S.araliklar[0]&&S.araliklar[0].bas)||0;
+          var html0=buildVideoEmbedHtml(S.url||'',Math.max(0,Math.floor(bas0)),0);
+          if(html0){
+            var sar0=document.createElement('div');sar0.innerHTML=html0;
+            var yeni0=sar0.querySelector('iframe');
+            if(yeni0){
+              var eski0=kapE._ptpAktifIfr;
+              yeni0.removeAttribute('id');yeni0.removeAttribute('style');yeni0.className='ptp-aktif';
+              kapE.appendChild(yeni0);
+              kapE._ptpUrl=S.url;
+              kapE._ptpKirpBicem=null;              // yeni pencereye kırpma yeniden yazılsın
+              kapE._ptpIframeDegistir(yeni0);
+              ptpGomuluKenarKirp();
+              setTimeout(function(){
+                try{if(eski0&&eski0.parentNode)eski0.parentNode.removeChild(eski0);}catch(e){}
+              },400);
+            }
+          }
+        }
+      }catch(e){}
+      return;
+    }
     // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "bunlar niye çalışmıyor" - biri http://
     // adresliydi): Uygulama HTTPS üzerinden sunuluyor. Tarayıcılar, HTTPS bir sayfanın
     // HTTP bir kaynağı yüklemesini KESİN olarak engeller ("mixed content") - bu bir ağ hatası
@@ -23181,7 +23260,11 @@ window.PTPlayer=(function(){
     // basıyor, etiket değişiyor ama görüntü aynı kalıyordu.
     // ÇÖZÜM: Gömülü kaynakta uygulanamayan mod döngüye hiç alınmıyor. Böylece her dokunuş
     // görünür bir değişiklik yapar; etiket ile ekrandaki sonuç birbirini tutar.
-    var order=(S.gomulu)?['contain','cover']:['contain','fill','cover'];
+    // ÜÇ MOD DA GERİ GELDİ: Geçen sürümde "Genişlet"i döngüden çıkarmıştım çünkü gömülüde
+    // "Kırp" ile aynı sonucu veriyordu. Artık oranı bozan esnetme iki eksende ayrı ölçek
+    // çarpanıyla yapılıyor (bkz. ptpGomuluKenarKirp), yani üçü de gerçekten farklı - canlı
+    // yayın kanallarındaki sıranın birebir aynısı.
+    var order=['contain','fill','cover'];
     var i=order.indexOf(S.fit);
     S.fit=order[(i+1)%order.length];
     applyVisual();
@@ -23431,8 +23514,18 @@ window.PTPlayer=(function(){
     // Kullanıcının BİLEREK duraklattığı işaretlenir: geçiş sensörü "beklenmedik duraklama"
     // uyarısını yalnızca kullanıcı istemediği hâlde duran oynatmalar için vermeli, aksi halde
     // her elle duraklatma yanlış alarm üretirdi.
-    if(S.video.paused){S.kullaniciDuraklatti=false;S.video.play().catch(function(){});}
-    else {S.kullaniciDuraklatti=true;S.video.pause();}
+    // Merkez maskesi YALNIZCA burada - gerçek bir kullanıcı dokunuşunda. Bkz. ifr.play/pause
+    // üzerindeki not: programatik komutlarda maske çizmek, video sonunda ve geçişlerde
+    // ekranda beklenmedik bir simge bırakıyordu.
+    if(S.video.paused){
+      S.kullaniciDuraklatti=false;
+      try{if(S.gomulu&&window.ptpMerkezMaske)window.ptpMerkezMaske('oynat');}catch(e){}
+      S.video.play().catch(function(){});
+    }else{
+      S.kullaniciDuraklatti=true;
+      try{if(S.gomulu&&window.ptpMerkezMaske)window.ptpMerkezMaske('duraklat');}catch(e){}
+      S.video.pause();
+    }
     showControls();
   }
   function stop(){
@@ -25671,6 +25764,7 @@ window.PTPlayer=(function(){
         ifr.className='ptp-aktif';
         kap.appendChild(ifr);
         video.parentNode.replaceChild(kap,video);
+        kap._ptpUrl=opt.url||'';   // bkz. attachSource: adres değişmedikçe pencere yenilenmez
         video=ptpGomuluMedya(kap,ifr);
       }else{gomulu=false;}
     }
