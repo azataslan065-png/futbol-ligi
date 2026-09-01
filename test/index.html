@@ -2086,7 +2086,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-Z';
+window.APP_BUILD='2026-09-02-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22155,7 +22155,15 @@ window.PTPlayer=(function(){
   // oranı değiştirir). Hesap 200 ms'lik denetim turunda tazelenir ve yalnızca DEĞİŞTİĞİNDE
   // yazılır - boş yere biçem güncellemesi yapılmaz.
   // ══════════════════════════════════════════════════════════════════════════════════════
-  var PT_KENAR_BUYUTME=0.60;   // %60 büyütme: kenar şeritleri rahatça dışarıda kalır
+  // ÖLÇÜMLE ARTIRILDI (kullanıcı: "neredeyse kusursuz, ama hâlâ görünüyor"):
+  // %60 ile kaydırma 2340px'lik ekranda 702px oluyordu; ekran görüntüsünde başlığın son
+  // ~460px'i hâlâ içeride kalıyordu (yazı soldan kesilmiş "nid 142. Bölüm" olarak görünüyor).
+  // Başlığın sağ ucu iframe içinde ~1162px'te; dışarı çıkması için kaydırma bundan büyük
+  // olmalı. %160 kaydırmayı 1872px'e çıkarıyor - uzun başlıklar ve alt sağdaki "Diğer
+  // videolar" kutusu için de rahat pay bırakır.
+  // NOT: Bu değer görüntüyü KÜÇÜLTMEZ ya da kirpmaz - büyütme yalnızca videonun bulunmadığı
+  // boş yönde yapılıyor (bkz. ptpGomuluKenarKirp üzerindeki "letterbox boşluğu" notu).
+  var PT_KENAR_BUYUTME=1.60;
   function ptpGomuluKenarKirp(){
     try{
       if(!S||!S.gomulu)return;
@@ -22246,7 +22254,10 @@ window.PTPlayer=(function(){
         // Oynatma geri döndüğünde platformun arayüzü ekrandan hemen silinmiyor. Örtüyü aynı
         // karede çekersek butonlar bir an görünür. Kısa bir bekleme tanınır.
         if(mevcut&&!S._ortuKalkBas){S._ortuKalkBas=Date.now();return;}
-        if(mevcut&&Date.now()-S._ortuKalkBas<320)return;
+        // 320 → 450 ms: Devam ettirildiğinde platform ortada bir ▶ parlaması gösteriyor;
+        // örtüyü biraz daha tutmak o parlamayı da kapatır. Siyah eklemez - alttaki görüntü
+        // zaten akıyor ve örtü sönerek kalkıyor.
+        if(mevcut&&Date.now()-S._ortuKalkBas<450)return;
         S._ortuKalkBas=0;
         // Oynatma geri geldi - örtü kalkar ve sayaç sıfırlanır.
         // Ayrıca "ilk oynatma gerçekleşti" işaretlenir: bundan sonra 500 ms'lik titreme
@@ -22269,7 +22280,18 @@ window.PTPlayer=(function(){
       // ÇÖZÜM: Eşik yalnızca oynatma BİR KEZ başladıktan sonra uygulanır. İlk oynatmaya kadar
       // örtü gecikmesiz konur ve ilk kare akana kadar kalkmaz.
       // ══════════════════════════════════════════════════════════════════════════════════
-      if(!S._ilkOynatmaOldu){
+      // KULLANICI TALEBİ ("YouTube'un oynat/duraklat butonuna da bir işlem yaparsan tam olacak"):
+      // Ortadaki büyük ⏸/▶ simgesi kenara YAPISIK DEĞİL, tam merkezde duruyor - dolayısıyla
+      // kenar kırpmayla dışarı itilemez. Tek yolu üstünü örtmek.
+      // Bu simge, oynatma DURDUĞU anda bir parlama olarak beliriyor (biz duraklat komutu
+      // gönderdiğimizde de). Örtümüz ise 500 ms bekleme eşiği yüzünden geç geliyordu ve
+      // parlama tam o aralıkta görünüyordu.
+      // ÇÖZÜM: Bekleme eşiği yalnızca ARABELLEĞE ALMA (durum 3) için geçerli - o gerçekten
+      // kısa süren, gelip geçici bir durum ve ekranı boşuna karartmamak gerekir. DURAKLAMA
+      // (durum 2) ise kararlı bir durumdur, titreme riski yoktur; orada örtü ANINDA konur.
+      if(ytDurum===2){
+        S._ortsuzBas=0;                 // duraklama: beklemeden ört
+      }else if(!S._ilkOynatmaOldu){
         if(!mevcut)S._ortsuzBas=0;      // eşiği atla
       }else{
         // Durum 500 ms'den kısa sürdüyse henüz örtme - kısa sıçramalarda ekran titremesin.
@@ -22590,7 +22612,7 @@ window.PTPlayer=(function(){
         // ══════════════════════════════════════════════════════════════════════════════
         if(akiyor&&S.gomulu&&!S._akisBekleme){
           S._akisBekleme=true;
-          setTimeout(function(){try{if(S)S._akisOnay=true;}catch(e){}},320);
+          setTimeout(function(){try{if(S)S._akisOnay=true;}catch(e){}},450);
           akiyor=false;
         }else if(akiyor&&S.gomulu&&!S._akisOnay){
           akiyor=false;
