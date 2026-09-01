@@ -2033,7 +2033,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-K';
+window.APP_BUILD='2026-09-01-L';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22046,23 +22046,18 @@ window.PTPlayer=(function(){
   // Oynatma gerçekten başladığı doğrulandığında ses açılır. Tek seferlik bir komut YETMEZ:
   // YouTube, açılış sırasında kendi ses durumunu birkaç kez tazeliyor ve erken gönderilen
   // komutu yutabiliyor - bu yüzden komut birkaç kez tekrarlanır.
-  // GÜVENLİK AĞI: Tarayıcı sesi açmayı yine de kabul etmezse oynatmayı DURDURABİLİR. Böyle
-  // bir durumda (ses açıldıktan sonraki 1,5 saniye içinde duraklama) sessize geri dönülür ve
-  // oynatma sürdürülür - kullanıcı sessiz de olsa videoyu izlemeye devam eder, ekran donmaz.
   function ptpSesiOtomatikAc(){
     try{
       if(!S||!S.gomulu||S._sesAcildi)return;
       var v=S.video,akiyor=false;
       try{akiyor=!v.paused&&(v.currentTime||0)>0;}catch(e){return;}
       if(!akiyor)return;
-      if(S._sesKapatKilit)return;             // güvenlik ağı devreye girdiyse bir daha denenmez
       S._sesAcildi=true;
-      S._sesAcmaAni=Date.now();
       var hedefSes=Math.max(0,Math.min(1,Number(pref('volume',100))/100));
       if(hedefSes<=0)hedefSes=1;              // kayıtlı ses 0 ise sessiz kalmasın
       var uygula=function(){
         try{
-          if(!S||!S.gomulu||S._sesKapatKilit)return;
+          if(!S||!S.gomulu)return;
           v.volume=hedefSes;
           v.muted=false;
         }catch(e){}
@@ -22108,7 +22103,15 @@ window.PTPlayer=(function(){
       try{duraklad=!!v.paused;}catch(e){}
       try{ytDurum=(v._ytState===undefined?null:v._ytState);}catch(e){}
       // Durum akışı hiç gelmediyse (ytDurum null) eski ölçüte, yani paused'a düşülür.
-      var oynamiyor=(ytDurum===null)?duraklad:(ytDurum!==1);
+      // GERİ ALINDI (kullanıcı bildirdi: "bunlar düzenleme değil, bozulma var"):
+      // Bir önceki sürümde kural "durum 1 DEĞİLSE ört" idi. Bu, ARABELLEĞE ALMAYI (durum 3)
+      // da kapsıyordu - yani her ağ takılmasında ekran opak siyaha dönüyordu. YouTube'u
+      // gizlerken videonun kendisi de gizlenmiş oluyordu; bu bir düzeltme değil, kusurdu.
+      // DOĞRUSU: Arabelleğe alma sırasında YouTube TAM arayüzünü (başlık, "Diğer videolar",
+      // logo) AÇMAZ - yalnızca kendi yükleniyor halkasını gösterir. Örtülmesi gereken durum
+      // arabellek değil, oynatıcının GERÇEKTEN DURDUĞU durumdur: duraklatıldı (2), bitti (0),
+      // sıraya alındı (5). Tam arayüzünü bu üçünde açıyor.
+      var oynamiyor=(ytDurum===null)?duraklad:(ytDurum===2||ytDurum===0||ytDurum===5);
       var kap=S.root.querySelector('#ptpRot')||S.root;
       var mevcut=kap.querySelector('.ptp-duraklat-ortu');
       // Bitiş ekranı ya da geçiş örtüsü zaten üstteyse ikinci bir katmana gerek yok.
@@ -22123,20 +22126,6 @@ window.PTPlayer=(function(){
         // Oynatma geri geldi - örtü GECİKMESİZ kalkar ve sayaç sıfırlanır.
         S._ortsuzBas=0;
         if(mevcut)mevcut.remove();
-        return;
-      }
-      // GÜVENLİK AĞI (bkz. ptpSesiOtomatikAc): Tarayıcı sesli oynatmayı kabul etmezse
-      // oynatmayı durdurur. Sesi açtıktan sonraki 1,5 saniye içinde duraklama olduysa sebep
-      // büyük olasılıkla budur - sessize dönülür ve oynatma sürdürülür. Bir daha denenmez;
-      // kullanıcı isterse oynatıcının kendi ses düğmesinden açabilir.
-      // Yalnızca GERÇEK duraklamada (durum 2) tetiklenir. Arabelleğe alma (3) sıradan bir ağ
-      // olayıdır; onu "ses reddedildi" sanıp sessize dönmek, sesi boş yere kapatırdı.
-      if(S._sesAcmaAni&&!S._sesKapatKilit&&(ytDurum===2||ytDurum===null)&&
-         Date.now()-S._sesAcmaAni<1500&&!S.kullaniciDuraklatti){
-        S._sesKapatKilit=true;S._sesAcmaAni=0;
-        try{v.muted=true;}catch(e){}
-        try{if(v.play)v.play().catch(function(){});}catch(e){}
-        try{showToastMsg('\ud83d\udd07 Taray\u0131c\u0131 sesli ba\u015flatmaya izin vermedi - sesi oynat\u0131c\u0131dan a\u00e7abilirsiniz',3200);}catch(e){}
         return;
       }
       // Durum 220 ms'den kısa sürdüyse henüz örtme - kısa sıçramalarda ekran titremesin.
