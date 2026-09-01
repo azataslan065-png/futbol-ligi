@@ -2054,7 +2054,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-N';
+window.APP_BUILD='2026-09-01-O';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22373,6 +22373,13 @@ window.PTPlayer=(function(){
         if(!S){clearInterval(S._akisT);return;}
         var t=0;try{t=S.video.currentTime||0;}catch(e){}
         var akiyor=(oncekiT>=0&&t>oncekiT+0.02);
+        // SİYAH SÜRESİNİ KISALTMA: "Konum ilerledi mi" ölçütü tek başına yavaş kalıyor -
+        // YouTube konum bilgisini ~250 ms'de bir gönderdiği için, görüntü çoktan aktığı halde
+        // iki ardışık farklı değeri görmemiz ~300 ms daha sürüyor ve örtü o kadar fazla
+        // kalıyordu. Oynatıcı zaten OYNUYOR (durum 1) diyorsa beklemeye gerek yok.
+        // Erken kaldırma riski yok: durum 1 değilse örtü zaten devreye giriyor
+        // (bkz. ptpDuraklatOrtusuGuncelle), yani boşta kalan bir an oluşmuyor.
+        if(!akiyor){try{if(S.video._ytState===1)akiyor=true;}catch(e){}}
         // Aralıklı videoda ek koşul: akış yetmez, konumun aralığın İÇİNDE olması da gerekir.
         // Aksi halde örtü, video henüz 0. saniyede akarken kalkıyor ve kullanıcı aralık dışı
         // görüntüyü bir an görüyordu (bkz. açılış örtüsü notu).
@@ -23467,8 +23474,28 @@ window.PTPlayer=(function(){
     S._yedekIfr=null;S._yedekHazir=false;S._yedekIdx=-1;S._yedekBas=0;
     S._yedekOynatIstendi=false;S._yedekOynuyor=false;
   }
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // YEDEK OYNATICI KAPALI - ÖLÇÜMLE ALINAN KARAR (kullanıcı bildirdi: "video geçişi sağlandı
+  // fakat geçiş ÖNCESİ yaklaşık 30 sn siyah ekran ve yükleniyor vardı")
+  //
+  // Yedek pencere, bölüm bitmeden 10 saniye önce kuruluyor ve arabelleğe almak için bir süre
+  // OYNUYOR. Yani o aralıkta telefonda AYNI ANDA İKİ YouTube oynatıcısı çalışıyor. Ölçüm
+  // şunu gösterdi: ikinci oynatıcı ana videonun bant genişliğini ve işlemcisini paylaşınca
+  // ana video duruyor, arabelleğe düşüyor ve toparlanamıyor - kullanıcı geçişten ÖNCE
+  // 30 saniye boyunca duran bir görüntü görüyor.
+  // Yani yedek yöntem, geçişteki ~1 saniyelik siyahı kaldırmak için geçiş ÖNCESİNE 30
+  // saniyelik bir siyah ekliyordu. Bu takas kabul edilemez.
+  // KARAR: Yöntem KAPATILDI. Bölüm geçişi yeniden sarma yoluyla yapılıyor (geçişte kısa bir
+  // siyah kalır ama ondan öncesi tamamen temiz). Kod silinmedi: aşağıdaki tek bayrak true
+  // yapılırsa yöntem aynen geri gelir. İleride tek bir oynatıcıyla arabelleğe alma yolu
+  // bulunursa, buradan devam edilebilir.
+  // NOT: Bu kararın YANINDA kalan düzeltmeler (kendi oynatıcımızın görünürlüğü, ses
+  // tercihinin korunması, halka takılması, geri sarma kısırdöngüsü) yedekten BAĞIMSIZDIR ve
+  // yürürlüktedir.
+  var YEDEK_OYNATICI_ACIK=false;
   function ptpYedekHazirla(saniye){
     try{
+      if(!YEDEK_OYNATICI_ACIK)return;
       if(!S||!S.gomulu||!(saniye>=0))return;
       if(window.D&&D.kesintisizGecis===false)return;   // yönetici kapattıysa hiç kurulmaz
       var kap=S.video;
@@ -23539,6 +23566,9 @@ window.PTPlayer=(function(){
       // TEŞHİS: Geçişin HANGİ yoldan gittiği artık tahmin edilmiyor, yazılıyor. Yedek yol
       // kullanılamadıysa SEBEBİ de kaydedilir - "neden hâlâ YouTube arayüzü çıkıyor"
       // sorusunun cevabı doğrudan burada görünür.
+      // Yöntem kapalıyken (bkz. YEDEK_OYNATICI_ACIK) uyarı yazılmaz - bu bir arıza değil,
+      // bilinçli bir tercihtir. Her geçişte uyarı basmak raporu gereksiz doldururdu.
+      if(!YEDEK_OYNATICI_ACIK)return false;
       var _neden=null;
       if(!S||!S.gomulu)_neden='gömülü kaynak değil';
       else if(!S._yedekIfr)_neden='yedek pencere hiç kurulmadı (bölüm 10 sn\'den kısa ya da adres üretilemedi)';
