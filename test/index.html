@@ -939,6 +939,27 @@ body.ptp-fs-active{overflow:hidden}
    görünür olur hem de aralık sınırı gerçekten uygulanır. (Aynı yaklaşım tam ekran kabuğunda
    da kullanılmıştı - orada da sebep buydu.) */
 iframe.ptp-video{pointer-events:none}
+/* ── ÇİFT OYNATICI (YEDEK) KAPSAYICISI ────────────────────────────────────────────────
+   KULLANICI TALEBİ ("sahneden sahneye geçerken ~1 saniye siyah ekran çıkıyor, çıkmasın"):
+   Siyah ekranın sebebi, geçişi gizlemek için koyduğumuz DÜZ SİYAH ÖRTÜNÜN, YouTube sarma
+   işlemini bitirene kadar (arabellek + durum akışı gecikmesi) ekranda kalmak zorunda
+   olmasıydı. Yani örtü sorunun kendisi değil, sorunun SONUCUYDU: sarma sırasında
+   gösterilecek bir görüntü yoktu.
+   ÇÖZÜM - iki oynatıcı: Bölüm bitmeden ~10 saniye önce, sonraki bölümün BAŞLANGICINDA
+   duran İKİNCİ bir gömülü oynatıcı sessizce kurulur; arkada, görünmeyen katmanda
+   arabelleğe alınır ve tam o karede duraklatılır. Bölüm bittiğinde SARMA YAPILMAZ - sadece
+   iki katmanın sırası değişir. Yeni oynatıcı zaten doğru kareyi göstererek beklediğinden
+   ekranda tek bir siyah kare bile oluşmaz.
+   Kapsayıcı, oynatıcının "medya elemanı"dır (bkz. ptpGomuluMedya) - iframe'ler onun İÇİNDE
+   yer değiştirir, böylece dışarıdaki hiçbir dinleyici/kod bu değişimi görmez. */
+.ptp-gomulu-kap{position:relative;overflow:hidden;background:#000;pointer-events:none}
+.ptp-gomulu-kap>iframe{position:absolute;left:0;top:0;width:100%;height:100%;border:none;
+  display:block;pointer-events:none}
+/* Görünen oynatıcı üstte, hazırlanan yedek onun ARKASINDA durur. Yedek gizlenmez (gizlenen
+   iframe'i tarayıcı yavaşlatır ve arabelleğe alma durur) - yalnızca üsttekinin altında
+   kalır, bu yüzden kullanıcı onu hiç görmez ama tam hızda hazırlanır. */
+.ptp-gomulu-kap>iframe.ptp-yedek{z-index:1}
+.ptp-gomulu-kap>iframe.ptp-aktif{z-index:2}
 /* HATA DÜZELTMESİ (kullanıcı bildirdi: "video oynatılamıyor, ortadaki yuvarlak sürekli
    kalıyor"): Mobil tarayıcılar SESLİ otomatik oynatmayı engeller - gömülü oynatıcı duraklamış
    açılır ve kendi büyük oynat düğmesini gösterir. Dokunuşları tamamen kestiğimiz için kullanıcı
@@ -1999,7 +2020,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-I';
+window.APP_BUILD='2026-09-01-J';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21626,11 +21647,21 @@ window.togglePtVideoFullscreen=function(){
 // DESTEKLENMEYENLER (ve sebebi): textTracks (altyazı), ses pisti ve kalite listesi iframe'in
 // İÇİNDEKİ oynatıcıya aittir; çapraz kaynak kuralı gereği dışarıdan okunamaz. Bu yüzden boş
 // döndürülürler - arayüz o bölümleri kendiliğinden gizler.
-function ptpGomuluMedya(ifr){
+// KÖK SEBEP DÜZELTMESİ (kullanıcı: "geçişte ~1 sn siyah ekran"): Kabuk ESKİDEN doğrudan
+// iframe'in ÜZERİNE kuruluyordu - yani oynatıcının medya elemanı ile YouTube penceresi aynı
+// şeydi. Bu yüzden bölüm değiştirmenin tek yolu, o TEK pencereyi SARMAKTI; sarma da
+// arabelleğe alma süresince görüntüsüz kalıyor ve siyah ekrana yol açıyordu.
+// ARTIK kabuk bir KAPSAYICININ üzerine kuruluyor ve iframe'ler o kapsayıcının içinde
+// değiştirilebiliyor. Oynatıcının geri kalanı (tüm dinleyiciler, kumanda, aralık denetimi)
+// kapsayıcıyla konuştuğu için değişimi hiç görmez; biz ise perde arkasında hazır bekleyen
+// ikinci bir pencereye ANINDA geçebiliyoruz (bkz. ptpYedekHazirla / ptpYedegeGec).
+function ptpGomuluMedya(kap,ilkIfr){
+  var ifr=kap;                       // özellikleri ve olayları taşıyan eleman: KAPSAYICI
+  kap._ptpAktifIfr=ilkIfr||null;     // komutların gideceği, o an GÖRÜNEN pencere
   var D={pos:0,dur:0,vol:1,mut:false,rate:1,duraklad:true,loop:false};
   ifr._ptpGomulu=D;
   function komut(fn,args){
-    try{ifr.contentWindow.postMessage(JSON.stringify({event:'command',func:fn,args:args||[]}),'*');}catch(e){}
+    try{kap._ptpAktifIfr.contentWindow.postMessage(JSON.stringify({event:'command',func:fn,args:args||[]}),'*');}catch(e){}
   }
   ifr._ptpKomut=komut;
   function tanim(ad,al,ver){
@@ -21654,7 +21685,7 @@ function ptpGomuluMedya(ifr){
   tanim('textTracks',function(){return {length:0,addEventListener:function(){},removeEventListener:function(){}};});
   tanim('audioTracks',function(){return {length:0};});
   tanim('buffered',function(){return {length:1,start:function(){return 0;},end:function(){return D.pos;}};});
-  tanim('src',function(){return ifr.getAttribute('src')||'';},function(){/* kaynak iframe'in kendi adresidir */});
+  tanim('src',function(){return (kap._ptpAktifIfr&&kap._ptpAktifIfr.getAttribute('src'))||'';},function(){/* kaynak iframe'in kendi adresidir */});
   ifr.play=function(){komut('playVideo');return Promise.resolve();};
   ifr.pause=function(){komut('pauseVideo');};
   ifr.load=function(){};
@@ -21663,14 +21694,41 @@ function ptpGomuluMedya(ifr){
   // pakette değerleri tazeler ve <video>'nun yayacağı olayların AYNILARINI bu eleman üzerinde
   // tetikleriz - böylece oynatıcının mevcut dinleyicileri hiç değişmeden çalışır.
   function dinle(){
-    try{ifr.contentWindow.postMessage(JSON.stringify({event:'listening',id:'ptp',channel:'widget'}),'*');}catch(e){}
+    try{if(kap._ptpAktifIfr)kap._ptpAktifIfr.contentWindow.postMessage(JSON.stringify({event:'listening',id:'ptp',channel:'widget'}),'*');}catch(e){}
   }
   ifr._ptpDinle=dinle;
+  // GÖRÜNEN PENCEREYİ DEĞİŞTİR - hazır bekleyen yedek öne alındığında çağrılır.
+  // Dışarıya hiçbir olay/dinleyici değişikliği yansımaz; yalnızca komutların ve durum
+  // akışının muhatabı değişir. Kullanıcının ses/hız tercihleri yeni pencereye taşınır -
+  // aksi halde yedek, kurulurken zorunlu olarak sessiz başlatıldığı için ses geri gelmezdi.
+  kap._ptpIframeDegistir=function(yeni,baslangicSn){
+    if(!yeni)return;
+    kap._ptpAktifIfr=yeni;
+    D.duraklad=false;
+    // Yeni pencerenin ilk durum paketi gelene kadar (birkaç yüz ms) eski konum bildirilirdi;
+    // ilerleme çubuğu bu yüzden bir an geriye zıplıyordu. Bilinen başlangıç saniyesi varsa
+    // hemen o yazılır - çubuk doğru yerden devam eder.
+    if(typeof baslangicSn==='number'&&isFinite(baslangicSn)&&baslangicSn>=0)D.pos=baslangicSn;
+    dinle();
+    [120,400,900,1800].forEach(function(ms){setTimeout(function(){if(kap._ptpAktifIfr===yeni)dinle();},ms);});
+    setTimeout(function(){
+      if(kap._ptpAktifIfr!==yeni)return;
+      try{
+        komut('setVolume',[Math.round(D.vol*100)]);
+        komut(D.mut?'mute':'unMute');
+        if(D.rate&&D.rate!==1)komut('setPlaybackRate',[D.rate]);
+      }catch(e){}
+    },260);
+  };
   function olay(ad){try{ifr.dispatchEvent(new Event(ad));}catch(e){}}
   function mesaj(e){
     if(!document.body.contains(ifr))return;
     var host=String(e.origin||'').replace(/^https?:\/\//,'');
     if(!/youtube(-nocookie)?\.com$/.test(host))return;
+    // KRİTİK: Hazırlanan YEDEK pencere de aynı anda durum yayını yapar. Kaynağı süzmezsek
+    // onun konumu (sonraki bölümün başı) AKTİF oynatıcının konumu sanılır; aralık denetimi
+    // yanlış tetiklenir, ilerleme çubuğu zıplar. Yalnızca görünen pencere dinlenir.
+    try{if(!kap._ptpAktifIfr||e.source!==kap._ptpAktifIfr.contentWindow)return;}catch(err){return;}
     var d;try{d=typeof e.data==='string'?JSON.parse(e.data):e.data;}catch(err){return;}
     if(!d)return;
     if(d.event==='onReady'||d.event==='initialDelivery')dinle();
@@ -21786,6 +21844,11 @@ window.PTPlayer=(function(){
     var sonDurum={durakUyari:0,sinirUyari:0,halkaUyari:0,tetikUyari:0};
     S._gecisDenetT=setInterval(function(){
       if(!S||!S.video)return;
+      // Yedek pencereye geçiş sürerken sensör susar: o anda konum/duraklama bilgisi iki
+      // pencere arasında el değiştiriyor, okunan değerler geçici olarak anlamsız. Susmazsa
+      // sensör kendi düzelttiğimiz bir durumu "hata" diye kaydeder (bkz. önceki yanlış alarm
+      // düzeltmesi) ve üstelik eski pencereye play() göndermeye çalışırdı.
+      if(S._gecisKilit)return;
       ptpDuraklatOrtusuGuncelle();
       ptpSesAcDugmesi();
       var simdi=Date.now(),t=0,duraklad=true;
@@ -21905,6 +21968,7 @@ window.PTPlayer=(function(){
         ptpBitisEkraniKaldir();
         try{
           S.aralikIdx=0;S._aralikBitti=false;S._basUygulandi=false;S._hazirlikYapildi=false;
+          try{ptpYedekTemizle();}catch(err2){}   // hazır yedek artık yanlış bölüme ait
           var bas=(S.araliklar&&S.araliklar[0]&&S.araliklar[0].bas)||0;
           S.video.currentTime=bas;
           S.kullaniciDuraklatti=false;
@@ -21970,6 +22034,12 @@ window.PTPlayer=(function(){
       var mevcut=kap.querySelector('.ptp-duraklat-ortu');
       // Bitiş ekranı ya da geçiş örtüsü zaten üstteyse ikinci bir katmana gerek yok.
       if(S._bitisModu||S.freezing){if(mevcut)mevcut.remove();return;}
+      // KULLANICI TALEBİ ("geçiş sonrası uygulama oynatıcısı da çıkmasın"): Yedek pencereye
+      // geçerken eski pencere kapatılırken kısa bir "duraklama" bildirimi gelebiliyor; bu
+      // örtü de kendi büyük ▶ düğmesiyle ekrana düşüyor ve kullanıcı bunu "oynatıcı çıktı"
+      // olarak görüyordu. Geçişin hemen ardındaki bu pencerede örtü konmaz - o an ekranda
+      // zaten yeni bölümün gerçek görüntüsü akıyor, gizlenecek bir şey yok.
+      if(S._gecisKilit||(S._gecisAni&&Date.now()-S._gecisAni<1600)){if(mevcut)mevcut.remove();return;}
       if(duraklad){
         if(mevcut)return;
         var d=document.createElement('div');
@@ -22215,7 +22285,11 @@ window.PTPlayer=(function(){
         }
       }
     }catch(e){}
-    if(S._ortuOncesiKontrol){S._ortuOncesiKontrol=false;showControls();}
+    // KULLANICI TALEBİ ("geçiş sonrası uygulama oynatıcısı çıkmasın"): Örtü kalkınca
+    // kontroller GERİ GETİRİLMEZ. Önceden "geçişten önce açıktıysa geri gelsin" mantığı
+    // vardı; ama kullanıcı için sonuç aynıydı - geçişin hemen ardından ekranda bir oynatıcı
+    // beliriyordu. Artık bayrak yalnızca sıfırlanır; kontrolleri açan tek şey dokunuştur.
+    if(S._ortuOncesiKontrol)S._ortuOncesiKontrol=false;
   }
 
   // KULLANICI TALEBİ ("bir sonraki video için inceden hazırlık yapılsın, veri toplama gibi
@@ -23047,10 +23121,17 @@ window.PTPlayer=(function(){
   // Tek yerde tutulması, iki yolun farklı davranma ihtimalini ortadan kaldırır.
   function ptpAralikUygula(t){
     if(!S||!S.araliklar||!S.araliklar.length)return false;
+    // Yedek oynatıcıya geçiş sürerken hiçbir denetim çalışmaz - bkz. ptpYedegeGec içindeki
+    // "GEÇİŞ KİLİDİ" notu.
+    if(S._gecisKilit)return true;
     var a=S.araliklar[S.aralikIdx];
     if(!a)return false;
     if(a.bit>0&&t>=a.bit){
       if(S.aralikIdx+1<S.araliklar.length){
+        // ÖNCE hazır yedek pencere denenir: sarma yapılmaz, siyah ekran oluşmaz. Yedek
+        // hazır değilse (ör. bölüm 10 saniyeden kısa, ağ yavaş, gömme izni yok) aşağıdaki
+        // eski yol aynen çalışır.
+        if(ptpYedegeGec())return true;
         // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "1:21:30'dan 1:40:30'a geçişte oynatıcı
         // çıkıyor"): Geçiş örtüsü YALNIZCA video→video değişiminde (switchSourceInPlace)
         // uygulanıyordu. BÖLÜMDEN BÖLÜME atlama ise sadece currentTime yazıyor - örtü yok.
@@ -23150,11 +23231,16 @@ window.PTPlayer=(function(){
     if(!S||!S.araliklar||!S.araliklar.length)return;
     S._aralikTimer=setInterval(function(){
       if(!S||!S.video||!S.araliklar.length)return;
+      if(S._gecisKilit)return;   // bkz. ptpYedegeGec "GEÇİŞ KİLİDİ" notu
       var a=S.araliklar[S.aralikIdx];
       if(!a||!(a.bit>0))return;
       var t=0;try{t=S.video.currentTime||0;}catch(e){return;}
       if(t>=a.bit){
         if(S.aralikIdx+1<S.araliklar.length){
+          // AYNI DÜZELTME BURADA DA UYGULANIR: Bu bekçi, ptpAralikUygula'dan BAĞIMSIZ olarak
+          // tek başına da tetiklenebiliyor (durum akışı hiç gelmediğinde). Yedek denemesi
+          // yalnızca bir yere konsaydı geçişlerin bir kısmı yine sarmayla yapılırdı.
+          if(ptpYedegeGec())return;
           ptpGecisOrtusuAc();   // bkz. ptpAralikUygula içindeki aynı düzeltme
           ptpTaniKaydet('bekçi · bölüm '+S.aralikIdx+'→'+(S.aralikIdx+1));
           S.aralikIdx++;
@@ -23208,12 +23294,149 @@ window.PTPlayer=(function(){
       }
     },500);
   }
+  // ── YEDEK OYNATICI: SİYAH EKRANSIZ BÖLÜM GEÇİŞİ ─────────────────────────────────────
+  // KULLANICI TALEBİ ("geçiş esnasında ~1 saniye siyah ekran çıkıyor, engelle"):
+  // Sarma yöntemiyle siyah ekranı YOK ETMEK mümkün değil - YouTube sarma sırasında hiçbir
+  // görüntü vermiyor ve o boşluğu ancak bir örtüyle kapatabiliyorduk (örtünün kendisi de
+  // siyahtı). Sarmayı ORTADAN KALDIRMAK gerekiyordu.
+  // YÖNTEM: Bölüm bitmeden ~10 saniye önce (bkz. ptpAralikUygula içindeki hazırlık koşulu)
+  // ikinci bir gömülü pencere kurulur; sonraki bölümün başlangıcından açılır, oynamaya
+  // başladığı doğrulanır, tam o karede duraklatılır ve GÖRÜNEN pencerenin ARKASINDA bekler.
+  // Bölüm bittiğinde tek yapılan, iki katmanın sırasını değiştirmek: yeni pencere zaten
+  // doğru kareyi gösteriyor, arabelleği dolu ve komut bağlantısı (listening el sıkışması)
+  // ÖNCEDEN kurulmuş durumda.
+  // NOT - daha önce denenip GERİ ALINAN yöntemden farkı: O deneme, iframe'i GEÇİŞ ANINDA
+  // baştan kuruyordu; el sıkışma o an koptuğu için oynatıcı yanıt vermiyor ve örtü 5 saniye
+  // asılı kalıyordu (tanı kayıtlarında "Geçiş zaman aşımına uğradı" olarak görülmüştü).
+  // Burada pencere 10 saniye ÖNCE kuruluyor ve hazır olduğu DOĞRULANMADAN kullanılmıyor;
+  // hazır değilse eski (sarmalı) yola sessizce dönülür - yani en kötü ihtimalde bugünkü
+  // davranış korunur, hiçbir şey bozulmaz.
+  function ptpYedekTemizle(){
+    if(!S)return;
+    try{if(S._yedekMsg)window.removeEventListener('message',S._yedekMsg);}catch(e){}
+    S._yedekMsg=null;
+    try{clearTimeout(S._yedekT);}catch(e){}
+    S._yedekT=null;
+    try{if(S._yedekIfr&&S._yedekIfr.parentNode)S._yedekIfr.parentNode.removeChild(S._yedekIfr);}catch(e){}
+    S._yedekIfr=null;S._yedekHazir=false;S._yedekIdx=-1;S._yedekBas=0;
+  }
+  function ptpYedekHazirla(saniye){
+    try{
+      if(!S||!S.gomulu||!(saniye>=0))return;
+      if(window.D&&D.kesintisizGecis===false)return;   // yönetici kapattıysa hiç kurulmaz
+      var kap=S.video;
+      if(!kap||typeof kap._ptpIframeDegistir!=='function')return;
+      var hedefIdx=S.aralikIdx+1;
+      if(S._yedekIfr&&S._yedekIdx===hedefIdx)return;   // bu bölüm için zaten hazırlanıyor
+      ptpYedekTemizle();
+      var html=(typeof buildVideoEmbedHtml==='function')
+        ?buildVideoEmbedHtml(S.url||'',Math.max(0,Math.floor(saniye)),0):'';
+      if(!html)return;
+      var sar=document.createElement('div');sar.innerHTML=html;
+      var y=sar.querySelector('iframe');
+      if(!y)return;
+      y.removeAttribute('id');y.removeAttribute('style');y.className='ptp-yedek';
+      S._yedekIfr=y;S._yedekIdx=hedefIdx;S._yedekHazir=false;S._yedekBas=saniye;
+      kap.appendChild(y);
+      var komut=function(fn,args){
+        try{y.contentWindow.postMessage(JSON.stringify({event:'command',func:fn,args:args||[]}),'*');}catch(e){}
+      };
+      var dinle=function(){
+        try{y.contentWindow.postMessage(JSON.stringify({event:'listening',id:'ptpYedek',channel:'widget'}),'*');}catch(e){}
+      };
+      var yakalandi=false;
+      S._yedekMsg=function(e){
+        if(!S||S._yedekIfr!==y)return;
+        var host=String(e.origin||'').replace(/^https?:\/\//,'');
+        if(!/youtube(-nocookie)?\.com$/.test(host))return;
+        try{if(e.source!==y.contentWindow)return;}catch(err){return;}
+        var d;try{d=typeof e.data==='string'?JSON.parse(e.data):e.data;}catch(err){return;}
+        if(!d)return;
+        // Gömme izni yoksa (kod 101/150) yedek işe yaramaz - temizlenir, eski yola dönülür.
+        if(d.event==='onError'){ptpYedekTemizle();return;}
+        if(d.event==='onReady'||d.event==='initialDelivery'){dinle();return;}
+        var i=d.info;if(!i)return;
+        // OYNAMAYA BAŞLADIĞI AN duraklat: pencere artık doğru sahnenin gerçek karesini
+        // gösteriyor ve arabelleği dolu. Ardından tam başlangıç saniyesine sarılır (açılış
+        // birkaç yüz milisaniye ileride olabilir) ve yeniden duraklatılır.
+        if(typeof i.playerState==='number'&&i.playerState===1&&!yakalandi){
+          yakalandi=true;
+          komut('mute');
+          komut('pauseVideo');
+          S._yedekT=setTimeout(function(){
+            if(!S||S._yedekIfr!==y)return;
+            komut('seekTo',[saniye,true]);
+            komut('pauseVideo');
+            S._yedekT=setTimeout(function(){
+              if(!S||S._yedekIfr!==y)return;
+              komut('pauseVideo');
+              S._yedekHazir=true;
+            },800);
+          },150);
+        }
+      };
+      window.addEventListener('message',S._yedekMsg);
+      dinle();
+      [300,900,1800,3000].forEach(function(ms){
+        setTimeout(function(){if(S&&S._yedekIfr===y)dinle();},ms);
+      });
+    }catch(e){}
+  }
+  // Hazır yedek varsa ona geçer ve true döner. Hazır değilse false döner - çağıran taraf
+  // eski (örtü + sarma) yolu uygular, yani davranış hiçbir koşulda kötüleşmez.
+  function ptpYedegeGec(){
+    try{
+      if(!S||!S.gomulu||!S._yedekHazir||!S._yedekIfr)return false;
+      if(S._yedekIdx!==S.aralikIdx+1)return false;
+      var kap=S.video,y=S._yedekIfr;
+      if(!kap||typeof kap._ptpIframeDegistir!=='function')return false;
+      var eski=kap._ptpAktifIfr;
+      // GEÇİŞ KİLİDİ: Bu andan itibaren aralık denetimi ve 400 ms'lik bekçi devre dışı.
+      // Aksi halde eski pencere hâlâ "bölüm bitişi" konumunu bildirirken yeni bölüm indeksi
+      // yazılmış olur ve iki denetim, henüz görevi bitmemiş eski pencereye sarma komutu
+      // gönderir - tam da kaçındığımız sarma geri gelirdi.
+      S._gecisKilit=true;
+      S._gecisAni=Date.now();
+      S.aralikIdx++;
+      S._hazirlikYapildi=false;
+      // ÖNCE oynat, SONRA öne al: bir kare sonra öne alındığında pencere çoktan oynuyor
+      // olur; platformun duraklama arayüzü ekrana hiç düşmez.
+      try{y.contentWindow.postMessage(JSON.stringify({event:'command',func:'playVideo',args:[]}),'*');}catch(e){}
+      var gecir=function(){
+        try{
+          if(!S)return;
+          y.className='ptp-aktif';
+          if(eski)eski.className='ptp-yedek';
+          kap._ptpIframeDegistir(y,S._yedekBas);
+          S._yedekIfr=null;S._yedekHazir=false;S._yedekIdx=-1;
+          try{if(S._yedekMsg)window.removeEventListener('message',S._yedekMsg);}catch(e){}
+          S._yedekMsg=null;
+          // Eski pencere biraz gecikmeyle kaldırılır - hemen silmek, tarayıcının katman
+          // birleştirmesiyle aynı kareye denk gelip bir anlık boşluk gösterebiliyordu.
+          setTimeout(function(){
+            try{if(eski&&eski.parentNode)eski.parentNode.removeChild(eski);}catch(e){}
+          },500);
+          ptpTaniKaydet('yedek oynatıcıyla bölüm '+(S.aralikIdx-1)+'→'+S.aralikIdx);
+          try{
+            if(typeof DiagCore!=='undefined'&&DiagCore.kaydet)
+              DiagCore.kaydet('pt_gecis','bilgi','Bölüm geçişi yedek oynatıcıyla yapıldı',
+                {aralikIdx:S.aralikIdx,videoId:S.videoId,
+                 anlami:'Sarma yapılmadı, iki pencere yer değiştirdi - siyah ekran ve platform arayüzü oluşmaz.'});
+          }catch(e){}
+        }catch(e){}
+      };
+      if(window.requestAnimationFrame)requestAnimationFrame(gecir);else setTimeout(gecir,16);
+      clearTimeout(S._gecisKilitT);
+      S._gecisKilitT=setTimeout(function(){if(S)S._gecisKilit=false;},1500);
+      return true;
+    }catch(e){if(S)S._gecisKilit=false;return false;}
+  }
   function ptpSonrakiHazirla(saniye){
     if(!S||!S.url||saniye<=0)return;
     // Gömülü kaynakta (YouTube vb.) adres bir video dosyası değil bir sayfadır; ham bir
-    // <video> elemanına verilmesi anlamsızdır. Orada hazırlık atlanır - geçiş yine yapılır,
-    // yalnızca ısıtma olmaz.
-    if(S.gomulu)return;
+    // <video> elemanına verilmesi anlamsızdır. Orada dosya ısıtması yerine YEDEK OYNATICI
+    // kurulur - geçişin siyah ekransız olmasını sağlayan asıl mekanizma budur.
+    if(S.gomulu){ptpYedekHazirla(saniye);return;}
     try{
       var y=S._hazirlikEl;
       if(!y){
@@ -23748,6 +23971,7 @@ window.PTPlayer=(function(){
       try{
         S.araliklar=(typeof ptAraliklariCoz==='function')?ptAraliklariCoz(hedef.araliklar,hedef.basSure,hedef.bitSure):[];
         S.aralikIdx=0;S._aralikBitti=false;S._basUygulandi=false;S._hazirlikYapildi=false;
+        ptpYedekTemizle();   // yeni videoya geçiliyor - eski videonun yedeği geçersiz
       }catch(e){}
       if(switchSourceInPlace(yeniUrl,hedef.title||'',!!hedef.isLive,hedef.id)){
         try{ptpAralikBekcisiBaslat();}catch(e){}
@@ -24857,11 +25081,18 @@ window.PTPlayer=(function(){
       sar.innerHTML=gomuluHtml;
       var ifr=sar.querySelector('iframe');
       if(ifr){
-        ifr.className='ptp-video';ifr.id='ptpVideo';
-        ifr.setAttribute('data-fit','contain');
-        ifr.style.cssText='width:100%;height:100%;border:none;display:block';
-        video.parentNode.replaceChild(ifr,video);
-        video=ptpGomuluMedya(ifr);
+        // Medya elemanı artık iframe'in KENDİSİ değil, onu barındıran kapsayıcı - böylece
+        // pencere değiştirilebilir hale gelir (bkz. ptpGomuluMedya üzerindeki not).
+        var kap=document.createElement('div');
+        kap.className='ptp-video ptp-gomulu-kap';
+        kap.id='ptpVideo';
+        kap.setAttribute('data-fit','contain');
+        ifr.removeAttribute('id');
+        ifr.removeAttribute('style');
+        ifr.className='ptp-aktif';
+        kap.appendChild(ifr);
+        video.parentNode.replaceChild(kap,video);
+        video=ptpGomuluMedya(kap,ifr);
       }else{gomulu=false;}
     }
     S={
@@ -24944,6 +25175,9 @@ window.PTPlayer=(function(){
           var esle=ptpAralikKonumEsle(d,hedefGecen);
           if(esle){
             hedef=esle.t;S.aralikIdx=esle.idx;S._hazirlikYapildi=false;
+            // Kullanıcı elle başka bir bölüme sardı - hazırlanmış yedek pencere artık YANLIŞ
+            // bölüme ait. Bırakılırsa bir sonraki geçişte hatalı sahneye atlanırdı.
+            try{ptpYedekTemizle();}catch(err2){}
             // Video daha önce bittiyse (bkz. "video bittikten sonra kasma" düzeltmesi -
             // gözetleyici zamanlayıcılar orada durdurulmuştu) ve kullanıcı şimdi geri sardıysa,
             // sınır denetimi yeniden aktif hale getirilir.
@@ -25046,7 +25280,12 @@ window.PTPlayer=(function(){
       // geçiş SESSİZCE sürerken (S.freezing true) bu çağrı ATLANIR - kontrollerin görünürlüğü,
       // kullanıcının kendi son tercihiyle (gösterili/gizli) AYNEN korunur. Gerçek bir ilk açılış
       // veya elle oynat/duraklat gibi durumlarda S.freezing zaten false'tur, davranış değişmez.
-      if(!S.freezing)showControls();
+      // KULLANICI TALEBİ ("geçiş sonrası uygulama oynatıcısı çıkmasın; sadece kullanıcı
+      // ekrana tıklayınca çıksın"): Bu çağrı TAMAMEN kaldırıldı. S.freezing koşulu yetmiyordu
+      // çünkü örtü kalktıktan SONRA gelen bir 'playing' olayı (sarma/arabellek sonrası, yedek
+      // pencereye geçişte, ağ toparlanmasında) kontrolleri yine kendiliğinden açıyordu.
+      // Denetimlerin görünürlüğü artık YALNIZCA kullanıcının dokunuşuyla değişir
+      // (bkz. toggleControls). İlk açılışta .ptp-ov zaten görünür durumda başlar.
       // KULLANICI TALEBİ: Yeni kaynak GERÇEKTEN oynamaya başladı - donmuş kareyi (varsa)
       // yumuşakça kaldır. Böylece kullanıcı hiçbir zaman boş/yüklenen bir kare görmez, kare
       // dolu görüntüden dolu görüntüye akıcı biçimde geçer.
@@ -25060,7 +25299,11 @@ window.PTPlayer=(function(){
     });
     video.addEventListener('canplay',function(){var sp=el('ptpSpin');if(sp)sp.style.display='none';ptpFreezeRelease();});
     video.addEventListener('play',syncUI);
-    video.addEventListener('pause',function(){syncUI();showControls();wakeLock(false);});
+    // AYNI KULLANICI TALEBİ (bkz. 'playing' dinleyicisindeki not): Duraklama, kontrolleri
+    // KENDİLİĞİNDEN açmaz. Gömülü kaynakta duraklama çoğu zaman kullanıcıdan değil
+    // platformdan gelir (arabellek, sarma, bölüm geçişi) - o anlarda oynatıcının aniden
+    // belirmesi, gizlemeye çalıştığımız geçişi ele veriyordu.
+    video.addEventListener('pause',function(){syncUI();wakeLock(false);});
     video.addEventListener('volumechange',function(){if(S)syncUI();});
     // Duraklama örtüsü OLAY anında da güncellenir - 600 ms'lik denetim turunu beklemek,
     // platformun arayüzünün o aralıkta görünmesine yeterdi.
@@ -25526,6 +25769,11 @@ window.PTPlayer=(function(){
       try{var _do=S.root&&S.root.querySelector('.ptp-duraklat-ortu');if(_do)_do.remove();}catch(e){}
       try{var _sa=S.root&&S.root.querySelector('.ptp-ses-ac');if(_sa)_sa.remove();}catch(e){}
       try{clearInterval(S._akisT);}catch(e){}
+      // Yedek oynatıcı penceresi ve onun ileti dinleyicisi de bırakılır - aksi halde her
+      // oynatıcı kapanışında bir pencere ve bir dinleyici birikirdi.
+      try{clearTimeout(S._gecisKilitT);}catch(e){}
+      S._gecisKilit=false;
+      try{ptpYedekTemizle();}catch(e){}
       try{if(S._hazirlikEl){S._hazirlikEl.removeAttribute('src');S._hazirlikEl.load();S._hazirlikEl.remove();}}catch(e){}
       S._hazirlikEl=null;
       clearTimeout(S._prefetchT);S._prefetchT=null;
