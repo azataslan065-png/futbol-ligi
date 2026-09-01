@@ -1105,7 +1105,14 @@ iframe.ptp-video{pointer-events:none}
    Sert kesme, 0,7 saniyelik siyahın bir "sıçrama" gibi hissedilmesine yol açıyordu; kısa bir
    sönme onu kasıtlı bir sahne geçişine benzetir. Siyahın SÜRESİ değişmiyor, sadece bitişi
    yumuşuyor. */
-.ptp-freeze.ptp-freeze-duz{background:#000;opacity:1;transition:none}
+/* ÖLÇÜM DÜZELTMESİ: Bu örtü 'pointer-events:none' idi (temel .ptp-freeze kuralından
+   geliyor). Bunun iki sonucu vardı:
+   1) Teşhis, ekranda en üstte hangi öğenin durduğunu elementFromPoint ile ölçüyor; o
+      fonksiyon dokunuş almayan öğeleri HİÇ GÖRMEZ. Bu yüzden geçiş dökümünde örtü yerine
+      hep '#ptpRot' okunuyor ve "örtü gerçekten üstte mi" sorusu ölçülemiyordu.
+   2) Geçiş sürerken ekrana yapılan dokunuşlar örtünün ALTINA geçiyordu.
+   Örtü artık dokunuş alır: hem ölçülebilir olur hem de geçiş sırasında altına dokunulmaz. */
+.ptp-freeze.ptp-freeze-duz{background:#000;opacity:1;transition:none;pointer-events:auto}
 .ptp-freeze.ptp-freeze-duz.ptp-freeze-sonlan{opacity:0;transition:opacity .22s ease}
 /* Kendi bitiş ekranımız - gömülü oynatıcı duraklatıldığında platformun açtığı arayüzü
    tamamen örter (bkz. ptpBitisEkraniGoster). Örtünün ÜSTÜNDE durur. */
@@ -2063,7 +2070,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-01-S';
+window.APP_BUILD='2026-09-01-T';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22157,13 +22164,33 @@ window.PTPlayer=(function(){
       if(S._gecisKilit||(S._gecisAni&&Date.now()-S._gecisAni<1600)){if(mevcut)mevcut.remove();return;}
       if(!oynamiyor){
         // Oynatma geri geldi - örtü GECİKMESİZ kalkar ve sayaç sıfırlanır.
+        // Ayrıca "ilk oynatma gerçekleşti" işaretlenir: bundan sonra 500 ms'lik titreme
+        // eşiği devreye girer (bkz. aşağıdaki açılış notu).
+        S._ilkOynatmaOldu=true;
         S._ortsuzBas=0;
         if(mevcut)mevcut.remove();
         return;
       }
-      // Durum 500 ms'den kısa sürdüyse henüz örtme - kısa sıçramalarda ekran titremesin.
-      if(!S._ortsuzBas)S._ortsuzBas=Date.now();
-      if(Date.now()-S._ortsuzBas<500){if(mevcut)mevcut.remove();return;}
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // TANI DÖKÜMÜNDEN BULUNDU (kullanıcı: "İLK GİRİŞTE YouTube butonları görünüyor"):
+      //   102ms yt=-  drtOrt0     ← örtü YOK
+      //   601ms yt=3  drtOrt0     ← örtü YOK, YouTube yükleniyor ve arayüzünü açıyor
+      //  1206ms yt=3  drtOrt1     ← örtü nihayet kondu
+      // Yani açılışta ekran 1,2 saniye boyunca tamamen açıkta kalıyor. Sebep, aşağıdaki
+      // 500 ms'lik bekleme eşiği: onu "kısa sıçramalarda ekran titremesin" diye koymuştum.
+      // O gerekçe OYNATMA SIRASINDA doğru (yarım saniyelik bir arabellek için ekranı
+      // karartmak abes olurdu), ama AÇILIŞTA yanlış: orada bekleyecek bir şey yok, oynatma
+      // henüz hiç başlamamış - beklemek doğrudan YouTube'un açılış arayüzünü göstermek demek.
+      // ÇÖZÜM: Eşik yalnızca oynatma BİR KEZ başladıktan sonra uygulanır. İlk oynatmaya kadar
+      // örtü gecikmesiz konur ve ilk kare akana kadar kalkmaz.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      if(!S._ilkOynatmaOldu){
+        if(!mevcut)S._ortsuzBas=0;      // eşiği atla
+      }else{
+        // Durum 500 ms'den kısa sürdüyse henüz örtme - kısa sıçramalarda ekran titremesin.
+        if(!S._ortsuzBas)S._ortsuzBas=Date.now();
+        if(Date.now()-S._ortsuzBas<500){if(mevcut)mevcut.remove();return;}
+      }
       // Arabelleğe alma (3) ya da henüz başlamamış (-1) durumda ▶ değil DÖNEN HALKA gösterilir:
       // orada beklenen şey kullanıcının bir şeye basması değil, verinin gelmesidir. Yanlış
       // simge kullanıcıyı "basayım mı?" diye tereddütte bırakıyordu.
