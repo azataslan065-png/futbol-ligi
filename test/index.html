@@ -2123,7 +2123,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-A';
+window.APP_BUILD='2026-09-03-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -26496,7 +26496,30 @@ window.PTPlayer=(function(){
       }catch(e){}
     }
     beat();
+    // KULLANICI BİLDİRDİ ("kumandadaki video ilerleme çubuğu anlık değil"):
+    // Nabız 4 saniyede bir atıyordu; çubuk da ancak o sıklıkta güncelleniyordu. Bu, kanal
+    // adı/ses gibi YAVAŞ değişen alanlar için makul ama KONUM için çok seyrek.
+    // ÇÖZÜM: İki ayrı tur. AĞIR tur (kanal listesi, kalite, altyazı, ses parçaları) 4 saniyede
+    // bir kalır - onları sıklaştırmak boşuna veri yazmak olurdu. HAFİF tur (konum, süre,
+    // duraklama durumu) saniyede bir atıyor ve YALNIZCA değişen alanları yazıyor.
     S.remoteHeartbeatT=setInterval(beat,4000);
+    clearInterval(S.remoteHafifT);
+    S.remoteHafifT=setInterval(function(){
+      try{
+        if(!S||!S.video||S.isLive)return;
+        var _p=null,_d=null,_ar=false;
+        if(isFinite(S.video.currentTime)){
+          var _tp=ptpToplamAralikDurumu(S.video.duration,S.video.currentTime||0);
+          if(_tp){_p=Math.floor(_tp.gecen);_d=Math.floor(_tp.toplam);_ar=true;}
+          else{_p=Math.floor(S.video.currentTime);_d=isFinite(S.video.duration)?Math.floor(S.video.duration):null;}
+        }
+        var _dk=false;try{_dk=!!S.video.paused;}catch(e){}
+        var _imza=_p+'/'+_d+'/'+(_dk?1:0);
+        if(S._hafifImza===_imza)return;      // değişmediyse yazma
+        S._hafifImza=_imza;
+        firebase.database().ref(base+'/session').update({pos:_p,dur:_d,aralikli:_ar,duraklad:_dk,ts:Date.now()});
+      }catch(e){}
+    },1000);
     // Bu oturuma yönelik uzaktan komutları dinle (bkz. takeoverAsRemoteController).
     try{
       // HATA DÜZELTMESİ (kullanıcı bildirdi: "kanal ilerletme tuşu çalışmıyor" - KÖK SEBEP):
@@ -26672,6 +26695,10 @@ window.PTPlayer=(function(){
   function stopRemoteHeartbeat(){
     if(!S)return;
     if(S.remoteHeartbeatT){clearInterval(S.remoteHeartbeatT);S.remoteHeartbeatT=null;}
+    // Hafif tur da durdurulmalı - aksi halde oynatıcı kapandıktan sonra saniyede bir
+    // boşuna yazmaya devam ederdi.
+    if(S.remoteHafifT){clearInterval(S.remoteHafifT);S.remoteHafifT=null;}
+    S._hafifImza=null;
     if(S.remoteCmdRef&&S.remoteCmdHandler){try{S.remoteCmdRef.off('child_added',S.remoteCmdHandler);}catch(e){}}
     var base=remoteBasePath();
     if(base&&typeof firebase!=='undefined'){

@@ -1353,7 +1353,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-A';
+window.APP_BUILD='2026-09-03-B';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1599,6 +1599,26 @@ db.ref('globalAdminSettings').on('value',function(snap){
   // mevcut TV kategorileri kaybolmaz. Bir kez yazıldıktan sonra bu türetme devreye girmez.
   if(g.tvCategories){
     S.tvCategories=g.tvCategories;
+    // KÖK SEBEP DÜZELTMESİ (kullanıcı: "TV sekmesindeki kategoriler video sekmesinde
+    // görünmesin"): Ayrıştırma sırasında TV kategorileri yeni listeye KOPYALANMIŞTI ama eski
+    // ortak listeden (videoCategories) SİLİNMEMİŞTİ - o yüzden video tarafinda görünmeye
+    // devam ediyorlardı. Bu tek seferlik temizlik, videoCategories içinde YALNIZCA canlı
+    // yayınlarda kullanılan kategorileri ayıklar. Hem canlıda hem videoda kullanılan ya da
+    // hiç kullanılmayan kategorilere DOKUNULMAZ - yöneticinin video için açtığı ama henüz
+    // kullanmadığı bir kategori sessizce kaybolmasın.
+    if(!g.kategoriAyristirmaTemiz){
+      var _canliKul={},_videoKul={};
+      (S.videoLinks||[]).forEach(function(v){
+        if(!v||!v.category)return;
+        if(v.isLive)_canliKul[v.category]=1;else _videoKul[v.category]=1;
+      });
+      var _temiz=(S.videoCategories||[]).filter(function(c){return !(_canliKul[c]&&!_videoKul[c]);});
+      if(_temiz.length!==(S.videoCategories||[]).length){
+        S.videoCategories=_temiz;
+        saveVideoCategoryGlobal(_temiz);
+      }
+      db.ref('globalAdminSettings/kategoriAyristirmaTemiz').set(true);
+    }
   }else{
     var _tvSet={},_tvList=[];
     (S.videoLinks||[]).forEach(function(v){
@@ -6953,7 +6973,16 @@ function sendChannelPoolEntryToTv(pid){
     var c=snap.val();if(!c)return;
     // Denetim HER İKİ listeye birden bakar: kaydedilmemiş taslak ve kalıcı liste. Yalnızca
     // birine bakmak, ikisi ayrıştığında yanlış cevap üretiyordu (bkz. removeVideoLink notu).
-    var mevcutListe=(window._editVideoLinks||[]).concat(S.videoLinks||[]);
+    // KÖK SEBEP DÜZELTMESİ (kullanıcı: "TV sekmesinde bir kanal silindiğinde, havuzdan
+    // tekrar eklenince zaten mevcut diyor"):
+    // Denetim İKİ LİSTEYİ BİRLEŞTİRİP tarıyordu. Bu, listeler ayrışırken doğru bir korumaydı;
+    // ama artık silme her iki listeyi de AYNI ANDA güncelliyor (bkz. removeVideoLink notu).
+    // Birleştirme bu durumda koruma sağlamayıp yalnızca RİSK ekliyor: iki listeden HERHANGİ
+    // BİRİNDE bayat bir kayıt kalırsa - örneğin silme sonrası gelen bir senkron paketi eski
+    // S.videoLinks'i geri yazdıysa - "zaten mevcut" yanlış alarmı üretiliyor ve yönetici
+    // kanalı bir daha ekleyemiyor.
+    // DOĞRUSU: O anki GEÇERLİ liste taranır - kaydedilmemiş taslak varsa o, yoksa kalıcı liste.
+    var mevcutListe=(window._editVideoLinks||S.videoLinks||[]);
     var cTitle=(c.title||'').trim().toLowerCase();
     var cUrl=(c.url||'').trim().toLowerCase();
     var zatenVar=mevcutListe.some(function(v){
