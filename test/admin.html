@@ -1353,7 +1353,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-G';
+window.APP_BUILD='2026-09-02-J';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1569,6 +1569,22 @@ function saveGlobalAdminSetting(key,value){
 function saveVideoCategoryGlobal(list){
   return db.ref('globalAdminSettings/videoCategories').set(list);
 }
+// KULLANICI TALEBİ ("TV sekmesindeki kategoriler ayrı, video sekmesindeki kategoriler
+// birbirinden bağımsız ayrı olsun"): Kategori listesi TEKTİ - bir TV kanalı için oluşturulan
+// kategori, video ekleme ekranının açılır listesinde de çıkıyordu (ve tersi). İki liste
+// ayrıldı: canlı yayınlar 'tvCategories', videolar 'videoCategories' kullanır.
+function saveTvCategoryGlobal(list){
+  return db.ref('globalAdminSettings/tvCategories').set(list);
+}
+// İlgili listeyi türe göre verir. Tüm açılır listeler ve kategori oluşturma buradan geçer -
+// böylece iki taraf birbirine karışamaz.
+function katListesi(isLive){
+  return (isLive?(S.tvCategories||[]):(S.videoCategories||[]));
+}
+function katKaydet(isLive,list){
+  if(isLive){S.tvCategories=list;return saveTvCategoryGlobal(list);}
+  S.videoCategories=list;return saveVideoCategoryGlobal(list);
+}
 db.ref('globalAdminSettings').on('value',function(snap){
   var g=snap.val()||{};
   S.adminMenuGroups=g.adminMenuGroups||null;
@@ -1578,6 +1594,18 @@ db.ref('globalAdminSettings').on('value',function(snap){
   S.splitCards=g.splitCards||{};
   S.splitCardChildOrder=g.splitCardChildOrder||{};
   S.videoCategories=g.videoCategories||[];
+  // GEÇİŞ: 'tvCategories' henüz hiç yazılmamışsa (eski kayıtlar), o an CANLI olarak
+  // işaretli kanalların kullandığı kategorilerden türetilir - böylece ayrışma sonrası
+  // mevcut TV kategorileri kaybolmaz. Bir kez yazıldıktan sonra bu türetme devreye girmez.
+  if(g.tvCategories){
+    S.tvCategories=g.tvCategories;
+  }else{
+    var _tvSet={},_tvList=[];
+    (S.videoLinks||[]).forEach(function(v){
+      if(v&&v.isLive&&v.category&&!_tvSet[v.category]){_tvSet[v.category]=1;_tvList.push(v.category);}
+    });
+    S.tvCategories=_tvList;
+  }
   renderVideoLinkAdmin();
   ensureAllCustomTabsDom();
   renderAdminMenuButtons();
@@ -6428,7 +6456,9 @@ function kbEtiketTazele(){
 window.setMaskeSaydamlik=function(v){
   var n=Number(v);
   if(!isFinite(n))n=85;
-  n=Math.max(20,Math.min(100,Math.round(n)));
+  // Alt sınır 20→0. Opaklık negatif olamayacağı için ("%-20"nin görsel karşılığı yoktur)
+  // en düşük anlamlı değer 0'dır - maske tamamen saydam, yani görünmez olur.
+  n=Math.max(0,Math.min(100,Math.round(n)));
   S.maskeSaydamlik=n;
   save().then(function(){kbEtiketTazele();toast('◉ Maske koyuluğu: %'+n);});
 };
@@ -6570,7 +6600,7 @@ function renderVideoLinkAdmin(){
       +'<span style="font-size:.62rem;color:var(--mu);flex-shrink:0">🏷️ Kategori:</span>'
       +'<select onchange="if(this.value===\'__new__\'){promptNewVideoCategory('+i+');}else{setVideoLinkField('+i+',\'category\',this.value);}" style="flex:1;font-size:.7rem;padding:.3rem .5rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif">'
       +'<option value=""'+(!v.category?' selected':'')+'>Kategorisiz</option>'
-      +(S.videoCategories||[]).map(function(cat){return '<option value="'+escHtml(cat)+'"'+(v.category===cat?' selected':'')+'>'+escHtml(cat)+'</option>';}).join('')
+      +katListesi(v.isLive).map(function(cat){return '<option value="'+escHtml(cat)+'"'+(v.category===cat?' selected':'')+'>'+escHtml(cat)+'</option>';}).join('')
       +'<option value="__new__">➕ Yeni Kategori Oluştur...</option>'
       +'</select>'
       +'</div>'
@@ -6628,9 +6658,14 @@ function confirmCatPrompt(){
   var i=_catPromptTargetIdx;
   closeCatPrompt();
   if(!name||i==null)return;
-  S.videoCategories=S.videoCategories||[];
-  var yeniKategori=S.videoCategories.indexOf(name)===-1;
-  if(yeniKategori)S.videoCategories.push(name);
+  // Kategori HANGİ TÜRE ekleniyor? Havuz formunda işaret kutusundan, listede ise satırın
+  // kendi isLive değerinden okunur. Yanlış listeye yazılırsa iki taraf yine karışırdı.
+  var _kIsLive;
+  if(i==='cp'){var _cb=qs('cpIsLive');_kIsLive=!!(_cb&&_cb.checked);}
+  else{var _sv=(window._editVideoLinks||[])[i];_kIsLive=!!(_sv&&_sv.isLive);}
+  var _kList=katListesi(_kIsLive).slice();
+  var yeniKategori=_kList.indexOf(name)===-1;
+  if(yeniKategori)_kList.push(name);
   // KULLANICI TALEBİ (defalarca bildirildi - "kanal havuzu kanal oluşturduğunda kategoriye
   // girilemiyor veya kaydedilemiyor... hâlâ görünmüyor"): Kategori listesi artık ZATEN
   // İZİNLİ, kanıtlanmış 'globalAdminSettings' yolunun bir alanı olarak kaydediliyor (bkz.
@@ -6639,7 +6674,7 @@ function confirmCatPrompt(){
   // başarısız olursa admin'e AÇIKÇA, ekranda görünen bir uyarı gösteriliyor - "sessiz
   // başarısızlık" ihtimali ortadan kalkıyor.
   if(yeniKategori){
-    saveVideoCategoryGlobal(S.videoCategories)
+    katKaydet(_kIsLive,_kList)
       .catch(function(_e){
         DiagSil('confirmCatPrompt->videoCategoriesSync',_e);
         toast('❌ Kategori kaydedilemedi: '+(_e&&_e.message?_e.message:'bağlantı/izin hatası'),'er');
@@ -6817,7 +6852,7 @@ function _channelPoolFormHtml(c){
     +'<div class="field" style="margin-top:.5rem"><span class="lbl">Video/Yayın Linki</span><input id="cpUrl" value="'+(c.url||'').replace(/"/g,'&quot;')+'" placeholder="https://..."/></div>'
     +'<label style="display:flex;align-items:center;gap:.4rem;font-size:.72rem;color:var(--mu);cursor:pointer;margin-top:.6rem"><input type="checkbox" id="cpIsLive" '+(c.isLive?'checked':'')+' style="width:15px;height:15px;cursor:pointer"/>🔴 Bu bir canlı yayın</label>'
     +'<div class="field" style="margin-top:.5rem"><span class="lbl">Kategori</span><select id="cpCategory" onchange="if(this.value===\'__new__\'){promptNewChannelPoolCategory();}" style="width:100%;font-size:.78rem;padding:.5rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif"><option value="">Kategorisiz</option>'
-      +(S.videoCategories||[]).map(function(cat){return '<option value="'+escHtml(cat)+'"'+(c.category===cat?' selected':'')+'>'+escHtml(cat)+'</option>';}).join('')
+      +katListesi(c.isLive).map(function(cat){return '<option value="'+escHtml(cat)+'"'+(c.category===cat?' selected':'')+'>'+escHtml(cat)+'</option>';}).join('')
       +'<option value="__new__">➕ Yeni Kategori Oluştur...</option>'
       +'</select></div>'
     +'<div style="display:flex;align-items:center;gap:.5rem;margin-top:.6rem">'
@@ -17504,9 +17539,10 @@ function listenToLeague(leagueId){
     // kurulurken (aşağıda), o global dinleyicinin doldurduğu değer SİLİNMESİN diye önce
     // yakalanıp hemen sonra GERİ KONUYOR - ligle hiçbir alışverişi yok, sadece S'in bu
     // resetten ETKİLENMEMESİ sağlanıyor.
-    var _korunanVideoKategorileri=S.videoCategories;
+    var _korunanVideoKategorileri=S.videoCategories,_korunanTvKategorileri=S.tvCategories;
     S={leagueName:'Lig',season:'1. Sezon',teams:{},matches:{}};
     S.videoCategories=_korunanVideoKategorileri||[];
+    S.tvCategories=_korunanTvKategorileri||[];   // aynı koruma TV listesi için de şart
     // HATA DÜZELTMESİ (kullanıcı bildirdi: "giriş yapıldığında kayıtlı takımlar
     // görünmüyor, sekme değiştirip geri gelince görünüyor"): renderTeams() zaten senkron
     // sırasında koşulsuz çağrılıyordu, ama veri henüz Firebase'den gelmemişken (kısa bir
@@ -21118,12 +21154,12 @@ function openDiagnosticsManager(){
         +'kapat\u0131r. <b style="color:var(--tx)">D\u00fc\u015f\u00fck de\u011ferler</b> daha az dikkat \u00e7eker ama alttaki '
         +'simge se\u00e7ilebilir hale gelir.'
       +'</div>'
-      +'<input id="msRange" type="range" min="20" max="100" step="5" value="85" '
+      +'<input id="msRange" type="range" min="0" max="100" step="5" value="85" '
         +'oninput="(function(e){var t=document.getElementById(\'msDeger\');if(t)t.textContent=\'%\'+e.value;})(this)" '
         +'onchange="setMaskeSaydamlik(this.value)" '
         +'style="width:100%;min-height:32px;accent-color:var(--ac)"/>'
       +'<div style="display:flex;justify-content:space-between;font-size:.58rem;color:var(--mu);margin-top:-.15rem">'
-        +'<span>%20 (soluk)</span><span>%100 (opak)</span>'
+        +'<span>%0 (g\u00f6r\u00fcnmez)</span><span>%100 (opak)</span>'
       +'</div>'
     +'</div>'
     +'<div id="diagModuleList"></div>'

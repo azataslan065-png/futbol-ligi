@@ -2096,7 +2096,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-G';
+window.APP_BUILD='2026-09-02-J';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -19447,7 +19447,7 @@ function renderVideoScreenList(){
     // TEŞHİS RAPORU DÜZELTMESİ (kontrast): Seçili sekmenin yazısı sabit beyaz yerine temanın
     // vurgu rengine göre hesaplanan --ac-tx; seçili OLMAYAN sekmenin yazısı ise soluk --mu
     // yerine ana metin rengi --tx (soluk gri, koyu yüzey üzerinde 3.90:1 ile eşiğin altındaydı).
-    return `<button onclick="openVideoScreen('${id}')" style="flex:1;padding:.6rem .5rem;border-radius:10px;border:1.5px solid ${on?'var(--ac)':'var(--br)'};background:${on?'var(--ac)':'var(--s2)'};color:${on?'var(--ac-tx,#fff)':'var(--tx)'};font-size:.78rem;font-weight:800;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">${label}</button>`;
+    return `<button onclick="ptVideoSekmeKategoriSifirla();openVideoScreen('${id}')" style="flex:1;padding:.6rem .5rem;border-radius:10px;border:1.5px solid ${on?'var(--ac)':'var(--br)'};background:${on?'var(--ac)':'var(--s2)'};color:${on?'var(--ac-tx,#fff)':'var(--tx)'};font-size:.78rem;font-weight:800;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">${label}</button>`;
   }
   const reordering=!!window._videoScreenReordering;
   // Arama kutusu sadece 2+ öğe varken gösterilir - tek/hiç öğe için aramanın bir anlamı yok,
@@ -19551,6 +19551,13 @@ function saveVideoScreenOrder(tab,ids){
   try{localStorage.setItem('pt_videoOrder_'+tab,JSON.stringify(ids));}catch(e){}
   if(typeof syncProfileToFirebase==='function')syncProfileToFirebase();
 }
+// KULLANICI TALEBİ ("TV ve video sekmesindeki kategoriler birbirinden bağımsız olsun"):
+// Kategori süzgeci tek bir değişkende tutuluyordu ve sekme değiştirince OLDUĞU GİBİ
+// kalıyordu. TV'de "Haber" seçiliyken video sekmesine geçilince süzgeç hâlâ "Haber" oluyor,
+// o kategoride video olmadığı için liste boş görünüyordu - iki sekmenin kategorileri
+// birbirine karışıyormuş gibi hissettiren durumlardan biri buydu.
+// Sekme değişiminde süzgeç sıfırlanır; her sekme kendi kategorileriyle temiz başlar.
+window.ptVideoSekmeKategoriSifirla=function(){window._videoScreenCategory='';};
 window.filterVideoScreenCategory=function(cat){
   window._videoScreenCategory=cat;
   renderVideoScreenList();
@@ -22297,7 +22304,10 @@ window.PTPlayer=(function(){
       if(v===undefined||v===null||v==='')return 85;
       v=Number(v);
       if(!isFinite(v))return 85;
-      return Math.max(20,Math.min(100,v));
+      // ARALIK GENİŞLETİLDİ (kullanıcı isteği): alt sınır 20 değil 0.
+      // Not: Opaklık negatif olamaz - "%-20" gibi bir değerin görsel karşılığı yoktur.
+      // 0 zaten "tamamen saydam", yani maskenin en görünmez hali; alt uç budur.
+      return Math.max(0,Math.min(100,v));
     }catch(e){return 85;}
   }
   function ptpKenarBuyutmeOrani(){
@@ -24887,7 +24897,18 @@ window.PTPlayer=(function(){
     var v=S.video;
     var sure=null;
     if(!S.isLive&&v&&isFinite(v.duration)&&v.duration>0){
-      sure={cur:fmt(v.currentTime),tot:fmt(v.duration),yuzde:(v.currentTime/v.duration)*100};
+      // KÖK SEBEP DÜZELTMESİ (kullanıcı: "adminin girdiği zaman aralığı kumanda ilerleme
+      // çubuğu üzerinden doğru gösterilmiyor"):
+      // Burada süre/yüzde videonun TAMAMINA göre hesaplanıyordu. Oysa oynatıcının kendi
+      // çubuğu (bkz. updateTimes) yöneticinin tanımladığı BÖLÜMLERİN TOPLAMINA göre
+      // hesaplıyor. İki çubuk aynı videoyu farklı ölçeklerde gösteriyordu: 2 saatlik videonun
+      // 1:22:30-1:24:30 aralığı izlenirken oynatıcı "0:15 / 2:00" derken kumanda "1:22:45 /
+      // 2:00:00" diyordu ve çubuk neredeyse hiç ilerlemiyordu.
+      // Artık İKİSİ DE aynı kaynağı kullanıyor.
+      var _tpK=ptpToplamAralikDurumu(v.duration,v.currentTime||0);
+      var _kt=_tpK?_tpK.gecen:(v.currentTime||0);
+      var _kd=_tpK?_tpK.toplam:v.duration;
+      sure={cur:fmt(_kt),tot:fmt(_kd),yuzde:_kd>0?((_kt/_kd)*100):0};
     }
     var g=rcxGovde({
       baslik:'KUMANDA',
@@ -26278,6 +26299,19 @@ window.PTPlayer=(function(){
           }
         };
       }
+      // Konum/süre, yönetici aralıkları varsa onların toplamına çevrilir.
+      var _nb={pos:null,dur:null,aralikli:false};
+      try{
+        if(!S.isLive&&isFinite(S.video.currentTime)){
+          var _tpH=ptpToplamAralikDurumu(S.video.duration,S.video.currentTime||0);
+          if(_tpH){
+            _nb.pos=Math.floor(_tpH.gecen);_nb.dur=Math.floor(_tpH.toplam);_nb.aralikli=true;
+          }else{
+            _nb.pos=Math.floor(S.video.currentTime);
+            _nb.dur=isFinite(S.video.duration)?Math.floor(S.video.duration):null;
+          }
+        }
+      }catch(e){}
       try{
         firebase.database().ref(base+'/session').set({
           sessionId:window._ptRemoteSessionId,
@@ -26300,8 +26334,13 @@ window.PTPlayer=(function(){
           // kontrol edilebilir olmalı; çubuk ayrı, süre ayrı kontrol edilmeli"): Kumandanın
           // ilerleme çubuğunu VE süre yazısını BAĞIMSIZ olarak çizebilmesi için konum/süre
           // ayrı alanlar halinde (ikisi de sadece CANLI OLMAYAN içerikte anlamlıdır).
-          pos:(!S.isLive&&isFinite(S.video.currentTime))?Math.floor(S.video.currentTime):null,
-          dur:(!S.isLive&&isFinite(S.video.duration))?Math.floor(S.video.duration):null,
+          // AYNI DÜZELTME TELEFON KUMANDASI İÇİN (bkz. oynatıcı içi kumandadaki not):
+          // Telefona HAM konum/süre gönderiliyordu; kumanda ekranı da onu çiziyordu. Artık
+          // yöneticinin tanımladığı bölümlerin toplamına çevrilmiş değerler gönderiliyor -
+          // telefondaki çubuk ile TV'deki çubuk artık birebir aynı şeyi gösteriyor.
+          // 'aralikli' bayrağı, geri gelen sarma komutunun nasıl yorumlanacağını belirler
+          // (bkz. cmd.action==='seekto').
+          pos:_nb.pos,dur:_nb.dur,aralikli:_nb.aralikli,
           settings:_agirVeriCache.settings
         }).catch(function(){});
       }catch(e){}
@@ -26424,7 +26463,11 @@ window.PTPlayer=(function(){
         else if(cmd.action==='liveseek'){var _lsSec=Number(cmd.value);if(_lsSec)seekBy(_lsSec);}
         else if(cmd.action==='jump'){
           var pl2=playlist();
-          if(cmd.value>=1&&cmd.value<=pl2.length&&typeof window.openVideoWatch==='function')window.openVideoWatch(pl2[cmd.value-1].id);
+          // Telefondan gelen geçiş, oynatıcının İÇİNDEN yapılmış sayılır: TV tarafındaki sayfa
+          // zaten oynatıcı sayfasıdır, sıfırdan kurulması gerekmez (bkz. openVideoWatch
+          // üzerindeki "yerinde geçiş" notu). Sayfayı yeniden kurmak, TV'de tam ekran/ekran modu
+          // gibi durumların bozulmasına da yol açıyordu.
+          if(cmd.value>=1&&cmd.value<=pl2.length&&typeof window.openVideoWatch==='function')window.openVideoWatch(pl2[cmd.value-1].id,{yerinde:true});
         }
         // KULLANICI TALEBİ ("telefonu kumanda olarak kullanırken TV sekmesinden video
         // sekmesine geçiş yapabilir"): Kumandadaki 📺TV/🎬Video sekme anahtarıyla, o AN
@@ -26434,7 +26477,7 @@ window.PTPlayer=(function(){
         // hedefin kendi kimliğiyle (videoId) gönderilir; hangi türden olursa olsun
         // openVideoWatch zaten doğru şekilde açar.
         else if(cmd.action==='jumpid'){
-          if(cmd.value&&typeof window.openVideoWatch==='function')window.openVideoWatch(String(cmd.value));
+          if(cmd.value&&typeof window.openVideoWatch==='function')window.openVideoWatch(String(cmd.value),{yerinde:true});
         }
         // KULLANICI TALEBİ ("video sekmesindeki video ilerleme çubuğu kumanda üzerinden
         // kontrol edilebilir olmalı"): Kumandadaki ilerleme çubuğu bırakıldığında (sürüklenip
@@ -26442,6 +26485,19 @@ window.PTPlayer=(function(){
         else if(cmd.action==='seekto'){
           var _skT=Number(cmd.value);
           if(S.video&&isFinite(_skT)){
+            // Kumanda artık BÖLÜMLERİN BİRLEŞİK zaman çizelgesinde konum gönderiyor
+            // (bkz. nabız içindeki not). Bu değeri ham video saniyesine çevirmek ZORUNLU -
+            // aksi halde örneğin "0:15" komutu videonun başına sarıyor, izlenen bölümün
+            // 15. saniyesine değil. Hangi bölüme denk geldiği de burada belirlenir; böylece
+            // kullanıcı telefondan doğrudan ikinci/üçüncü bölüme de sarabilir.
+            try{
+              var _esleK=ptpAralikKonumEsle(S.video.duration,_skT);
+              if(_esleK){
+                _skT=_esleK.t;
+                S.aralikIdx=_esleK.idx;S._hazirlikYapildi=false;S._aralikBitti=false;
+                try{ptpYedekTemizle();}catch(e2){}
+              }
+            }catch(e2){}
             S.video.currentTime=Math.max(0,Math.min(_skT,isFinite(S.video.duration)?S.video.duration:_skT));
             // HATA DÜZELTMESİ (kullanıcı bildirdi: "video ileri sarıldığında yüklenmiyor veya
             // oynatılmıyor" - KÖK SEBEP): currentTime SADECE konumu değiştirir, video DURAKLI
