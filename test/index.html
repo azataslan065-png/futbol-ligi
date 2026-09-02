@@ -971,7 +971,10 @@ iframe.ptp-video{pointer-events:none}
 /* Başlangıç değeri. Gerçek konum/boyut ptpGomuluKenarKirp() tarafından, kutunun o anki
    en-boy oranına göre yazılır - bkz. oradaki "letterbox boşluğu" notu. Buradaki kural
    yalnızca ilk kare için geçerlidir. */
-.ptp-gomulu-kap>iframe{position:absolute;left:0;top:0;width:100%;height:100%;border:none;
+/* İç katman - bkz. ptpGomuluIcKatman üzerindeki not. Kapsayıcıyla aynı ölçüdedır;
+   yalnızca "Genişlet" modunda dönüşüm alır. Kırpma (overflow) DIŞTAKİ kapsayıcıda kalır. */
+.ptp-gomulu-ic{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none}
+.ptp-gomulu-kap iframe{position:absolute;left:0;top:0;width:100%;height:100%;border:none;
   display:block;pointer-events:none}
 /* Görünen oynatıcı üstte, hazırlanan yedek onun ARKASINDA durur. Yedek gizlenmez (gizlenen
    iframe'i tarayıcı yavaşlatır ve arabelleğe alma durur) - yalnızca üsttekinin altında
@@ -1176,8 +1179,17 @@ iframe.ptp-video{pointer-events:none}
   justify-content:center;background:rgba(0,0,0,.96);cursor:pointer}
 /* Arabelleğe alma sırasında ▶ değil dönen halka gösterilir - bkz. ptpDuraklatOrtusuGuncelle
    içindeki "yanlış simge" notu. */
+/* KÖK SEBEP DÜZELTMESİ (kullanıcı: "arkadaki dönen beyaz yükleniyor butonu yukarı
+   çapraza doğru hareket ediyordu"):
+   Bu halka, '.ptp-spin' için yazılmış 'ptpSpin' animasyonunu paylaşıyordu. O animasyonun
+   içinde 'translate(-50%,-50%)' var - çünkü .ptp-spin mutlak konumlu ve kendini o kaydırmayla
+   ortalıyor. Oysa .ptp-ort-spin ESNEK KUTUYLA ortalanıyor, kendi kaydırması yok. Animasyon
+   başlar başlamaz ona da aynı kaydırmayı uyguluyor ve halka boyunun yarısı kadar YUKARI SOLA
+   çapraz kayıyordu - hem de geçiş sırasında hareket ediyormuş gibi görünüyordu.
+   ÇÖZÜM: Bu halkaya kendi animasyonu verildi - yalnızca döndürür, konum değiştirmez. */
+@keyframes ptpOrtSpin{to{transform:rotate(360deg)}}
 .ptp-ort-spin{width:40px;height:40px;border-radius:50%;border:3px solid rgba(255,255,255,.25);
-  border-top-color:#fff;animation:ptpSpin .8s linear infinite}
+  border-top-color:#fff;animation:ptpOrtSpin .8s linear infinite}
 .ptp-duraklat-ortu .ic{width:64px;height:64px;border-radius:50%;background:rgba(0,0,0,.55);
   display:flex;align-items:center;justify-content:center;font-size:1.6rem;color:#fff}
 /* Gömülü video SESSİZ başlar (bkz. mute=1 notu) - sesi açmak kullanıcı dokunuşu gerektirir
@@ -2111,7 +2123,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-X';
+window.APP_BUILD='2026-09-03-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22009,7 +22021,7 @@ window.PTPlayer=(function(){
         if(S.gomulu&&S.video&&S.video._ytState===2&&!S.freezing&&!S._bitisModu
            &&!S.root.querySelector('.ptp-duraklat-ortu')){
           var _mm=(S.root.querySelector('#ptpRot')||S.root).querySelector('.ptp-merkez-maske');
-          if(!_mm||!_mm.classList.contains('ptp-mm-on'))ptpMerkezMaske('duraklat');
+          if(_mm)ptpMerkezMaske();   // maske kaldırıldı - kalıntı varsa temizlenir
         }
       }catch(e){}
       ptpSesAcDugmesi();      // eski sürümden kalan yüzen düğme varsa temizler
@@ -22205,94 +22217,17 @@ window.PTPlayer=(function(){
   // ileride farklı bir platform için geçici bir maske gerekirse tek yerden açılabilsin.
   function ptpChromeMaskeAc(){}
   function ptpChromeMaskeKapat(){}
-  // Merkezdeki platform parlamasını kapatan küçük maske - bkz. ifr.play/ifr.pause üzerindeki not.
-  // Boyutu kutunun kısa kenarına göre ölçeklenir: platformun simgesi de oynatıcı boyutuyla
-  // birlikte büyüyüp küçüldüğü için sabit piksel değeri küçük ekranda taşar, büyükte yetmezdi.
-  // Kabuk (ptpGomuluMedya) bu modülün DIŞINDA tanımlı olduğu için pencere üzerinden açılır.
-  function ptpMerkezMaske(simge){
+  // MERKEZ MASKESİ KALDIRILDI (kullanıcı: "işe yaramıyor, onu da kaldır"):
+  // Amacı platformun ortadaki oynat/duraklat simgesini örtmekti. Simge merkeze yapışık
+  // olduğu için kenar kırpmayla dışarı itilemiyor, örtmek de ekranda başka bir leke bırakıyordu.
+  // Kullanıcı bu takası istemediğini belirtti - özellik ve yönetici ayarı kaldırıldı.
+  // Fonksiyon, eski bir önbellekten çağrılması ihtimaline karşı kaldı ama artık yalnızca
+  // ekranda kalmış bir maske varsa onu TEMİZLER.
+  function ptpMerkezMaske(){
     try{
-      if(!S||!S.gomulu||!S.root)return;
-      var kap=S.root.querySelector('#ptpRot')||S.root;
-      // ══════════════════════════════════════════════════════════════════════════════════
-      // %0 = MASKE TAMAMEN KAPALI (kullanıcı: "%0'da gözle görünüyor"):
-      // Önceden %0'da eleman yine oluşturuluyor, yalnızca saydam yapılıyordu. Saydam bir
-      // eleman "görünmez" olmalıydı ama tarayıcının katman birleştirmesi, kenar yumuşatması
-      // ve backdrop-filter kalıntıları yüzünden yine de hafif bir iz bırakabiliyor.
-      // Artık %0'da eleman DOM'dan TAMAMEN KALDIRILIYOR - geriye çizilecek hiçbir şey kalmıyor.
-      // TEŞHİS DEĞERİ: Bundan sonra %0'da ekranın ortasında hâlâ bir simge görünüyorsa,
-      // o KESİNLİKLE platformun kendi simgesidir - bizim çizdiğimiz bir şey değildir.
-      // ══════════════════════════════════════════════════════════════════════════════════
-      var _bo=ptpMaskeBoyutOrani();
-      if(_bo<=0){
-        var _eski=kap.querySelector('.ptp-merkez-maske');
-        if(_eski&&_eski.parentNode)_eski.parentNode.removeChild(_eski);
-        clearTimeout(S._merkezMaskeT);
-        return;
-      }
-      var r=kap.getBoundingClientRect();
-      var c=Math.max(24,Math.round(Math.min(r.width,r.height)*(_bo/100)));
-      var m=kap.querySelector('.ptp-merkez-maske');
-      if(!m){
-        m=document.createElement('div');
-        m.className='ptp-merkez-maske';
-        kap.appendChild(m);
-      }
-      m.style.width=c+'px';m.style.height=c+'px';
-      // KULLANICI TALEBİ ("ortadaki oynatıcı için şeffaflık ayarı, %20-%100, yönetici
-      // belirleyecek"): Maskenin koyuluğu yönetici panelinden geliyor.
-      // %100 = tamamen opak (platformun simgesini kesin gizler, ama altındaki görüntüyü de
-      // kapatır). Düşük değerler daha az dikkat çeker ama alttaki simge seçilebilir.
-      // KÖK SEBEP DÜZELTMESİ (kullanıcı: "ortadaki beyaz duraklatma çizgilerini de
-      // şeffaflaştır" + "%0'da gözle görünüyor"):
-      // Koyuluk ayarı yalnızca maskenin ZEMİNİNE uygulanıyordu. Simge (beyaz çubuklar / üçgen)
-      // her zaman TAM beyaz kalıyordu - bu yüzden %0 seçildiğinde zemin kayboluyor ama beyaz
-      // çizgiler ortada durmaya devam ediyordu. Ayar "maskenin tamamı" için geldiğinden,
-      // simgeye de AYNI değer uygulanır; %0'da maskeden geriye hiçbir şey kalmaz.
-      // Koyuluk SABİT: maskenin tek işi platformun simgesini gizlemek; yarı saydam olursa
-      // o işi yapamaz. Ayarlanabilir olan boyuttur.
-      m.style.background='rgba(0,0,0,.92)';
-      // Bulanıklık KOYULUĞA BAĞLI DEĞİL, tam güçte sabittir - amacı zaten "düşük koyulukta
-      // bile simgeyi gizlemek". Koyulukla birlikte azaltmak bu faydayı ortadan kaldırırdı.
-      // Tek istisna %0: orada maskeden geriye HİÇBİR şey kalmamalı, bulanıklık da kapanır.
-      var _bl='blur(18px) saturate(.8)';
-      m.style.backdropFilter=_bl;m.style.webkitBackdropFilter=_bl;
-      // EMOJİ KULLANILMIYOR: ⏸/▶ karakterleri Android'de RENKLİ emoji olarak çiziliyor -
-      // kullanıcının "sarı simge" dediği şey buydu. Simge artık CSS ile çiziliyor; oynatıcının
-      // geri kalanıyla aynı dilde, beyaz ve yalın.
-      // ══════════════════════════════════════════════════════════════════════════════════
-      // KULLANICI TESPİTİ ("bu ikon bizim oynatıcıya ait değil, her türlü ekranda fazladan
-      // bir duraklat tuşu belirecek") - HAKLI VE İLKEYE AYKIRI:
-      // Maskenin işi platformun simgesini ÖRTMEKTİ. Ben üstüne BİR DE kendi simgemi
-      // çizdirmiştim - yani gizlediğim düğmenin yerine başka bir düğme koyuyordum. Oynatıcının
-      // kendi oynat/duraklat düğmesi zaten var ve o yalnızca dokunulduğunda çıkıyor;
-      // buradaki ikinci simge sadece fazlalıktı.
-      // ARTIK MASKE BİR ŞEY ÇİZMEZ - yalnızca altını kapatır. Ekranda beliren fazladan bir
-      // düğme kalmaz.
-      // ══════════════════════════════════════════════════════════════════════════════════
-      m.innerHTML='';
-      m.classList.add('ptp-mm-on');
-      clearTimeout(S._merkezMaskeT);
-      // ══════════════════════════════════════════════════════════════════════════════════
-      // KÖK SEBEP DÜZELTMESİ (kullanıcı: "hiçbir şey değişmiyor, ne perde ne oynatıcı"):
-      // Maske 900 ms sonra kendiliğinden kayboluyordu. Ama platformun DURAKLATMA simgesi bir
-      // "parlama" DEĞİL - video durakladığı sürece ekranda KALICI olarak durur.
-      // Yani maske doğru çalışsa bile 900 ms sonra kalkıyor ve altından platformun simgesi
-      // yeniden çıkıyordu. Kullanıcı ekran görüntüsünü o andan sonra aldığı için koyuluk
-      // ayarının hiçbir etkisi yokmuş gibi görünüyordu - %0 ile %100 arasında fark
-      // görülmemesinin sebebi buydu.
-      // DOĞRUSU: DURAKLATMA maskesi, oynatma yeniden başlayana kadar KALIR. Yalnızca OYNAT
-      // maskesi kısa süreli olmalı - orada platformun gösterdiği şey gerçekten bir parlamadır
-      // ve hemen kaybolur.
-      // ══════════════════════════════════════════════════════════════════════════════════
-      if(simge==='duraklat'){
-        S._maskeKalici=true;      // oynatma dönene kadar durur (bkz. ptpDurumDegisti)
-        return;
-      }
-      S._maskeKalici=false;
-      // Platformun parlaması ~600-800 ms sürüyor; maske ondan biraz daha uzun durur.
-      S._merkezMaskeT=setTimeout(function(){
-        try{m.classList.remove('ptp-mm-on');}catch(e){}
-      },900);
+      if(!S||!S.root)return;
+      var _m=S.root.querySelector('.ptp-merkez-maske');
+      if(_m&&_m.parentNode)_m.parentNode.removeChild(_m);
     }catch(e){}
   }
   window.ptpMerkezMaske=ptpMerkezMaske;
@@ -22324,7 +22259,7 @@ window.PTPlayer=(function(){
       if(!((eski===1&&yeni===2)||(eski===2&&yeni===1)))return;
       if(S.freezing||S._bitisModu)return;
       if(S.root&&S.root.querySelector('.ptp-duraklat-ortu'))return;
-      ptpMerkezMaske(yeni===2?'duraklat':'oynat');
+      ptpMerkezMaske();   // maske kaldırıldı - yalnızca temizlik
     }catch(e){}
   }
   window.ptpDurumDegisti=ptpDurumDegisti;
@@ -22387,26 +22322,7 @@ window.PTPlayer=(function(){
   // ve onu tetikleyen durum değişimi dinleyicisi).
   // ══════════════════════════════════════════════════════════════════════════════════════
   function ptpKenarKaydirmaY(){return 0;}
-  // KULLANICI TALEBİ ("şeffaflık işe yaramadığı için onu kaldırıp yerine büyütme/küçültme
-  // koy"): Maske artık hiçbir şey çizmiyor, yalnızca altını kapatıyor - dolayısıyla önemli
-  // olan ne kadar KOYU olduğu değil, ne kadar YER KAPLADIĞI. Koyuluk sabitlendi (platformun
-  // simgesini kesin gizleyecek düzeyde), boyut yönetici denetimine alındı.
-  // Değer, oynatıcının KISA KENARINA oranla verilir; böylece maske ekran büyüklüğünden
-  // bağımsız olarak aynı görsel oranda kalır - platformun simgesi de oynatıcı boyutuyla
-  // birlikte büyüyüp küçüldüğü için sabit piksel değeri küçük ekranda taşar, büyükte yetmezdi.
-  function ptpMaskeBoyutOrani(){
-    try{
-      var v=(window.D&&D.maskeBoyut);
-      // VARSAYILAN 30 → 18: Platformun ortadaki simgesi ölçüldüğünde oynatıcının kısa
-      // kenarının yaklaşık %9'u kadar. %18, üzerine rahat pay bırakırken maskeyi mümkün olduğunca
-      // küçük tutar - kullanıcı "görünmeyecek kadar küçük olsun" dediği için taban değer
-      // gereksiz büyük tutulmuyor.
-      if(v===undefined||v===null||v==='')return 18;
-      v=Number(v);
-      if(!isFinite(v))return 18;
-      return Math.max(0,Math.min(70,v));
-    }catch(e){return 18;}
-  }
+  function ptpMaskeBoyutOrani(){return 0;}   // maske kaldırıldı
   function ptpKenarBuyutmeOrani(){
     try{
       var v=(window.D&&D.kenarBuyutme);
@@ -22415,6 +22331,33 @@ window.PTPlayer=(function(){
       if(!isFinite(v)||v<0)return PT_KENAR_BUYUTME;
       return Math.min(4,v);
     }catch(e){return PT_KENAR_BUYUTME;}
+  }
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // İÇ KATMAN (kullanıcı: "üçü de çalışsın"):
+  // "Genişlet" modu videonun oranını BOZARAK esnetmeyi gerektiriyor; bunun tek yolu CSS
+  // dönüşümü. Ama dönüşümü DOĞRUDAN iframe'e vermek Android'de onu kendi bileşik
+  // katmanına terfi ettiriyor ve iframe, z-index sırasını yok sayarak bütün kontrollerimizin
+  // üstüne çıkıyordu (T sürümünde yaşanan buydu: üç mod da çalışıyordu çünkü oynatıcı
+  // görünmüyordu).
+  // ÇÖZÜM: Dönüşüm iframe'e değil, onu saran İÇ KATMANA uygulanır. Böylece terfi eden
+  // şey iframe olmaz. Dıştaki kapsayıcı (kırpma kutusu) hiç dokunulmadan kalır - overflow
+  // ondadır, dönüşüm ona verilseydi kırpma sınırı da büyür ve kenar şeritleri geri gelirdi.
+  // RİSK SINIRI: Dönüşüm YALNIZCA "Genişlet" modunda uygulanır. Bir sorun çıkarsa yalnızca
+  // o modda çıkar; Sığdır ve Kırp dönüşümsüz çalışmaya devam eder.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  function ptpGomuluIcKatman(kap){
+    if(!kap)return null;
+    var ic=kap.querySelector(':scope > .ptp-gomulu-ic');
+    if(!ic){
+      ic=document.createElement('div');
+      ic.className='ptp-gomulu-ic';
+      // Var olan iframe'ler iç katmana taşınır - eski oturumlardan kalma yapı da düzelir.
+      var mevcut=[],l=kap.querySelectorAll('iframe');
+      for(var i=0;i<l.length;i++)mevcut.push(l[i]);
+      kap.appendChild(ic);
+      mevcut.forEach(function(f){ic.appendChild(f);});
+    }
+    return ic;
   }
   function ptpGomuluKenarKirp(){
     try{
@@ -22461,7 +22404,9 @@ window.PTPlayer=(function(){
       var VID=16/9,W=r.width,H=r.height,dar=(W/H)<=VID;
       var vw,vh;                                   // videonun ekranda kaplayacağı ölçü
       if(dar){vw=W;vh=W/VID;}else{vh=H;vw=H*VID;}
-      var kirp=(S.fit==='cover'||S.fit==='fill');
+      // 'fill' artık KENDİ yolundan (iç katman esnetmesi) hallediliyor; burada Sığdır
+      // ölçüsünde bırakılır ki esnetme çarpanları doğru taban üzerine uygulansın.
+      var kirp=(S.fit==='cover');
       if(kirp){var sc=Math.max(W/vw,H/vh);vw*=sc;vh*=sc;}
       // Pencere, videonun ölçüsünü KORUYARAK büyütülür: bir eksende videoya tam oturur
       // (o eksen videonun boyutunu belirler), diğer eksende pay eklenir - şeritler o yönden
@@ -22473,6 +22418,38 @@ window.PTPlayer=(function(){
       var st='position:absolute;left:'+L+'px;top:'+T+'px;'
         +'width:'+Math.round(Wi)+'px;height:'+Math.round(Hi)+'px;'
         +'border:none;display:block;pointer-events:none';
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KULLANICI BİLDİRDİ ("video ilk yüklendiğinde veya sahne geçişi sırasında arkadaki
+      // 'yükleniyor' butonu yukarı doğru hareket ediyor") - SEBEBİ BURASI:
+      // Açılışta panel açılma animasyonu yüzünden kutunun ölçüsü birkaç kare boyunca
+      // değişiyor (tanı dökümünde görülüyor: 355x200 → 360x202 → 360x203). Bu tur 200 ms'de
+      // bir çalıştığı için her değişimde iframe yeniden konumlandırılıyor; iframe kutudan
+      // 2,6 kat uzun olduğundan küçük bir ölçü değişikliği bile içerideki halkayı görünür
+      // biçimde KAYDIRIYOR - kullanıcının gördüğü "yukarı hareket" buydu.
+      // ÇÖZÜM: Ölçü OTURANA kadar beklenir - aynı ölçü arka arkaya iki turda okunmadıkça
+      // yazılmaz. İlk yazımda bekleme yoktur (ekran boşuna gecikmesin), yalnızca SONRAKİ
+      // değişikliklerde uygulanır - böylece animasyon sırasında ara ölçüler yazılmaz.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // "Genişlet": video kutuya TAM otursun diye iki eksende AYRI çarpanla esnetilir.
+      // Çarpanlar Sığdır ölçüsüne göre hesaplanır ve İÇ KATMANA uygulanır.
+      var _don='none';
+      if(S.fit==='fill'){
+        var fw,fh;
+        if(dar){fw=W;fh=W/VID;}else{fh=H;fw=H*VID;}
+        _don='scale('+(Math.round((W/fw)*1000)/1000)+','+(Math.round((H/fh)*1000)/1000)+')';
+      }
+      var _ic=ptpGomuluIcKatman(kap);
+      if(_ic&&_ic._ptpDon!==_don){
+        _ic._ptpDon=_don;
+        _ic.style.transformOrigin='50% 50%';
+        _ic.style.transform=_don;
+      }
+      var _olcu=Math.round(W)+'x'+Math.round(H);
+      if(kap._ptpKirpBicem&&kap._ptpSonOlcu!==_olcu){
+        if(kap._ptpBekleyenOlcu!==_olcu){kap._ptpBekleyenOlcu=_olcu;return;}
+      }
+      kap._ptpBekleyenOlcu=null;
+      kap._ptpSonOlcu=_olcu;
       if(kap._ptpKirpBicem===st)return;   // değişmediyse dokunma
       kap._ptpKirpBicem=st;
       var l=kap.querySelectorAll('iframe');
@@ -22826,13 +22803,19 @@ window.PTPlayer=(function(){
       // yükleniyor halkasıdır; ikisi de siyah ekrandan iyidir.
       // ══════════════════════════════════════════════════════════════════════════════════
       clearTimeout(S._ortuGecikmeT);
-      if(S.gomulu){
-        S._ortuGecikmeT=setTimeout(function(){
-          try{if(S&&S._ortuBas)ptpFreezeCapture();}catch(e){}
-        },PT_ORTU_GECIKME);
-      }else{
-        ptpFreezeCapture();
-      }
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KULLANICI TALEBİ ("sahne geçişi siyah ekranını kaldır"):
+      // Gömülü kaynakta geçiş örtüsü ARTIK HİÇ KONMUYOR. Bu örtü, sarma sırasında
+      // platformun arayüzünü gizlemek için vardı; o arayüzün kenar şeritleri artık KENAR
+      // KIRPMA sayesinde zaten görüş alanının dışında (bkz. ptpGomuluKenarKirp). Geriye
+      // yalnızca ortadaki yükleniyor halkası kalıyor - o bir düğme değil ve siyah ekrandan
+      // çok daha az rahatsız edici.
+      // Süre ölçümü (_ortuBas) ve güvenlik ağı zaman aşımı KORUNUYOR - tanı kayıtları ve
+      // "geçiş asılı kaldı" koruması örtüden bağımsız çalışır.
+      // Doğrudan medya kaynaklarında örtü AYNEN KALIYOR: orada donmuş kare gerçekten
+      // yakalanabildiği için siyah değil, videonun son karesi gösteriliyor.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      if(!S.gomulu)ptpFreezeCapture();
       // GÜVENLİK AĞI: Atlama sonrası oynatma hiç geri gelmezse örtü asılı kalmasın. Normal
       // yolda akış ölçümü onu zaten kaldırır; bu yalnızca son çare.
       clearTimeout(S._ortuT);
@@ -23155,7 +23138,7 @@ window.PTPlayer=(function(){
             if(yeni0){
               var eski0=kapE._ptpAktifIfr;
               yeni0.removeAttribute('id');yeni0.removeAttribute('style');yeni0.className='ptp-aktif';
-              kapE.appendChild(yeni0);
+              (ptpGomuluIcKatman(kapE)||kapE).appendChild(yeni0);
               kapE._ptpUrl=S.url;
               kapE._ptpKirpBicem=null;              // yeni pencereye kırpma yeniden yazılsın
               kapE._ptpIframeDegistir(yeni0);
@@ -23468,6 +23451,14 @@ window.PTPlayer=(function(){
     // "Kırp" ile aynı sonucu veriyordu. Artık oranı bozan esnetme iki eksende ayrı ölçek
     // çarpanıyla yapılıyor (bkz. ptpGomuluKenarKirp), yani üçü de gerçekten farklı - canlı
     // yayın kanallarındaki sıranın birebir aynısı.
+    // KULLANICI BİLDİRDİ ("ekran modlarını yeniden düzelt"): Gömülü kaynakta "Genişlet"
+    // (oranı bozarak esnetme) UYGULANAMIYOR - bunu ancak CSS dönüşümü yapabilirdi, o da
+    // Android'de iframe'i üst katmana taşıyıp bütün kontrollerimizi görünmez yapıyordu
+    // (bkz. ptpGomuluKenarKirp üzerindeki 'transform' notu). "Genişlet" döngüde kalırsa
+    // "Kırp" ile aynı sonucu verir ve düğmeye iki kez basmak gerekiyormuş gibi hissettirir.
+    // Gömülüde döngü İKİ mod: her dokunuş görünür bir değişiklik yapar.
+    // ÜÇ MOD DA GERİ GELDİ: "Genişlet" artık iç katman esnetmesiyle gerçekten uygulanıyor
+    // (bkz. ptpGomuluIcKatman), yani üçü de farklı sonuç veriyor.
     var order=['contain','fill','cover'];
     var i=order.indexOf(S.fit);
     S.fit=order[(i+1)%order.length];
@@ -25986,7 +25977,7 @@ window.PTPlayer=(function(){
         ifr.removeAttribute('id');
         ifr.removeAttribute('style');
         ifr.className='ptp-aktif';
-        kap.appendChild(ifr);
+        kap.appendChild(ifr);      // ptpGomuluIcKatman ilk çağrıda iç katmana taşır
         video.parentNode.replaceChild(kap,video);
         kap._ptpUrl=opt.url||'';   // bkz. attachSource: adres değişmedikçe pencere yenilenmez
         video=ptpGomuluMedya(kap,ifr);
