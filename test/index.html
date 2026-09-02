@@ -2096,7 +2096,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-E';
+window.APP_BUILD='2026-09-02-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21886,7 +21886,12 @@ function ptpGomuluMedya(kap,ilkIfr){
       // HİÇ yaymıyordu - yalnızca 'play' vardı - bu yüzden video oynarken bile halka ekranda
       // kalıyordu. Ayrıca 'waiting' yayılıp karşılığı gelmediği için halka bir kez açılınca
       // bir daha kapanmıyordu. Oynatma başladığında ikisi de yayılır.
-      try{ifr._ytState=i.playerState;}catch(e){}   // tanı kaydı için (bkz. ptpTaniKaydet)
+      try{
+        var _eskiSt=ifr._ytState;
+        ifr._ytState=i.playerState;
+        if(_eskiSt!==i.playerState&&typeof window.ptpDurumDegisti==='function')
+          window.ptpDurumDegisti(_eskiSt,i.playerState);
+      }catch(e){}   // tanı kaydı için (bkz. ptpTaniKaydet)
       if(i.playerState===1){olay('playing');olay('canplay');}
       if(i.playerState===3)olay('waiting');
       if(i.playerState===0)olay('ended');
@@ -22203,6 +22208,25 @@ window.PTPlayer=(function(){
   }
   window.ptpMerkezMaske=ptpMerkezMaske;
   // ══════════════════════════════════════════════════════════════════════════════════════
+  // ORTADAKİ SİMGENİN GERÇEK ÇÖZÜMÜ (kaydırmanın neden işe yaramadığı için bkz.
+  // ptpKenarKaydirmaY üzerindeki not):
+  // Simge kalıcı değil - yalnızca oynatma durumu OYNUYOR ↔ DURAKLADI arasında geçtiğinde
+  // bir parlama olarak beliriyor. Arabellek (3), bitiş (0) ya da bölüm geçişi (1→3→1)
+  // bu simgeyi çıkarmaz - o yüzden yalnızca 1↔2 geçişlerinde maske konur. Böylece geçişte
+  // ve video sonunda ekranda beklenmedik bir simge belirmez (kullanıcının önceki şikayeti).
+  // Bir de üstünde başka bir örtü varsa maske hiç konmaz - o örtü zaten her şeyi kapatıyor.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  function ptpDurumDegisti(eski,yeni){
+    try{
+      if(!S||!S.gomulu)return;
+      if(!((eski===1&&yeni===2)||(eski===2&&yeni===1)))return;
+      if(S.freezing||S._bitisModu)return;
+      if(S.root&&S.root.querySelector('.ptp-duraklat-ortu'))return;
+      ptpMerkezMaske(yeni===2?'duraklat':'oynat');
+    }catch(e){}
+  }
+  window.ptpDurumDegisti=ptpDurumDegisti;
+  // ══════════════════════════════════════════════════════════════════════════════════════
   // YAPISAL ÇÖZÜM - PLATFORM ARAYÜZÜNÜ GÖRÜŞ ALANININ DIŞINA TAŞIMA
   //
   // NEDEN GEREKLİ: Bugüne kadarki bütün düzeltmeler TEPKİSELDİ - bir durumu algılayıp üstüne
@@ -22245,22 +22269,22 @@ window.PTPlayer=(function(){
   // KULLANICI TALEBİ ("bunu ben admin ayağından yapacağım"): Oran artık kodda sabit değil.
   // Yönetici panelindeki kaydıraçtan geliyor ve ayarlar senkronuyla anında yayılıyor;
   // 0 verilirse özellik tamamen kapanır (pencere görünen alanla aynı boyutta kalır).
-  // KULLANICI TALEBİ ("ortadaki oynatıcı için yukarı veya aşağı kaydırma yapabilir miyiz,
-  // yönetici ayarında eklenebilir mi"): Platformun ORTADAKİ simgesi merkeze yapışık olduğu
-  // için kenar kırpmayla dışarı itilemez - ama pencerenin tamamını kaydırırsak o simge de
-  // görüş alanının dışına çıkar.
-  // DİKKAT - bu ayarın bir BEDELİ vardir: kenar büyütmenin aksine, kaydırma videoyu da
-  // birlikte taşır. Kutuda boş bant varsa o bant kadarı bedelsizdir; ötesinde görüntünün
-  // bir kenarı kırpılır. Bu yüzden varsayılanı 0'dır ve kararı yöneticiye bırakılır.
-  function ptpKenarKaydirmaY(){
-    try{
-      var v=(window.D&&D.kenarKaydirmaY);
-      if(v===undefined||v===null||v==='')return 0;
-      v=Number(v);
-      if(!isFinite(v))return 0;
-      return Math.max(-45,Math.min(45,v));
-    }catch(e){return 0;}
-  }
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // DİKEY KAYDIRMA KALDIRILDI - GEOMETRİK OLARAK İMKÂNSIZ (kullanıcı: "kaydırma yapıldığında
+  // videonun kendisi de kayıyor, bunu önle"):
+  // Önleyemiyorum çünkü platformun ortadaki simgesi ile videonun MERKEZLERİ AYNI NOKTADA.
+  // Pencereyi kaydırınca ikisi birlikte kayıyor; birini dışarı itip ötekini yerinde tutmak
+  // mümkün değil. Hesap şu (kutu yüksekliği H):
+  //     simge konumu = H/2 + kaydırma        → dışarı çıkması için |kaydırma| > H/2
+  //     videoya kalan yükseklik = H - 2|kaydırma|  → |kaydırma| = H/2 iken SIFIR
+  // Yani simgenin kaybolduğu anda video da tamamen kaybolur. %100'e çıkarmak bunu
+  // değiştirmez, yalnızca kesinleştirir.
+  // YERİNE KONAN ÇÖZÜM: Simge kalıcı değil - yalnızca oynatma DURUMU değiştiğinde (oynat↔
+  // duraklat) bir parlama olarak beliriyor. O anları zaten biliyoruz, dolayısıyla üstünü
+  // küçük bir maskeyle kapatmak yeterli - görüntüyü hiç oynatmadan (bkz. ptpMerkezMaske
+  // ve onu tetikleyen durum değişimi dinleyicisi).
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  function ptpKenarKaydirmaY(){return 0;}
   function ptpKenarBuyutmeOrani(){
     try{
       var v=(window.D&&D.kenarBuyutme);
@@ -22304,10 +22328,8 @@ window.PTPlayer=(function(){
       var sx=1,sy=1;
       if(S.fit==='cover'){var sc=Math.max(W/vw,H/vh);sx=sc;sy=sc;}
       else if(S.fit==='fill'){sx=W/vw;sy=H/vh;}
-      // Dikey kaydırma - yönetici ayarı (bkz. ptpKenarKaydirmaY). Piksel cinsinden verilir
-      // çünkü yüzde, iframe'in KENDİ yüksekliğine göre hesaplanır ve o büyütülmüş olandır.
-      var dy=Math.round(ptpKenarKaydirmaY()/100*H);
-      st+='transform-origin:50% 50%;transform:translateY('+dy+'px) scale('+
+      // Kaydırma yok - bkz. ptpKenarKaydirmaY üzerindeki "geometrik olarak imkânsız" notu.
+      st+='transform-origin:50% 50%;transform:scale('+
           (Math.round(sx*1000)/1000)+','+(Math.round(sy*1000)/1000)+');';
       st+='border:none;display:block;pointer-events:none';
       if(kap._ptpKirpBicem===st)return;   // değişmediyse dokunma
@@ -26576,8 +26598,18 @@ window.PTPlayer=(function(){
     if(prevBtn)prevBtn.disabled=!S.isLive&&i<=0;
     if(nextBtn)nextBtn.disabled=!S.isLive&&(i<0||i>=list.length-1);
   }
-  function switchSourceInPlace(newUrl,newTitle,newIsLive,newVideoId){
+  function switchSourceInPlace(newUrl,newTitle,newIsLive,newVideoId,newAraliklar){
     if(!S)return false;
+    // KÖK SEBEP DÜZELTMESİ (kullanıcı: "kumanda üzerinden videolar arası değişim olmuyor"):
+    // Yeni videonun KENDİ sahne aralıkları var. Eskiden bu alan hiç tazelenmiyordu; yerinde
+    // geçiş yalnızca canlı yayınlarda kullanıldığı (ve orada aralık olmadığı) için fark
+    // edilmemiş. Artık gömülü videolar da bu yoldan geçtiği için tazelenmesi ŞART -
+    // yoksa yeni video, ESKİ videonun saniyelerine hapsolurdu.
+    if(newAraliklar!==undefined){
+      S.araliklar=newAraliklar||[];
+      S.aralikIdx=0;S._aralikBitti=false;S._basUygulandi=false;S._hazirlikYapildi=false;
+      try{ptpYedekTemizle();}catch(e){}
+    }
     // KULLANICI TALEBİ: Kaynak değişmeden HEMEN ÖNCE, o an ekranda olan kareyi dondurup
     // üste koy - bkz. ptpFreezeCapture üzerindeki uzun not. Bu satırın attachSource()'tan
     // ÖNCE çalışması ŞART: video.src DEĞİŞMEDEN yakalanan kare, geçişten hemen önceki GERÇEK
@@ -26654,7 +26686,7 @@ window.PTPlayer=(function(){
     if(!toplam){showToastMsg('❌ Önce bir süre girin (saat/dakika/saniye)');return;}
     seekBy(yon==='back'?-toplam:toplam);
   }
-  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,switchSourceInPlace:switchSourceInPlace,isActive:function(){return !!S;}};
+  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,switchSourceInPlace:switchSourceInPlace,isActive:function(){return !!S;},isEmbedded:function(){return !!(S&&S.gomulu);}};
 })();
 
 window.openVideoWatch=function(videoId){
@@ -26689,8 +26721,23 @@ window.openVideoWatch=function(videoId){
   // kanal izleniyorsa VE yeni hedef de aynı türdeyse (doğrudan medya/m3u8), oynatıcının DOM'u
   // HİÇ YIKILIP YENİDEN KURULMUYOR - native tam ekran/döndürme kilidi TAMAMEN DOKUNULMADAN,
   // sadece video kaynağı değişiyor.
-  if(window.PTPlayer&&PTPlayer.isActive()&&document.getElementById('ptPlayerHost')&&ptIsDirectMediaUrl(urlOnceden)&&typeof PTPlayer.switchSourceInPlace==='function'){
-    if(PTPlayer.switchSourceInPlace(urlOnceden,v.title||'',!!v.isLive,videoId)){
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KÖK SEBEP DÜZELTMESİ (kullanıcı: "kumanda üzerinden videolar arası değişim olmuyor"):
+  // Yerinde geçiş yolu yalnızca DOĞRUDAN MEDYA adresleri için açıktı (ptIsDirectMediaUrl).
+  // Gömülü kaynaklar (YouTube vb.) bu koşula takılıp uzun yola düşüyordu: tüm sayfa
+  // sıfırdan kuruluyor, oynatıcı yıkılıp yeniden açılıyor - kumandadan yapılan geçişte bu
+  // akış güvenilir çalışmıyor ve ekranda eski video kalıyordu.
+  // Artık gömülü → gömülü geçişler de yerinde yapılıyor: attachSource, adres değiştiğinde
+  // pencereyi yeniden kuruyor (bkz. oradaki not). TÜR DEĞİŞİRSE (gömülü ↔ doğrudan medya)
+  // yerinde geçiş YAPILMAZ - iki türün medya katmanı farklı, uzun yol şarttır.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  var _suAnGomulu=false;
+  try{_suAnGomulu=!!(window.PTPlayer&&PTPlayer.isEmbedded&&PTPlayer.isEmbedded());}catch(e){}
+  var _yeniGomulu=!ptIsDirectMediaUrl(urlOnceden)&&isEmbeddableVideoUrl(urlOnceden);
+  var _turAyni=(_suAnGomulu&&_yeniGomulu)||(!_suAnGomulu&&ptIsDirectMediaUrl(urlOnceden));
+  if(window.PTPlayer&&PTPlayer.isActive()&&document.getElementById('ptPlayerHost')&&_turAyni&&typeof PTPlayer.switchSourceInPlace==='function'){
+    var _yeniAr=ptAraliklariCoz(v.araliklar,v.basSure,v.bitSure);
+    if(PTPlayer.switchSourceInPlace(urlOnceden,v.title||'',!!v.isLive,videoId,_yeniAr)){
       if(window.PTSheetNav)PTSheetNav.mark('videoWatch_'+videoId);
       return;
     }
