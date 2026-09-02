@@ -2096,7 +2096,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-F';
+window.APP_BUILD='2026-09-02-G';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22190,6 +22190,11 @@ window.PTPlayer=(function(){
         kap.appendChild(m);
       }
       m.style.width=c+'px';m.style.height=c+'px';
+      // KULLANICI TALEBİ ("ortadaki oynatıcı için şeffaflık ayarı, %20-%100, yönetici
+      // belirleyecek"): Maskenin koyuluğu yönetici panelinden geliyor.
+      // %100 = tamamen opak (platformun simgesini kesin gizler, ama altındaki görüntüyü de
+      // kapatır). Düşük değerler daha az dikkat çeker ama alttaki simge seçilebilir.
+      m.style.background='rgba(0,0,0,'+(ptpMaskeSaydamlik()/100)+')';
       // EMOJİ KULLANILMIYOR: ⏸/▶ karakterleri Android'de RENKLİ emoji olarak çiziliyor -
       // kullanıcının "sarı simge" dediği şey buydu. Simge artık CSS ile çiziliyor; oynatıcının
       // geri kalanıyla aynı dilde, beyaz ve yalın.
@@ -22285,6 +22290,16 @@ window.PTPlayer=(function(){
   // ve onu tetikleyen durum değişimi dinleyicisi).
   // ══════════════════════════════════════════════════════════════════════════════════════
   function ptpKenarKaydirmaY(){return 0;}
+  // Merkez maskesinin koyuluğu (%20-%100) - yönetici panelinden gelir, varsayılan %85.
+  function ptpMaskeSaydamlik(){
+    try{
+      var v=(window.D&&D.maskeSaydamlik);
+      if(v===undefined||v===null||v==='')return 85;
+      v=Number(v);
+      if(!isFinite(v))return 85;
+      return Math.max(20,Math.min(100,v));
+    }catch(e){return 85;}
+  }
   function ptpKenarBuyutmeOrani(){
     try{
       var v=(window.D&&D.kenarBuyutme);
@@ -24645,7 +24660,12 @@ window.PTPlayer=(function(){
   function ptpSonrakiVarsaGec(){
     try{
       if(!S||S.isLive)return false;
-      if(!pref('autoplay',true))return false;
+      // KULLANICI TALEBİ ("video sekmesindeki izlenen video bittiğinde sonrakine geçmesin"):
+      // Otomatik geçiş artık VARSAYILAN OLARAK KAPALI. Önceden pref('autoplay') varsayılanı
+      // true idi; yani kullanıcı hiçbir şey seçmemişse video bitince kendiliğinden bir sonrakine
+      // atlıyordu. İzleyici, seçtiği videoyu izleyip bitirmek istiyor - devamını kendisi seçer.
+      // Ayarı AÇIKÇA açmış olanlar için davranış değişmez.
+      if(!pref('autoplay',false))return false;
       var list=playlist(false);
       var i=list.findIndex(function(x){return x.id===S.videoId;});
       if(i<0||i>=list.length-1)return false;
@@ -24847,7 +24867,9 @@ window.PTPlayer=(function(){
     var pl=playlist();
     if(idx<0||idx>=pl.length)return;
     closeChannelList();
-    if(typeof window.openVideoWatch==='function')window.openVideoWatch(pl[idx].id);
+    // Oynatıcının İÇİNDEN yapılan geçiş - burada yerinde geçiş DOĞRUDUR: sayfa zaten
+    // oynatıcı sayfası, yenilenmesi gereken bir içerik yok (bkz. openVideoWatch üzerindeki not).
+    if(typeof window.openVideoWatch==='function')window.openVideoWatch(pl[idx].id,{yerinde:true});
   }
   // KULLANICI TALEBİ ("kanal listesini örnek olarak böyle tasarla" - paylaşılan EPG referansı
   // + "kumanda tasarımı kötü, yeniden tasarla, sayılar/ileri-geri/ses tuşları olsun"): Tek
@@ -26689,7 +26711,17 @@ window.PTPlayer=(function(){
   return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,switchSourceInPlace:switchSourceInPlace,isActive:function(){return !!S;},isEmbedded:function(){return !!(S&&S.gomulu);}};
 })();
 
-window.openVideoWatch=function(videoId){
+// KÖK SEBEP DÜZELTMESİ (kullanıcı: "kullanıcı video açarken başka bir video açılıyor") -
+// BU HATAYI GEÇEN TUR BEN EKLEDİM:
+// Yerinde geçiş yolunu gömülü kaynaklara da açtım. O yol, oynatıcının kaynağını değiştirip
+// ERKEN ÇIKAR - yani sayfanın geri kalanını (başlık, açıklama, ilgili video listesi) HİÇ
+// yenilemez. Oynatıcının İÇİNDEN yapılan geçişlerde (kumanda, kanal listesi) bu doğrudur
+// ve zaten amacı budur. Ama kullanıcı LİSTEDEN bir videoya dokunduğunda sayfa eski videonun
+// içeriğiyle kalıyor; o eski sayfadaki bir bağlantıya dokunulunca bambaşka bir video açılıyordu.
+// ÇÖZÜM: Yerinde geçiş artık KENDİLİĞİNDEN seçilmiyor - yalnızca çağıran taraf açıkça
+// istediğinde kullanılıyor (yerinde=true). Listeden gelen her dokunuş tam yolu izler ve
+// sayfayı baştan kurar - eski, güvenilir davranış.
+window.openVideoWatch=function(videoId,secenek){
   const v=(D.videoLinks||[]).find(function(x){return x.id===videoId;});
   if(!v){showToast('❌ Video bulunamadı');return;}
   // KULLANICI TALEBİ ("yönetici istediği kanalları şifreli yapabilir... böyle bir sistem
@@ -26735,7 +26767,8 @@ window.openVideoWatch=function(videoId){
   try{_suAnGomulu=!!(window.PTPlayer&&PTPlayer.isEmbedded&&PTPlayer.isEmbedded());}catch(e){}
   var _yeniGomulu=!ptIsDirectMediaUrl(urlOnceden)&&isEmbeddableVideoUrl(urlOnceden);
   var _turAyni=(_suAnGomulu&&_yeniGomulu)||(!_suAnGomulu&&ptIsDirectMediaUrl(urlOnceden));
-  if(window.PTPlayer&&PTPlayer.isActive()&&document.getElementById('ptPlayerHost')&&_turAyni&&typeof PTPlayer.switchSourceInPlace==='function'){
+  var _yerindeIstendi=!!(secenek&&secenek.yerinde);
+  if(_yerindeIstendi&&window.PTPlayer&&PTPlayer.isActive()&&document.getElementById('ptPlayerHost')&&_turAyni&&typeof PTPlayer.switchSourceInPlace==='function'){
     var _yeniAr=ptAraliklariCoz(v.araliklar,v.basSure,v.bitSure);
     if(PTPlayer.switchSourceInPlace(urlOnceden,v.title||'',!!v.isLive,videoId,_yeniAr)){
       if(window.PTSheetNav)PTSheetNav.mark('videoWatch_'+videoId);
