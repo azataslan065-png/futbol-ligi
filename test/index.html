@@ -2111,7 +2111,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-P';
+window.APP_BUILD='2026-09-02-S';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22493,7 +22493,13 @@ window.PTPlayer=(function(){
       // örtünün gizlediği bir hareket yok - gizlediği tek şey YouTube'un arayüzü.
       // Kısa sıçramalarda titremesin diye eşik 220 ms'den 500 ms'ye çıkarıldı; yarım saniyeden
       // kısa duraksamalarda hiçbir şey görünmez.
-      var oynamiyor=(ytDurum===null)?duraklad:(ytDurum!==1);
+      // İKİ KAYNAĞIN İKİSİ DE DİNLENİR: Önceden yalnızca platformun durum akışına (ytDurum)
+      // bakılıyor, o gelmiyorsa 'paused' yedek olarak kullanılıyordu. Ama akış BAYAT kalabilir:
+      // durum hâlâ 1 (oynuyor) derken video gerçekte duraklamış olabilir - o durumda örtü hiç
+      // konmuyor ve platformun kalıcı duraklatma simgesi açıkta kalıyordu.
+      // Artık İKİSİNDEN BİRİ "oynamıyor" diyorsa örtü konur. Yanlış alarmın bedeli kısa bir
+      // örtü; kaçırmanın bedeli ise gizlemeye çalıştığımız arayüzün ekranda kalmasıdır.
+      var oynamiyor=(ytDurum!==null&&ytDurum!==1)||duraklad;
       var kap=S.root.querySelector('#ptpRot')||S.root;
       var mevcut=kap.querySelector('.ptp-duraklat-ortu');
       // Bitiş ekranı ya da geçiş örtüsü zaten üstteyse ikinci bir katmana gerek yok.
@@ -22722,10 +22728,24 @@ window.PTPlayer=(function(){
         }catch(e){}
         ornekler.push((Date.now()-bas)+'ms t='+_t+' yt='+_yt+' drk'+_drk+' ort'+_ort
           +' drtOrt'+_drt+' halka'+_halka+' ov'+_ov+' pe='+_pe
-          +' ust='+_ust+' kose='+_kose+' frz['+_frz+']');
+          +' ust='+_ust+' kose='+_kose+' frz['+_frz+']'
+          // MASKE TEŞHİSİ (kullanıcı: "ayar kaydediliyor ama oynatıcıya işlemiyor"):
+          //   mask = oynatıcının O AN kullandığı koyuluk değeri. Yöneticide seçilenle
+          //          aynı değilse ayar uygulamaya ULAŞMIYOR demektir (senkron/önbellek sorunu).
+          //   mm   = maske elemanı DOM'da mı ve görünür mü (0/1). 0 ise maske HİÇ konmuyordur -
+          //          o zaman koyuluk ayarının görünür bir etkisi olması zaten beklenemez.
+          // Bu iki alan, "ayar mı ulaşmıyor yoksa maske mi konmuyor" sorusunu tek satırda ayırır.
+          +' mask='+(function(){try{return ptpMaskeSaydamlik();}catch(e){return '?';}})()
+          +' mm='+(function(){try{
+              var _x=(S.root.querySelector('#ptpRot')||S.root).querySelector('.ptp-merkez-maske');
+              return _x?(_x.classList.contains('ptp-mm-on')?1:'var-kapali'):0;
+            }catch(e){return '?';}})());
         if(ornekler.length>=30){
           clearInterval(S._taniT);
           DiagCore.kaydet('pt_gecis','bilgi','Geçiş tanı örneklemesi · '+etiket,{
+            // Sürüm de kayda yazılır - "uygulama hangi sürümü çalıştırıyor" sorusunu her
+            // raporda tek bakışta cevaplar; önbellek/eski sürüm şüphesi böylece elenir.
+            surum:(window.APP_BUILD||'?'),
             gomulu:!!S.gomulu,videoId:S.videoId,aralikIdx:S.aralikIdx,
             ornekler:ornekler,
             anlami:'Geçişten sonraki 3 saniye, 100 ms aralıklarla. Sütunlar: '
