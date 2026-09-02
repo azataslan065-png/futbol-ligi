@@ -2111,7 +2111,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-N';
+window.APP_BUILD='2026-09-02-P';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22002,6 +22002,16 @@ window.PTPlayer=(function(){
       if(S._gecisKilit)return;
       ptpDuraklatOrtusuGuncelle();
       ptpGomuluKenarKirp();   // kenar şeritlerini görüş alanı dışında tut
+      // GÜVENCE: Oynatıcı duraklamış durumdaysa maske ekranda OLMALI. Durum bildirimi
+      // kaçırıldıysa (paket düşmesi, sekme arka plana alındı vb.) bu tur onu geri koyar -
+      // böylece platformun kalıcı duraklatma simgesi hiçbir koşulda açıkta kalmaz.
+      try{
+        if(S.gomulu&&S.video&&S.video._ytState===2&&!S.freezing&&!S._bitisModu
+           &&!S.root.querySelector('.ptp-duraklat-ortu')){
+          var _mm=(S.root.querySelector('#ptpRot')||S.root).querySelector('.ptp-merkez-maske');
+          if(!_mm||!_mm.classList.contains('ptp-mm-on'))ptpMerkezMaske('duraklat');
+        }
+      }catch(e){}
       ptpSesAcDugmesi();      // eski sürümden kalan yüzen düğme varsa temizler
       ptpSesiOtomatikAc();    // oynatma başladıysa sesi kendiliğinden açar
       var simdi=Date.now(),t=0,duraklad=true;
@@ -22267,6 +22277,23 @@ window.PTPlayer=(function(){
          +'<i class="ptp-mm-bar" style="background:'+_sr+';width:'+Math.round(ic*0.28)+'px;height:'+ic+'px"></i>';
       m.classList.add('ptp-mm-on');
       clearTimeout(S._merkezMaskeT);
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KÖK SEBEP DÜZELTMESİ (kullanıcı: "hiçbir şey değişmiyor, ne perde ne oynatıcı"):
+      // Maske 900 ms sonra kendiliğinden kayboluyordu. Ama platformun DURAKLATMA simgesi bir
+      // "parlama" DEĞİL - video durakladığı sürece ekranda KALICI olarak durur.
+      // Yani maske doğru çalışsa bile 900 ms sonra kalkıyor ve altından platformun simgesi
+      // yeniden çıkıyordu. Kullanıcı ekran görüntüsünü o andan sonra aldığı için koyuluk
+      // ayarının hiçbir etkisi yokmuş gibi görünüyordu - %0 ile %100 arasında fark
+      // görülmemesinin sebebi buydu.
+      // DOĞRUSU: DURAKLATMA maskesi, oynatma yeniden başlayana kadar KALIR. Yalnızca OYNAT
+      // maskesi kısa süreli olmalı - orada platformun gösterdiği şey gerçekten bir parlamadır
+      // ve hemen kaybolur.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      if(simge==='duraklat'){
+        S._maskeKalici=true;      // oynatma dönene kadar durur (bkz. ptpDurumDegisti)
+        return;
+      }
+      S._maskeKalici=false;
       // Platformun parlaması ~600-800 ms sürüyor; maske ondan biraz daha uzun durur.
       S._merkezMaskeT=setTimeout(function(){
         try{m.classList.remove('ptp-mm-on');}catch(e){}
@@ -22286,6 +22313,14 @@ window.PTPlayer=(function(){
   function ptpDurumDegisti(eski,yeni){
     try{
       if(!S||!S.gomulu)return;
+      // Oynatma geri döndüğünde, duraklamada bırakılan KALICI maske kaldırılır.
+      if(yeni===1&&S._maskeKalici){
+        S._maskeKalici=false;
+        try{
+          var _mk=(S.root.querySelector('#ptpRot')||S.root).querySelector('.ptp-merkez-maske');
+          if(_mk)_mk.classList.remove('ptp-mm-on');
+        }catch(e){}
+      }
       if(!((eski===1&&yeni===2)||(eski===2&&yeni===1)))return;
       if(S.freezing||S._bitisModu)return;
       if(S.root&&S.root.querySelector('.ptp-duraklat-ortu'))return;
