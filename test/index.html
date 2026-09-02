@@ -1167,8 +1167,11 @@ iframe.ptp-video{pointer-events:none}
   opacity:0;visibility:hidden;transition:opacity .16s ease,transform .16s ease}
 .ptp-merkez-maske.ptp-mm-on{opacity:1;visibility:visible;transform:translate(-50%,-50%) scale(1)}
 /* Simgeler CSS ile çizilir - emoji karakterleri Android'de renkli (sarı) görünüyordu. */
-.ptp-mm-bar{display:inline-block;background:#fff;border-radius:2px;margin:0 3px}
-.ptp-mm-play{display:inline-block;border-style:solid;border-color:transparent transparent transparent #fff;margin-left:12%}
+/* Renk oynatıcının kendi turuncusudur - bkz. ptpMerkezMaske içindeki "beyaz karışıklığı"
+   notu. Gerçek değer satır içinde koyuluk ayarıyla birlikte yazılır; buradakiler yalnızca
+   satır içi değer bir sebeple yazılamazsa devreye giren yedeklerdir. */
+.ptp-mm-bar{display:inline-block;background:#f7a325;border-radius:2px;margin:0 3px}
+.ptp-mm-play{display:inline-block;border-style:solid;border-color:transparent transparent transparent #f7a325;margin-left:12%}
 .ptp-duraklat-ortu{position:absolute;inset:0;z-index:60;display:flex;align-items:center;
   justify-content:center;background:rgba(0,0,0,.96);cursor:pointer}
 /* Arabelleğe alma sırasında ▶ değil dönen halka gösterilir - bkz. ptpDuraklatOrtusuGuncelle
@@ -2108,7 +2111,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-L';
+window.APP_BUILD='2026-09-02-N';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22200,6 +22203,22 @@ window.PTPlayer=(function(){
     try{
       if(!S||!S.gomulu||!S.root)return;
       var kap=S.root.querySelector('#ptpRot')||S.root;
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // %0 = MASKE TAMAMEN KAPALI (kullanıcı: "%0'da gözle görünüyor"):
+      // Önceden %0'da eleman yine oluşturuluyor, yalnızca saydam yapılıyordu. Saydam bir
+      // eleman "görünmez" olmalıydı ama tarayıcının katman birleştirmesi, kenar yumuşatması
+      // ve backdrop-filter kalıntıları yüzünden yine de hafif bir iz bırakabiliyor.
+      // Artık %0'da eleman DOM'dan TAMAMEN KALDIRILIYOR - geriye çizilecek hiçbir şey kalmıyor.
+      // TEŞHİS DEĞERİ: Bundan sonra %0'da ekranın ortasında hâlâ bir simge görünüyorsa,
+      // o KESİNLİKLE platformun kendi simgesidir - bizim çizdiğimiz bir şey değildir.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      var _a=ptpMaskeSaydamlik()/100;
+      if(_a<=0){
+        var _eski=kap.querySelector('.ptp-merkez-maske');
+        if(_eski&&_eski.parentNode)_eski.parentNode.removeChild(_eski);
+        clearTimeout(S._merkezMaskeT);
+        return;
+      }
       var r=kap.getBoundingClientRect();
       var c=Math.max(56,Math.round(Math.min(r.width,r.height)*0.30));
       var m=kap.querySelector('.ptp-merkez-maske');
@@ -22219,7 +22238,6 @@ window.PTPlayer=(function(){
       // her zaman TAM beyaz kalıyordu - bu yüzden %0 seçildiğinde zemin kayboluyor ama beyaz
       // çizgiler ortada durmaya devam ediyordu. Ayar "maskenin tamamı" için geldiğinden,
       // simgeye de AYNI değer uygulanır; %0'da maskeden geriye hiçbir şey kalmaz.
-      var _a=ptpMaskeSaydamlik()/100;
       m.style.background='rgba(0,0,0,'+(_a*0.9)+')';
       // Bulanıklık KOYULUĞA BAĞLI DEĞİL, tam güçte sabittir - amacı zaten "düşük koyulukta
       // bile simgeyi gizlemek". Koyulukla birlikte azaltmak bu faydayı ortadan kaldırırdı.
@@ -22230,9 +22248,19 @@ window.PTPlayer=(function(){
       // kullanıcının "sarı simge" dediği şey buydu. Simge artık CSS ile çiziliyor; oynatıcının
       // geri kalanıyla aynı dilde, beyaz ve yalın.
       var ic=Math.round(c*0.34);
-      // Simgenin rengi de ayara bağlı - bkz. yukarıdaki not. CSS'teki düz beyaz değerin
-      // ÜZERİNE yazıldığı için satır içi tanım şart.
-      var _sr='rgba(255,255,255,'+_a+')';
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KÖK SEBEP DÜZELTMESİ (kullanıcı: "bizim oynatıcı turuncu, o beyaz olan YouTube
+      // oynatıcısı") - BU KARIŞIKLIĞI BEN YARATTIM:
+      // Maskenin simgesini BEYAZ çizmiştim. Platformun kendi simgesi de beyaz. Yani maske,
+      // gizlemesi gereken simgenin ÜZERİNE ONUN AYNISINI çiziyordu - kullanıcı açısından
+      // maske hiç çalışmıyor gibi görünüyordu, çünkü ekranda yine aynı beyaz simge vardı.
+      // Ekran görüntülerinde hangisinin kimin olduğunu ayırt etmek de bu yüzden imkânsızdı.
+      // ÇÖZÜM: Simge artık oynatıcımızın kendi rengiyle - TURUNCU - çiziliyor. Oynatıcının
+      // diğer düğmeleri (▶️/⏸️ emojileri) Android'de bu tonda göründüğü için maske de onlarla
+      // aynı dili konuşur. Ekranda turuncu bir simge görünmesi "bizimki çalışıyor", beyaz bir
+      // simge görünmesi "platformunki açıkta kalmış" demektir - tek bakışta anlaşılır.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      var _sr='rgba(247,163,37,'+_a+')';
       m.innerHTML=(simge==='oynat')
         ? '<i class="ptp-mm-play" style="border-color:transparent transparent transparent '+_sr+';border-width:'+Math.round(ic*0.55)+'px 0 '+Math.round(ic*0.55)+'px '+Math.round(ic*0.92)+'px"></i>'
         : '<i class="ptp-mm-bar" style="background:'+_sr+';width:'+Math.round(ic*0.28)+'px;height:'+ic+'px"></i>'
