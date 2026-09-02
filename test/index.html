@@ -2111,7 +2111,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-02-T';
+window.APP_BUILD='2026-09-02-U';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22438,20 +22438,39 @@ window.PTPlayer=(function(){
       // Ölçekleme kutu MERKEZİNE göre yapılır ve çarpanların ikisi de 1'den büyüktür; yani
       // kenar şeritleri daha da dışarı çıkar, gizleme bozulmaz.
       // ══════════════════════════════════════════════════════════════════════════════════
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KÖK SEBEP DÜZELTMESİ - 'transform' KALDIRILDI (BU HATAYI BEN EKLEDİM):
+      // Ekran modlarını iframe'e 'transform: scale(...)' vererek kurmuştum. Android Chrome'da
+      // DÖNÜŞÜM UYGULANMIŞ ÇAPRAZ-KAYNAKLI bir iframe kendi bileşik katmanına terfi ediyor ve
+      // z-index sırasını YOK SAYARAK üstte çiziliyor. Sonuç: duraklama örtüsü, merkez maskesi
+      // ve KENDİ KONTROLLERİMİZİN tamamı iframe'in ALTINDA kalıyordu.
+      // Tanı dökümü bunu doğruladı: drtOrt=1, mm=1, ov=1 - üçü de DOM'da ve "görünür"
+      // işaretli, ama ekranda hiçbiri yok.
+      // (elementFromPoint ölçümüm de yanıltıcıydı: iframe 'pointer-events:none' olduğu için o
+      //  fonksiyon onu hiç görmez; "en üstte kontrollerimiz" demesi çizim sırası hakkında bir
+      //  şey söylemiyordu. Bu yüzden sorunu daha önce yakalayamadım.)
+      // ÇÖZÜM: Üç mod da YALNIZCA boyut ve konumla kuruluyor, hiç dönüşüm yok.
+      //   Sığdır  : video kutuya sığar; büyütme videonun bulunmadığı boş yönde → kayıpsız
+      //   Kırp    : video kutuyu kaplayana kadar büyütülür, taşan yer kırpılır
+      //   Genişlet: platform videonun oranını her zaman koruduğu için dönüşümsüz esnetme
+      //             MÜMKÜN DEĞİL; Kırp ile aynı davranır. Bu, katmanların çalışması için
+      //             ödenen bedel - oynatıcının hiç görünmemesindense bir modun tekrarı yeğlenir.
+      // ══════════════════════════════════════════════════════════════════════════════════
       var VID=16/9,W=r.width,H=r.height,dar=(W/H)<=VID;
-      var st=dar
-        ? 'position:absolute;left:0;width:100%;top:'+kaydir+'%;height:'+yuzde+'%;'
-        : 'position:absolute;top:0;height:100%;left:'+kaydir+'%;width:'+yuzde+'%;';
-      // Sığdır modunda videonun ekranda kapladığı ölçü:
-      var vw,vh;
+      var vw,vh;                                   // videonun ekranda kaplayacağı ölçü
       if(dar){vw=W;vh=W/VID;}else{vh=H;vw=H*VID;}
-      var sx=1,sy=1;
-      if(S.fit==='cover'){var sc=Math.max(W/vw,H/vh);sx=sc;sy=sc;}
-      else if(S.fit==='fill'){sx=W/vw;sy=H/vh;}
-      // Kaydırma yok - bkz. ptpKenarKaydirmaY üzerindeki "geometrik olarak imkânsız" notu.
-      st+='transform-origin:50% 50%;transform:scale('+
-          (Math.round(sx*1000)/1000)+','+(Math.round(sy*1000)/1000)+');';
-      st+='border:none;display:block;pointer-events:none';
+      var kirp=(S.fit==='cover'||S.fit==='fill');
+      if(kirp){var sc=Math.max(W/vw,H/vh);vw*=sc;vh*=sc;}
+      // Pencere, videonun ölçüsünü KORUYARAK büyütülür: bir eksende videoya tam oturur
+      // (o eksen videonun boyutunu belirler), diğer eksende pay eklenir - şeritler o yönden
+      // dışarı çıkar. Pay hangi eksene eklenirse eklensin video büyümez.
+      var Wi,Hi;
+      if(dar||kirp){Wi=vw;Hi=vh*(1+B);}
+      else{Hi=vh;Wi=vw+B*W;}
+      var L=Math.round((W-Wi)/2),T=Math.round((H-Hi)/2);
+      var st='position:absolute;left:'+L+'px;top:'+T+'px;'
+        +'width:'+Math.round(Wi)+'px;height:'+Math.round(Hi)+'px;'
+        +'border:none;display:block;pointer-events:none';
       if(kap._ptpKirpBicem===st)return;   // değişmediyse dokunma
       kap._ptpKirpBicem=st;
       var l=kap.querySelectorAll('iframe');
