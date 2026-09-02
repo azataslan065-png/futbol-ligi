@@ -1353,7 +1353,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-C';
+window.APP_BUILD='2026-09-03-D';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6955,54 +6955,47 @@ function sendChannelPoolEntryToTv(pid){
     var c=snap.val();if(!c)return;
     // Denetim HER İKİ listeye birden bakar: kaydedilmemiş taslak ve kalıcı liste. Yalnızca
     // birine bakmak, ikisi ayrıştığında yanlış cevap üretiyordu (bkz. removeVideoLink notu).
-    // KÖK SEBEP DÜZELTMESİ (kullanıcı: "kanal silindiğinde havuzdan tekrar eklenince zaten
-    // mevcut diyor"): Denetim İKİ LİSTEYİ BİRLEŞTİRİP tarıyordu. Bu, listeler ayrışırken
-    // doğru bir korumaydı; ama artık silme her iki listeyi de AYNI ANDA güncelliyor
-    // (bkz. removeVideoLink notu). Birleştirme koruma sağlamayıp yalnızca RİSK ekliyor:
-    // iki listeden HERHANGİ BİRİNDE bayat bir kayıt kalırsa "zaten mevcut" yanlış alarmı
-    // üretiliyor ve yönetici kanalı bir daha ekleyemiyor.
-    // DOĞRUSU: O anki GEÇERLİ liste taranır - kaydedilmemiş taslak varsa o, yoksa kalıcı liste.
-    var mevcutListe=(window._editVideoLinks||S.videoLinks||[]);
-    var cTitle=(c.title||'').trim().toLowerCase();
-    var cUrl=(c.url||'').trim().toLowerCase();
     // ══════════════════════════════════════════════════════════════════════════════════
-    // KULLANICI BİLDİRDİ ("zaten mevcut diyor ama kanal Puan Tablosu ve TV/Video Yönetimi
-    // tarafında görünmüyor"):
-    // Denetimi tek listeye indirmek yetmedi - demek ki eşleşen bir kayıt GERÇEKTEN var ama
-    // hiçbir ekranda gösterilmiyor. Bilinen sebepleri: kaydın isLive değeri ters (TV
-    // sekmesinde arıyorsunuz ama kayıt Video tarafında duruyor ya da tersi), başlığı boş
-    // olduğu için listede fark edilmiyor, ya da aynı başlık+adres başka bir kayıtta geçiyor.
-    // Yöneticiye "mevcut" deyip susmak sorunu GİZLİYOR ve kanalı eklenemez hale getiriyordu.
-    // ARTIK: Eşleşen kaydın KİMLİĞİ gösterilir (başlık, hangi sekmede, nasıl eşleştiği) ve
-    // yine de eklemek isteyip istemediği sorulur - hem sebep görünür olur hem yönetici
-    // tıkalı kalmaz.
+    // KÖK SEBEP DÜZELTMESİ (kullanıcı: "kanal silindi, havuzdan tekrar eklenince hâlâ
+    // 'zaten mevcut' diyor - oysa kanal hiçbir yerde görünmüyor"):
+    // Denetim BELLEKTEKİ listelere bakıyordu (_editVideoLinks / S.videoLinks). Bu listeler
+    // silme, kaydetme ve gelen senkron paketleri arasında BAYAT kalabiliyor - hangisinin o an
+    // doğru olduğunu buradan bilmenin bir yolu yok. Sonuç: kanal gerçekte silinmiş olduğu
+    // hâlde bellekte bir kopyası kalıyor ve yönetici onu bir daha ekleyemiyor.
+    // DOĞRUSU: Tek gerçek kaynak VERİTABANIDIR. Denetim, gönderim anında videoLinks'i
+    // doğrudan Firebase'den okur. Bellekteki kopyalara hiç bakılmaz.
+    // TEK İSTİSNA: Yöneticinin HENÜZ KAYDETMEDİĞİ taslak düzenlemesi varsa (_videoLinksDirty)
+    // o taslak veritabanından DAHA YENİDİR ve onun kullanılması gerekir.
     // ══════════════════════════════════════════════════════════════════════════════════
-    var eslesen=null,nasil='';
-    for(var _i=0;_i<mevcutListe.length;_i++){
-      var _v=mevcutListe[_i];if(!_v)continue;
-      if(_v.poolSourceId===pid){eslesen=_v;nasil='aynı havuz kaydından daha önce gönderilmiş';break;}
-      if((_v.title||'').trim().toLowerCase()===cTitle&&(_v.url||'').trim().toLowerCase()===cUrl){
-        eslesen=_v;nasil='başlık ve adres birebir aynı';break;
-      }
-    }
-    if(eslesen){
-      var _yer=eslesen.isLive?'TV (canlı yayın)':'Video';
-      var _bas=(eslesen.title||'').trim()||'(başlık boş)';
-      var _msj='"'+(c.title||'Bu kanal')+'" zaten kayıtlı görünüyor.\n\n'
-        +'Eşleşen kayıt:\n'
-        +'  Başlık : '+_bas+'\n'
-        +'  Sekme  : '+_yer+'\n'
-        +'  Kimlik : '+(eslesen.id||'-')+'\n'
-        +'  Eşleşme: '+nasil+'\n\n'
-        +'Kanalı listede görmüyorsanız yukarıdaki "Sekme" satırına bakın - kayıt diğer '
-        +'sekmede duruyor olabilir.\n\nYine de yeni bir kayıt olarak eklensin mi?';
-      if(!confirm(_msj)){
-        toast('⚠️ Eklenmedi - eşleşen kayıt: '+_bas+' ('+(eslesen.isLive?'TV':'Video')+')','er');
+    var _dbYol=db.ref('leagues/'+_curLeagueId+'/videoLinks');
+    var _listeSoz=(window._videoLinksDirty&&window._editVideoLinks)
+      ? Promise.resolve(window._editVideoLinks)
+      : _dbYol.once('value').then(function(sn){return sn.val()||[];});
+    _listeSoz.then(function(mevcutListe){
+      if(!Array.isArray(mevcutListe))mevcutListe=[];
+      var zatenVar=mevcutListe.some(function(v){
+        if(!v)return false;
+        if(v.poolSourceId===pid)return true;
+        return (v.title||'').trim().toLowerCase()===cTitle&&(v.url||'').trim().toLowerCase()===cUrl;
+      });
+      if(zatenVar){
+        toast('⚠️ '+(c.title||'Bu kanal')+' zaten TV tarafında mevcut, tekrar gönderilmedi','er');
         return;
       }
-    }
-    if(window._editVideoLinks===null)window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
-    window._editVideoLinks.unshift({id:uid(),title:c.title||'',url:c.url||'',isLive:!!c.isLive,category:c.category||'',logo:c.logo||'',createdAt:Date.now(),poolSourceId:pid});
+      // Bellekteki taslak, veritabanının o anki hâliyle hizalanır - aksi halde eklediğimiz
+      // kayıt bayat bir listenin üstüne yazılıp silinmiş kanalları geri getirebilirdi.
+      window._editVideoLinks=JSON.parse(JSON.stringify(mevcutListe));
+      ekle();
+    }).catch(function(_e){
+      // Veritabanı okunamazsa engelleme - yönetici tıkalı kalmasın; en kötü ihtimalle
+      // aynı kanal iki kez eklenir ve elle silinebilir.
+      try{DiagSil('sendChannelPoolEntryToTv->videoLinksOku',_e);}catch(_x){}
+      if(window._editVideoLinks===null)window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
+      ekle();
+    });
+    function ekle(){
+      if(!Array.isArray(window._editVideoLinks))window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
+      window._editVideoLinks.unshift({id:uid(),title:c.title||'',url:c.url||'',isLive:!!c.isLive,category:c.category||'',logo:c.logo||'',createdAt:Date.now(),poolSourceId:pid});
     S.videoLinks=window._editVideoLinks.slice();
     window._videoLinksDirty=true;
     save().then(function(){
@@ -7010,7 +7003,8 @@ function sendChannelPoolEntryToTv(pid){
       toast('✅ '+(c.title||'Kanal')+' TV tarafına gönderildi');
       closeSheet();
       renderVideoLinkAdmin();
-    }).catch(function(e){toast('❌ Gönderilemedi: '+(e&&e.message?e.message:'bağlantı hatası'),'er');});
+      }).catch(function(e){toast('❌ Gönderilemedi: '+(e&&e.message?e.message:'bağlantı hatası'),'er');});
+    }
   });
 }
 function setVideoLinkField(i,field,val){
@@ -7139,6 +7133,7 @@ function removeVideoLink(i){
   // Premium işaretli bir kanal kalıcı olarak kaldırılırsa, ona ait fiyat kaydı da (font/tema
   // silinince yapıldığı gibi) öksüz kalmasın diye temizlenir.
   if(window._editVideoLinks&&window._editVideoLinks[i]&&window._editVideoLinks[i].premium&&S.premiumPrices)delete S.premiumPrices['ch_'+window._editVideoLinks[i].id];
+  var _silinenId=(window._editVideoLinks[i]||{}).id||'';
   window._editVideoLinks.splice(i,1);
   // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "TV/Video sekmesinde kanal kaldırılıyor fakat
   // Puan Tablosu tarafında görünmeye devam ediyor. Havuzda 'ekle' deyince 'zaten mevcut'
@@ -7155,7 +7150,33 @@ function removeVideoLink(i){
   renderVideoLinkAdmin();
   // Silme kalıcı olsun diye hemen yazılır - "Kaydet"i beklemek, yukarıdaki (a) durumunu
   // yeniden üretirdi.
-  save().then(function(){toast('🗑️ Kanal kaldırıldı');});
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KULLANICI BİLDİRDİ ("kanal silindi ama havuzdan eklerken hâlâ mevcut sayılıyor"):
+  // Silme, save() ile TÜM videoLinks dizisini yeniden yazıyordu. Bu yazım, kayıt sırasında
+  // gelen bir senkron paketi bellekteki listeyi tazelerse SİLİNMİŞ kaydı geri getirebilir -
+  // dizinin tamamı yazıldığı için son yazan kazanır ve o son yazan bayat kopya olabilir.
+  // EK GÜVENCE: Silinen kaydın kimliği, yazımdan SONRA veritabanında hâlâ duruyor mu diye
+  // denetlenir; duruyorsa tek tek ayıklanıp yeniden yazılır. Böylece kaydın veritabanında
+  // kalması mümkün olmaz - havuz denetimi de artık doğrudan veritabanını okuduğu için
+  // "zaten mevcut" yanlış alarmı üretilemez.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  save().then(function(){
+    toast('🗑️ Kanal kaldırıldı');
+    if(!_silinenId||!_curLeagueId)return;
+    var yol=db.ref('leagues/'+_curLeagueId+'/videoLinks');
+    yol.once('value').then(function(sn){
+      var liste=sn.val();
+      if(!Array.isArray(liste))return;
+      var kalan=liste.filter(function(v){return !(v&&v.id===_silinenId);});
+      if(kalan.length!==liste.length){
+        yol.set(kalan).then(function(){
+          S.videoLinks=kalan.slice();
+          window._editVideoLinks=JSON.parse(JSON.stringify(kalan));
+          renderVideoLinkAdmin();
+        });
+      }
+    }).catch(function(_e){try{DiagSil('removeVideoLink->artikDenetimi',_e);}catch(_x){}});
+  });
 }
 function saveVideoLinkSettings(){
   var links=(window._editVideoLinks||[]).slice();
