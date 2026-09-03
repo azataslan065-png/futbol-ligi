@@ -1042,6 +1042,16 @@ iframe.ptp-video{pointer-events:none}
   text-shadow:0 1px 2px rgba(0,0,0,.9);margin-bottom:.15rem}
 .ptp-times>span{flex-shrink:0;white-space:nowrap}
 .ptp-times .ptp-sp{flex:1}
+/* Bölüm sınırı çentikleri - yöneticinin tanımladığı bölümler birleşik bir zaman çizelgesinde
+   arka arkaya oynatılıyor. Kullanıcı çubuğa bakınca nerede bölüm değiştiğini göremiyordu;
+   çentikler o sınırları işaretler. Çubuğun kendisiyle etkileşime girmesin diye dokunuş almaz. */
+.ptp-centikler{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);height:10px;
+  pointer-events:none;z-index:2}
+.ptp-centik{position:absolute;top:0;width:2px;height:10px;background:rgba(255,255,255,.75);
+  border-radius:1px;box-shadow:0 0 2px rgba(0,0,0,.6);transform:translateX(-1px)}
+/* Kaçıncı bölümde olunduğunu gösteren küçük rozet - kumandada zaten vardı, oynatıcıda yoktu. */
+.ptp-bolum-rozet{font-size:.6rem;font-weight:800;color:var(--ptp-mu,#cbd5e1);opacity:.85;
+  padding:0 .25rem;flex-shrink:0}
 .ptp-seekwrap{position:relative;height:22px;display:flex;align-items:center}
 .ptp-buf{position:absolute;left:0;height:4px;border-radius:3px;background:rgba(255,255,255,.32);pointer-events:none}
 .ptp-seek{position:relative;width:100%;-webkit-appearance:none;appearance:none;height:4px;border-radius:3px;
@@ -2119,11 +2129,42 @@ setTimeout(_adjustTopbarSpacing,300); // Fontlar/ikonlar geç yüklenirse yükse
 </script>
 <script>
 const FB={apiKey:"AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY",authDomain:"superlig-208e3.firebaseapp.com",databaseURL:"https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app",projectId:"superlig-208e3",storageBucket:"superlig-208e3.firebasestorage.app",messagingSenderId:"879221404148",appId:"1:879221404148:web:daae84d7187311400209a1"};
-const app=firebase.initializeApp(FB);const db=firebase.database();
+const app=firebase.initializeApp(FB);
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   TEST ORTAMI - AYRI VERİTABANI KÖKÜ
+   SORUN: Test kopyası ile yayındaki kopya AYNI veritabanını kullanıyordu. Şeritte de böyle
+   yazıyordu: "buradaki değişiklikler gerçek veritabanına yazılır". Yani test ederken silinen
+   bir kanal gerçekten siliniyor, eklenen gerçekten ekleniyordu - denemek risk taşıyordu.
+   ÇÖZÜM: Adres "/test/" içeriyorsa bütün veri yolları "test/" önekiyle yazılır. Gerçek veri
+   hiç görülmez, hiç dokunulmaz.
+   NEDEN BURADA VE BÖYLE: Kod içinde veriye iki farklı yoldan erişiliyor - hem 'db' değişkeni
+   hem doğrudan firebase.database(). İkisini tek tek değiştirmek yüzlerce satır dokunmak ve
+   birini atlama riski demekti. Firebase her çağrıda AYNI veritabanı nesnesini döndürdüğü
+   için onun 'ref' yöntemini BİR KEZ sarmak yeterli: bundan sonra hangi yoldan çağrılırsa
+   çağrılsın önek kendiliğinden uygulanır. Atlanan çağrı yeri kalamaz.
+   GERÇEK VERİYE ERİŞİM: Sarmalanmamış hâli window._ptGercekRef olarak saklanır - test
+   ortamından gerçek veriyi KOPYALAMAK gerektiğinde kullanılır (yazmak için değil, okumak için).
+   ══════════════════════════════════════════════════════════════════════════════════════════ */
+(function ptTestVeriKoku(){
+  try{
+    var testMi=(location.pathname.indexOf('/test/')!==-1);
+    var d=firebase.database();
+    var orj=d.ref.bind(d);
+    window._ptGercekRef=orj;          // önek UYGULANMAMIŞ hâli
+    window._ptTestOrtami=testMi;
+    if(!testMi)return;
+    d.ref=function(yol){
+      var y=(yol==null?'':String(yol)).replace(/^\/+/,'');
+      return orj('test/'+y);
+    };
+  }catch(e){}
+})();
+
+const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-M';
+window.APP_BUILD='2026-09-03-U';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -2189,7 +2230,10 @@ window.APP_CHECK_SITE_KEY='6Ld4-4EtAAAAAPC1eNtLyCC-w74V0PGwFAz9Cpbf';   // reCAP
       if(document.getElementById('testOrtamBandi'))return;
       var b=document.createElement('div');
       b.id='testOrtamBandi';
-      b.textContent='🧪 TEST ORTAMI - buradaki değişiklikler gerçek veritabanına yazılır';
+      // Metin GÜNCELLENDİ: Veri kökü ayrıldıktan sonra (bkz. ptTestVeriKoku) eski uyarı
+      // yanlış bilgi veriyordu - artık gerçek veriye yazılmıyor. Şerit yine de duruyor,
+      // çünkü asıl işlevi "hangi kopyadasınız" sorusunu cevaplamak.
+      b.textContent='🧪 TEST ORTAMI - ayrı veritabanı, gerçek veriye dokunulmaz';
       b.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2147483647;'
         +'background:repeating-linear-gradient(45deg,#f59e0b,#f59e0b 12px,#b45309 12px,#b45309 24px);'
         +'color:#fff;font-family:sans-serif;font-size:11px;font-weight:800;text-align:center;'
@@ -15911,6 +15955,17 @@ function ptDiagKopyaKutusuCiz(){
       +'color:'+(kopyalanabilir?'var(--ac-tx,#fff)':'var(--mu)')+';font-size:.72rem;font-weight:800;'
       +'cursor:'+(kopyalanabilir?'pointer':'default')+';font-family:inherit;margin-bottom:.4rem">'
       +(kopyalanabilir?'📋 Bütün Teşhisi Kopyala':'✔️ Yeni teşhis yok')+'</button>'
+    // Damga sıfırlama - kayıtları SİLMEZ, yalnızca "kopyalandı" işaretini kaldırır. Silme
+    // düğmesinin ÜSTÜNE konuldu: aradığı kaydı raporda göremeyen kullanıcının ilk aklına
+    // gelen şey silmek olmasın, önce bu seçeneği görsün.
+    +'<button onclick="ptDiagDamgaSifirla()" style="width:100%;background:rgba(59,130,246,.12);'
+      +'border:1px solid rgba(59,130,246,.3);color:#93c5fd;border-radius:10px;padding:.55rem;'
+      +'font-size:.72rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif;margin-bottom:.4rem">'
+      +'↺ Kopyalama Damgalarını Sıfırla</button>'
+    +'<div style="font-size:.6rem;color:var(--mu);line-height:1.5;margin-bottom:.6rem">'
+      +'Bir kez kopyalanan kayıtlar sonraki raporlara girmez (çift raporlamayı önlemek için). '
+      +'Aynı sorunu yeniden incelemek gerekirse bu düğme o işareti kaldırır - '
+      +'<b style="color:var(--tx)">kayıtlar silinmez</b>, yeniden görünür hâle gelir.</div>'
     +'<button onclick="ptDiagTumunuSil()" style="width:100%;background:rgba(239,68,68,.12);'
       +'border:1px solid rgba(239,68,68,.35);border-radius:10px;min-height:34px;color:#f87171;'
       +'font-size:.66rem;font-weight:800;cursor:pointer;font-family:inherit">🗑️ Teşhis Kayıtlarını Kalıcı Sil</button>'
@@ -15944,6 +15999,14 @@ function ptDiagPanoYedek(metin,bitir){
     if(ok)bitir();else showToast('Kopyalanamadı - tarayıcı izin vermedi');
   }catch(e){showToast('Kopyalanamadı - tarayıcı izin vermedi');}
 }
+window.ptDiagDamgaSifirla=function(){
+  if(!window.DiagCore||!DiagCore.damgaSifirla){showToast('Bu sürümde desteklenmiyor');return;}
+  var n=0;
+  try{n=DiagCore.damgaSifirla();}catch(e){}
+  ptDiagKopyaKutusuCiz();
+  showToast(n?('↺ '+n+' kaydın damgası sıfırlandı - raporda yeniden görünecekler')
+             :'Sıfırlanacak damga yok');
+};
 window.ptDiagTumunuSil=function(){
   if(!window.DiagCore)return;
   var n=0;try{n=DiagCore.logs().length;}catch(e){}
@@ -23618,6 +23681,15 @@ window.PTPlayer=(function(){
 
   // ── Arayüz senkronizasyonu ──
   function syncUI(){
+    // Bölüm düğmeleri yalnızca birden fazla bölüm varken görünür.
+    try{
+      var _cok=!!(S&&S.araliklar&&S.araliklar.length>1&&!S.isLive);
+      var _pb=el('ptpPrevCh'),_nb=el('ptpNextCh');
+      if(_pb)_pb.style.display=_cok?'':'none';
+      if(_nb)_nb.style.display=_cok?'':'none';
+      if(_cok&&_nb)_nb.disabled=(S.aralikIdx>=S.araliklar.length-1);
+      if(_cok&&_pb)_pb.disabled=false;
+    }catch(e){}
     if(!S)return;
     var v=S.video;
     var pb=el('ptpPlay');if(pb)pb.textContent=v.paused?'▶️':'⏸️';
@@ -23674,6 +23746,33 @@ window.PTPlayer=(function(){
     }
     return null;
   }
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // BÖLÜM ATLAMA (kullanıcı: "sonraki bölüme atlama düğmesi")
+  // yon: -1 önceki, +1 sonraki. Hedef bölümün BAŞINA gidilir ve aralık indeksi güncellenir -
+  // güncellenmezse aralık denetimi konumu "bölüm dışı" sayıp kullanıcıyı geri çekerdi
+  // (bkz. ilerleme çubuğundaki aynı düzeltme).
+  // "Önceki" davranışı bilinçli: bölümün başına 3 saniyeden fazla girilmişse önce BU bölümün
+  // başına döner, ancak baştaysanız gerçekten önceki bölüme geçer - müzik çalarların yerleşik
+  // davranışı budur ve yanlışlıkla bölüm kaybetmeyi önler.
+  function bolumeAtla(yon){
+    try{
+      if(!S||!S.video||!S.araliklar||S.araliklar.length<2)return;
+      var t=S.video.currentTime||0,i=S.aralikIdx;
+      var suan=S.araliklar[i];
+      var hedef;
+      if(yon<0&&suan&&(t-(suan.bas||0))>3){hedef=i;}
+      else{hedef=i+yon;}
+      if(hedef<0)hedef=0;
+      if(hedef>S.araliklar.length-1)hedef=S.araliklar.length-1;
+      var sg=S.araliklar[hedef];
+      if(!sg)return;
+      S.aralikIdx=hedef;S._hazirlikYapildi=false;S._aralikBitti=false;
+      try{ptpYedekTemizle();}catch(e){}
+      S.video.currentTime=sg.bas||0;
+      showControls();
+      showToastMsg('⏱ Bölüm '+(hedef+1)+'/'+S.araliklar.length);
+    }catch(e){}
+  }
   function updateTimes(){
     if(!S)return;
     var v=S.video,d=v.duration,t=v.currentTime;
@@ -23685,6 +23784,37 @@ window.PTPlayer=(function(){
       d=_tp.toplam;
       t=_tp.gecen;
     }
+    // ── Bölüm sınırı çentikleri ve "kaçıncı bölüm" rozeti ────────────────────────────────
+    // Yalnızca bölüm listesi ya da toplam süre DEĞİŞTİĞİNDE yeniden çizilir - saniyede
+    // dört kez çalışan bu fonksiyonda her turda DOM'a yazmak titremeye yol açardı
+    // (bkz. aşağıdaki 'aynı alan ard arda çiziliyor' notu).
+    try{
+      var _ck=el('ptpCentikler');
+      if(_ck){
+        var _segK=(!canli&&S.araliklar&&S.araliklar.length>1)?S.araliklar:null;
+        var _imza=_segK?(_segK.length+'@'+Math.round(d)):'';
+        if(_ck._ptpImza!==_imza){
+          _ck._ptpImza=_imza;
+          if(!_segK){_ck.innerHTML='';}
+          else{
+            var _bir=0,_par=[];
+            for(var _i=0;_i<_segK.length-1;_i++){
+              var _sg=_segK[_i];
+              var _sr=Math.max(0,((_sg.bit>0?_sg.bit:0)-(_sg.bas||0)));
+              _bir+=_sr;
+              if(d>0)_par.push('<div class="ptp-centik" style="left:'+((_bir/d)*100).toFixed(3)+'%"></div>');
+            }
+            _ck.innerHTML=_par.join('');
+          }
+        }
+      }
+      var _rz=el('ptpBolumRozet');
+      if(_rz){
+        var _yazi=(!canli&&S.araliklar&&S.araliklar.length>1)
+          ? ((S.aralikIdx+1)+'/'+S.araliklar.length) : '';
+        if(_rz.textContent!==_yazi)_rz.textContent=_yazi;
+      }
+    }catch(_e){}
     // TEŞHİS RAPORU DÜZELTMESİ ("Titreme: aynı alan ard arda yeniden çiziliyor · alan:
     // div#ptpOv > div.ptp-bot > div.ptp-times > span#ptpCur · 3 kez / 400ms içinde"):
     // Bu fonksiyon 'timeupdate' olayıyla saniyede ~4 kez çalışıyor ve her seferinde
@@ -26073,14 +26203,22 @@ window.PTPlayer=(function(){
             +'<button class="ptp-btn" id="ptpSet" title="Ayarlar">⚙️</button>'
           +'</div>'
           +'<div class="ptp-mid">'
+            // KULLANICI TALEBİ ("sonraki bölüme atlama düğmesi"): Bölümler arasında geçmek
+            // için çubuğu parmakla tam yere getirmek gerekiyordu. Bu iki düğme önceki/sonraki
+            // bölüme doğrudan atlar. YALNIZCA birden fazla bölüm varsa görünürler - tek
+            // bölümlü ya da aralıksız videolarda oynatıcı hiç değişmez (bkz. syncUI).
+            +'<button class="ptp-btn ptp-bolum-btn" id="ptpPrevCh" title="Önceki bölüm" style="display:none">⏮️</button>'
             +'<button class="ptp-btn" id="ptpBack" title="Geri sar">⏪</button>'
             +'<button class="ptp-btn ptp-play" id="ptpPlay" title="Oynat/Duraklat">▶️</button>'
             +'<button class="ptp-btn" id="ptpFwd" title="İleri sar">⏩</button>'
+            +'<button class="ptp-btn ptp-bolum-btn" id="ptpNextCh" title="Sonraki bölüm" style="display:none">⏭️</button>'
           +'</div>'
           +'<div class="ptp-bot">'
             +'<div class="ptp-times"><span id="ptpCur">0:00</span><span class="ptp-sp"></span>'
+              +'<span class="ptp-bolum-rozet" id="ptpBolumRozet"></span>'
               +'<span id="ptpRem"></span><span id="ptpTot"></span></div>'
             +'<div class="ptp-seekwrap"><div class="ptp-buf" id="ptpBuf" style="width:0"></div>'
+            +'<div class="ptp-centikler" id="ptpCentikler"></div>'
               +'<input type="range" class="ptp-seek" id="ptpSeek" min="0" max="100" step="0.1" value="0"/></div>'
             +'<div class="ptp-row">'
               // HATA DÜZELTMESİ (kullanıcı bildirdi: "kanal ilerletme tuşu çalışmıyor -
@@ -26200,6 +26338,9 @@ window.PTPlayer=(function(){
     on('ptpStop',stop);
     on('ptpBack',function(){seekBy(-Number(pref('skip',10)));});
     on('ptpFwd',function(){seekBy(Number(pref('skip',10)));});
+    // Bölüm atlama düğmeleri - bkz. bolumeAtla üzerindeki not.
+    on('ptpPrevCh',function(){bolumeAtla(-1);});
+    on('ptpNextCh',function(){bolumeAtla(1);});
     on('ptpPrev',function(){jump(-1);});
     on('ptpNext',function(){jump(1);});
     on('ptpMute',toggleMute);
@@ -29701,6 +29842,37 @@ window.voteMvp=function(matchId,player){
     sessiz:sessiz,
     kopyalanmamis:kopyalanmamisKayitlar,
     damgala:damgalaKopyalandi,
+    // ══════════════════════════════════════════════════════════════════════════════════════
+    // KULLANICI TALEBİ ("rapor kopyalama damgasının sıfırlanması"):
+    // Kayıtlar bir kez kopyalandıktan sonra "daha önce kopyalandı" damgası alıyor ve sonraki
+    // raporlara HİÇ girmiyor. Amaç çift raporlamayı önlemekti ve doğru bir amaç. Ama yan
+    // etkisi şu: aynı sorunu ikinci kez incelemek gerektiğinde kayıtlar erişilemez hâle
+    // geliyor. Bu oturumda tam olarak bu yaşandı - aradığım kayıtlar raporlara girmediği için
+    // teşhis modülünü KAPALI sandım ve iki tur boşa gitti.
+    // BU FONKSİYON KAYIT SİLMEZ - yalnızca damgayı kaldırır. Kayıtlar yerinde durur, bir
+    // sonraki raporda yeniden görünür hâle gelir.
+    // Ortak damga listesi de temizlenir; aksi halde yerel damga silinse bile diğer taraf
+    // kaydı "zaten kopyalanmış" sayıp gizlemeye devam ederdi.
+    // ══════════════════════════════════════════════════════════════════════════════════════
+    damgaSifirla:function(modId){
+      var n=0,silinecek=[];
+      LOGS.forEach(function(r){
+        if(!r||!r.kop)return;
+        if(modId&&r.mod!==modId)return;
+        delete r.kop;n++;
+        if(r.rid)silinecek.push(r.rid);
+        try{silinecek.push(fpAnahtar(r.app,r.mod,r.kind,r.title,r.ts));}catch(e){}
+      });
+      if(!n)return 0;
+      try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}
+      // Ortak liste sunucuda; erişilemezse yerel sıfırlama yine de geçerli kalır.
+      try{
+        silinecek.forEach(function(k){
+          if(k)firebase.database().ref('diagnostics/copied/'+k).remove().catch(function(){});
+        });
+      }catch(e){}
+      return n;
+    },
     temizle:function(){LOGS.length=0;try{localStorage.removeItem('diag_logs_'+APP);}catch(e){}},
     // KULLANICI TALEBİ ("daha önce oluşturulan teşhis raporları alan kaplamaması için KALICI
     // olarak silinebilir"): Yerel listeyi temizlemek yetmez - kayıtlar ayrıca sunucuda
@@ -29757,6 +29929,61 @@ window.voteMvp=function(matchId,player){
       var enEski=LOGS.reduce(function(a,r){return (!a||r.ts<a)?r.ts:a;},0);
       L.push('Kayıt: '+LOGS.length+' (bu oturumdan '+buOturum+', önceki oturumlardan '+(LOGS.length-buOturum)+')');
       if(enEski)L.push('En eski kayıt: '+tamTarih(enEski)+'  ·  '+SAKLAMA_GUN+' günden eski kayıtlar otomatik silinir');
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // RAPOR ÖZETİ (kullanıcı: "teşhis raporunu yorumlayan katman")
+      // NE YAPAR: Kayıtları GRUPLAR ve sayar. Hangi kaydın kaç kez tekrarlandığını, hangi
+      // modülde yoğunlaştığını ve hangilerinin AYNI DAKİKA içinde birlikte oluştuğunu
+      // gösterir.
+      // NE YAPMAZ - BİLEREK: Kök sebep TAHMİN ETMEZ, "şu yüzden oldu" demez. Bu oturumda
+      // yaşadığımız en pahalı hata, elimdeki belirtilere bakıp yanlış sebebe atlamaktı;
+      // aynı hatayı otomatikleştirmek okuyanı daha hızlı yanlış yere götürürdü. Özet
+      // yalnızca SAYAR ve YAN YANA KOYAR - yorumu okuyan kişi yapar.
+      // Birlikte oluşan kayıtlar özellikle değerli: tek bir kök sebebin birden çok modülde
+      // belirti üretmesi bu şekilde görünür hâle gelir.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      if(LOGS.length){
+        var _g={},_mod={},_dk={},_sur={};
+        LOGS.forEach(function(r){
+          var ad=(modById(r.m)?modById(r.m).label:r.m)+' · '+r.t;
+          if(!_g[ad])_g[ad]={n:0,ilk:r.ts,son:r.ts,kind:r.k};
+          _g[ad].n+=(r.n||1);
+          if(r.ts<_g[ad].ilk)_g[ad].ilk=r.ts;
+          if(r.ts>_g[ad].son)_g[ad].son=r.ts;
+          _mod[r.m]=(_mod[r.m]||0)+(r.n||1);
+          var dk=Math.floor(r.ts/60000);
+          (_dk[dk]=_dk[dk]||{}) [r.m]=1;
+          var sv=(r.d&&r.d.surum)||'(damgasız)';
+          _sur[sv]=(_sur[sv]||0)+1;
+        });
+        L.push('');
+        L.push('─── ÖZET ─────────────────────────────────────────────');
+        var _sirali=Object.keys(_g).sort(function(a,b){return _g[b].n-_g[a].n;});
+        L.push('En sık tekrarlayanlar:');
+        _sirali.slice(0,5).forEach(function(ad){
+          var o=_g[ad];
+          L.push('  '+String(o.n).padStart(3)+'×  ['+o.kind.toUpperCase()+'] '+ad
+            +(o.n>1?('   ilk: '+tamTarih(o.ilk)+'  son: '+tamTarih(o.son)):''));
+        });
+        var _mk=Object.keys(_mod).sort(function(a,b){return _mod[b]-_mod[a];});
+        L.push('Modül dağılımı: '+_mk.map(function(k){
+          return (modById(k)?modById(k).label:k)+' ('+_mod[k]+')';
+        }).join(' · '));
+        // Aynı dakikada BİRDEN ÇOK modülün kayıt üretmesi - ortak kök sebep işareti olabilir.
+        var _birlikte=Object.keys(_dk).filter(function(dk){return Object.keys(_dk[dk]).length>1;});
+        if(_birlikte.length){
+          L.push('Birlikte oluşanlar ('+_birlikte.length+' dakikada birden çok modül kayıt üretti):');
+          _birlikte.sort().slice(-4).forEach(function(dk){
+            L.push('  '+tamTarih(Number(dk)*60000)+' → '+Object.keys(_dk[dk]).map(function(k){
+              return (modById(k)?modById(k).label:k);
+            }).join(' + '));
+          });
+          L.push('  (Aynı anda oluşmaları ORTAK bir sebebe işaret EDEBİLİR - kesin değildir.)');
+        }
+        var _sk=Object.keys(_sur);
+        if(_sk.length>1)L.push('Sürüm dağılımı: '+_sk.map(function(k){return k+' ('+_sur[k]+')';}).join(' · ')
+          +'   ← birden çok sürüm var, kayıtları karşılaştırırken dikkat');
+        L.push('──────────────────────────────────────────────────────');
+      }
       L.push('');
       LOGS.slice().reverse().forEach(function(r){
         var m=modById(r.m);
