@@ -1353,7 +1353,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-D';
+window.APP_BUILD='2026-09-03-H';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6374,9 +6374,21 @@ window._editVideoLinks=null;
 // "Test Et"e basmayı hatırlamak zorunda kalmaz. Elle basıldığında da aynı fonksiyon
 // çalışır; tek fark, otomatik çağrıda boş/kısa adres için uyarı gösterilmemesidir
 // (yönetici daha yazmayı bitirmemiş olabilir, erken uyarı rahatsız edici olurdu).
+// KULLANICI TALEBİ ("kontrol butonları havuzda da olacak"): Havuz formundaki "Test Et"
+// düğmesi. Sınama mantığını ÇOĞALTMAK yerine mevcut testVideoLink yeniden kullanılır -
+// tek fark, kaydın listede değil formda olması. Geçici bir kayıt oluşturulup ona bakılır;
+// böylece iki yerde ayrışabilecek iki ayrı sınama kodu oluşmaz.
+window.testChannelPoolUrl=function(){
+  var url=qs('cpUrl')?qs('cpUrl').value.trim():'';
+  window._cpTestKayit=[{url:url}];
+  var eski=window._editVideoLinks;
+  window._editVideoLinks=window._cpTestKayit;
+  try{window.testVideoLink(0);}finally{window._editVideoLinks=eski;}
+};
 window.testVideoLink=function(i,otomatik){
   var v=(window._editVideoLinks||[])[i];
-  var kutu=qs('vlTestSonuc'+i),btn=qs('vlTest'+i);
+  // Havuz formunda kutu/düğme kimlikleri farklıdır - ikisi de denenir (bkz. testChannelPoolUrl).
+  var kutu=qs('vlTestSonuc'+i)||qs('cpTestSonuc'),btn=qs('vlTest'+i)||qs('cpTestBtn');
   if(!v||!kutu)return;
   var url=(v.url||'').trim();
   if(otomatik&&url.length<12)return;
@@ -6498,7 +6510,18 @@ function addVideoLinkEntry(){
 window._adminTvTab=window._adminTvTab||'live';
 function setAdminTvTab(tab){
   window._adminTvTab=tab;
+  window._vlAra='';        // sekme değişince arama sıfırlanır - iki sekme kendi listesiyle başlar
   renderVideoLinkAdmin();
+}
+// Arama kutusu her tuşta listeyi yeniden çizer. Çizim sonrası odak ve imleç konumu geri
+// verilir - aksi halde yazarken odak kaybolur ve kutu kullanılamaz hale gelirdi.
+function setVideoLinkAra(val){
+  window._vlAra=val||'';
+  renderVideoLinkAdmin();
+  try{
+    var k=qs('vlAraKutu');
+    if(k){k.focus();k.setSelectionRange(k.value.length,k.value.length);}
+  }catch(e){}
 }
 function renderVideoLinkAdmin(){
   if(window._editVideoLinks===null)window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
@@ -6509,7 +6532,10 @@ function renderVideoLinkAdmin(){
       var on=tab===id;
       return '<button onclick="setAdminTvTab(\''+id+'\')" style="flex:1;padding:.55rem .5rem;border-radius:10px;border:1.5px solid '+(on?'var(--ac)':'var(--br)')+';background:'+(on?'var(--ac)':'var(--s2)')+';color:'+(on?'#fff':'var(--mu)')+';font-size:.74rem;font-weight:800;cursor:pointer">'+label+'</button>';
     }
-    tabBar.innerHTML=tvTabBtn('live','📡 Canlı Yayın')+tvTabBtn('video','🎬 Video');
+    tabBar.innerHTML=tvTabBtn('live','📡 Canlı Yayın')+tvTabBtn('video','🎬 Video')
+      // Kategori yönetimi, o an açık sekmenin türüyle açılır - iki liste ayrı yönetilir.
+      +'<button onclick="openCategoryManager('+(tab==='live'?'true':'false')+')" title="Kategorileri düzenle" '
+      +'style="flex-shrink:0;padding:.55rem .6rem;border-radius:10px;border:1.5px solid var(--br);background:var(--s2);color:var(--mu);font-size:.74rem;font-weight:800;cursor:pointer">🏷️</button>';
     var addBtn=qs('adminTvAddBtn');
     if(addBtn)addBtn.textContent=tab==='live'?'➕ Canlı Yayın Ekle':'➕ Video Ekle';
   }
@@ -6520,10 +6546,45 @@ function renderVideoLinkAdmin(){
   // olacağından (diğer sekmedeki kayıtlar araya girebilir), her satır kendi GERÇEK indeksini
   // (i) taşımalı - setVideoLinkField/removeVideoLink hep bu gerçek indekse göre çalışır.
   var indexed=allLinks.map(function(v,i){return {v:v,i:i};}).filter(function(x){return !!x.v.isLive===(tab==='live');});
-  if(!indexed.length){grid.innerHTML='<div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">'+(tab==='live'?'Henüz canlı yayın eklenmedi':'Henüz video eklenmedi')+'</div>';return;}
-  grid.innerHTML=indexed.map(function(x){
+  // KULLANICI TALEBİ ("hem TV/Video Yönetimi hem havuzda bir kanal arama çubuğu olacak"):
+  // Liste uzadıkça aranan kanalı bulmak için kaydırmak gerekiyordu. Arama başlıkta, adreste
+  // ve kategoride geçen metne bakar; büyük/küçük harf ve Türkçe karakter ayrımı yapmaz.
+  var _ara=(window._vlAra||'').trim().toLocaleLowerCase('tr');
+  if(_ara){
+    indexed=indexed.filter(function(x){
+      var v=x.v;
+      return ((v.title||'')+' '+(v.url||'')+' '+(v.category||'')).toLocaleLowerCase('tr').indexOf(_ara)!==-1;
+    });
+  }
+  var _aramaHtml='<div style="position:relative;margin-bottom:.6rem">'
+    +'<input id="vlAraKutu" value="'+String(window._vlAra||'').replace(/"/g,'&quot;')+'" '
+    +'placeholder="🔍 Kanal ara - başlık, adres veya kategori" '
+    +'oninput="setVideoLinkAra(this.value)" '
+    +'style="width:100%;box-sizing:border-box;font-size:.74rem;padding:.5rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-family:Outfit,sans-serif"/>'
+    +'</div>';
+  if(!indexed.length){
+    grid.innerHTML=_aramaHtml+'<div style="font-size:.62rem;color:var(--mu);margin-bottom:.5rem">'
+      +(_ara?('"'+escHtml(window._vlAra||'')+'" ile eşleşen kayıt yok'):(tab==='live'?'Henüz canlı yayın eklenmedi':'Henüz video eklenmedi'))+'</div>';
+    return;
+  }
+  grid.innerHTML=_aramaHtml+indexed.map(function(x,_sira){
     var v=x.v,i=x.i;
-    return '<div id="vlRow_'+i+'" style="background:var(--s2);border-radius:12px;padding:.6rem;margin-bottom:.6rem;transition:outline-color .3s">'
+    // KULLANICI TALEBİ ("bütün kanallar tek bir arka plana alınmış, karmaşık görünüyor -
+    // her biri için ayırt edilebilir bir arka plan olsun, havuzdaki liste gibi"):
+    // Satırlar da kapsayıcı da aynı yüzey rengini kullandığı için liste tek bir blok gibi
+    // görünüyordu. Her satır artık KENDİ KARTI: çerçevesi, gölgesi ve sıra numarasıyla
+    // başlık şeridi var. Arka plan iki tonda dönüşümlü - bitişik iki kayıt birbirine karışmaz.
+    var _cift=(_sira%2===1);
+    var _harf=(v.title||'?').trim().charAt(0).toUpperCase()||'?';
+    var _rozet=v.isLive?'🔴 Canlı':'🎬 Video';
+    return '<div id="vlRow_'+i+'" style="background:'+(_cift?'var(--s2)':'var(--s3)')+';border:1px solid var(--br);border-radius:13px;padding:.6rem;margin-bottom:.7rem;box-shadow:0 2px 8px rgba(0,0,0,.18);transition:outline-color .3s">'
+      +'<div style="display:flex;align-items:center;gap:.5rem;margin:-.15rem -.15rem .5rem;padding:.35rem .45rem;background:var(--s1);border:1px solid var(--br);border-radius:10px">'
+        +(v.logo?'<img src="'+escHtml(v.logo)+'" style="width:26px;height:26px;border-radius:7px;object-fit:contain;background:var(--s3);flex-shrink:0;padding:2px;box-sizing:border-box"/>'
+                :'<div style="width:26px;height:26px;border-radius:7px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:900;flex-shrink:0">'+escHtml(_harf)+'</div>')
+        +'<div style="flex:1;min-width:0;font-size:.7rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+          +escHtml((v.title||'').trim()||'(başlıksız kayıt)')+'</div>'
+        +'<div style="flex-shrink:0;font-size:.58rem;color:var(--mu)">'+_rozet+(v.category?' · '+escHtml(v.category):'')+'</div>'
+      +'</div>'
       +'<div style="display:flex;gap:.5rem;margin-bottom:.4rem">'
       +'<input value="'+(v.title||'').replace(/"/g,'&quot;')+'" placeholder="Başlık (kullanıcı bunu görecek)" oninput="setVideoLinkField('+i+',\'title\',this.value);clearVlRowWarning('+i+')" style="flex:1;font-size:.74rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif"/>'
       +'<button onclick="removeVideoLink('+i+')" style="flex-shrink:0;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:.3rem .6rem;font-size:.7rem;font-weight:700;cursor:pointer">✕</button>'
@@ -6617,6 +6678,92 @@ function renderVideoLinkAdmin(){
 // KULLANICI TALEBİ ("admin kategori seçim popup yeniden tasarla"): prompt() yerine kendi
 // stilimize uygun bir kutu - bkz. yukarıdaki #catPromptOv HTML'i.
 var _catPromptTargetIdx=null;
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// KATEGORİ YÖNETİMİ (kullanıcı: "bütün kategoriler düzenlenebilir ve silinebilir olsun")
+// Şimdiye kadar kategori yalnızca OLUŞTURULABİLİYORDU; yanlış yazılan ya da artık
+// kullanılmayan bir kategoriyi kaldırmanın yolu yoktu.
+// TV ve video listeleri AYRI yönetilir - ekran hangi türle açıldıysa yalnızca o türün
+// kategorilerini gösterir ve yalnızca o türdeki kayıtlara dokunur.
+// ADI DEĞİŞTİRİLİRSE: Kategoriyi kullanan TÜM kayıtlar da güncellenir (hem lig listesi hem
+// havuz). Aksi halde kayıtlar var olmayan bir kategoriye bağlı kalır ve süzgeçlerde kaybolur.
+// SİLİNİRSE: Kayıtlar silinmez, yalnızca kategorisiz kalır - içerik kaybı olmaz.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+function openCategoryManager(isLive){
+  window._katYonTur=!!isLive;
+  var list=katListesi(!!isLive);
+  var kayitlar=(S.videoLinks||[]).filter(function(v){return v&&!!v.isLive===!!isLive;});
+  function sayim(cat){return kayitlar.filter(function(v){return (v.category||'')===cat;}).length;}
+  var html='<div style="font-size:.68rem;color:var(--mu);line-height:1.6;margin-bottom:.7rem">'
+    +(isLive?'📡 <b>Canlı yayın</b>':'🎬 <b>Video</b>')+' kategorileri. Bu liste diğer sekmeden '
+    +'tamamen bağımsızdır.<br/>Adını değiştirirseniz o kategoriyi kullanan tüm kayıtlar da '
+    +'güncellenir. Silerseniz kayıtlar <b>silinmez</b>, yalnızca kategorisiz kalır.</div>';
+  if(!list.length){
+    html+='<div style="text-align:center;color:var(--mu);padding:1.2rem;font-size:.78rem">Henüz kategori yok</div>';
+  }else{
+    html+=list.map(function(cat,idx){
+      var n=sayim(cat);
+      return '<div style="display:flex;align-items:center;gap:.5rem;padding:.5rem .6rem;background:'
+        +(idx%2?'var(--s2)':'var(--s3)')+';border:1px solid var(--br);border-radius:11px;margin-bottom:.4rem">'
+        +'<div style="flex:1;min-width:0">'
+          +'<div style="font-size:.78rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(cat)+'</div>'
+          +'<div style="font-size:.62rem;color:var(--mu)">'+n+' kayıt kullanıyor</div>'
+        +'</div>'
+        +'<button data-cat="'+escHtml(cat)+'" onclick="renameCategory(this.dataset.cat)" style="background:rgba(124,58,237,.15);border:1px solid rgba(124,58,237,.3);color:#c084fc;border-radius:7px;padding:.35rem .55rem;font-size:.68rem;cursor:pointer;font-family:Outfit,sans-serif;flex-shrink:0">✏️</button>'
+        +'<button data-cat="'+escHtml(cat)+'" onclick="deleteCategory(this.dataset.cat)" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:7px;padding:.35rem .55rem;font-size:.68rem;cursor:pointer;font-family:Outfit,sans-serif;flex-shrink:0">🗑️</button>'
+        +'</div>';
+    }).join('');
+  }
+  openSheet((isLive?'📡 Canlı Yayın':'🎬 Video')+' Kategorileri',html);
+}
+// Kategoriyi kullanan kayıtları toplu günceller. yeniAd boş verilirse kategori kaldırılır.
+function _kategoriUygula(eski,yeniAd){
+  var isLive=!!window._katYonTur;
+  var liste=katListesi(isLive).slice();
+  var yeni=[];
+  liste.forEach(function(c){
+    if(c===eski){if(yeniAd&&yeni.indexOf(yeniAd)===-1)yeni.push(yeniAd);}
+    else if(yeni.indexOf(c)===-1)yeni.push(c);
+  });
+  // Lig listesindeki kayıtlar
+  if(!Array.isArray(window._editVideoLinks))window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
+  window._editVideoLinks.forEach(function(v){
+    if(v&&!!v.isLive===isLive&&(v.category||'')===eski)v.category=yeniAd||'';
+  });
+  S.videoLinks=window._editVideoLinks.slice();
+  window._videoLinksDirty=true;
+  // Havuz kayıtları - aynı kategori orada da geçiyor olabilir
+  db.ref('channelPool').once('value').then(function(sn){
+    var pool=sn.val()||{};
+    Object.keys(pool).forEach(function(id){
+      var c=pool[id];
+      if(c&&!!c.isLive===isLive&&(c.category||'')===eski){
+        db.ref('channelPool/'+id+'/category').set(yeniAd||'').catch(function(_e){DiagSil('_kategoriUygula->havuz',_e);});
+      }
+    });
+  }).catch(function(_e){DiagSil('_kategoriUygula->havuzOku',_e);});
+  return katKaydet(isLive,yeni).then(function(){return save();}).then(function(){
+    renderVideoLinkAdmin();
+    openCategoryManager(isLive);
+  });
+}
+window.renameCategory=function(cat){
+  var ad=prompt('Kategorinin yeni adı:',cat);
+  if(ad===null)return;
+  ad=(ad||'').trim();
+  if(!ad){toast('❌ Ad boş olamaz','er');return;}
+  if(ad===cat)return;
+  var isLive=!!window._katYonTur;
+  if(katListesi(isLive).indexOf(ad)!==-1){toast('❌ "'+ad+'" zaten var','er');return;}
+  _kategoriUygula(cat,ad).then(function(){toast('✏️ Kategori yeniden adlandırıldı: '+ad);});
+};
+window.deleteCategory=function(cat){
+  var isLive=!!window._katYonTur;
+  var n=(S.videoLinks||[]).filter(function(v){return v&&!!v.isLive===isLive&&(v.category||'')===cat;}).length;
+  if(!confirm('"'+cat+'" kategorisi silinsin mi?\n\n'
+    +(n?(n+' kayıt bu kategoriyi kullanıyor. Kayıtlar SİLİNMEZ, yalnızca kategorisiz kalır.')
+       :'Bu kategoriyi kullanan kayıt yok.')))return;
+  _kategoriUygula(cat,'').then(function(){toast('🗑️ Kategori silindi: '+cat);});
+};
 function promptNewVideoCategory(i){
   _catPromptTargetIdx=i;
   var inp=qs('catPromptInp');
@@ -6815,10 +6962,26 @@ function renderChannelPoolSheet(pool){
   var ids=Object.keys(pool);
   var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Buraya eklenen kanallar hiçbir lige veya "TV/Video" listesine bağlı değildir - o liste her ne sebeple silinirse silinsin, buradakiler SİZ silmediğiniz sürece SİLİNMEZ. Buradan istediğiniz kanalı "📡 TV Tarafına Gönder" ile canlı listeye ekleyebilir/geri yükleyebilirsiniz.</div>';
   html+='<button class="btn bg" onclick="openCreateChannelPoolEntry()" style="width:100%;margin-bottom:.6rem">➕ Havuza Yeni Kanal Oluştur</button>';
-  if(!ids.length){
+  // KULLANICI TALEBİ ("havuzda da bir kanal arama çubuğu olacak"): Yönetim listesindekiyle
+  // aynı davranış - başlık, adres ve kategoride arar, Türkçe harf ayrımı yapmaz.
+  var _pAra=(window._cpAra||'').trim().toLocaleLowerCase('tr');
+  var _tumId=ids.slice();
+  if(_pAra){
+    ids=ids.filter(function(id){
+      var c=pool[id]||{};
+      return ((c.title||'')+' '+(c.url||'')+' '+(c.category||'')).toLocaleLowerCase('tr').indexOf(_pAra)!==-1;
+    });
+  }
+  html+='<input id="cpAraKutu" value="'+String(window._cpAra||'').replace(/"/g,'&quot;')+'" '
+    +'placeholder="🔍 Havuzda ara - başlık, adres veya kategori" '
+    +'oninput="setChannelPoolAra(this.value)" '
+    +'style="width:100%;box-sizing:border-box;font-size:.74rem;padding:.5rem .6rem;margin-bottom:.6rem;background:var(--s3);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-family:Outfit,sans-serif"/>';
+  if(!_tumId.length){
     html+='<div style="text-align:center;color:var(--mu);padding:1.2rem;font-size:.78rem">Henüz havuzda kanal yok</div>';
+  }else if(!ids.length){
+    html+='<div style="text-align:center;color:var(--mu);padding:1.2rem;font-size:.78rem">"'+escHtml(window._cpAra||'')+'" ile eşleşen kanal yok</div>';
   }else{
-    html+='<div style="font-size:.66rem;font-weight:800;color:var(--mu);margin-bottom:.4rem;text-transform:uppercase">Havuzdaki Kanallar ('+ids.length+')</div>';
+    html+='<div style="font-size:.66rem;font-weight:800;color:var(--mu);margin-bottom:.4rem;text-transform:uppercase">Havuzdaki Kanallar ('+ids.length+(_pAra?(' / '+_tumId.length):'')+')</div>';
     html+=ids.map(function(id){
       var c=pool[id];
       var harf=(c.title||'?').trim().charAt(0).toUpperCase()||'?';
@@ -6836,6 +6999,17 @@ function renderChannelPoolSheet(pool){
   }
   openSheet('📦 Kanal Havuzu',html, 'renderChannelPoolSheet');
 }
+// Havuz listesi yeniden çizilirken açık olan sayfa korunur; arama kutusuna odak geri verilir.
+function setChannelPoolAra(val){
+  window._cpAra=val||'';
+  db.ref('channelPool').once('value').then(function(snap){
+    renderChannelPoolSheet(snap.val()||{});
+    try{
+      var k=qs('cpAraKutu');
+      if(k){k.focus();k.setSelectionRange(k.value.length,k.value.length);}
+    }catch(e){}
+  }).catch(function(_e){try{DiagSil('setChannelPoolAra',_e);}catch(_x){}});
+}
 function _channelPoolFormHtml(c){
   c=c||{title:'',url:'',isLive:true,category:'',logo:''};
   return '<div class="field"><span class="lbl">Başlık</span><input id="cpTitle" value="'+(c.title||'').replace(/"/g,'&quot;')+'" placeholder="Kullanıcının göreceği isim"/></div>'
@@ -6849,7 +7023,20 @@ function _channelPoolFormHtml(c){
     +(c.logo?'<img id="cpLogoPreview" src="'+escHtml(c.logo)+'" style="width:32px;height:32px;border-radius:8px;object-fit:contain;background:var(--s3);flex-shrink:0;padding:2px;box-sizing:border-box"/>':'<div id="cpLogoPreview" style="width:32px;height:32px;border-radius:8px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--mu);flex-shrink:0">🖼️</div>')
     +'<button type="button" onclick="triggerChannelPoolLogoUpload()" style="flex-shrink:0;background:var(--s3);border:1px solid var(--br);border-radius:8px;padding:.35rem .6rem;font-size:.65rem;font-weight:700;color:var(--tx);cursor:pointer">🖼️ Logo Yükle</button>'
     +'</div><div id="cpLogoStatus" style="font-size:.6rem;margin-top:.3rem"></div>'
-    +'<input type="hidden" id="cpLogoUrl" value="'+(c.logo||'').replace(/"/g,'&quot;')+'"/>';
+    +'<input type="hidden" id="cpLogoUrl" value="'+(c.logo||'').replace(/"/g,'&quot;')+'"/>'
+    // KULLANICI TALEBİ ("TV/Video Yönetimi'ndeki kanal oluşturma özellikleri ve kontrol
+    // butonları havuzda da olacak"): Havuz formu yalnızca başlık/adres/canlı/kategori/logo
+    // alıyordu. İzleme aralıkları, adres sınama ve ek ses dilleri yalnızca yönetim tarafında
+    // vardı - havuzdan gönderilen kanal bu bilgileri taşımadığı için yönetici aynı işi iki
+    // kez yapmak zorunda kalıyordu. Alanlar buraya taşındı ve gönderim akışına eklendi.
+    +'<div style="font-size:.64rem;color:var(--mu);margin:.7rem 0 .25rem">⏱️ İzleme aralıkları (her satıra bir bölüm)</div>'
+    +'<textarea id="cpAraliklar" rows="3" placeholder="1:23:14 - 1:43:56&#10;2:05:00 - 2:12:30" style="width:100%;box-sizing:border-box;font-size:.68rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;resize:vertical">'+(c.araliklar||'').replace(/</g,'&lt;')+'</textarea>'
+    +'<div style="font-size:.6rem;color:var(--mu);line-height:1.5;margin:.25rem 0 .5rem">Boş bırakılırsa video baştan sona oynar. Birden fazla satır yazarsanız bölümler <b>arka arkaya, kesintisiz</b> oynatılır.</div>'
+    +'<button type="button" onclick="testChannelPoolUrl()" id="cpTestBtn" style="width:100%;min-height:32px;margin-bottom:.4rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-size:.68rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">🔍 Bu Adresi Test Et</button>'
+    +'<div id="cpTestSonuc" style="font-size:.66rem;line-height:1.6;margin-bottom:.4rem"></div>'
+    +'<details style="margin-bottom:.2rem"><summary style="font-size:.66rem;color:var(--mu);cursor:pointer;min-height:30px;display:flex;align-items:center">🗣️ Ek ses dilleri (ayrı akış adresi olan yayınlar için)</summary>'
+    +'<textarea id="cpSesDilleri" rows="3" placeholder="Her satıra bir dil:&#10;Türkçe | https://.../master.m3u8&#10;Kurmancî | https://.../master.m3u8" style="width:100%;box-sizing:border-box;font-size:.68rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;margin-top:.3rem;resize:vertical">'+(c.sesDilleri||'').replace(/</g,'&lt;')+'</textarea>'
+    +'</details>';
 }
 function openCreateChannelPoolEntry(){
   window._cpEditId=null;
@@ -6893,7 +7080,10 @@ function saveChannelPoolEntry(){
     title:title,url:url,
     isLive:qs('cpIsLive')?qs('cpIsLive').checked:true,
     category:qs('cpCategory')?qs('cpCategory').value:'',
-    logo:qs('cpLogoUrl')?qs('cpLogoUrl').value:''
+    logo:qs('cpLogoUrl')?qs('cpLogoUrl').value:'',
+    // Yeni alanlar - bkz. _channelPoolFormHtml içindeki not.
+    araliklar:qs('cpAraliklar')?qs('cpAraliklar').value:'',
+    sesDilleri:qs('cpSesDilleri')?qs('cpSesDilleri').value:''
   };
   var pid=window._cpEditId||uid();
   data.id=pid;
@@ -6995,7 +7185,9 @@ function sendChannelPoolEntryToTv(pid){
     });
     function ekle(){
       if(!Array.isArray(window._editVideoLinks))window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
-      window._editVideoLinks.unshift({id:uid(),title:c.title||'',url:c.url||'',isLive:!!c.isLive,category:c.category||'',logo:c.logo||'',createdAt:Date.now(),poolSourceId:pid});
+      // İzleme aralıkları ve ek ses dilleri de TV tarafına TAŞINIR - havuzda tanımlanan
+      // ayarların gönderimde kaybolması, yöneticiyi aynı işi iki kez yapmaya zorluyordu.
+      window._editVideoLinks.unshift({id:uid(),title:c.title||'',url:c.url||'',isLive:!!c.isLive,category:c.category||'',logo:c.logo||'',araliklar:c.araliklar||'',sesDilleri:c.sesDilleri||'',createdAt:Date.now(),poolSourceId:pid});
     S.videoLinks=window._editVideoLinks.slice();
     window._videoLinksDirty=true;
     save().then(function(){
@@ -7215,8 +7407,23 @@ function saveVideoLinkSettings(){
     // değişiklikler bağlı olduğu havuz kaydına da yansıtılır - Kalıcı Takım Havuzu'ndaki
     // "düzenleme otomatik iki tarafa da yansır" davranışıyla TUTARLI.
     links.forEach(function(v){
-      if(!v.poolSourceId)return;
-      db.ref('channelPool/'+v.poolSourceId).update({title:v.title||'',url:v.url||'',isLive:!!v.isLive,category:v.category||'',logo:v.logo||''}).catch(function(_e){DiagSil('saveVideoLinkSettings->poolSync',_e);});
+      if(v.poolSourceId){
+        db.ref('channelPool/'+v.poolSourceId).update({title:v.title||'',url:v.url||'',isLive:!!v.isLive,category:v.category||'',logo:v.logo||'',araliklar:v.araliklar||'',sesDilleri:v.sesDilleri||''}).catch(function(_e){DiagSil('saveVideoLinkSettings->poolSync',_e);});
+      }else if((v.title||'').trim()||(v.url||'').trim()){
+      // KULLANICI TALEBİ ("TV/Video Yönetimi üzerinden kanal oluşturulduğunda otomatik olarak
+      // havuza eklensin"): Havuz, listeden bağımsız KALICI depodur; buradan oluşturulan bir
+      // kanal havuza girmezse liste silindiğinde geri getirilemez.
+      // Kayıt havuza eklenir ve 'poolSourceId' ile eşleştirilir - böylece sonraki
+      // düzenlemeler yukarıdaki daldan havuza da yansır, iki kopya birbirinden ayrışmaz.
+      // Boş satırlar (başlık ve adres ikisi de boş) havuza gönderilmez.
+        var _yeniPid=uid();
+        v.poolSourceId=_yeniPid;
+        db.ref('channelPool/'+_yeniPid).set({
+          title:v.title||'',url:v.url||'',isLive:!!v.isLive,
+          category:v.category||'',logo:v.logo||'',
+          araliklar:v.araliklar||'',sesDilleri:v.sesDilleri||'',createdAt:Date.now()
+        }).catch(function(_e){DiagSil('saveVideoLinkSettings->havuzaOtomatikEkle',_e);});
+      }
     });
   });
 }

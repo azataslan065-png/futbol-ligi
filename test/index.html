@@ -2123,7 +2123,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-D';
+window.APP_BUILD='2026-09-03-H';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21451,7 +21451,18 @@ window.PTFrame=(function(){
       buf:A.buf||'',
       // Gömülü yayında da GERÇEK ilerleme gösterilir - değerler YouTube'un durum akışından
       // gelir (bkz. ytMesaj). Canlıda ilerleme çubuğu anlamsız olduğu için çizilmez.
-      sure:(!A.canli&&A.dur)?{cur:ptfSure(A.pos||0),tot:ptfSure(A.dur),yuzde:((A.pos||0)/A.dur)*100}:null,
+      // Bölüm aralıkları tanımlıysa konum/süre ONLARA göre gösterilir - oynatıcının kendi
+      // çubuğuyla birebir aynı ölçek (bkz. PTPlayer.aralikDurumu üzerindeki not).
+      // Aralık yoksa eski davranış: ham video süresi.
+      sure:(function(){
+        if(A.canli)return null;
+        var ad=null;
+        try{if(window.PTPlayer&&PTPlayer.aralikDurumu)ad=PTPlayer.aralikDurumu();}catch(e){}
+        if(ad&&ad.toplam>0)
+          return {cur:ptfSure(ad.gecen||0),tot:ptfSure(ad.toplam),yuzde:((ad.gecen||0)/ad.toplam)*100,aralikli:true};
+        if(!A.dur)return null;
+        return {cur:ptfSure(A.pos||0),tot:ptfSure(A.dur),yuzde:((A.pos||0)/A.dur)*100};
+      })(),
       fit:A.fit||'contain',
       yatay:!!(A.rotate||A.yatayKilit),
       tamEkran:!!(document.fullscreenElement||document.webkitFullscreenElement),
@@ -21488,7 +21499,29 @@ window.PTFrame=(function(){
       rcSeek.addEventListener('click',function(e){e.stopPropagation();});
       rcSeek.addEventListener('change',function(e){
         e.stopPropagation();A.seekTutuluyor=false;
-        ytKomut('seekTo',[Number(rcSeek.value),true]);
+        // ══════════════════════════════════════════════════════════════════════════════
+        // İKİ AYRI HATA BİRDEN:
+        // 1) Kaydıracın aralığı 0-1000'dir (binde birlik oran), SANİYE DEĞİL. Değeri
+        //    doğrudan seekTo'ya vermek "sonuna çek" komutunu 1000. saniyeye (16:40) sarma
+        //    hâline getiriyordu - uzun videolarda çubuk hiç doğru çalışmıyordu.
+        // 2) Bölüm aralıkları tanımlıysa çubuk BÖLÜM çizelgesini gösterir; oradan okunan
+        //    değer ham video saniyesi değildir ve çevrilmeden uygulanamaz.
+        // Önce oran → hedef saniye, sonra gerekiyorsa bölüm çizelgesinden ham saniyeye.
+        // ══════════════════════════════════════════════════════════════════════════════
+        var _oran=Math.max(0,Math.min(1,(Number(rcSeek.value)||0)/1000));
+        var _ad=null;
+        try{if(window.PTPlayer&&PTPlayer.aralikDurumu)_ad=PTPlayer.aralikDurumu();}catch(_x){}
+        var _hedef;
+        if(_ad&&_ad.toplam>0){
+          _hedef=_oran*_ad.toplam;
+          try{
+            var _e2=PTPlayer.aralikCoz?PTPlayer.aralikCoz(_hedef):null;
+            if(_e2&&isFinite(_e2.t))_hedef=_e2.t;
+          }catch(_x2){}
+        }else{
+          _hedef=_oran*(A.dur||0);
+        }
+        ytKomut('seekTo',[_hedef,true]);
       });
     }
     box.addEventListener('click',function(ev){
@@ -25253,6 +25286,30 @@ window.PTPlayer=(function(){
       var t=say('ptpChSaat')*3600+say('ptpChDk')*60+say('ptpChSn');
       if(S.isLive){seekBy(-t);showToastMsg('⏪ '+fmt(t)+' geri');return;}
       if(!isFinite(v.duration)||!(v.duration>0))return;
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KULLANICI TALEBİ ("sa/dk/sn + GİT alanını da bölüm çizelgesine bağla"):
+      // Bu alan HAM video saniyesine sarıyordu. Çubuk ise yöneticinin tanımladığı bölümlerin
+      // toplamını gösteriyor - ikisi farklı ölçekteydi. "0:12:30" yazan yönetici, çubukta
+      // gördüğü 12:30'a değil videonun gerçek 12:30'una gidiyordu; o nokta çoğu zaman
+      // izlenen bölümlerin DIŞINDA kalıyor ve aralık denetimi kullanıcıyı hemen geri
+      // çekiyordu - yani alan çalışmıyor gibi görünüyordu.
+      // ARTIK: Girilen süre, çubukta görünen ölçekle AYNI anlama gelir - izlenen bölümlerin
+      // başından itibaren geçen süre. Hangi bölüme denk geldiği de belirlenir, böylece
+      // doğrudan ikinci/üçüncü bölüme atlanabilir.
+      // Aralık tanımlı değilse davranış değişmez: ham video saniyesine sarılır.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      var _ad=ptpToplamAralikDurumu(v.duration,v.currentTime||0);
+      if(_ad&&_ad.toplam>0){
+        var _sinirli=Math.max(0,Math.min(_ad.toplam,t));
+        var _esle=ptpAralikKonumEsle(v.duration,_sinirli);
+        if(_esle&&isFinite(_esle.t)){
+          S.aralikIdx=_esle.idx;S._hazirlikYapildi=false;S._aralikBitti=false;
+          try{ptpYedekTemizle();}catch(_x){}
+          v.currentTime=_esle.t;
+          showToastMsg('⏱ '+fmt(_sinirli)+' konumuna gidildi');
+          return;
+        }
+      }
       v.currentTime=Math.max(0,Math.min(v.duration,t));
       showToastMsg('⏱ '+fmt(t)+' konumuna gidildi');
     });
@@ -26941,7 +26998,27 @@ window.PTPlayer=(function(){
     if(!toplam){showToastMsg('❌ Önce bir süre girin (saat/dakika/saniye)');return;}
     seekBy(yon==='back'?-toplam:toplam);
   }
-  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,switchSourceInPlace:switchSourceInPlace,isActive:function(){return !!S;},isEmbedded:function(){return !!(S&&S.gomulu);}};
+  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,switchSourceInPlace:switchSourceInPlace,isActive:function(){return !!S;},isEmbedded:function(){return !!(S&&S.gomulu);},
+    // KULLANICI BİLDİRDİ ("kumandadaki video orijinal süresini gösteriyor"): Ekrandaki
+    // KUMANDA paneli AYRI bir modül (PTFrame) ve konumu doğrudan platformdan okuyor -
+    // yöneticinin tanımladığı bölümlerden haberi yok. Oynatıcının kendi çubuğu ise bölüm
+    // toplamını gösteriyordu; iki çubuk aynı videoyu farklı ölçekte gösteriyordu.
+    // Bu iki fonksiyon, bölüm hesabını DIŞARIYA açar - böylece hesap tek yerde kalır,
+    // iki ayrı yerde ayrışabilecek iki kopya oluşmaz.
+    //   aralikDurumu()  : {gecen, toplam} - bölümlerin birleşik zaman çizelgesindeki konum
+    //   aralikCoz(hedef): birleşik çizelgedeki bir konumu HAM video saniyesine çevirir
+    aralikDurumu:function(){
+      try{
+        if(!S||!S.video)return null;
+        return ptpToplamAralikDurumu(S.video.duration,S.video.currentTime||0);
+      }catch(e){return null;}
+    },
+    aralikCoz:function(hedef){
+      try{
+        if(!S||!S.video)return null;
+        return ptpAralikKonumEsle(S.video.duration,Number(hedef)||0);
+      }catch(e){return null;}
+    }};
 })();
 
 // KÖK SEBEP DÜZELTMESİ (kullanıcı: "kullanıcı video açarken başka bir video açılıyor") -
