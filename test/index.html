@@ -2123,7 +2123,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-H';
+window.APP_BUILD='2026-09-03-J';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21427,6 +21427,61 @@ window.PTFrame=(function(){
   // elemanına, burada YouTube'un IFrame API'sine (ses/oynatma/sarma) ve uygulamanın kendi
   // kanal verisine (kanal geçişi) gider. Böylece kullanıcı için iki yayın türü arasında
   // hiçbir arayüz farkı kalmıyor.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KULLANICI BİLDİRDİ ("kumanda hâlâ orijinal süreyi gösteriyor") - EKSİK KALAN PARÇA:
+  // Ekranda İKİ AYRI kumanda paneli olabiliyor: PTPlayer'ınki ve PTFrame'inki. PTPlayer'ınkini
+  // düzeltmiştim; ama video PTFrame üzerinden oynatıldığında PTPlayer etkin DEĞİL, dolayısıyla
+  // PTPlayer.aralikDurumu() null dönüyor ve panel ham süreye geri düşüyordu.
+  // PTFrame'in yöneticinin tanımladığı bölümlerden hiç haberi yoktu. Artık kendi hesabını
+  // yapıyor: kaydı A.videoId ile bulur, aralık metnini ORTAK çözücüyle (ptAraliklariCoz)
+  // ayrıştırır - yani biçim kuralları tek yerde kalır, iki ayrı yorum oluşmaz.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  function ptfSegmentler(){
+    try{
+      if(!A||!A.videoId)return null;
+      var rec=((window.D&&D.videoLinks)||[]).filter(function(x){return x&&x.id===A.videoId;})[0];
+      if(!rec)return null;
+      var ar=(typeof ptAraliklariCoz==='function')?ptAraliklariCoz(rec.araliklar,rec.basSure,rec.bitSure):null;
+      if(!ar||!ar.length)return null;
+      var dur=A.dur||0;
+      var segs=ar.map(function(a){
+        var bas=Math.max(0,Number(a.bas)||0);
+        var bit=(Number(a.bit)>0)?Number(a.bit):(dur||0);
+        if(dur>0)bit=Math.min(bit,dur);
+        return {bas:bas,bit:bit,sure:Math.max(0,bit-bas)};
+      }).filter(function(x){return x.sure>0;});
+      return segs.length?segs:null;
+    }catch(e){return null;}
+  }
+  // Ham konumu bölümlerin BİRLEŞİK çizelgesindeki konuma çevirir.
+  function ptfAralikDurumu(){
+    var segs=ptfSegmentler();
+    if(!segs)return null;
+    var t=A.pos||0,toplam=0,gecen=0,bulundu=false,birikim=0;
+    for(var i=0;i<segs.length;i++){
+      var sg=segs[i];
+      if(!bulundu){
+        if(t<sg.bas){gecen=birikim;bulundu=true;}
+        else if(t<=sg.bit){gecen=birikim+(t-sg.bas);bulundu=true;}
+      }
+      birikim+=sg.sure;
+    }
+    toplam=birikim;
+    if(!bulundu)gecen=toplam;   // konum son bölümün de ötesindeyse sona sabitlenir
+    return {gecen:gecen,toplam:toplam};
+  }
+  // Birleşik çizelgedeki bir konumu HAM video saniyesine çevirir.
+  function ptfAralikCoz(hedef){
+    var segs=ptfSegmentler();
+    if(!segs)return null;
+    var once=0;
+    for(var i=0;i<segs.length;i++){
+      if(hedef<=once+segs[i].sure||i===segs.length-1)
+        return {t:segs[i].bas+Math.max(0,Math.min(segs[i].sure,hedef-once)),idx:i};
+      once+=segs[i].sure;
+    }
+    return null;
+  }
   function ptfKumanda(){
     var b=kutu();if(!b||!A)return;
     var v=document.getElementById('ptfRcBox');
@@ -21458,6 +21513,8 @@ window.PTFrame=(function(){
         if(A.canli)return null;
         var ad=null;
         try{if(window.PTPlayer&&PTPlayer.aralikDurumu)ad=PTPlayer.aralikDurumu();}catch(e){}
+        // PTPlayer etkin değilse (video PTFrame üzerinden oynuyorsa) kendi hesabımızı kullan.
+        if(!ad||!(ad.toplam>0))ad=ptfAralikDurumu();
         if(ad&&ad.toplam>0)
           return {cur:ptfSure(ad.gecen||0),tot:ptfSure(ad.toplam),yuzde:((ad.gecen||0)/ad.toplam)*100,aralikli:true};
         if(!A.dur)return null;
@@ -21509,13 +21566,16 @@ window.PTFrame=(function(){
         // Önce oran → hedef saniye, sonra gerekiyorsa bölüm çizelgesinden ham saniyeye.
         // ══════════════════════════════════════════════════════════════════════════════
         var _oran=Math.max(0,Math.min(1,(Number(rcSeek.value)||0)/1000));
-        var _ad=null;
-        try{if(window.PTPlayer&&PTPlayer.aralikDurumu)_ad=PTPlayer.aralikDurumu();}catch(_x){}
+        var _ad=null,_ptpEtkin=false;
+        try{
+          if(window.PTPlayer&&PTPlayer.aralikDurumu){_ad=PTPlayer.aralikDurumu();_ptpEtkin=!!(_ad&&_ad.toplam>0);}
+        }catch(_x){}
+        if(!_ptpEtkin)_ad=ptfAralikDurumu();
         var _hedef;
         if(_ad&&_ad.toplam>0){
           _hedef=_oran*_ad.toplam;
           try{
-            var _e2=PTPlayer.aralikCoz?PTPlayer.aralikCoz(_hedef):null;
+            var _e2=_ptpEtkin?(PTPlayer.aralikCoz?PTPlayer.aralikCoz(_hedef):null):ptfAralikCoz(_hedef);
             if(_e2&&isFinite(_e2.t))_hedef=_e2.t;
           }catch(_x2){}
         }else{
