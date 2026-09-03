@@ -2123,7 +2123,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-L';
+window.APP_BUILD='2026-09-03-M';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -25372,7 +25372,30 @@ window.PTPlayer=(function(){
     sl.addEventListener('input',function(e){
       e.stopPropagation();
       var v=S.video;
-      if(v&&isFinite(v.duration)&&v.duration>0)v.currentTime=(Number(sl.value)/1000)*v.duration;
+      if(!v||!isFinite(v.duration)||!(v.duration>0))return;
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KULLANICI BİLDİRDİ ("ilerleme çubuğunda ileri geri sarınca otomatik başa sarıyor"):
+      // İKİ ayrı hata vardı.
+      // 1) Oran HAM süreyle çarpılıyordu. Çubuk artık bölüm çizelgesini gösterdiği için
+      //    aynı orana karşılık gelen ham saniye bambaşka bir yerdi.
+      // 2) Daha önemlisi: sarma sonrası oynatıcının HANGİ BÖLÜMDE olduğu güncellenmiyordu.
+      //    Aralık denetimi (ptpAralikUygula) her turda "konum, o an geçerli bölümün
+      //    dışında" sonucuna varıp kullanıcıyı o bölümün BAŞINA çekiyordu - kullanıcının
+      //    gördüğü "otomatik başa sarma" tam olarak buydu.
+      // Artık hedef ham saniyeye çevriliyor VE denk geldiği bölüm numarası yazılıyor.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      var _o=Math.max(0,Math.min(1,(Number(sl.value)||0)/1000));
+      var _d=ptpToplamAralikDurumu(v.duration,v.currentTime||0);
+      if(_d&&_d.toplam>0){
+        var _es=ptpAralikKonumEsle(v.duration,_o*_d.toplam);
+        if(_es&&isFinite(_es.t)){
+          S.aralikIdx=_es.idx;S._hazirlikYapildi=false;S._aralikBitti=false;
+          try{ptpYedekTemizle();}catch(_x){}
+          v.currentTime=_es.t;
+          return;
+        }
+      }
+      v.currentTime=_o*v.duration;
     });
     // KULLANICI TALEBİ ("süre girme sistemini de eklersin"): İki cihazlı kumandada olan
     // saat/dakika/saniye ile atlama, oynatıcı içi kumandada yoktu. Uzun videolarda çubuğu
