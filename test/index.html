@@ -2123,7 +2123,7 @@ const app=firebase.initializeApp(FB);const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-J';
+window.APP_BUILD='2026-09-03-L';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21169,14 +21169,20 @@ window.PTFrame=(function(){
   // mesajında innerHTML yazmak, düğmeleri parmağın altından kaydırırdı.
   function ytArayuzTazele(){
     if(!A)return;
+    // Kabuğun KENDİ alt çubuğu da aynı hesabı kullanır - aksi halde aynı ekranda iki çubuk
+    // (kabuğunki ve kumandanınki) farklı süre gösterir ve hangisinin doğru olduğu
+    // anlaşılmazdı. Bkz. ptfAralikDurumu üzerindeki not.
+    var _bd=ptfAralikDurumu();
+    var _bcur=_bd?_bd.gecen:(A.pos||0);
+    var _btot=_bd?_bd.toplam:(A.dur||0);
     var bar=document.getElementById('ptfSeek');
-    if(bar&&A.dur&&!A.seekTutuluyor){
-      bar.max=Math.round(A.dur);
-      bar.value=Math.round(A.pos||0);
+    if(bar&&_btot>0&&!A.seekTutuluyor){
+      bar.max=1000;
+      bar.value=Math.round((_bcur/_btot)*1000);
     }
     var c=document.getElementById('ptfCur'),t=document.getElementById('ptfTot');
-    if(c)c.textContent=ptfSure(A.pos||0);
-    if(t)t.textContent=A.canli?'CANLI':ptfSure(A.dur||0);
+    if(c)c.textContent=ptfSure(_bcur);
+    if(t)t.textContent=A.canli?'CANLI':ptfSure(_btot);
     var m=document.getElementById('ptfMute');
     if(m)m.textContent=A.sessiz?'🔇':'🔈';
     var h=document.getElementById('ptfHiz');
@@ -21184,10 +21190,17 @@ window.PTFrame=(function(){
     // Kumanda açıksa oradaki değerler de aynı anda güncellenir - iki arayüz asla ayrışmaz.
     var rc=document.getElementById('ptfRcBox');
     if(rc){
+      // AYNI HATA BURADA DA (bkz. PTPlayer panelindeki not): Bu yol da ham süreyi yazıyor ve
+      // tam çizimdeki bölüm hesabının üzerine biniyordu. Ayrıca kaydıracın ölçeği burada
+      // SANİYE (max=A.dur), tam çizimde ise BİNDE BİR idi - iki yol birbiriyle de çelişiyordu.
+      // Artık ikisi de binde birlik ölçeği ve bölüm hesabını kullanıyor.
+      var _fd=ptfAralikDurumu();
+      var _fcur=_fd?_fd.gecen:(A.pos||0);
+      var _ftot=_fd?_fd.toplam:(A.dur||0);
       var rb=rc.querySelector('.rcx-prog input');
-      if(rb&&A.dur&&!A.seekTutuluyor){rb.max=Math.round(A.dur);rb.value=Math.round(A.pos||0);}
+      if(rb&&_ftot>0&&!A.seekTutuluyor){rb.max=1000;rb.value=Math.round((_fcur/_ftot)*1000);}
       var rr=rc.querySelectorAll('.rcx-prog .r span');
-      if(rr&&rr.length===2){rr[0].textContent=ptfSure(A.pos||0);rr[1].textContent=A.canli?'CANLI':ptfSure(A.dur||0);}
+      if(rr&&rr.length===2){rr[0].textContent=ptfSure(_fcur);rr[1].textContent=A.canli?'CANLI':ptfSure(_ftot);}
     }
   }
   function ptfSure(sn){
@@ -21336,12 +21349,27 @@ window.PTFrame=(function(){
       sk.addEventListener('click',function(e){e.stopPropagation();});
       sk.addEventListener('input',function(e){
         e.stopPropagation();
+        // Çubuk artık binde birlik oran taşıyor (bkz. ytArayuzTazele) - sürüklerken gösterilen
+        // süre de o orandan hesaplanır, yoksa 0-1000 arası saniye gibi okunurdu.
         var c=document.getElementById('ptfCur');
-        if(c)c.textContent=ptfSure(Number(sk.value));
+        var _sd=ptfAralikDurumu();
+        var _stot=_sd?_sd.toplam:(A.dur||0);
+        if(c)c.textContent=ptfSure((Number(sk.value)/1000)*_stot);
       });
       sk.addEventListener('change',function(e){
         e.stopPropagation();A.seekTutuluyor=false;
-        ytKomut('seekTo',[Number(sk.value),true]);
+        // Oran → hedef saniye → (aralık varsa) ham video saniyesi.
+        var _so=Math.max(0,Math.min(1,(Number(sk.value)||0)/1000));
+        var _sd2=ptfAralikDurumu();
+        var _sh;
+        if(_sd2&&_sd2.toplam>0){
+          _sh=_so*_sd2.toplam;
+          var _se=ptfAralikCoz(_sh);
+          if(_se&&isFinite(_se.t))_sh=_se.t;
+        }else{
+          _sh=_so*(A.dur||0);
+        }
+        ytKomut('seekTo',[_sh,true]);
       });
     }
     // Durum akışını başlat - iframe henüz yüklenmemiş olabileceği için birkaç kez denenir.
@@ -25313,13 +25341,24 @@ window.PTPlayer=(function(){
       var box=el('ptpChBox');if(!box)return;
       var v=S.video;
       if(!v||S.isLive||!isFinite(v.duration)||!(v.duration>0))return;
+      // ══════════════════════════════════════════════════════════════════════════════
+      // ASIL HATA BURADAYDI (kullanıcı: "düzeltmemişsin, aynı görüntüyü atıyorum" - haklı):
+      // Panelin TAM ÇİZİM yolunu bölüm çizelgesine bağlamıştım, ama panel 250 ms'de bir
+      // KENDİNİ YERİNDE güncelliyor ve burada HAM video süresini yazıyordu. Yani düzeltmem
+      // çizimden hemen sonraki ilk turda üzerine yazılıyor, ekranda hiç görünmüyordu.
+      // Bir arayüzün iki ayrı yerden beslenmesi tam olarak bunu doğuruyor - artık ikisi de
+      // aynı hesabı kullanıyor.
+      // ══════════════════════════════════════════════════════════════════════════════
+      var _kd=ptpToplamAralikDurumu(v.duration,v.currentTime||0);
+      var _kcur=_kd?_kd.gecen:v.currentTime;
+      var _ktot=_kd?_kd.toplam:v.duration;
       var sl=box.querySelector('.rcx-prog input');
       if(sl&&!window._ptpChSeekTutuluyor){
         sl.max=1000;
-        sl.value=Math.round((v.currentTime/v.duration)*1000);
+        sl.value=_ktot>0?Math.round((_kcur/_ktot)*1000):0;
       }
       var r=box.querySelectorAll('.rcx-prog .r span');
-      if(r&&r.length===2){r[0].textContent=fmt(v.currentTime);r[1].textContent=fmt(v.duration);}
+      if(r&&r.length===2){r[0].textContent=fmt(_kcur);r[1].textContent=fmt(_ktot);}
     },250);
   }
   // KUMANDA sekmesindeki ilerleme çubuğu - videoda istenilen ana atlamak için.
