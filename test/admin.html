@@ -1358,6 +1358,125 @@ firebase.initializeApp(FB);
    yeterli; atlanan çağrı yeri kalamaz.
    window._ptGercekRef: önek uygulanmamış hâli - gerçek veriyi OKUMAK gerektiğinde kullanılır.
    ══════════════════════════════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   TEST ORTAMINA VERİ KOPYALAMA
+   SORUN: Veri kökü ayrıldıktan sonra test ortamı BOŞ açılıyor - lig listesi yok, yönetici
+   kaydı yok, dolayısıyla GİRİŞ YAPILAMIYOR. Ayırmanın kaçınılmaz sonucu, ama kullanılabilir
+   hâle getirmek için bir başlangıç verisi gerekiyor.
+   ÇÖZÜM: Test ortamında giriş ekranına bir kopyalama düğmesi konur. Gerçek veriyi OKUR,
+   test köküne YAZAR.
+   TEK YÖNLÜ - BİLEREK: Yalnızca gerçek → test yönünde çalışır. Ters yön hiç yazılmadı;
+   yanlışlıkla test verisinin gerçeğin üstüne yazılması, ayırmanın tüm amacını yok ederdi.
+   Okuma için önek UYGULANMAMIŞ ref (window._ptGercekRef) kullanılır; yazma normal db ile
+   yapılır ve o zaten test köküne yönlendirilmiştir.
+   ══════════════════════════════════════════════════════════════════════════════════════════ */
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// KOPYALAMA TEK SEFERLİKTİR (kullanıcı: "yeniden kopyalamayı engelle, teşhis kopyalama
+// sistemi gibi olsun")
+// NEDEN: Yeniden kopyalama, test ortamında kurduğunuz her şeyi sessizce siler. Onay kutusu
+// bunu yazıyordu ama onay kutuları alışkanlıkla geçilir - asıl koruma, işlemin baştan
+// engellenmesidir.
+// TEŞHİS SİSTEMİYLE AYNI MANTIK: Bir kez yapılan işlem damgalanır ve tekrarı engellenir;
+// gerçekten gerekiyorsa damga AÇIKÇA sıfırlanır. Fark şu: teşhiste damga sıfırlamak veri
+// kaybettirmez, burada kaybettirir - bu yüzden sıfırlama onayı tek dokunuşla değil, yazarak
+// verilir. Yanlışlıkla basılması mümkün olmasın.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+window.ptTestKopyaSifirla=function(){
+  var c=prompt('Bu, kopyalama kilidini kaldırır.\n\n'
+    +'Yeniden kopyaladığınızda TEST ORTAMINDAKİ TÜM DEĞİŞİKLİKLERİNİZ SİLİNİR.\n\n'
+    +'Onaylamak için büyük harfle SIFIRLA yazın:');
+  if(c===null)return;
+  if(String(c).trim().toLocaleUpperCase('tr')!=='SIFIRLA'){alert('İptal edildi.');return;}
+  firebase.database().ref('_kopyaBilgi').remove().then(function(){
+    alert('Kilit kaldırıldı. Sayfa yenileniyor.');
+    location.reload();
+  }).catch(function(e){alert('Kilit kaldırılamadı: '+((e&&e.message)||'bilinmeyen hata'));});
+};
+window.ptTestVeriKopyala=function(){
+  if(!window._ptTestOrtami){alert('Bu işlem yalnızca test ortamında kullanılabilir.');return;}
+  if(!window._ptGercekRef){alert('Gerçek veri kaynağına erişilemiyor.');return;}
+  // Damga varsa kopyalama YAPILMAZ - yalnızca durum açıklanır ve sıfırlama yolu gösterilir.
+  if(window._ptKopyaDamgasi){
+    var d=new Date(window._ptKopyaDamgasi);
+    if(confirm('Bu test ortamına veri bir kez kopyalandı:\n'
+      +d.toLocaleString('tr-TR')+'\n\n'
+      +'Kopyalama TEK SEFERLİKTİR - tekrarı engellenmiştir, çünkü yeniden kopyalamak test '
+      +'ortamındaki tüm çalışmanızı siler.\n\n'
+      +'Yine de yeniden kopyalamanız gerekiyorsa önce kilidi kaldırmanız gerekir.\n\n'
+      +'Kilidi kaldırma ekranı açılsın mı?'))window.ptTestKopyaSifirla();
+    return;
+  }
+  if(!confirm('Gerçek veritabanındaki lig, kanal havuzu ve genel ayarlar TEST ortamına kopyalanacak.\n\n'
+    +'• Gerçek veriye DOKUNULMAZ - yalnızca okunur.\n'
+    +'• Test ortamındaki mevcut veriler bu dallarda ÜZERİNE YAZILIR.\n\nDevam edilsin mi?'))return;
+  var btn=document.getElementById('testKopyaBtn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Kopyalanıyor…';}
+  var dallar=['leagues','channelPool','globalAdminSettings'];
+  var okundu={};
+  Promise.all(dallar.map(function(d){
+    return window._ptGercekRef(d).once('value').then(function(sn){okundu[d]=sn.val();});
+  })).then(function(){
+    return Promise.all(dallar.map(function(d){
+      if(okundu[d]==null)return Promise.resolve();
+      return firebase.database().ref(d).set(okundu[d]);
+    }));
+  }).then(function(){
+    // Kopyalama anı kaydedilir - yönetici "bu test verisi ne kadar eski" sorusunu
+    // düğmenin üstünden görebilsin. Kopya TEK SEFERLİKTİR; gerçek taraf sonradan
+    // değişirse test tarafı KENDİLİĞİNDEN güncellenmez, bu damga da bunu görünür kılar.
+    return firebase.database().ref('_kopyaBilgi').set({ts:Date.now()});
+  }).then(function(){
+    if(btn){btn.textContent='✅ Kopyalandı - sayfa yenileniyor';}
+    setTimeout(function(){location.reload();},900);
+  }).catch(function(e){
+    if(btn){btn.disabled=false;btn.textContent='📥 Gerçek Veriyi Test Ortamına Kopyala';}
+    alert('Kopyalanamadı: '+((e&&e.message)||'bilinmeyen hata')
+      +'\n\nVeritabanı kurallarınız test/ dalına yazmaya izin vermiyor olabilir.');
+  });
+};
+(function testKopyaDugmesi(){
+  try{
+    if(location.pathname.indexOf('/test/')===-1)return;
+    var koy=function(){
+      if(document.getElementById('testKopyaBtn'))return;
+      var b=document.createElement('button');
+      b.id='testKopyaBtn';
+      b.type='button';
+      b.textContent='📥 Gerçek Veriyi Test Ortamına Kopyala';
+      b.onclick=window.ptTestVeriKopyala;
+      // KULLANICI TALEBİ ("admin isterse bu kopyaları güncelleyebilir"): Düğme yalnızca giriş
+      // ekranında değil, HER ZAMAN erişilebilir olmalı - yeni sezon açıldığında ya da havuz
+      // değiştiğinde test verisini tazelemek isteyebilirsiniz.
+      // Ama tam genişlikte bir düğme panelin üstünü kapatırdı. Bu yüzden giriş yapıldıktan
+      // sonra küçük bir rozete dönüşür: köşede durur, dokununca aynı işi yapar.
+      // Üzerinde son kopyalama tarihi yazar - test verisinin ne kadar eski olduğu görünsün.
+      b.style.cssText='position:fixed;left:12px;right:12px;bottom:12px;z-index:2147483646;'
+        +'padding:12px;border-radius:12px;border:none;cursor:pointer;'
+        +'background:#7c3aed;color:#fff;font-family:inherit;font-size:13px;font-weight:800;'
+        +'box-shadow:0 6px 20px rgba(0,0,0,.35)';
+      document.body.appendChild(b);
+      // Son kopyalama damgasını oku ve düğmeyi buna göre biçimlendir.
+      try{
+        firebase.database().ref('_kopyaBilgi').once('value').then(function(sn){
+          var v=sn.val();
+          if(!v||!v.ts)return;                 // hiç kopyalanmamış - büyük düğme kalsın
+          var d=new Date(v.ts);
+          var et=('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2)
+                 +' '+('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+          window._ptKopyaDamgasi=v.ts;   // kilit: kopyalama bir daha yapılmaz
+          b.textContent='🧪 Test verisi · '+et+'  🔒';
+          b.title='Kopyalama tek seferliktir - bu tarihte yapıldı. Dokununca ayrıntı gösterilir.';
+          b.style.cssText='position:fixed;left:auto;right:10px;bottom:10px;z-index:2147483646;'
+            +'padding:7px 11px;border-radius:20px;border:1px solid rgba(255,255,255,.25);cursor:pointer;'
+            +'background:rgba(124,58,237,.92);color:#fff;font-family:inherit;font-size:11px;font-weight:700;'
+            +'box-shadow:0 4px 14px rgba(0,0,0,.3);opacity:.9';
+        }).catch(function(){});
+      }catch(e){}
+    };
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',koy);
+    else koy();
+  }catch(e){}
+})();
 (function ptTestVeriKoku(){
   try{
     var testMi=(location.pathname.indexOf('/test/')!==-1);
@@ -1376,7 +1495,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-03-U';
+window.APP_BUILD='2026-09-04-A';
 
 
 var DIAG_AUTH_MOD='adm_settings';
