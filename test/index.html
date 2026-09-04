@@ -2164,18 +2164,31 @@ const app=firebase.initializeApp(FB);
   }catch(e){}
 })();
 
-// GEÇİCİ TEŞHİS: Konsol erişimi olmayan cihazlarda yakalanmamış hataları görünür kılar.
+// Yakalanmamış hatalar TEŞHİS KAYDINA yazılır - ekrana uyarı kutusu ÇIKARILMAZ.
+// Önceki geçici sürüm alert kullanıyordu; sorunu bulmak için işe yaradı ama kalıcı olamaz:
+// sıradan bir ağ kesintisi ya da eklenti kaynaklı bir hata bile kullanıcının önüne kutu
+// çıkarır ve uygulamayı kullanılamaz gösterirdi. Kayıt sessizdir, rapora düşer, kullanıcıyı
+// rahatsız etmez. DiagCore henüz hazır değilse hata sessizce yutulur - teşhis uğruna
+// uygulamayı kırmak anlamsız olurdu.
 window.addEventListener('error',function(e){
-  try{alert('TEŞHİS - JS Hatası:\n'+(e&&e.message)+'\n'+(e&&e.filename?e.filename+':'+e.lineno:''));}catch(_e){}
+  try{
+    if(window.DiagCore&&DiagCore.kaydet)
+      DiagCore.kaydet('pt_data','hata','Yakalanmamış betik hatası',
+        {mesaj:(e&&e.message)||'?',dosya:(e&&e.filename)||'',satir:(e&&e.lineno)||0},15000);
+  }catch(_e){}
 });
 window.addEventListener('unhandledrejection',function(e){
-  try{alert('TEŞHİS - Yakalanmamış Promise Hatası:\n'+((e&&e.reason&&(e.reason.message||e.reason))||'bilinmeyen'));}catch(_e){}
+  try{
+    if(window.DiagCore&&DiagCore.kaydet)
+      DiagCore.kaydet('pt_data','hata','Yakalanmamış promise hatası',
+        {mesaj:((e&&e.reason&&(e.reason.message||e.reason))||'bilinmeyen')+''},15000);
+  }catch(_e){}
 });
 const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-04-B';
+window.APP_BUILD='2026-09-04-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -4997,7 +5010,12 @@ function init(){
     _lastKnownAdminLeague=snap.val();
     tryFollowAdminLeague();
   },function(err){
-    try{alert('TEŞHİS - activeDisplayLeague okunamadı:\ncode: '+(err&&err.code)+'\nmessage: '+(err&&err.message));}catch(_e){}
+    // Okuma hatası sessizce kayda geçer - kullanıcıya kutu çıkarılmaz.
+    try{
+      if(window.DiagCore&&DiagCore.kaydet)
+        DiagCore.kaydet('pt_data','hata','activeDisplayLeague okunamadı',
+          {kod:(err&&err.code)||'?',mesaj:(err&&err.message)||''},30000);
+    }catch(_e){}
   });
   // KULLANICI TALEBİ: "Lig yüklenemiyor" hatası verdiğinde artık (1) birkaç kez otomatik
   // yeniden denenir, (2) hâlâ başarısız olursa ve önbellekte (localStorage) daha önce
@@ -5060,9 +5078,13 @@ function init(){
       if(wasDeleted)showToast('ℹ️ Bulunduğunuz sezon kaldırıldı - '+((_leaguesMeta[useId]&&_leaguesMeta[useId].name)||'güncel sezona')+' geçildi');
     }
   },function(err){
-    // GEÇİCİ TEŞHİS: Mobilde konsol erişimi olmadığı için gerçek hatayı ekranda görebilmek
-    // amacıyla eklendi - sorun çözüldükten sonra kaldırılabilir.
-    try{alert('TEŞHİS - leaguesMeta okunamadı:\ncode: '+(err&&err.code)+'\nmessage: '+(err&&err.message));}catch(_e){}
+    // Okuma hatası kayda geçer; kullanıcı zaten aşağıdaki yeniden deneme ve önbellek
+    // mekanizmasıyla karşılanıyor, ayrıca uyarı kutusu göstermeye gerek yok.
+    try{
+      if(window.DiagCore&&DiagCore.kaydet)
+        DiagCore.kaydet('pt_data','hata','leaguesMeta okunamadı',
+          {kod:(err&&err.code)||'?',mesaj:(err&&err.message)||'',deneme:_leaguesMetaRetryCount+1},30000);
+    }catch(_e){}
     _leaguesMetaRetryCount++;
     if(_leaguesMetaRetryCount<=4){
       // KULLANICI TALEBİ: Önce birkaç kez (artan gecikmeyle) otomatik yeniden dene - çoğu
@@ -20833,14 +20855,14 @@ function buildVideoEmbedHtml(url,basSn,bitSn){
       // (çapraz kaynak), ama bu bayrak sayesinde iframe'e postMessage ile oynat/duraklat/sar
       // KOMUTU gönderebiliriz - kendi tam ekran kabuğumuzun (bkz. PTFrame) düğmeleri buna
       // dayanır. Bayrak olmadan YouTube bu komutları sessizce yok sayar.
-      if(kanal)return `<iframe src="https://www.youtube.com/embed/live_stream?channel=${kanal[1]}&autoplay=1&playsinline=1&enablejsapi=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
+      if(kanal)return `<iframe src="https://www.youtube.com/embed/live_stream?channel=${kanal[1]}&autoplay=1&playsinline=1&enablejsapi=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&cc_load_policy=0&cc_lang_pref=none" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;encrypted-media;picture-in-picture;fullscreen" allowfullscreen></iframe>`;
       const yt=url.match(/(?:watch\?v=|\/live\/|\/shorts\/|\/embed\/)([A-Za-z0-9_-]{6,})/)||url.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
       // İzleme aralığı: YouTube start/end parametrelerini kendi destekler. BİRDEN ÇOK bölüm
       // tanımlandığında yalnızca İLK bölümün başlangıcı adrese yazılır - bitiş yazılmaz,
       // çünkü YouTube "end"e gelince videoyu tamamen bitirir ve sonraki bölüme geçemezdik.
       // Bölüm zincirini bizim timeupdate denetimimiz yürütür (gömülü oynatıcı da S.video gibi
       // davrandığı için aynı kod çalışır - bkz. ptpGomuluMedya).
-      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1${basSn>0?'&start='+Math.floor(basSn):''}${''/* KÖK SEBEP DÜZELTMESİ (kullanıcı: "sahne geçişi sonrası YouTube arayüzleri kendiliğinden
+      if(yt)return `<iframe src="https://www.youtube.com/embed/${yt[1]}?autoplay=1&playsinline=1&enablejsapi=1&mute=1&controls=0&modestbranding=1&rel=0&iv_load_policy=3&disablekb=1&cc_load_policy=0&cc_lang_pref=none${basSn>0?'&start='+Math.floor(basSn):''}${''/* KÖK SEBEP DÜZELTMESİ (kullanıcı: "sahne geçişi sonrası YouTube arayüzleri kendiliğinden
         birden beliriyor"): Buraya &end=... yazıyorduk. YouTube o saniyeye gelince videoyu
         KENDİ BİTİRİYOR ve bitiş ekranını açıyor - başlık, kanal, "Diğer videolar", öneri
         küçük resimleri. Bu bizim geçişimiz değil, PLATFORMUN kendi davranışı; örtüyle
@@ -22054,6 +22076,22 @@ function ptpGomuluMedya(kap,ilkIfr){
   // Dışarıya hiçbir olay/dinleyici değişikliği yansımaz; yalnızca komutların ve durum
   // akışının muhatabı değişir. Kullanıcının ses/hız tercihleri yeni pencereye taşınır -
   // aksi halde yedek, kurulurken zorunlu olarak sessiz başlatıldığı için ses geri gelmezdi.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KULLANICI BİLDİRDİ ("YouTube'a ait video altyazılarını görüyor"):
+  // Gömme adresine cc_load_policy=0 eklendi ama o TEK BAŞINA yetmiyor - platform, izleyicinin
+  // hesabında ya da tarayıcısında kayıtlı "altyazı açık" tercihini hatırlayıp yine açabiliyor.
+  // Adres parametresi yalnızca VARSAYILANI belirler, kullanıcı tercihini ezmez.
+  // ÇÖZÜM: Oynatıcı hazır olduğunda altyazı modülü açıkça KALDIRILIR. Modül yüklü değilken
+  // altyazı çizilemez, dolayısıyla tercih ne olursa olsun görünmez.
+  // Birkaç kez denenir: komut, platformun kendi açılış sırasına denk gelirse yutulabiliyor.
+  function altyaziKapat(){
+    try{
+      komut('unloadModule',['captions']);      // eski ad
+      komut('unloadModule',['cc']);            // yeni ad - platform sürümüne göre değişiyor
+      komut('setOption',['captions','track',{}]);
+    }catch(e){}
+  }
+  kap._ptpAltyaziKapat=altyaziKapat;
   kap._ptpIframeDegistir=function(yeni,baslangicSn){
     if(!yeni)return;
     kap._ptpAktifIfr=yeni;
@@ -22064,6 +22102,8 @@ function ptpGomuluMedya(kap,ilkIfr){
     if(typeof baslangicSn==='number'&&isFinite(baslangicSn)&&baslangicSn>=0)D.pos=baslangicSn;
     dinle();
     [120,400,900,1800].forEach(function(ms){setTimeout(function(){if(kap._ptpAktifIfr===yeni)dinle();},ms);});
+    // Yeni pencerede de altyazı kapatılır - pencere değişince tercih yeniden uygulanıyor.
+    [300,900,2000].forEach(function(ms){setTimeout(function(){if(kap._ptpAktifIfr===yeni)altyaziKapat();},ms);});
     // Ses/hız tercihi YENİ pencereye taşınır. Okunan değer D DEĞİL, ISTEK - sebebi için
     // yukarıdaki "geçiş sonrası ses gelmiyor" notuna bakın.
     // Tek komut yetmez: YouTube açılış sırasında ses durumunu birkaç kez kendi tazeliyor ve
@@ -22127,7 +22167,17 @@ function ptpGomuluMedya(kap,ilkIfr){
         if(_eskiSt!==i.playerState&&typeof window.ptpDurumDegisti==='function')
           window.ptpDurumDegisti(_eskiSt,i.playerState);
       }catch(e){}   // tanı kaydı için (bkz. ptpTaniKaydet)
-      if(i.playerState===1){olay('playing');olay('canplay');}
+      if(i.playerState===1){
+        olay('playing');olay('canplay');
+        // Oynatma başladığında altyazı bir kez daha kapatılır: platform, açılış sırasında
+        // kullanıcı tercihini oynatma başlarken uyguluyor ve daha erken gönderilen komutu
+        // eziyordu (bkz. altyaziKapat üzerindeki not). Tek seferlik bayrakla tekrarlanmaz.
+        if(!kap._ptpAltyaziKapandi){
+          kap._ptpAltyaziKapandi=true;
+          altyaziKapat();
+          setTimeout(altyaziKapat,700);
+        }
+      }
       if(i.playerState===3)olay('waiting');
       if(i.playerState===0)olay('ended');
     }
