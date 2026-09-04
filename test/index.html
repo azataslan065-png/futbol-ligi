@@ -33,7 +33,7 @@
 // için var.
 if('serviceWorker' in navigator){
   window.addEventListener('load',function(){
-    navigator.serviceWorker.register('service-worker.js').catch(function(){});
+    navigator.serviceWorker.register('service-worker.js').catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
   });
 }
 </script>
@@ -2216,7 +2216,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-04-H';
+window.APP_BUILD='2026-09-04-R';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -2424,7 +2424,7 @@ window._authSonda={durum:'ortam-uygun-değil',hata:null,uid:null,ms:null,kaynak:
        e-posta oturumu her yenilemede anonime düşer ve yazma yetkisi kaybolurdu. */
     Promise.resolve(
       auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
-        .catch(function(){return auth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function(){});})
+        .catch(function(){return auth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});})
     ).then(function(){
       if(auth.currentUser)return {user:auth.currentUser};
       return auth.signInAnonymously();
@@ -4691,7 +4691,8 @@ function registerVisitor(name,isNew){
 // isimle giriş yapınca bunların HİÇBİRİNİ görmüyordu. Bu liste, senkronize edilecek TÜM
 // cihaz-yerel ayar anahtarlarını tek bir yerden yönetir - yeni bir ayar eklenirse buraya
 // eklemek yeterli olur.
-const SYNCED_PREF_KEYS=['pt_fontFamily','pt_reactionPack','pt_liveTicker','pt_bgPaletteSync',
+const SYNCED_PREF_KEYS=['pt_favVideos','pt_videoHistory',
+  'pt_fontFamily','pt_reactionPack','pt_liveTicker','pt_bgPaletteSync',
   'pt_clockMode','pt_voiceAnnouncer','pt_voiceAnnouncePrefs','pt_eventSoundOn','pt_eventSoundPrefs',
   'pt_weeklySummaryOff','pt_autoDarkMode','pt_autoDarkStart','pt_autoDarkEnd',
   'pt_hideTypingFromOthers','pt_quietHoursOn','pt_quietHoursStart','pt_quietHoursEnd',
@@ -4719,6 +4720,9 @@ function applySyncedPrefsAndCheckChanged(prefs){
   });
   return changed;
 }
+// Pencere üzerinden de erişilebilir olmalı - favori/geçmiş yazıcıları bu fonksiyonu
+// tanımından ÖNCE gelen bir kapsamda çağırıyor.
+window.syncProfileToFirebase=syncProfileToFirebase;
 function syncProfileToFirebase(){
   if(!_curVisitorId)return;
   const profileData={
@@ -4944,9 +4948,9 @@ function logUserAction(actionText){
       if(fazla>0){
         var updates={};
         keys.slice(0,fazla).forEach(function(k){updates[k]=null;});
-        ref.update(updates).catch(function(){});
+        ref.update(updates).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
       }
-    }).catch(function(){});
+    }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
   }
 }
 
@@ -14937,6 +14941,79 @@ window.showTeamDetail=function(tid){
 
 window.switchTdTab=function(tab){_tdTab=tab;renderTeamDetailContent();};
 
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// TAKIM MAÇ GEÇMİŞİ ve FORM ÇİZGİSİ (kullanıcı listesi)
+// Form çizgisi EN SON 5 maçtan hesaplanır ve SOLDAN SAĞA eskiden yeniye dizilir - insanların
+// zaman çizgisini okuma yönü budur; tersi kafa karıştırırdı.
+// Beraberlikte penaltı galibiyeti varsa GALİBİYET sayılır: lig bu ayrımı zaten yapıyor
+// (penaltyWinner alanı), form çizgisinin ondan farklı davranması tutarsızlık olurdu.
+// Maç listesi YENİDEN ESKİYE sıralanır - kullanıcı önce son maça bakar.
+// Oynanmamış maçlar ayrı bir bölümde, sonuç yerine tarihle gösterilir.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+function renderTdMatches(tid,t){
+  var tum=Object.entries(D.matches||{})
+    .map(function(e){return Object.assign({_id:e[0]},e[1]||{});})
+    .filter(function(m){return m&&(m.homeId===tid||m.awayId===tid);});
+  if(!tum.length)
+    return '<div style="text-align:center;color:var(--mu);padding:1.6rem;font-size:.8rem">Bu takım için maç kaydı yok</div>';
+  function sonuc(m){
+    var ev=(m.homeId===tid),hg=Number(m.homeGoals)||0,ag=Number(m.awayGoals)||0;
+    if(hg===ag)return (m.penaltyWinner===tid)?'W':(m.penaltyWinner?'L':'D');
+    return ((ev&&hg>ag)||(!ev&&ag>hg))?'W':'L';
+  }
+  var oynanan=tum.filter(function(m){return m.played;})
+    .sort(function(a,b){return (b.week||0)-(a.week||0);});
+  var bekleyen=tum.filter(function(m){return !m.played;})
+    .sort(function(a,b){return (a.week||0)-(b.week||0);});
+  // Form: son 5 oynanan maç, eskiden yeniye
+  var form=oynanan.slice(0,5).reverse().map(sonuc);
+  var renk={W:'#22c55e',D:'#94a3b8',L:'#ef4444'};
+  var etiket={W:'G',D:'B',L:'M'};
+  var formHtml=form.length?('<div style="margin-bottom:.8rem">'
+    +'<div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.35rem">SON '+form.length+' MAÇ</div>'
+    +'<div style="display:flex;gap:.3rem;align-items:center">'
+    +form.map(function(r,i){
+        // EN SON oynanan maç dizinin SONUNDA (eskiden yeniye dizili). Belirgin bir çerçeveyle
+        // ayrılır - beş kutu yan yanayken hangisinin en güncel olduğu yoksa anlaşılmıyordu.
+        var son=(i===form.length-1);
+        return '<span style="width:26px;height:26px;border-radius:8px;background:'+renk[r]
+          +';color:#fff;font-size:.7rem;font-weight:900;display:flex;align-items:center;justify-content:center'
+          +(son?';outline:2px solid var(--tx);outline-offset:2px':'')+'">'
+          +etiket[r]+'</span>';
+      }).join('')
+    +'<span style="margin-left:.4rem;font-size:.64rem;color:var(--mu)">eskiden yeniye</span>'
+    +'</div></div>'):'';
+  function satir(m,oynandiMi){
+    var ev=(m.homeId===tid);
+    var rakipId=ev?m.awayId:m.homeId;
+    var rakip=(D.teams&&D.teams[rakipId]&&D.teams[rakipId].name)||'—';
+    var hg=Number(m.homeGoals)||0,ag=Number(m.awayGoals)||0;
+    var r=oynandiMi?sonuc(m):null;
+    var skor=oynandiMi?((ev?hg:ag)+' - '+(ev?ag:hg)):'—';
+    return '<div onclick="showMatchDetail(\''+escAttr(m._id)+'\')" style="display:flex;align-items:center;gap:.6rem;padding:.55rem .6rem;background:var(--s2);border:1px solid var(--br);border-radius:11px;margin-bottom:.4rem;cursor:pointer">'
+      +(oynandiMi?('<span style="width:22px;height:22px;border-radius:7px;flex-shrink:0;background:'+renk[r]
+        +';color:#fff;font-size:.62rem;font-weight:900;display:flex;align-items:center;justify-content:center">'+etiket[r]+'</span>')
+        :'<span style="width:22px;flex-shrink:0;text-align:center;font-size:.7rem">📅</span>')
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:.76rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
+          +(ev?'':'@ ')+escAttr(rakip)+'</div>'
+        +'<div style="font-size:.6rem;color:var(--mu)">'+(m.week?(m.week+'. hafta'):'')
+          +(m.date?((m.week?' · ':'')+escAttr(m.date)):'')+'</div>'
+      +'</div>'
+      +'<div style="flex-shrink:0;font-size:.82rem;font-weight:900">'+skor+'</div>'
+    +'</div>';
+  }
+  var html=formHtml;
+  if(oynanan.length){
+    html+='<div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.35rem">OYNANAN ('+oynanan.length+')</div>'
+      +oynanan.map(function(m){return satir(m,true);}).join('');
+  }
+  if(bekleyen.length){
+    html+='<div style="font-size:.68rem;font-weight:800;color:var(--mu);margin:.8rem 0 .35rem">GELECEK ('+bekleyen.length+')</div>'
+      +bekleyen.map(function(m){return satir(m,false);}).join('');
+  }
+  return html;
+}
 function renderTeamDetailContent(){
   // (bkz. renderMatchDetailContent'teki aynı gerekçe) - sekme değişimi/canlı yenileme
   // sırasında geri yığınına yanlışlıkla girmesin diye no-push bayrağı kullanılır.
@@ -14950,6 +15027,7 @@ function renderTeamDetailContent(){
   if(_tdTab==='info')body=renderTdInfo(tid,t,tr);
   else if(_tdTab==='squad')body=renderTdSquad(tid,t);
   else if(_tdTab==='players')body=renderTdPlayers(tid,t);
+  else if(_tdTab==='matches')body=renderTdMatches(tid,t);
   else if(_tdTab==='fanwall')body=renderTdFanWall(tid,t);
 
   // Eski kayıtlarda görseller düz metin (string) olarak saklanmış olabilir - geriye dönük uyumluluk.
@@ -15024,6 +15102,7 @@ function renderTeamDetailContent(){
       <button class="td-tab${_tdTab==='info'?' active':''}" onclick="switchTdTab('info')">📊 Bilgi</button>
       <button class="td-tab${_tdTab==='squad'?' active':''}" onclick="switchTdTab('squad')">👕 Kadro & Saha</button>
       <button class="td-tab${_tdTab==='players'?' active':''}" onclick="switchTdTab('players')">📋 Oyuncular</button>
+      <button class="td-tab${_tdTab==='matches'?' active':''}" onclick="switchTdTab('matches')">📅 Maçlar</button>
       <button class="td-tab${_tdTab==='fanwall'?' active':''}" onclick="switchTdTab('fanwall')">📣 Taraftar Duvarı</button>
     </div>
     ${body}
@@ -17823,7 +17902,7 @@ function requestPtTrimWakeLock(){
 }
 function releasePtTrimWakeLock(){
   try{
-    if(_ptTrimWakeLock){var wl=_ptTrimWakeLock;_ptTrimWakeLock=null;wl.release().catch(function(){});}
+    if(_ptTrimWakeLock){var wl=_ptTrimWakeLock;_ptTrimWakeLock=null;wl.release().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}
   }catch(e){DiagSil('releasePtTrimWakeLock',e);}
 }
 function trimVideoClientSide(file,startSec,endSec,onProgress,callback){
@@ -19600,7 +19679,7 @@ function checkForActiveRemoteSessionOnListScreen(){
         banner.querySelector('.rmb-btn').setAttribute('onclick',"openRemoteControllerScreen('"+v.sessionId+"','"+base+"')");
       }
     }
-  }).catch(function(){});
+  }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
 }
 // KULLANICI TALEBİ: "Kullanıcı tarafında kanal ve video araması için arama motoru ekle."
 window.filterVideoScreenList=function(q){
@@ -19612,7 +19691,21 @@ function renderVideoScreenList(){
   const tab=window._videoScreenTab||'tv';
   const q=(window._videoScreenQuery||'').trim().toLocaleLowerCase('tr');
   const all=D.videoLinks||[];
-  let baseList=all.filter(function(v){return tab==='tv'?!!v.isLive:!v.isLive;});
+  // KULLANICI TALEBİ ("bir kanalı geçici olarak yayından kaldırma - silmeden gizleme"):
+  // 'gizli' işaretli kayıtlar kullanıcıya HİÇ gösterilmez. Kayıt silinmediği için ayarları,
+  // aralıkları ve havuz bağlantısı korunur; yönetici tek dokunuşla geri açabilir.
+  // SENSÖR: Gizleme özelliği eklendikten sonra ortaya çıkan yeni bir sessiz hata: yönetici
+  // sekmedeki TÜM kanalları gizlerse kullanıcı boş bir ekran görür ve sebebini anlayamaz.
+  // "Hiç kanal eklenmemiş" ile "hepsi gizlenmiş" birbirinden ayırt edilemiyordu.
+  var _tumTab=all.filter(function(v){return tab==='tv'?!!v.isLive:!v.isLive;});
+  let baseList=_tumTab.filter(function(v){return v&&!v.gizli;});
+  try{
+    if(_tumTab.length&&!baseList.length&&window.DiagCore&&DiagCore.kaydet)
+      DiagCore.kaydet('pt_nav','uyari','Sekmedeki tüm kanallar gizli',
+        {sekme:tab,gizliSayisi:_tumTab.length,
+         anlami:'Kullanıcı boş bir liste görüyor; kayıtlar duruyor ama hepsi yayından kaldırılmış.',
+         oneri:'Yönetici panelinde TV/Video Yönetimi > ilgili sekmede 🚫 işaretli satırları 👁️ ile yayına alın.'},60000);
+  }catch(e){}
   const toplamSayi=baseList.length;
   // KULLANICI TALEBİ ("kanallar bulundukları sıraya göre otomatik numaralandırılacak"):
   // Numara, ARAMA/KATEGORİ filtresi UYGULANMADAN ÖNCEKİ tam sıradaki KONUM olmalı - aksi
@@ -19635,6 +19728,18 @@ function renderVideoScreenList(){
   const catsInTab=[...new Set(list.map(v=>v.category).filter(Boolean))];
   const activeCat=window._videoScreenCategory||'';
   if(activeCat)list=list.filter(function(v){return v.category===activeCat;});
+  // FAVORİ / GEÇMİŞ süzgeci. Geçmişte sıralama İZLENME zamanına göredir - kişisel sıra ya da
+  // kategori sırası burada anlamsız olurdu, kullanıcı "en son ne izledim" diye bakıyor.
+  const _suz=window._videoScreenSuzgec||'';
+  if(_suz==='fav'){
+    var _favL=ptFavListesi();
+    list=list.filter(function(v){return _favL.indexOf(v.id)!==-1;});
+  }else if(_suz==='gecmis'){
+    var _gec=ptGecmisListesi(),_sira={};
+    _gec.forEach(function(x,k){if(x&&x.id)_sira[x.id]=k;});
+    list=list.filter(function(v){return _sira[v.id]!==undefined;})
+             .sort(function(a,b){return _sira[a.id]-_sira[b.id];});
+  }
   if(q)list=list.filter(function(v){return (v.title||'').toLocaleLowerCase('tr').indexOf(q)!==-1;});
   function tabBtnHtml(id,label){
     const on=tab===id;
@@ -19656,10 +19761,24 @@ function renderVideoScreenList(){
   // artırılıp min-height:30px verildi. Yazı renkleri de vurgu-üstü hesaplanan --ac-tx ve
   // soluk --mu yerine ana metin --tx ile değiştirildi.
   const catChipCss=(on)=>`flex-shrink:0;min-height:32px;display:inline-flex;align-items:center;padding:.45rem .75rem;border-radius:15px;border:1.5px solid ${on?'var(--ac)':'var(--br)'};background:${on?'var(--ac)':'var(--s2)'};color:${on?'var(--ac-tx,#fff)':'var(--tx)'};font-size:.7rem;font-weight:700;cursor:pointer;white-space:nowrap`;
-  const catHtml=catsInTab.length?`<div style="display:flex;gap:.35rem;overflow-x:auto;padding-bottom:.5rem;margin-bottom:.2rem">
+  // Favori ve geçmiş çipleri kategori çiplerinden AYRI satırda: ikisi farklı türde süzgeç
+  // (biri içerik kategorisi, biri kişisel liste) ve aynı satırda karışıyorlardı.
+  // Sayılar SÜZGEÇSİZ listeden hesaplanır - çipin üstündeki sayı, çipe basınca kaç sonuç
+  // çıkacağını göstermeli; süzgeç uygulanmış listeden saymak kendi kendini sıfırlardı.
+  const _favL2=ptFavListesi();
+  const _gecL2=ptGecmisListesi().map(function(x){return x&&x.id;});
+  const _favSay=baseList.filter(function(v){return _favL2.indexOf(v.id)!==-1;}).length;
+  const _gecSay=baseList.filter(function(v){return _gecL2.indexOf(v.id)!==-1;}).length;
+  const _suzAktif=window._videoScreenSuzgec||'';
+  const suzHtml=(_favSay||_gecSay)?`<div style="display:flex;gap:.35rem;margin-bottom:.45rem;align-items:center">
+      ${_favSay?`<button onclick="ptVideoSuzgec('fav')" style="${catChipCss(_suzAktif==='fav')}">⭐ Favoriler · ${_favSay}</button>`:''}
+      ${_gecSay?`<button onclick="ptVideoSuzgec('gecmis')" style="${catChipCss(_suzAktif==='gecmis')}">🕘 Geçmiş · ${_gecSay}</button>`:''}
+      ${_suzAktif==='gecmis'?`<button onclick="ptGecmisTemizle()" style="margin-left:auto;background:transparent;border:none;color:var(--mu);font-size:.66rem;cursor:pointer;font-family:inherit">🗑️ Temizle</button>`:''}
+    </div>`:'';
+  const catHtml=suzHtml+(catsInTab.length?`<div style="display:flex;gap:.35rem;overflow-x:auto;padding-bottom:.5rem;margin-bottom:.2rem">
       <button onclick="filterVideoScreenCategory('')" style="${catChipCss(!activeCat)}">Tümü</button>
       ${catsInTab.map(c=>`<button onclick="filterVideoScreenCategory('${escAttr(c)}')" style="${catChipCss(activeCat===c)}">${escAttr(c)}</button>`).join('')}
-    </div>`:'';
+    </div>`:'');
   // KULLANICI TALEBİ: Sıralama düzenleme aç/kapa - yalnızca 2+ öğe varken anlamlı.
   const reorderBtnHtml=toplamSayi>1?`<button onclick="toggleVideoScreenReorder()" style="width:100%;margin-bottom:.6rem;padding:.5rem;border-radius:10px;border:1.5px solid ${reordering?'var(--ac)':'var(--br)'};background:${reordering?'var(--ac)':'var(--s2)'};color:${reordering?'#fff':'var(--mu)'};font-size:.72rem;font-weight:700;cursor:pointer">${reordering?'✅ Sıralamayı Bitir':'🔀 Sırayı Düzenle'}</button>`:'';
   const html=`<div class="sheet-handle"></div>
@@ -19707,7 +19826,10 @@ function renderVideoScreenList(){
           ${kilitli?'<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.1rem">🔒</div>':''}
         </div>
         <div style="flex:1;min-width:0">
-          <div class="pt-kayan" style="font-size:.9rem;font-weight:800"><span>${(q?highlightMatch(v.title||'İsimsiz Video',q):(v.title||'İsimsiz Video').replace(/</g,'&lt;'))}</span></div>
+          <div style="display:flex;align-items:center;gap:.4rem">
+            <div class="pt-kayan" style="flex:1;min-width:0;font-size:.9rem;font-weight:800"><span>${(q?highlightMatch(v.title||'İsimsiz Video',q):(v.title||'İsimsiz Video').replace(/</g,'&lt;'))}</span></div>
+            <button onclick="ptFavToggle(event,'${escAttr(v.id)}')" title="Favori" style="flex-shrink:0;background:transparent;border:none;cursor:pointer;font-size:1rem;line-height:1;padding:.25rem;min-width:32px;min-height:32px">${ptFavMi(v.id)?'⭐':'☆'}</button>
+          </div>
           <div style="font-size:.68rem;color:var(--mu);margin-top:.15rem">${altSatir}</div>
         </div>
         ${reordering?`<div style="display:flex;gap:.3rem;flex-shrink:0">
@@ -19747,7 +19869,7 @@ function getVideoScreenOrder(tab){
   }catch(e){return [];}
 }
 function saveVideoScreenOrder(tab,ids){
-  try{localStorage.setItem('pt_videoOrder_'+tab,JSON.stringify(ids));}catch(e){}
+  try{localStorage.setItem('pt_videoOrder_'+tab,JSON.stringify(ids));}catch(e){try{DiagSil('yerelKayit:pt_videoOrder_',e,{anahtar:'pt_videoOrder_',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
   if(typeof syncProfileToFirebase==='function')syncProfileToFirebase();
 }
 // KULLANICI TALEBİ ("TV ve video sekmesindeki kategoriler birbirinden bağımsız olsun"):
@@ -19777,6 +19899,80 @@ window.ptKayanBaslikTazele=function(){
       }
     });
   }catch(e){}
+};
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// FAVORİLER ve İZLEME GEÇMİŞİ
+// İkisi de KİŞİSEL veridir - lig kaydına değil, kullanıcının kendi tercihlerine aittir.
+// Bu yüzden cihaz tercihlerinde tutulur ve SYNCED_PREF_KEYS'e eklenerek kullanıcının diğer
+// cihazlarına da taşınır (aynı mekanizma yazı tipi, tema vb. için zaten kullanılıyor).
+// GEÇMİŞ SINIRLI: son 50 kayıt tutulur. Sınırsız büyümesi hem depolamayı hem senkronu
+// şişirir; 50 kayıt "yakın zamanda ne izledim" sorusunu fazlasıyla cevaplar.
+// Aynı video tekrar izlenirse yeni kayıt eklenmez, mevcut kaydın zamanı güncellenip başa
+// alınır - liste aynı başlıkla dolmaz.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+var PT_GECMIS_SINIR=50;
+function ptFavListesi(){
+  try{var r=localStorage.getItem('pt_favVideos');return r?JSON.parse(r):[];}catch(e){return [];}
+}
+function ptFavYaz(l){
+  // SENSÖR: Yerel kayıt SESSİZCE başarısız olabilir - depolama kotası dolduğunda ya da
+  // gizli sekmede tarayıcı yazmayı reddeder. Eskiden boş yakalama bloğuna düşüyordu:
+  // kullanıcı favoriye ekliyor, ekranda görüyor, sayfayı yenileyince kayboluyordu ve
+  // sebebi hiçbir yere yazılmıyordu. Artık kayda geçer ve ÖNERİ sunar.
+  try{localStorage.setItem('pt_favVideos',JSON.stringify(l||[]));}
+  catch(e){
+    try{
+      if(window.DiagCore&&DiagCore.kaydet)
+        DiagCore.kaydet('pt_kisisel','hata','Favori listesi cihaza kaydedilemedi',
+          {mesaj:(e&&e.message)||'?',adet:(l||[]).length,
+           anlami:'Favori ekrana yansır ama sayfa yenilenince kaybolur.',
+           oneri:'En sık sebep depolama kotasının dolması. Ayarlar > Önbelleği Temizle ile yer açın; gizli sekmede çalışıyorsanız normal sekmeye geçin.'},20000);
+    }catch(_e){}
+  }
+  try{if(window.syncProfileToFirebase)syncProfileToFirebase();}catch(e){}
+}
+window.ptFavMi=function(id){return ptFavListesi().indexOf(id)!==-1;};
+window.ptFavToggle=function(ev,id){
+  try{if(ev){ev.stopPropagation();ev.preventDefault();}}catch(e){}
+  var l=ptFavListesi(),i=l.indexOf(id);
+  if(i===-1)l.unshift(id);else l.splice(i,1);
+  ptFavYaz(l);
+  try{showToast(i===-1?'⭐ Favorilere eklendi':'☆ Favorilerden çıkarıldı');}catch(e){}
+  try{renderVideoScreenList();}catch(e){}
+};
+function ptGecmisListesi(){
+  try{var r=localStorage.getItem('pt_videoHistory');return r?JSON.parse(r):[];}catch(e){return [];}
+}
+window.ptGecmiseEkle=function(id){
+  if(!id)return;
+  try{
+    var l=ptGecmisListesi().filter(function(x){return x&&x.id!==id;});
+    l.unshift({id:id,ts:Date.now()});
+    if(l.length>PT_GECMIS_SINIR)l=l.slice(0,PT_GECMIS_SINIR);
+    localStorage.setItem('pt_videoHistory',JSON.stringify(l));
+    if(window.syncProfileToFirebase)syncProfileToFirebase();
+  }catch(e){
+    try{
+      if(window.DiagCore&&DiagCore.kaydet)
+        DiagCore.kaydet('pt_kisisel','uyari','İzleme geçmişi kaydedilemedi',
+          {mesaj:(e&&e.message)||'?',
+           anlami:'Geçmiş sekmesi boş kalır ya da eski hâlde takılı kalır.',
+           oneri:'Depolama kotası dolmuş olabilir. Geçmiş listesi 50 kayıtla sınırlı, tek başına kota doldurmaz - başka bir veri şişmiş olabilir, Önbelleği Temizle deneyin.'},20000);
+    }catch(_e){}
+  }
+};
+window.ptGecmisTemizle=function(){
+  if(!confirm('İzleme geçmişiniz silinsin mi?\n\nVideolar silinmez, yalnızca geçmiş listesi temizlenir.'))return;
+  try{
+    localStorage.setItem('pt_videoHistory','[]');
+    if(window.syncProfileToFirebase)syncProfileToFirebase();
+  }catch(e){}
+  try{showToast('🕘 Geçmiş temizlendi');renderVideoScreenList();}catch(e){}
+};
+// Süzgeç: '' tümü · 'fav' favoriler · 'gecmis' izleme geçmişi
+window.ptVideoSuzgec=function(mod){
+  window._videoScreenSuzgec=(window._videoScreenSuzgec===mod)?'':mod;
+  try{renderVideoScreenList();}catch(e){}
 };
 window.filterVideoScreenCategory=function(cat){
   window._videoScreenCategory=cat;
@@ -20316,7 +20512,7 @@ function rcPosOku(){
 }
 function rcPosYaz(xr,yr){
   window._remoteCtrlSavedPos={xr:xr,yr:yr};
-  try{localStorage.setItem(RC_POS_KEY,JSON.stringify(window._remoteCtrlSavedPos));}catch(e){}
+  try{localStorage.setItem(RC_POS_KEY,JSON.stringify(window._remoteCtrlSavedPos));}catch(e){try{DiagSil('yerelKayit:bilinmeyen',e,{anahtar:'bilinmeyen',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
 }
 // Paneli kaydedilmiş orana göre yerleştirir. Kırpma kuralı: panelin en az 64px'i yatayda,
 // tamamı dikeyde ekran içinde kalır - böylece tutamaç HER ZAMAN yakalanabilir durumda olur.
@@ -21151,7 +21347,7 @@ function ptAttachStreamPlayer(){
   if(!vid)return;
   if(vid.canPlayType('application/vnd.apple.mpegurl')){
     vid.src=url;
-    vid.play().catch(function(){});
+    vid.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
     return;
   }
   if(window.Hls&&window.Hls.isSupported()){_ptHlsBagla(vid,url);return;}
@@ -21159,9 +21355,9 @@ function ptAttachStreamPlayer(){
   s.src='https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js';
   s.onload=function(){
     if(window.Hls&&window.Hls.isSupported())_ptHlsBagla(vid,url);
-    else{vid.src=url;vid.play().catch(function(){});}
+    else{vid.src=url;vid.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}
   };
-  s.onerror=function(){vid.src=url;vid.play().catch(function(){});};
+  s.onerror=function(){vid.src=url;vid.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});};
   document.head.appendChild(s);
 }
 function _ptHlsBagla(vid,url){
@@ -21171,10 +21367,10 @@ function _ptHlsBagla(vid,url){
     window._ptHls=hls;
     hls.loadSource(url);
     hls.attachMedia(vid);
-    hls.on(window.Hls.Events.MANIFEST_PARSED,function(){vid.play().catch(function(){});});
+    hls.on(window.Hls.Events.MANIFEST_PARSED,function(){vid.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});});
   }catch(e){
     DiagSil('ptAttachStreamPlayer',e);
-    vid.src=url;vid.play().catch(function(){});
+    vid.src=url;vid.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
   }
 }
 // KULLANICI TALEBİ: Oynatıcıya tam ekran modu. Fullscreen API #videoPlayerBox konteynerine
@@ -21874,7 +22070,7 @@ window.PTFrame=(function(){
         var req=b.requestFullscreen||b.webkitRequestFullscreen;
         if(req){
           var pr=req.call(b);
-          if(pr&&pr.then)pr.then(function(){if(A)A.nativeFs=true;}).catch(function(){});
+          if(pr&&pr.then)pr.then(function(){if(A)A.nativeFs=true;}).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
           else if(A)A.nativeFs=true;
         }
       }else if(!acik&&fsEl){
@@ -21991,7 +22187,7 @@ window.PTFrame=(function(){
           f.style.transform='';f.style.maxHeight='';f.style.aspectRatio='';}
     try{
       var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
-      if(fsEl){var ex=document.exitFullscreen||document.webkitExitFullscreen;if(ex)ex.call(document).catch(function(){});}
+      if(fsEl){var ex=document.exitFullscreen||document.webkitExitFullscreen;if(ex)ex.call(document).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}
     }catch(e){}
   }
   return {ac:ac,kapat:kapat,aktif:function(){return !!A;},kumandaAc:function(){if(A&&!document.getElementById('ptfRcBox'))ptfKumandaCiz();}};
@@ -22287,14 +22483,14 @@ window.PTPlayer=(function(){
     try{return JSON.parse(localStorage.getItem('pt_playerPrefs')||'{}')||{};}catch(e){return {};}
   }
   function setPref(k,v){
-    try{var p=prefs();p[k]=v;localStorage.setItem('pt_playerPrefs',JSON.stringify(p));}catch(e){}
+    try{var p=prefs();p[k]=v;localStorage.setItem('pt_playerPrefs',JSON.stringify(p));}catch(e){try{DiagSil('yerelKayit:pt_playerPrefs',e,{anahtar:'pt_playerPrefs',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
   }
   function pref(k,def){var v=prefs()[k];return v===undefined?def:v;}
   // İzleme konumu (video başına) - "kaldığın yerden devam" için.
   function posKey(id){return 'pt_vpos_'+id;}
   function savePos(id,t,d){
     if(!id||!isFinite(t)||!isFinite(d)||d<60)return; // çok kısa videolarda anlamsız
-    try{localStorage.setItem(posKey(id),JSON.stringify({t:Math.floor(t),d:Math.floor(d),ts:Date.now()}));}catch(e){}
+    try{localStorage.setItem(posKey(id),JSON.stringify({t:Math.floor(t),d:Math.floor(d),ts:Date.now()}));}catch(e){try{DiagSil('yerelKayit:bilinmeyen',e,{anahtar:'bilinmeyen',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
   }
   function loadPos(id){
     try{var r=JSON.parse(localStorage.getItem(posKey(id))||'null');return r&&isFinite(r.t)?r:null;}catch(e){return null;}
@@ -22393,7 +22589,7 @@ window.PTPlayer=(function(){
           // Ve sebebi beklemeden sonucu kapatıyoruz: örtü konur, oynatma sürdürülmeye
           // çalışılır. Kullanıcı platformun arayüzünü görmez.
           try{ptpDuraklatOrtusuGuncelle();}catch(e){}
-          try{if(!S.kullaniciDuraklatti&&S.video.play)S.video.play().catch(function(){});}catch(e){}
+          try{if(!S.kullaniciDuraklatti&&S.video.play)S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}catch(e){}
           ptpGecisKaydet('uyari','Beklenmedik duraklama - platform arayüzü görünüyor olabilir',
             {konumSn:Math.round(t),
              anlami:'Oynatma, kullanıcı duraklatmadığı hâlde durdu ve ekranda geçiş örtüsü yok. '
@@ -22489,7 +22685,7 @@ window.PTPlayer=(function(){
           var bas=(S.araliklar&&S.araliklar[0]&&S.araliklar[0].bas)||0;
           S.video.currentTime=bas;
           S.kullaniciDuraklatti=false;
-          if(S.video.play)S.video.play().catch(function(){});
+          if(S.video.play)S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
           ptpAralikBekcisiBaslat();
         }catch(err){}
       });
@@ -22792,6 +22988,23 @@ window.PTPlayer=(function(){
       }
       kap._ptpBekleyenOlcu=null;
       kap._ptpSonOlcu=_olcu;
+      // SENSÖR: Kırpma hesabı videonun ölçüsünü KORUMALI. Bozulursa (yanlış eksende büyütme,
+      // hatalı oran) kullanıcı kırpılmış ya da küçülmüş görüntü görür - bu oturumda tam olarak
+      // bu yaşandı ve fark edilmesi uzun sürdü. Hesaplanan video ölçüsü, kırpmasız hâliyle
+      // karşılaştırılır; sapma varsa kayda geçer.
+      try{
+        var _bekW=dar?W:H*VID, _bekH=dar?W/VID:H;
+        if(!kirp&&S.fit!=='fill'){
+          var _gerW=Math.min(Wi,Hi*VID);
+          if(Math.abs(_gerW-_bekW)>2&&window.DiagCore&&DiagCore.kaydet)
+            DiagCore.kaydet('pt_embed','hata','Kenar kırpma videonun ölçüsünü değiştirdi',
+              {beklenen:Math.round(_bekW)+'x'+Math.round(_bekH),
+               olusan:Math.round(_gerW)+'x'+Math.round(_gerW/VID),
+               kutu:Math.round(W)+'x'+Math.round(H),buyutme:B,
+               anlami:'Sığdır modunda görüntü kırpılmamalıydı - kullanıcı videonun bir kısmını göremiyor.',
+               oneri:'Yönetici panelinde Kenar Büyütme değerini düşürün; sorun sürerse kutunun en-boy oranı beklenmedik olabilir.'},30000);
+        }
+      }catch(e){}
       if(kap._ptpKirpBicem===st)return;   // değişmediyse dokunma
       kap._ptpKirpBicem=st;
       var l=kap.querySelectorAll('iframe');
@@ -22960,7 +23173,7 @@ window.PTPlayer=(function(){
           e.stopPropagation();
           // Duraklamadan çıkarken de platform arayüzü kısa süre beliriyor - şeritler maskelenir.
           try{ptpChromeMaskeAc(3200);}catch(err){}
-          try{S.kullaniciDuraklatti=false;if(v.play)v.play().catch(function(){});}catch(err){}
+          try{S.kullaniciDuraklatti=false;if(v.play)v.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}catch(err){}
         });
         // KÖK SEBEP DÜZELTMESİ (kullanıcı: "geçiş sonrası YouTube görünüyor" - örtü konuyor
         // ama işe yaramıyor): Örtü S.root'a ekleniyordu. Ama video/iframe, döndürme desteği
@@ -23165,7 +23378,7 @@ window.PTPlayer=(function(){
         if(S&&S.freezing){
           // Zorla kaldırırken boş bırakmıyoruz: oynatma bir kez daha denenir ve duraklama
           // örtüsü hemen güncellenir - böylece altındaki platform arayüzü açıkta kalmaz.
-          try{if(S.video&&S.video.play)S.video.play().catch(function(){});}catch(e){}
+          try{if(S.video&&S.video.play)S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}catch(e){}
           ptpFreezeRelease();
           try{ptpDuraklatOrtusuGuncelle();}catch(e){}
           // Teşhis: örtü zaman aşımına uğradıysa geçiş takılmış demektir - bu, sessizce
@@ -23660,7 +23873,7 @@ window.PTPlayer=(function(){
       // Otomatik oynatma engellendi (tarayıcı politikası) - sessize alıp bir kez daha denenir,
       // yine olmazsa kullanıcı oynat düğmesine basar. Hata GÖSTERİLMEZ, bu normal bir durumdur.
       if(!S)return;
-      if(!S.video.muted&&pref('autoplay',true)){S.video.muted=true;syncUI();S.video.play().catch(function(){});}
+      if(!S.video.muted&&pref('autoplay',true)){S.video.muted=true;syncUI();S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}
     });
   }
   function fail(baslik,aciklama){
@@ -23937,6 +24150,26 @@ window.PTPlayer=(function(){
     var canli=S.isLive||!isFinite(d)||d===Infinity;
     var cur=el('ptpCur'),rem=el('ptpRem'),tot=el('ptpTot'),sk=el('ptpSeek'),buf=el('ptpBuf');
     // Aralık(lar) tanımlıysa gösterge/kaydırıcı hesaplarını TÜM bölümlerin toplamına göre çevir.
+      // SENSÖR: Yöneticinin aralık tanımı bozuksa (bitiş başlangıçtan önce, süre videodan
+      // uzun) oynatıcı sessizce tuhaf davranıyordu - çubuk ilerlemiyor ya da bölüm hiç
+      // bitmiyor. Yönetici tarafına yazdıkça denetim ekledik ama ESKİ kayıtlar denetimden
+      // geçmedi; bu sensör onları izlerken yakalar.
+      try{
+        if(!canli&&S.araliklar&&S.araliklar.length&&isFinite(d)&&d>0&&!S._aralikDenetlendi){
+          S._aralikDenetlendi=true;
+          var _bozuk=[];
+          S.araliklar.forEach(function(sg,i){
+            var b=Number(sg.bas)||0,e=Number(sg.bit)||0;
+            if(e>0&&e<=b)_bozuk.push((i+1)+'. bölüm: bitiş başlangıçtan önce');
+            else if(b>d)_bozuk.push((i+1)+'. bölüm: başlangıç videonun süresinden sonra');
+          });
+          if(_bozuk.length&&window.DiagCore&&DiagCore.kaydet)
+            DiagCore.kaydet('pt_gecis','uyari','Bozuk sahne aralığı tanımı',
+              {videoId:S.videoId,videoSuresi:Math.round(d),sorunlar:_bozuk,
+               anlami:'Bölüm hiç oynamayabilir, ilerleme çubuğu yanlış ölçek gösterebilir ya da geçiş takılabilir.',
+               oneri:'Yönetici panelinde bu videonun aralık alanını açın - satır satır denetim kutusu hatalı satırı ✕ ile işaretler.'},0);
+        }
+      }catch(e){}
     var _tp=canli?null:ptpToplamAralikDurumu(d,t);
     if(_tp){
       d=_tp.toplam;
@@ -24124,7 +24357,7 @@ window.PTPlayer=(function(){
     if(S.video.paused){
       S.kullaniciDuraklatti=false;
       try{if(S.gomulu&&window.ptpMerkezMaske)window.ptpMerkezMaske('oynat');}catch(e){}
-      S.video.play().catch(function(){});
+      S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
     }else{
       S.kullaniciDuraklatti=true;
       try{if(S.gomulu&&window.ptpMerkezMaske)window.ptpMerkezMaske('duraklat');}catch(e){}
@@ -24363,7 +24596,7 @@ window.PTPlayer=(function(){
         // olduğundan kullanıcı hiçbirini görmez - bu, katmanın DOM'da bile belirmesini
         // olabildiğince kısaltmak içindir.
         try{S.video.currentTime=b;}catch(e){}
-        try{if(S.video.play)S.video.play().catch(function(){});}catch(e){}
+        try{if(S.video.play)S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}catch(e){}
         S._hazirlikYapildi=false;
         return true;
       }
@@ -24456,7 +24689,7 @@ window.PTPlayer=(function(){
           ptpTaniKaydet('bekçi · bölüm '+S.aralikIdx+'→'+(S.aralikIdx+1));
           S.aralikIdx++;
           try{S.video.currentTime=S.araliklar[S.aralikIdx].bas||0;}catch(e){}
-          try{if(S.video.play)S.video.play().catch(function(){});}catch(e){}
+          try{if(S.video.play)S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}catch(e){}
           S._hazirlikYapildi=false;
         }else{
           // Aynı gerekçe: geçiş varsa duraklatmadan geçilir (bkz. ptpAralikUygula notu).
@@ -24501,7 +24734,7 @@ window.PTPlayer=(function(){
       // sessiz başlatma sayesinde bu neredeyse her zaman işe yarar.
       if(Date.now()-t0>3000&&!S._basDenendi){
         S._basDenendi=true;
-        try{if(S.video.play)S.video.play().catch(function(){});}catch(e){}
+        try{if(S.video.play)S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}catch(e){}
       }
     },500);
   }
@@ -24809,11 +25042,11 @@ window.PTPlayer=(function(){
             document.removeEventListener('touchstart',_tekSeferlikJest,true);
             if(S)S._fsGestureHandler=null;
             if(!S||!root.classList.contains('ptp-fs'))return;
-            try{var req2=root.requestFullscreen||root.webkitRequestFullscreen;if(req2)req2.call(root).catch(function(){});}catch(e){}
+            try{var req2=root.requestFullscreen||root.webkitRequestFullscreen;if(req2)req2.call(root).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}catch(e){}
             try{
               if(screen.orientation&&screen.orientation.lock&&pref('autoRotate',true)){
                 var yatay2=S.video.videoWidth>=S.video.videoHeight;
-                screen.orientation.lock(yatay2?'landscape':'portrait').catch(function(){});
+                screen.orientation.lock(yatay2?'landscape':'portrait').catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
               }
             }catch(e){}
           };
@@ -24823,12 +25056,12 @@ window.PTPlayer=(function(){
         }else{
           try{
             var req=root.requestFullscreen||root.webkitRequestFullscreen;
-            if(req)req.call(root).catch(function(){});
+            if(req)req.call(root).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
           }catch(e){}
           try{
             if(screen.orientation&&screen.orientation.lock&&pref('autoRotate',true)){
               var yatay=S.video.videoWidth>=S.video.videoHeight;
-              screen.orientation.lock(yatay?'landscape':'portrait').catch(function(){});
+              screen.orientation.lock(yatay?'landscape':'portrait').catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
             }
           }catch(e){}
         }
@@ -24849,7 +25082,7 @@ window.PTPlayer=(function(){
       // Native tam ekran da BİZ tetiklemişsek (yukarıdaki dal), burada da temiz çıkılır.
       try{
         var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
-        if(fsEl){var ex=document.exitFullscreen||document.webkitExitFullscreen;if(ex)ex.call(document).catch(function(){});}
+        if(fsEl){var ex=document.exitFullscreen||document.webkitExitFullscreen;if(ex)ex.call(document).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}
       }catch(e){}
       try{if(screen.orientation&&screen.orientation.unlock)screen.orientation.unlock();}catch(e){}
     }
@@ -25114,8 +25347,8 @@ window.PTPlayer=(function(){
   function wakeLock(ac){
     try{
       if(ac&&navigator.wakeLock&&!S.wl){
-        navigator.wakeLock.request('screen').then(function(w){if(S)S.wl=w;}).catch(function(){});
-      }else if(!ac&&S&&S.wl){S.wl.release().catch(function(){});S.wl=null;}
+        navigator.wakeLock.request('screen').then(function(w){if(S)S.wl=w;}).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
+      }else if(!ac&&S&&S.wl){S.wl.release().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});S.wl=null;}
     }catch(e){}
   }
 
@@ -25140,7 +25373,9 @@ window.PTPlayer=(function(){
   function playlist(canliMod){
     var canli=(canliMod===undefined)?chModu():!!canliMod;
     var all=(window.D&&D.videoLinks)||[];
-    var list=all.filter(function(x){return !!x.isLive===canli;});
+    // Gizli kanallar oynatıcının kanal listesinde de görünmez - liste ile ekran arasında
+    // fark olursa kanal numaraları kayar ve kumandadan yanlış kanala geçilir.
+    var list=all.filter(function(x){return x&&!x.gizli&&!!x.isLive===canli;});
     try{
       var order=typeof getVideoScreenOrder==='function'?getVideoScreenOrder(canli?'tv':'video'):[];
       if(order&&order.length){
@@ -25572,7 +25807,7 @@ window.PTPlayer=(function(){
     }catch(e){return null;}
   }
   function chPosYaz(xr,yr){
-    try{localStorage.setItem(CH_POS_KEY,JSON.stringify({xr:xr,yr:yr}));}catch(e){}
+    try{localStorage.setItem(CH_POS_KEY,JSON.stringify({xr:xr,yr:yr}));}catch(e){try{DiagSil('yerelKayit:bilinmeyen',e,{anahtar:'bilinmeyen',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
   }
   function chPosUygula(box){
     if(!box||window._ptpChSurukleniyor)return;
@@ -26717,7 +26952,7 @@ window.PTPlayer=(function(){
           _d0.innerHTML='<div class="ptp-ort-spin"></div>';
           _d0.addEventListener('click',function(e){
             e.stopPropagation();
-            try{if(S&&S.video&&S.video.play)S.video.play().catch(function(){});}catch(err){}
+            try{if(S&&S.video&&S.video.play)S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}catch(err){}
           });
           _ak.appendChild(_d0);
         }
@@ -26773,7 +27008,7 @@ window.PTPlayer=(function(){
         }
       }catch(e){}
       if(!canli){
-        try{localStorage.setItem(posKey(opt.videoId),JSON.stringify({t:0,d:Math.floor(video.duration||0),done:1,ts:Date.now()}));}catch(e){}
+        try{localStorage.setItem(posKey(opt.videoId),JSON.stringify({t:0,d:Math.floor(video.duration||0),done:1,ts:Date.now()}));}catch(e){try{DiagSil('yerelKayit:bilinmeyen',e,{anahtar:'bilinmeyen',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
       }
       syncUI();
       // KULLANICI TALEBİ (güncellendi: "videolar arası geçiş belli ettirmeden sağlansın,
@@ -26970,7 +27205,7 @@ window.PTPlayer=(function(){
           // (bkz. cmd.action==='seekto').
           pos:_nb.pos,dur:_nb.dur,aralikli:_nb.aralikli,
           settings:_agirVeriCache.settings
-        }).catch(function(){});
+        }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
       }catch(e){}
     }
     beat();
@@ -27155,7 +27390,7 @@ window.PTPlayer=(function(){
             // İSE orada TAKILI KALIR (hls.js yeni konumu YÜKLER ama OYNATMAZ) - kullanıcıya
             // "sarma çalışmadı" gibi görünüyordu. "...video oradan devam etmeli" isteğine göre
             // sarma SONRASI oynatma her zaman (yeniden) tetiklenir.
-            var _oynatDene=function(){S.video.play().catch(function(){});};
+            var _oynatDene=function(){S.video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});};
             if(S.video.readyState>=2)_oynatDene();
             else S.video.addEventListener('loadeddata',_oynatDene,{once:true});
           }
@@ -27183,7 +27418,7 @@ window.PTPlayer=(function(){
       try{
         firebase.database().ref(base+'/session').once('value').then(function(snap){
           var v=snap.val();
-          if(v&&v.sessionId===window._ptRemoteSessionId)firebase.database().ref(base+'/session').remove().catch(function(){});
+          if(v&&v.sessionId===window._ptRemoteSessionId)firebase.database().ref(base+'/session').remove().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
         });
       }catch(e){}
     }
@@ -27201,7 +27436,7 @@ window.PTPlayer=(function(){
         S.remoteOtherSession=v;
         if(S.chOpen)renderChannelListOverlay();
       }
-    }).catch(function(){});
+    }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
   }
   window.takeoverAsRemoteController=function(){
     if(!S||!S.remoteOtherSession)return;
@@ -27263,7 +27498,7 @@ window.PTPlayer=(function(){
         var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
         if(fsEl&&S.root&&(fsEl===S.root||S.root.contains(fsEl))){
           var ex=document.exitFullscreen||document.webkitExitFullscreen;
-          if(ex)ex.call(document).catch(function(){});
+          if(ex)ex.call(document).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
         }
       }catch(e){}
       if(S.hls){S.hls.destroy();}
@@ -27453,6 +27688,9 @@ window.PTPlayer=(function(){
 // istediğinde kullanılıyor (yerinde=true). Listeden gelen her dokunuş tam yolu izler ve
 // sayfayı baştan kurar - eski, güvenilir davranış.
 window.openVideoWatch=function(videoId,secenek){
+  // İzleme geçmişine kaydet - video AÇILDIĞI anda. İzlenme süresine bakmıyoruz: kullanıcı
+  // "neye baktım" diye arıyor, üç saniye mi otuz dakika mı izlediği ayrı bir soru.
+  try{if(window.ptGecmiseEkle)ptGecmiseEkle(videoId);}catch(e){}
   const v=(D.videoLinks||[]).find(function(x){return x.id===videoId;});
   if(!v){showToast('❌ Video bulunamadı');return;}
   // KULLANICI TALEBİ ("yönetici istediği kanalları şifreli yapabilir... böyle bir sistem
@@ -29367,7 +29605,7 @@ window.voteMvp=function(matchId,player){
       // kapatsa bile kayıt "kopyalanmış" olarak kalır.
       var t=Date.now();
       yeni.forEach(function(l){l.kop=t;});
-      try{localStorage.setItem('pt_chatDoctorLogs',JSON.stringify(LOGS.slice(-CFG.maxLogs)));}catch(e){}
+      try{localStorage.setItem('pt_chatDoctorLogs',JSON.stringify(LOGS.slice(-CFG.maxLogs)));}catch(e){try{DiagSil('yerelKayit:pt_chatDoctorLogs',e,{anahtar:'pt_chatDoctorLogs',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
       if(navigator.clipboard&&navigator.clipboard.writeText){
         navigator.clipboard.writeText(txt).then(done).catch(function(){fallbackCopy(txt,done);});
       }else fallbackCopy(txt,done);
@@ -29466,7 +29704,7 @@ window.voteMvp=function(matchId,player){
 
   var APP='pt';                 // 'pt' (Puan Tablosu) | 'adm' (Admin Paneli)
   var APP_LABEL='Puan Tablosu';
-  var MODULES=[{"id": "pt_nav", "label": "🧭 Gezinme & Sekmeler", "desc": "Sekme geçişleri, alt menü, arama, sayfa açma/kapama", "fns": ["switchTab", "renderTab", "switchTabById", "openSheet", "closeSheet", "renderMainNav", "toggleSearch", "doSearch", "jumpToRefereeRow", "openSeasonMenu", "openPastSeasons", "openLeagueSwitcher", "selectLeagueFromSwitcher", "openSettings", "openMyProfile", "withHScrollPreserved", "openVideoScreen", "renderVideoScreenList", "filterVideoScreenList", "filterVideoScreenCategory", "toggleVideoScreenReorder", "moveVideoScreenItem", "getVideoScreenOrder", "saveVideoScreenOrder"]}, {"id": "pt_player", "label": "📺 TV & Video Oynatıcı", "desc": "Kanal/video açma, kanal ilerletme, ekran modu, sarma, ses, hız, altyazı, tam ekran", "fns": ["openVideoWatch", "updateVideoLinkBadge", "buildVideoEmbedHtml", "isEmbeddableVideoUrl", "buildExternalWatchCardHtml", "buildExternalWatchLoadingHtml", "buildGenericIframeEmbedHtml", "openExternalVideoLink", "togglePtVideoFullscreen", "mount", "destroy", "attachSource", "jump", "playlist", "switchSourceInPlace", "toggleFullscreen", "cycleFit", "toggleDikeyYatay", "applyVisual", "togglePlay", "seekBy", "setSpeed", "setVolume", "toggleMute", "goLive", "openPanel", "openChannelListOverlay", "renderChannelListOverlay", "buildChannelRows", "jumpToChannelByIndex", "confirmChannelBuf", "chBoxInitDrag"]}, {"id": "pt_remote", "label": "📟 Kumanda (Uzaktan Kontrol)", "desc": "İki cihazlı kumanda ekranı, oturum eşleşmesi, komut gönderme/alma, kumanda taşıma", "fns": ["openRemoteControllerScreen", "renderRemoteControllerScreen", "remoteCtrlKey", "remoteCtrlAction", "remoteCtrlSetFit", "remoteCtrlToggleFullscreen", "remoteCtrlSettingsNav", "remoteCtrlSend", "remoteCtrlSendSlider", "remoteCtrlLiveSeek", "remoteCtrlJumpTo", "remoteCtrlSearchInput", "remoteCtrlSetListMode", "remoteCtrlSeek", "remoteCtrlSeekTyped", "remoteCtrlInitDrag", "closeRemoteControllerScreen", "sendRemoteCommand", "startRemoteHeartbeat", "stopRemoteHeartbeat", "takeoverAsRemoteController", "checkForOtherRemoteSession"]}, {"id": "pt_standings", "label": "📊 Puan Durumu", "desc": "Puan tablosu çizimi, hafta/saha filtresi, simülatör, PDF", "fns": ["renderStandings", "setStandingsWeek", "setStandingsVenue", "adaptStandingsColumnScale", "applyStandingsAlign", "applyStandingsGap", "applyStandingsColumnScale", "printStandingsPdf", "openStandingsSimulator", "setSimScore", "exitStandingsSimulator", "viewPastSeasonStandings", "renderSimModeBar", "getSimMergedMatches", "renderGroupView", "openScenarioScreen", "renderScenarioSheet", "toggleScenarioTeam", "scenarioSelectAll", "isStandingsPanelVisible", "scheduleStandingsAdaptAndDiagnose"]}, {"id": "pt_fixture", "label": "📅 Fikstür & Sonuçlar", "desc": "Fikstür/sonuç listeleri, hafta seçici, tarih filtresi", "fns": ["renderFixture", "renderResults", "setResultsWeek", "setResultsQuickFilter", "openResultsWeekPicker", "openWeekPicker", "renderDateStrip", "setDateFilter", "openDatePickerSheet", "getWeekList", "setSearchFilter", "highlightMatch", "toggleMatchReminder", "isMatchReminderSet", "getMatchReminders", "shareMatch"]}, {"id": "pt_matchdetail", "label": "⚽ Maç Detayı", "desc": "Maç detay ekranı ve tüm sekmeleri (anlatım, kadro, istatistik)", "fns": ["showMatchDetail", "renderMatchDetailContent", "switchMdTab", "renderMdAnlatim", "renderMdDetay", "renderMdIstatistik", "renderMdKadro", "renderMdKarne", "renderMdKarsi", "toggleMdLiveTable", "showArchivedMatchDetailFull", "showPastLeagueMatchDetailFull", "renderMvpSection", "voteMvp", "voteBestMatch", "submitScorePrediction", "renderScorePredictionHtml", "setKarneFilter", "renderSquad", "selSqTeam"]}, {"id": "pt_teamdetail", "label": "🛡️ Takım Detayı", "desc": "Takım sayfası, kadro, taraftar duvarı, kupa vitrini", "fns": ["showTeamDetail", "renderTeamDetailContent", "switchTdTab", "renderTdFanWall", "renderTdInfo", "renderTdPlayers", "renderTdSquad", "postFanWallMessage", "deleteFanWallMessage", "saveFanWallEdit", "openTdChampViewer", "getClubTrophies", "clubTrophyCaseHtml", "startTeamDetailDirectListener", "stopTeamDetailDirectListener", "showPlayerDetail"]}, {"id": "pt_stats", "label": "📈 İstatistikler & Karşılaştırma", "desc": "İstatistik sekmesi, oyuncu/takım karşılaştırma, analiz, form", "fns": ["renderStats", "showStatTab", "openStatCategoryView", "renderCompare", "setCmp", "setCmpMode", "setCmpPlayer", "setCmpTeamFilter", "renderPlayerCompare", "getPlayerCompareStats", "renderAnalysis", "renderForm", "playerRadarSvg", "openCmpPickerPopup", "openCmpTeamFilterPicker", "selectCmpFromPopup", "filterCmpPopupRows", "getAllPlayersForCompare", "getAllPlayersFlat"]}, {"id": "pt_fantasy", "label": "🎽 Fantezi Takım", "desc": "Fantezi kadro kurma, oyuncu seçimi, puanlama", "fns": ["renderFantasy", "toggleFantasyPlayer", "saveFantasyTeam", "resetFantasyTeam", "calcFantasyPoints", "openFantasyPicker", "renderFantasyPickerContent", "setFormation"]}, {"id": "pt_live", "label": "🔴 Canlı Alt Şerit", "desc": "Canlı skor şeridi, gol kutlaması, sesli anlatım, olay sesleri", "fns": ["renderLiveTicker", "scrollToLive", "toggleLiveTicker", "toggleLiveTable", "checkFavTeamLiveStart", "showFavTeamLiveBanner", "showGoalCelebration", "announceEvent", "playEventSound", "checkLiveVoiceAnnouncements", "checkFavTeamGoalCelebration", "checkFavTeamMatchEnded", "getPrimaryLiveMatch", "previewEventSound", "testVoiceAnnouncer", "toggleVoiceAnnouncer", "setTickerAnimForContent", "applyTickerSpeed", "checkStaleLiveMatches"]}, {"id": "pt_chat", "label": "💬 Sohbet", "desc": "Sohbet ekranı, mesaj gönderme, tepkiler, yanıtlar, yazıyor göstergesi", "fns": ["openChatScreen", "renderChatScreen", "renderChatComments", "renderOne", "sendChatMessage", "sendGeneralChatMessage", "sendComment", "toggleReaction", "setReplyTarget", "clearReplyTarget", "jumpToChatMessage", "handleChatBubbleClick", "deleteComment", "togglePinComment", "saveEditedComment", "markMessagesSeenByMe", "loadOlderChatMessages", "loadPastSeasonComments", "openChatMatchPicker", "selectChatMatchTag", "broadcastTyping", "applyTypingIndicatorToDOM", "updateChatUnreadBadge", "markChatAsRead", "showReactorListPopup", "showSeenByPopup"]}, {"id": "pt_notifications", "label": "🔔 Bildirimler", "desc": "Bildirim merkezi, tercihler, hatırlatıcılar, kilometre taşları", "fns": ["addNotification", "openNotificationCenter", "renderNotifListItems", "updateNotifUnreadBadge", "checkMilestones", "checkUpcomingMatchReminder", "checkSubscribedMatchEvents", "toggleNotifyPref", "toggleNotifTypePref", "openNotifManage", "clearNotificationHistory", "checkWeeklySummaryNotification", "getNotifPrefs", "getNotificationHistory", "filterNotificationList", "showInAppNotifBanner", "checkTeamNotifyBroadcast", "checkDevReplyNotify", "checkPollResultBroadcast", "checkPremiumCodeNotifications", "checkFavTeamFanWallPosts", "isQuietHoursActive", "saveQuietHours", "toggleQuietHours"]}, {"id": "pt_premium", "label": "💎 Premium & Mağaza", "desc": "Premium erişim, kod kullanma, puan mağazası, deneme süreleri", "fns": ["hasPremiumAccess", "requestPremiumAccess", "sendPremiumAccessRequest", "requestGenericPremiumAccess", "redeemPremiumCode", "redeemGenericPremiumCode", "openPremiumCodeRedeem", "openGenericPremiumCodeRedeem", "buyPremiumWithPoints", "openPointsShop", "revalidateAllPremiumAccessNow", "revalidateFontFamilyAccess", "revalidateReactionPackAccess", "startFontTrial", "startReactionPackTrial", "startPaletteTrial", "endFontTrial", "endReactionPackTrial", "endPaletteTrial", "isEmojiLockedForViewer", "isFontPremium", "isReactionPackPremium", "getPremiumPointsPrice", "getActivePremiumCodes", "cleanupTrialChatArtifacts", "refreshPremiumScreensLive", "updateLivePremiumCountdowns", "getLoyaltyLevel"]}, {"id": "pt_theme", "label": "🎨 Tema & Görünüm", "desc": "Tema/palet/yazı tipi uygulama, kart stili, otomatik karanlık mod", "fns": ["applyTheme", "setPalette", "applyBgTheme", "applyFontFamily", "setFontFamily", "applyCardStyle", "applyNumberSize", "buildTheme", "setReactionPack", "applyAutoDarkModeIfNeeded", "toggleAutoDarkMode", "saveAutoDarkHours", "applySparkleLayer", "applyStatColors", "openFontGroupPopup", "openPaletteGroupPopup", "openReactionPackGroupPopup", "selectCustomThemeFromGroup", "selectPaletteFromGroup", "getFontCssAndEnsureLoaded", "loadGoogleFontIfNeeded", "toggleBgPaletteSync", "suggestPaletteForColor", "renderTeamColorThemeSuggestion", "applySuggestedTeamTheme"]}, {"id": "pt_login", "label": "🚪 Giriş Ekranı", "desc": "Giriş akışı, lig seçici, şifre alanı, mod seçimi, giriş ekranı teması ve düzeni", "fns": ["applyLoginScreenTheme", "applyLoginLayoutBlock", "populateLoginLeagueSel", "onLoginLeagueChange", "showLoginPasswordField", "renderModeOptions", "selectMode", "backToModeScreen", "backToLogin", "toggleLoginUpdates", "cancelRememberedAutoLogin", "openForgotPasswordForm", "renderTempPasswordHint", "doEnter", "doEnterAfterPasswordCheck", "loadProfileAndEnter", "getHashLeagueId", "handleHash"]}, {"id": "pt_auth", "label": "🔐 Giriş & Profil", "desc": "Giriş akışı, şifre işlemleri, profil kaydı, oturum takibi", "fns": ["doLogoutPt", "saveNewPassword", "openPasswordManager", "registerVisitor", "startPresenceTracking", "setVisitorOnline", "setVisitorOffline", "syncProfileToFirebase", "saveSettName", "saveSettFavTeam", "previewProfileAvatar", "handleAvatarUpload"]}, {"id": "pt_media", "label": "🖼️ Medya & Yükleme", "desc": "Fotoğraf/video/GIF yükleme, video kırpma, Supabase aktarımı", "fns": ["uploadImageToSupabase", "uploadVideoToSupabase", "processAndUploadCommentVideo", "trimVideoClientSide", "requestPtTrimWakeLock", "releasePtTrimWakeLock", "openVideoTrimmer", "updateTrimRangeHint", "confirmVideoTrim", "cancelVideoTrim", "searchGifs", "searchGifsDebounced", "openGifPicker", "renderGifFilterChips", "buildGifQuery", "toggleGifFilter", "selectGif", "handleCommentPhoto", "handleCommentVideo", "triggerCommentPhoto", "openVideoMenu", "promptVideoLink", "setVideoLink", "parseVideoUrl", "renderCommentMedia", "renderCommentVideo", "playPtLazyVideo", "openImagePreviewOv", "openImageViewerFullscreen", "updateUploadProgressUI", "_supabaseXhrUpload", "_processLogoImg", "getUrlHostname", "isKnownVideoHost", "isEmbeddableVideoUrl", "buildVideoEmbedHtml"]}, {"id": "pt_cards", "label": "🖼️ Kart Oluşturma & Paylaşım", "desc": "Maç/profil/sezon kartı üretimi ve paylaşımı", "fns": ["generateMatchSummaryCard", "downloadMyProfileCard", "downloadSeasonSummaryCard", "downloadFavTeamSummaryCard", "downloadSeasonWrapCard", "shareCardImage", "renderStandingsPreviewCard", "confirmDownloadMatchCard", "confirmDownloadMyProfileCard", "confirmDownloadSeasonCard", "confirmDownloadFavTeamCard", "shareAppLink"]}, {"id": "pt_data", "label": "📡 Veri & Bağlantı", "desc": "Firebase dinleyicileri, lig yükleme, önbellek, senkronizasyon", "fns": ["listenToLeague", "startMatchesDirectListener", "stopMatchesDirectListener", "startChatDirectListener", "stopChatDirectListener", "clearLocalCache", "getEffectiveMatches", "getAllCommentsFlat", "getVersions", "init"]}, {"id": "pt_feedback", "label": "📮 Geri Bildirim & Şikayet", "desc": "Geri bildirim formu, içerik şikayeti", "fns": ["openFeedbackForm", "submitFeedback", "handleFeedbackPhoto", "handleFeedbackVideo", "renderFeedbackMediaPreview", "reportContent"]}, {"id": "pt_maintenance", "label": "🚧 Bakım Modu", "desc": "Bakım ekranı, zamanlanmış bakım geçişleri, izinli kullanıcılar", "fns": ["isMaintenanceCurrentlyActive", "showMaintenanceScreen", "hideMaintenanceScreen", "checkMaintenanceScheduleTransition", "isUserAllowedDuringMaintenance", "returnToLoginFromMaintenance", "scheduleMaintenanceBoundaryCheck"]}, {"id": "pt_polls", "label": "🗳️ Anketler & Tahminler", "desc": "Anket oylama, MVP/maç oylaması, skor tahmini", "fns": ["votePoll", "pollNotificationHtml", "savePersonalNote", "renderPersonalNoteSection", "categorizeNote"]}, {"id": "pt_embed", "label": "▶️ Gömülü Yayın (YouTube vb.)", "desc": "Gömülü kaynakların oynatıcı içinde çalışması: durum akışı, ses/hız/sarma komutları, kanal geçişi", "fns": ["ptpGomuluMedya", "buildVideoEmbedHtml", "ptIsDirectMediaUrl", "ptExtractVideoUrl", "ptIsPlayerOnlyUrl"]}, {"id": "pt_rcx", "label": "🎛️ Kumanda Gövdesi & Yerleşimi", "desc": "İki kumandanın ortak gövdesi, kanal listesi/kategori süzgeci, sürükleme ve konum kalıcılığı", "fns": ["rcxGovde", "buildChannelCats", "chPosUygula", "ptpChIlerlemeBaslat", "ptpChSeekBagla", "ptpChAyarKaydiriciBagla", "remoteCtrlProgressBaslat", "remoteCtrlSendSlider", "remoteCtrlResetPos", "ptpChKonumSifirla"]}, {"id": "pt_orient", "label": "🔄 Ekran Yönü & Tam Ekran", "desc": "Dikey/yatay çevirme, cihaz yön kilidi, tam ekrana giriş/çıkış, küçük pencere (PiP)", "fns": ["cihazYatayaKilitle", "toggleDikeyYatay", "cssIleDondur", "toggleFullscreen", "togglePip", "enterFullscreenProgrammatic"]}, {"id": "pt_storage", "label": "💾 Yerel Kayıt & Tercihler", "desc": "localStorage okuma/yazma: tercihler, kumanda konumu, görülen sürüm, önbellek anahtarları", "fns": ["pref", "setPref", "prefs", "rcPosYaz", "rcPosOku", "chPosYaz", "chPosOku", "surumRozetiHtml"]}, {"id": "pt_a11y", "label": "♿ Okunabilirlik & Kontrast", "desc": "Tema renklerinin okunabilirlik denetimi: soluk metin, bağlantı ve vurgu üzeri yazı renkleri", "fns": ["ptKontrastOrani", "ptZeminUstuYaziRengi", "ptOkunurYap", "applyTheme"]}, {"id": "pt_gecis", "label": "🎬 Geçiş & Oynatıcı Gösterim Teşhisi", "desc": "Bölümler ve videolar arası geçişler, geçiş örtüsü, yükleniyor göstergesi ve platform oynatıcısının beklenmedik görünmesi", "fns": ["ptpGecisOrtusuAc", "ptpFreezeCapture", "ptpFreezeRelease", "ptpSonrakiyeGec", "ptpSonrakiVarsaGec", "ptpAralikUygula", "ptpAralikBekcisiBaslat", "ptpGomuluBaslatmaBekcisi"]}, {"id": "pt_ui", "label": "📐 Yerleşim, Sıkışma & Titreme", "desc": "Yazı kesilmesi/sıkışması, okunamayacak küçük yazı, sayfa yatay taşması, küçük dokunma hedefi, ekran titremesi ve içerik zıplaması", "fns": []}, {"id": "pt_silent", "label": "🕳️ Sessizce Yutulan Hatalar", "desc": "Kodun görmezden geldiği (boş yakalama bloğuna düşen) hataların tamamı - hangi fonksiyonda, hangi sebeple", "fns": []}];
+  var MODULES=[{"id": "pt_nav", "label": "🧭 Gezinme & Sekmeler", "desc": "Sekme geçişleri, alt menü, arama, sayfa açma/kapama", "fns": ["switchTab", "renderTab", "switchTabById", "openSheet", "closeSheet", "renderMainNav", "toggleSearch", "doSearch", "jumpToRefereeRow", "openSeasonMenu", "openPastSeasons", "openLeagueSwitcher", "selectLeagueFromSwitcher", "openSettings", "openMyProfile", "withHScrollPreserved", "openVideoScreen", "renderVideoScreenList", "filterVideoScreenList", "filterVideoScreenCategory", "toggleVideoScreenReorder", "moveVideoScreenItem", "getVideoScreenOrder", "saveVideoScreenOrder", "ptVideoSuzgec"]}, {"id": "pt_player", "label": "📺 TV & Video Oynatıcı", "desc": "Kanal/video açma, kanal ilerletme, ekran modu, sarma, ses, hız, altyazı, tam ekran", "fns": ["openVideoWatch", "updateVideoLinkBadge", "buildVideoEmbedHtml", "isEmbeddableVideoUrl", "buildExternalWatchCardHtml", "buildExternalWatchLoadingHtml", "buildGenericIframeEmbedHtml", "openExternalVideoLink", "togglePtVideoFullscreen", "mount", "destroy", "attachSource", "jump", "playlist", "switchSourceInPlace", "toggleFullscreen", "cycleFit", "toggleDikeyYatay", "applyVisual", "togglePlay", "seekBy", "setSpeed", "setVolume", "toggleMute", "goLive", "openPanel", "openChannelListOverlay", "renderChannelListOverlay", "buildChannelRows", "jumpToChannelByIndex", "confirmChannelBuf", "chBoxInitDrag", "bolumeAtla", "ptKayanBaslikTazele"]}, {"id": "pt_remote", "label": "📟 Kumanda (Uzaktan Kontrol)", "desc": "İki cihazlı kumanda ekranı, oturum eşleşmesi, komut gönderme/alma, kumanda taşıma", "fns": ["openRemoteControllerScreen", "renderRemoteControllerScreen", "remoteCtrlKey", "remoteCtrlAction", "remoteCtrlSetFit", "remoteCtrlToggleFullscreen", "remoteCtrlSettingsNav", "remoteCtrlSend", "remoteCtrlSendSlider", "remoteCtrlLiveSeek", "remoteCtrlJumpTo", "remoteCtrlSearchInput", "remoteCtrlSetListMode", "remoteCtrlSeek", "remoteCtrlSeekTyped", "remoteCtrlInitDrag", "closeRemoteControllerScreen", "sendRemoteCommand", "startRemoteHeartbeat", "stopRemoteHeartbeat", "takeoverAsRemoteController", "checkForOtherRemoteSession"]}, {"id": "pt_standings", "label": "📊 Puan Durumu", "desc": "Puan tablosu çizimi, hafta/saha filtresi, simülatör, PDF", "fns": ["renderStandings", "setStandingsWeek", "setStandingsVenue", "adaptStandingsColumnScale", "applyStandingsAlign", "applyStandingsGap", "applyStandingsColumnScale", "printStandingsPdf", "openStandingsSimulator", "setSimScore", "exitStandingsSimulator", "viewPastSeasonStandings", "renderSimModeBar", "getSimMergedMatches", "renderGroupView", "openScenarioScreen", "renderScenarioSheet", "toggleScenarioTeam", "scenarioSelectAll", "isStandingsPanelVisible", "scheduleStandingsAdaptAndDiagnose"]}, {"id": "pt_fixture", "label": "📅 Fikstür & Sonuçlar", "desc": "Fikstür/sonuç listeleri, hafta seçici, tarih filtresi", "fns": ["renderFixture", "renderResults", "setResultsWeek", "setResultsQuickFilter", "openResultsWeekPicker", "openWeekPicker", "renderDateStrip", "setDateFilter", "openDatePickerSheet", "getWeekList", "setSearchFilter", "highlightMatch", "toggleMatchReminder", "isMatchReminderSet", "getMatchReminders", "shareMatch"]}, {"id": "pt_matchdetail", "label": "⚽ Maç Detayı", "desc": "Maç detay ekranı ve tüm sekmeleri (anlatım, kadro, istatistik)", "fns": ["showMatchDetail", "renderMatchDetailContent", "switchMdTab", "renderMdAnlatim", "renderMdDetay", "renderMdIstatistik", "renderMdKadro", "renderMdKarne", "renderMdKarsi", "toggleMdLiveTable", "showArchivedMatchDetailFull", "showPastLeagueMatchDetailFull", "renderMvpSection", "voteMvp", "voteBestMatch", "submitScorePrediction", "renderScorePredictionHtml", "setKarneFilter", "renderSquad", "selSqTeam"]}, {"id": "pt_teamdetail", "label": "🛡️ Takım Detayı", "desc": "Takım sayfası, kadro, taraftar duvarı, kupa vitrini", "fns": ["showTeamDetail", "renderTeamDetailContent", "switchTdTab", "renderTdFanWall", "renderTdInfo", "renderTdPlayers", "renderTdSquad", "postFanWallMessage", "deleteFanWallMessage", "saveFanWallEdit", "openTdChampViewer", "getClubTrophies", "clubTrophyCaseHtml", "startTeamDetailDirectListener", "stopTeamDetailDirectListener", "showPlayerDetail", "renderTdMatches"]}, {"id": "pt_stats", "label": "📈 İstatistikler & Karşılaştırma", "desc": "İstatistik sekmesi, oyuncu/takım karşılaştırma, analiz, form", "fns": ["renderStats", "showStatTab", "openStatCategoryView", "renderCompare", "setCmp", "setCmpMode", "setCmpPlayer", "setCmpTeamFilter", "renderPlayerCompare", "getPlayerCompareStats", "renderAnalysis", "renderForm", "playerRadarSvg", "openCmpPickerPopup", "openCmpTeamFilterPicker", "selectCmpFromPopup", "filterCmpPopupRows", "getAllPlayersForCompare", "getAllPlayersFlat"]}, {"id": "pt_fantasy", "label": "🎽 Fantezi Takım", "desc": "Fantezi kadro kurma, oyuncu seçimi, puanlama", "fns": ["renderFantasy", "toggleFantasyPlayer", "saveFantasyTeam", "resetFantasyTeam", "calcFantasyPoints", "openFantasyPicker", "renderFantasyPickerContent", "setFormation"]}, {"id": "pt_live", "label": "🔴 Canlı Alt Şerit", "desc": "Canlı skor şeridi, gol kutlaması, sesli anlatım, olay sesleri", "fns": ["renderLiveTicker", "scrollToLive", "toggleLiveTicker", "toggleLiveTable", "checkFavTeamLiveStart", "showFavTeamLiveBanner", "showGoalCelebration", "announceEvent", "playEventSound", "checkLiveVoiceAnnouncements", "checkFavTeamGoalCelebration", "checkFavTeamMatchEnded", "getPrimaryLiveMatch", "previewEventSound", "testVoiceAnnouncer", "toggleVoiceAnnouncer", "setTickerAnimForContent", "applyTickerSpeed", "checkStaleLiveMatches"]}, {"id": "pt_chat", "label": "💬 Sohbet", "desc": "Sohbet ekranı, mesaj gönderme, tepkiler, yanıtlar, yazıyor göstergesi", "fns": ["openChatScreen", "renderChatScreen", "renderChatComments", "renderOne", "sendChatMessage", "sendGeneralChatMessage", "sendComment", "toggleReaction", "setReplyTarget", "clearReplyTarget", "jumpToChatMessage", "handleChatBubbleClick", "deleteComment", "togglePinComment", "saveEditedComment", "markMessagesSeenByMe", "loadOlderChatMessages", "loadPastSeasonComments", "openChatMatchPicker", "selectChatMatchTag", "broadcastTyping", "applyTypingIndicatorToDOM", "updateChatUnreadBadge", "markChatAsRead", "showReactorListPopup", "showSeenByPopup"]}, {"id": "pt_notifications", "label": "🔔 Bildirimler", "desc": "Bildirim merkezi, tercihler, hatırlatıcılar, kilometre taşları", "fns": ["addNotification", "openNotificationCenter", "renderNotifListItems", "updateNotifUnreadBadge", "checkMilestones", "checkUpcomingMatchReminder", "checkSubscribedMatchEvents", "toggleNotifyPref", "toggleNotifTypePref", "openNotifManage", "clearNotificationHistory", "checkWeeklySummaryNotification", "getNotifPrefs", "getNotificationHistory", "filterNotificationList", "showInAppNotifBanner", "checkTeamNotifyBroadcast", "checkDevReplyNotify", "checkPollResultBroadcast", "checkPremiumCodeNotifications", "checkFavTeamFanWallPosts", "isQuietHoursActive", "saveQuietHours", "toggleQuietHours"]}, {"id": "pt_premium", "label": "💎 Premium & Mağaza", "desc": "Premium erişim, kod kullanma, puan mağazası, deneme süreleri", "fns": ["hasPremiumAccess", "requestPremiumAccess", "sendPremiumAccessRequest", "requestGenericPremiumAccess", "redeemPremiumCode", "redeemGenericPremiumCode", "openPremiumCodeRedeem", "openGenericPremiumCodeRedeem", "buyPremiumWithPoints", "openPointsShop", "revalidateAllPremiumAccessNow", "revalidateFontFamilyAccess", "revalidateReactionPackAccess", "startFontTrial", "startReactionPackTrial", "startPaletteTrial", "endFontTrial", "endReactionPackTrial", "endPaletteTrial", "isEmojiLockedForViewer", "isFontPremium", "isReactionPackPremium", "getPremiumPointsPrice", "getActivePremiumCodes", "cleanupTrialChatArtifacts", "refreshPremiumScreensLive", "updateLivePremiumCountdowns", "getLoyaltyLevel"]}, {"id": "pt_theme", "label": "🎨 Tema & Görünüm", "desc": "Tema/palet/yazı tipi uygulama, kart stili, otomatik karanlık mod", "fns": ["applyTheme", "setPalette", "applyBgTheme", "applyFontFamily", "setFontFamily", "applyCardStyle", "applyNumberSize", "buildTheme", "setReactionPack", "applyAutoDarkModeIfNeeded", "toggleAutoDarkMode", "saveAutoDarkHours", "applySparkleLayer", "applyStatColors", "openFontGroupPopup", "openPaletteGroupPopup", "openReactionPackGroupPopup", "selectCustomThemeFromGroup", "selectPaletteFromGroup", "getFontCssAndEnsureLoaded", "loadGoogleFontIfNeeded", "toggleBgPaletteSync", "suggestPaletteForColor", "renderTeamColorThemeSuggestion", "applySuggestedTeamTheme"]}, {"id": "pt_login", "label": "🚪 Giriş Ekranı", "desc": "Giriş akışı, lig seçici, şifre alanı, mod seçimi, giriş ekranı teması ve düzeni", "fns": ["applyLoginScreenTheme", "applyLoginLayoutBlock", "populateLoginLeagueSel", "onLoginLeagueChange", "showLoginPasswordField", "renderModeOptions", "selectMode", "backToModeScreen", "backToLogin", "toggleLoginUpdates", "cancelRememberedAutoLogin", "openForgotPasswordForm", "renderTempPasswordHint", "doEnter", "doEnterAfterPasswordCheck", "loadProfileAndEnter", "getHashLeagueId", "handleHash"]}, {"id": "pt_auth", "label": "🔐 Giriş & Profil", "desc": "Giriş akışı, şifre işlemleri, profil kaydı, oturum takibi", "fns": ["doLogoutPt", "saveNewPassword", "openPasswordManager", "registerVisitor", "startPresenceTracking", "setVisitorOnline", "setVisitorOffline", "syncProfileToFirebase", "saveSettName", "saveSettFavTeam", "previewProfileAvatar", "handleAvatarUpload"]}, {"id": "pt_media", "label": "🖼️ Medya & Yükleme", "desc": "Fotoğraf/video/GIF yükleme, video kırpma, Supabase aktarımı", "fns": ["uploadImageToSupabase", "uploadVideoToSupabase", "processAndUploadCommentVideo", "trimVideoClientSide", "requestPtTrimWakeLock", "releasePtTrimWakeLock", "openVideoTrimmer", "updateTrimRangeHint", "confirmVideoTrim", "cancelVideoTrim", "searchGifs", "searchGifsDebounced", "openGifPicker", "renderGifFilterChips", "buildGifQuery", "toggleGifFilter", "selectGif", "handleCommentPhoto", "handleCommentVideo", "triggerCommentPhoto", "openVideoMenu", "promptVideoLink", "setVideoLink", "parseVideoUrl", "renderCommentMedia", "renderCommentVideo", "playPtLazyVideo", "openImagePreviewOv", "openImageViewerFullscreen", "updateUploadProgressUI", "_supabaseXhrUpload", "_processLogoImg", "getUrlHostname", "isKnownVideoHost", "isEmbeddableVideoUrl", "buildVideoEmbedHtml"]}, {"id": "pt_cards", "label": "🖼️ Kart Oluşturma & Paylaşım", "desc": "Maç/profil/sezon kartı üretimi ve paylaşımı", "fns": ["generateMatchSummaryCard", "downloadMyProfileCard", "downloadSeasonSummaryCard", "downloadFavTeamSummaryCard", "downloadSeasonWrapCard", "shareCardImage", "renderStandingsPreviewCard", "confirmDownloadMatchCard", "confirmDownloadMyProfileCard", "confirmDownloadSeasonCard", "confirmDownloadFavTeamCard", "shareAppLink"]}, {"id": "pt_data", "label": "📡 Veri & Bağlantı", "desc": "Firebase dinleyicileri, lig yükleme, önbellek, senkronizasyon", "fns": ["listenToLeague", "startMatchesDirectListener", "stopMatchesDirectListener", "startChatDirectListener", "stopChatDirectListener", "clearLocalCache", "getEffectiveMatches", "getAllCommentsFlat", "getVersions", "init"]}, {"id": "pt_feedback", "label": "📮 Geri Bildirim & Şikayet", "desc": "Geri bildirim formu, içerik şikayeti", "fns": ["openFeedbackForm", "submitFeedback", "handleFeedbackPhoto", "handleFeedbackVideo", "renderFeedbackMediaPreview", "reportContent"]}, {"id": "pt_maintenance", "label": "🚧 Bakım Modu", "desc": "Bakım ekranı, zamanlanmış bakım geçişleri, izinli kullanıcılar", "fns": ["isMaintenanceCurrentlyActive", "showMaintenanceScreen", "hideMaintenanceScreen", "checkMaintenanceScheduleTransition", "isUserAllowedDuringMaintenance", "returnToLoginFromMaintenance", "scheduleMaintenanceBoundaryCheck"]}, {"id": "pt_polls", "label": "🗳️ Anketler & Tahminler", "desc": "Anket oylama, MVP/maç oylaması, skor tahmini", "fns": ["votePoll", "pollNotificationHtml", "savePersonalNote", "renderPersonalNoteSection", "categorizeNote"]}, {"id": "pt_embed", "label": "▶️ Gömülü Yayın (YouTube vb.)", "desc": "Gömülü kaynakların oynatıcı içinde çalışması: durum akışı, ses/hız/sarma komutları, kanal geçişi", "fns": ["ptpGomuluMedya", "buildVideoEmbedHtml", "ptIsDirectMediaUrl", "ptExtractVideoUrl", "ptIsPlayerOnlyUrl", "ptpGomuluKenarKirp", "ptpGomuluIcKatman", "ptpKenarBuyutmeOrani", "ptpMerkezMaske", "ptpDurumDegisti", "ptfSegmentler", "ptfAralikDurumu", "ptfAralikCoz"]}, {"id": "pt_rcx", "label": "🎛️ Kumanda Gövdesi & Yerleşimi", "desc": "İki kumandanın ortak gövdesi, kanal listesi/kategori süzgeci, sürükleme ve konum kalıcılığı", "fns": ["rcxGovde", "buildChannelCats", "chPosUygula", "ptpChIlerlemeBaslat", "ptpChSeekBagla", "ptpChAyarKaydiriciBagla", "remoteCtrlProgressBaslat", "remoteCtrlSendSlider", "remoteCtrlResetPos", "ptpChKonumSifirla"]}, {"id": "pt_orient", "label": "🔄 Ekran Yönü & Tam Ekran", "desc": "Dikey/yatay çevirme, cihaz yön kilidi, tam ekrana giriş/çıkış, küçük pencere (PiP)", "fns": ["cihazYatayaKilitle", "toggleDikeyYatay", "cssIleDondur", "toggleFullscreen", "togglePip", "enterFullscreenProgrammatic"]}, {"id": "pt_storage", "label": "💾 Yerel Kayıt & Tercihler", "desc": "localStorage okuma/yazma: tercihler, kumanda konumu, görülen sürüm, önbellek anahtarları", "fns": ["pref", "setPref", "prefs", "rcPosYaz", "rcPosOku", "chPosYaz", "chPosOku", "surumRozetiHtml"]}, {"id": "pt_a11y", "label": "♿ Okunabilirlik & Kontrast", "desc": "Tema renklerinin okunabilirlik denetimi: soluk metin, bağlantı ve vurgu üzeri yazı renkleri", "fns": ["ptKontrastOrani", "ptZeminUstuYaziRengi", "ptOkunurYap", "applyTheme"]}, {"id": "pt_gecis", "label": "🎬 Geçiş & Oynatıcı Gösterim Teşhisi", "desc": "Bölümler ve videolar arası geçişler, geçiş örtüsü, yükleniyor göstergesi ve platform oynatıcısının beklenmedik görünmesi", "fns": ["ptpGecisOrtusuAc", "ptpFreezeCapture", "ptpFreezeRelease", "ptpSonrakiyeGec", "ptpSonrakiVarsaGec", "ptpAralikUygula", "ptpAralikBekcisiBaslat", "ptpGomuluBaslatmaBekcisi", "ptpYedekHazirla", "ptpYedegeGec", "ptpYedekTemizle", "ptpToplamAralikDurumu", "ptpAralikKonumEsle"]}, {"id": "pt_kisisel", "label": "⭐ Favoriler & İzleme Geçmişi", "desc": "Favori işaretleme, izleme geçmişi kaydı, kişisel süzgeçler ve bunların cihazlar arası eşitlenmesi", "fns": ["ptFavListesi", "ptFavYaz", "ptFavMi", "ptFavToggle", "ptGecmisListesi", "ptGecmiseEkle", "ptGecmisTemizle", "syncProfileToFirebase", "applySyncedPrefsAndCheckChanged"]}, {"id": "pt_ui", "label": "📐 Yerleşim, Sıkışma & Titreme", "desc": "Yazı kesilmesi/sıkışması, okunamayacak küçük yazı, sayfa yatay taşması, küçük dokunma hedefi, ekran titremesi ve içerik zıplaması", "fns": []}, {"id": "pt_silent", "label": "🕳️ Sessizce Yutulan Hatalar", "desc": "Kodun görmezden geldiği (boş yakalama bloğuna düşen) hataların tamamı - hangi fonksiyonda, hangi sebeple", "fns": []}];
 
   var SLOW_MS=250;                   // bir fonksiyon bu süreyi aşarsa "yavaş" kaydı
   var MAX_LOCAL=200;                 // cihazda tutulan en fazla kayıt
@@ -29491,7 +29729,7 @@ window.voteMvp=function(matchId,player){
   function applyFlags(obj){
     _flagsTazeMi=true;
     FLAGS=obj||{};
-    try{localStorage.setItem('diag_flags',JSON.stringify(FLAGS));}catch(e){}
+    try{localStorage.setItem('diag_flags',JSON.stringify(FLAGS));}catch(e){try{DiagSil('yerelKayit:diag_flags',e,{anahtar:'diag_flags',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
     if(typeof window.onDiagFlagsChanged==='function')try{window.onDiagFlagsChanged(FLAGS);}catch(e){}
   }
   // Firebase'den canlı bayrak aboneliği. Bağlantı yoksa localStorage'daki son bilinen
@@ -29561,7 +29799,7 @@ window.voteMvp=function(matchId,player){
             if(b)DEV_INFO.tarayici=b.brand+' '+b.version;
           }
           kaydetCihazKarti();
-        }).catch(function(){});
+        }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
       }
     }catch(e){}
   })();
@@ -29607,7 +29845,7 @@ window.voteMvp=function(matchId,player){
         kimlikHata:(window._authSonda&&window._authSonda.hata)||null,
         kaynakProtokol:location.protocol,
         kullanici:whoAmI(),app:APP,appLabel:APP_LABEL,sonGorulme:now
-      }).catch(function(){});
+      }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
     }catch(e){}
   }
 
@@ -29660,7 +29898,7 @@ window.voteMvp=function(matchId,player){
   function persist(){
     clearTimeout(_persistT);
     _persistT=setTimeout(function(){
-      try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}
+      try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){try{DiagSil('yerelKayit:diag_logs_',e,{anahtar:'diag_logs_',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
     },900);
   }
   /* KULLANICI TALEBİ (kesin çözüm): "Kullanıcı ve yönetici bir raporu kopyaladığı zaman
@@ -29725,7 +29963,7 @@ window.voteMvp=function(matchId,player){
             if(v[anahtarlar[i]]){r.kop=v[anahtarlar[i]];n++;return;}
           }
         });
-        if(n){try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}}
+        if(n){try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){try{DiagSil('yerelKayit:diag_logs_',e,{anahtar:'diag_logs_',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}}
       });
     }catch(e){}
   }
@@ -29737,7 +29975,7 @@ window.voteMvp=function(matchId,player){
       (kayitlar||[]).forEach(function(r){
         kayitAnahtarlari(r).forEach(function(a){upd['diagnostics/copied/'+DEV_ID+'/'+a]=t;v=true;});
       });
-      if(v)db.ref().update(upd).catch(function(){});
+      if(v)db.ref().update(upd).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
     }catch(e){}
   }
 /* ── UZAKTAN SENSÖR TESTİ (cihaz tarafı) ────────────────────────────────────────────
@@ -29796,7 +30034,7 @@ window.voteMvp=function(matchId,player){
     if(n){
       // Anında (gecikmesiz) yazılır: kullanıcı kopyaladıktan hemen sonra uygulamayı
       // kapatırsa damga kaybolmasın.
-      try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}
+      try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){try{DiagSil('yerelKayit:diag_logs_',e,{anahtar:'diag_logs_',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
       // Damga ayrıca ORTAK listeye yazılır - yönetici tarafı da aynı kaydı bir daha
       // kopyalayamasın (çift raporlamanın önlenmesi).
       yazOrtakDamga(kayitlar);
@@ -29841,7 +30079,18 @@ window.voteMvp=function(matchId,player){
       }
     }
     _throttle[key]=now;
-    var rec={m:modId,k:kind,t:title,d:detail||null,ts:now,n:1,rid:yeniRid()};
+    // KULLANICI TALEBİ ("tanı kayıtlarına otomatik sürüm damgası"): Sürüm bilgisi şimdiye
+    // kadar yalnızca birkaç modülde ELLE yazılıyordu; çoğu kayıtta yoktu. Bu oturumda
+    // "hangi sürümde oluştu" sorusunu birkaç kez cevaplayamadık ve yanlış yönlendik.
+    // Artık HER kayda otomatik eklenir - elle yazmayı hatırlamaya gerek kalmaz.
+    // Detay içinde zaten bir 'surum' varsa ona DOKUNULMAZ: çağıran taraf bilerek başka bir
+    // sürüm yazmış olabilir (ör. karşılaştırma amaçlı).
+    var _det=detail||null;
+    try{
+      if(!_det)_det={surum:(window.APP_BUILD||'?')};
+      else if(_det.surum===undefined)_det=Object.assign({surum:(window.APP_BUILD||'?')},_det);
+    }catch(e){}
+    var rec={m:modId,k:kind,t:title,d:_det,ts:now,n:1,rid:yeniRid()};
     LOGS.push(rec);
     if(LOGS.length>MAX_LOCAL)LOGS.splice(0,LOGS.length-MAX_LOCAL);
     persist();
@@ -29868,7 +30117,7 @@ window.voteMvp=function(matchId,player){
           localStorage.setItem('diag_remote_keys_'+APP,JSON.stringify(ak));
         }
       }catch(e){}
-      if(_ref&&_ref.catch)_ref.catch(function(){});
+      if(_ref&&_ref.catch)_ref.catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
       // Kayıt gönderen her cihazın kimlik kartı da güncel tutulur (kullanıcı adı değişmiş
       // olabilir: anonim gezerken hata oluştu, sonra giriş yaptı).
       kaydetCihazKarti();
@@ -29960,7 +30209,7 @@ window.voteMvp=function(matchId,player){
     try{
       var db=(window.firebase&&firebase.database)?firebase.database():null;
       if(!db)return;
-      db.ref('diagnostics/missing/'+APP).set(MISSING).catch(function(){});
+      db.ref('diagnostics/missing/'+APP).set(MISSING).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
     }catch(e){}
   }
   // Bir hata yığınındaki fonksiyon adlarını modül tablosuyla eşleştirerek sorumlu modülü bulur.
@@ -30022,11 +30271,11 @@ window.voteMvp=function(matchId,player){
         try{silinecek.push(fpAnahtar(r.app,r.mod,r.kind,r.title,r.ts));}catch(e){}
       });
       if(!n)return 0;
-      try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){}
+      try{localStorage.setItem('diag_logs_'+APP,JSON.stringify(LOGS.slice(-MAX_LOCAL)));}catch(e){try{DiagSil('yerelKayit:diag_logs_',e,{anahtar:'diag_logs_',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
       // Ortak liste sunucuda; erişilemezse yerel sıfırlama yine de geçerli kalır.
       try{
         silinecek.forEach(function(k){
-          if(k)firebase.database().ref('diagnostics/copied/'+k).remove().catch(function(){});
+          if(k)firebase.database().ref('diagnostics/copied/'+k).remove().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
         });
       }catch(e){}
       return n;
@@ -30066,10 +30315,10 @@ window.voteMvp=function(matchId,player){
         // kendisi değil, çocukları). Ayrıca çok yollu update atomik olduğu için tek bir
         // reddedilen anahtar hepsini düşürürdü.
         var isler=ak.map(function(k){
-          return k?db.ref('diagnostics/logs/'+k).remove().catch(function(){}):Promise.resolve();
+          return k?db.ref('diagnostics/logs/'+k).remove().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}}):Promise.resolve();
         });
         // Damga temizliği ikinci ve BAĞIMSIZ bir iştir; başarısız olması silmeyi bozmamalı.
-        var damga=db.ref('diagnostics/copied/'+DEV_ID).remove().catch(function(){});
+        var damga=db.ref('diagnostics/copied/'+DEV_ID).remove().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
         Promise.all([Promise.all(isler),damga]).then(function(){
           try{localStorage.removeItem('diag_remote_keys_'+APP);}catch(e){}
           if(cb)cb(true,ak.length);
@@ -31200,7 +31449,7 @@ window.voteMvp=function(matchId,player){
     }
     var t=window._sensorMetniPT?window._sensorMetniPT():'';
     if(!t)return;
-    try{localStorage.setItem('sensorKopya_'+iz,'1');}catch(e){}
+    try{localStorage.setItem('sensorKopya_'+iz,'1');}catch(e){try{DiagSil('yerelKayit:sensorKopya_',e,{anahtar:'sensorKopya_',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
     if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t);
     if(typeof showToast==='function')showToast('📋 Ölçüm kopyalandı');
   };

@@ -1495,7 +1495,7 @@ window.ptTestVeriKopyala=function(){
           // Rozet küçüldüğü için ayrılan boşluk da küçülmeli - yoksa altta gereksiz
           // büyük bir boşluk kalırdı.
           try{if(b._ptYerAc)b._ptYerAc();}catch(e){}
-        }).catch(function(){});
+        }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
       }catch(e){}
     };
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',koy);
@@ -1524,7 +1524,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-04-H';
+window.APP_BUILD='2026-09-04-R';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -1731,7 +1731,7 @@ window._authSonda={durum:'ortam-uygun-değil',hata:null,uid:null,ms:null,kaynak:
        e-posta oturumu her yenilemede anonime düşer ve yazma yetkisi kaybolurdu. */
     Promise.resolve(
       auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
-        .catch(function(){return auth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function(){});})
+        .catch(function(){return auth.setPersistence(firebase.auth.Auth.Persistence.NONE).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});})
     ).then(function(){
       if(auth.currentUser)return {user:auth.currentUser};
       return auth.signInAnonymously();
@@ -6600,6 +6600,69 @@ window._editVideoLinks=null;
 // Platform adreslerinde (YouTube) gömme oynatıcı, doğrudan medyada <video> kullanılır;
 // oynatma denetimini tarayıcıya bırakırız - burada amaç izlemek değil DOĞRULAMAK.
 // ══════════════════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// SAHNE ARALIĞI DÜZENLEYİCİ (kullanıcı listesi: "sahne aralığı düzenleyici")
+// Aralıklar serbest metin olarak giriliyor. Yazım hatası SESSİZCE kayboluyordu: satır
+// ayrıştırılamayınca yok sayılıyor, yönetici bunu ancak videoyu izlerken fark ediyordu.
+// Bu oturumda aralıklarla ilgili yaşadığımız sorunların bir kısmı buradan geliyordu.
+// ÇÖZÜM: Yazdıkça denetim. Her satır için ✓/✕, hatanın SEBEBİ, satırın süresi ve en altta
+// toplam izleme süresi. Kaydetmeden önce sorun görünür hâle gelir.
+// Denetim kaydetmeyi ENGELLEMEZ - yönetici yarım bıraktığı bir satırı kaydetmek isteyebilir;
+// amaç uyarmak, yolu kapatmak değil.
+// Biçim çözümü BAĞIŞLAYICI: "1:23:14", "83:14", "5014" hepsi kabul edilir - oynatıcı tarafı
+// da aynı esnekliği gösteriyor, denetimin ondan daha katı olması yanlış alarm üretirdi.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+window.ptAralikSaniye=function(t){
+  var p=String(t||'').trim();
+  if(!p)return null;
+  if(!/^[0-9:]+$/.test(p))return null;
+  var par=p.split(':').map(Number);
+  if(par.some(function(x){return isNaN(x)||x<0;}))return null;
+  return par.reverse().reduce(function(a,v,i){return a+v*Math.pow(60,i);},0);
+};
+window.ptAralikSureYaz=function(sn){
+  sn=Math.max(0,Math.round(sn||0));
+  var sa=Math.floor(sn/3600),dk=Math.floor((sn%3600)/60),ss=sn%60;
+  return (sa?sa+' sa ':'')+(sa||dk?dk+' dk ':'')+ss+' sn';
+};
+window.ptAralikDenetimHtml=function(metin){
+  var sat=String(metin||'').split(/\n+/).map(function(x){return x.trim();}).filter(Boolean);
+  if(!sat.length)
+    return '<div style="font-size:.62rem;color:var(--mu)">Aralık yok - video baştan sona oynar.</div>';
+  var toplam=0,hataVar=false;
+  var satirlar=sat.map(function(satir,i){
+    var pr=satir.split(/\s*[-–]\s*/);
+    var b=ptAralikSaniye(pr[0]);
+    var e=(pr.length>1)?ptAralikSaniye(pr[1]):null;
+    var hata=null,sure=null;
+    if(b===null)hata='başlangıç okunamadı';
+    else if(pr.length>1&&e===null)hata='bitiş okunamadı';
+    else if(e!==null&&e<=b)hata='bitiş, başlangıçtan önce ya da eşit';
+    else if(e===null)sure=null;               // tek değer: o andan sona kadar
+    else sure=e-b;
+    if(hata)hataVar=true;
+    if(sure!==null)toplam+=sure;
+    return '<div style="display:flex;gap:.4rem;align-items:flex-start;padding:.22rem 0;border-top:1px solid var(--br);font-size:.65rem">'
+      +'<span style="flex-shrink:0;color:'+(hata?'#f87171':'#4ade80')+'">'+(hata?'✕':'✓')+'</span>'
+      +'<span style="flex-shrink:0;color:var(--mu);min-width:1.1rem">'+(i+1)+'.</span>'
+      +'<span style="flex:1;min-width:0">'+escHtml(satir)
+        +(hata?('<span style="color:#f87171"> — '+hata+'</span>')
+              :(sure!==null?('<span style="color:var(--mu)"> — '+ptAralikSureYaz(sure)+'</span>')
+                           :'<span style="color:var(--mu)"> — sona kadar</span>'))
+      +'</span></div>';
+  }).join('');
+  return satirlar
+    +'<div style="display:flex;justify-content:space-between;font-size:.66rem;font-weight:800;margin-top:.35rem;padding-top:.3rem;border-top:1px solid var(--br)">'
+      +'<span>'+sat.length+' bölüm'+(hataVar?' <span style="color:#f87171">· hatalı satır var</span>':'')+'</span>'
+      +'<span>'+(toplam>0?('Toplam '+ptAralikSureYaz(toplam)):'—')+'</span>'
+    +'</div>';
+};
+// Metin alanı ile denetim kutusunu bağlar; yazdıkça tazelenir.
+window.ptAralikDenetle=function(alanId,kutuId){
+  var a=qs(alanId),k=qs(kutuId);
+  if(!a||!k)return;
+  k.innerHTML=ptAralikDenetimHtml(a.value);
+};
 window.ptKanalOnizle=function(url,baslik,araliklarMetni){
   url=String(url||'').trim();
   if(!url){toast('❌ Önce bir adres girin','er');return;}
@@ -6684,6 +6747,111 @@ window.ptKanalSinaTek=function(url){
 // zorunda kalmasın.
 // ══════════════════════════════════════════════════════════════════════════════════════════
 window._ptSaglikIptal=false;
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// HAVUZDAN TOPLU GÖNDERİM (kullanıcı listesi)
+// Havuzda onlarca kanal varken tek tek göndermek uzun sürüyordu.
+// YALNIZCA HENÜZ GÖNDERİLMEMİŞLERİ gönderir - zaten listede olanlar atlanır, kopya oluşmaz.
+// Denetim, tek tek gönderimdeki KURALIN AYNISI: aynı havuz kaydından gelmiş olmak ya da
+// başlık+adres birebir eşleşmek. İki yerde farklı kural olsaydı biri kopya üretirdi.
+// Karşılaştırma VERİTABANINDAN okunan liste üzerinde yapılır - bellekteki kopya bayat olabilir
+// (bkz. "zaten mevcut" yanlış alarmının kök sebebi).
+// Arama süzgeci etkinse YALNIZCA görünen kanallar gönderilir: yönetici bir kategoriyi süzüp
+// "bunları gönder" demek isteyebilir, tüm havuzu göndermek sürpriz olurdu.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// GERİ ALMA (kullanıcı listesi: "yönetici işlemleri için geri alma")
+// Yıkıcı işlemler (silme) onay kutusuyla korunuyordu, ama onay kutuları alışkanlıkla geçilir
+// ve yanlış satıra basmayı engellemez. Bu oturumda silinen bir kanalı geri getirmenin ne
+// kadar zor olduğunu gördük.
+// TASARIM - NEDEN ANLIK GERİ ALMA, NEDEN GEÇMİŞ YIĞINI DEĞİL:
+// Çok adımlı bir geri alma yığını, her işlemin tersini ayrı ayrı yazmayı ve veritabanının
+// aradaki değişimlerini hesaba katmayı gerektirir - başka bir yöneticinin araya giren
+// değişikliğini ezme riski taşır. Burada tek adım ve kısa süreli bir pencere var: işlem
+// yapılır, 12 saniye boyunca geri alınabilir, sonra kalıcılaşır. Yanlış dokunuşu düzeltmeye
+// yeter, veri tutarlılığını riske atmaz.
+// Geri alma İŞLEVİ çağıran tarafça verilir - bu katman "ne yapılacağını" bilmez, yalnızca
+// pencereyi ve düğmeyi yönetir.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+window._ptGeriAlT=null;
+window.ptGeriAlSun=function(aciklama,geriAlFn,sure){
+  try{
+    clearTimeout(window._ptGeriAlT);
+    var eski=document.getElementById('ptGeriAlBar');
+    if(eski&&eski.parentNode)eski.parentNode.removeChild(eski);
+    var bar=document.createElement('div');
+    bar.id='ptGeriAlBar';
+    bar.style.cssText='position:fixed;left:12px;right:12px;bottom:16px;z-index:2147483645;'
+      +'display:flex;align-items:center;gap:.6rem;padding:.7rem .8rem;border-radius:12px;'
+      +'background:#1f2937;color:#fff;font-family:inherit;font-size:.76rem;font-weight:600;'
+      +'box-shadow:0 8px 24px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.12)';
+    var yazi=document.createElement('span');
+    yazi.style.cssText='flex:1;min-width:0';
+    yazi.textContent=aciklama||'İşlem tamamlandı';
+    var btn=document.createElement('button');
+    btn.textContent='↩️ GERİ AL';
+    btn.style.cssText='flex-shrink:0;background:#7c3aed;color:#fff;border:none;border-radius:9px;'
+      +'padding:.45rem .7rem;font-size:.72rem;font-weight:800;cursor:pointer;font-family:inherit;min-height:34px';
+    btn.onclick=function(){
+      clearTimeout(window._ptGeriAlT);
+      try{if(bar.parentNode)bar.parentNode.removeChild(bar);}catch(e){}
+      try{geriAlFn&&geriAlFn();}catch(e){toast('❌ Geri alınamadı','er');}
+    };
+    bar.appendChild(yazi);bar.appendChild(btn);
+    document.body.appendChild(bar);
+    window._ptGeriAlT=setTimeout(function(){
+      try{if(bar.parentNode)bar.parentNode.removeChild(bar);}catch(e){}
+    },sure||12000);
+  }catch(e){}
+};
+window.ptHavuzTopluGonder=function(){
+  db.ref('channelPool').once('value').then(function(sn){
+    var pool=sn.val()||{},ids=Object.keys(pool);
+    var ara=(window._cpAra||'').trim().toLocaleLowerCase('tr');
+    if(ara){
+      ids=ids.filter(function(id){
+        var c=pool[id]||{};
+        return ((c.title||'')+' '+(c.url||'')+' '+(c.category||'')).toLocaleLowerCase('tr').indexOf(ara)!==-1;
+      });
+    }
+    if(!ids.length){toast('Gönderilecek kanal yok','er');return;}
+    var yol=db.ref('leagues/'+_curLeagueId+'/videoLinks');
+    var sozListe=(window._videoLinksDirty&&window._editVideoLinks)
+      ? Promise.resolve(window._editVideoLinks)
+      : yol.once('value').then(function(s2){return s2.val()||[];});
+    sozListe.then(function(mevcut){
+      if(!Array.isArray(mevcut))mevcut=[];
+      var eklenecek=ids.filter(function(id){
+        var c=pool[id]||{};
+        var t=(c.title||'').trim().toLowerCase(),u=(c.url||'').trim().toLowerCase();
+        return !mevcut.some(function(v){
+          if(!v)return false;
+          if(v.poolSourceId===id)return true;
+          return (v.title||'').trim().toLowerCase()===t&&(v.url||'').trim().toLowerCase()===u;
+        });
+      });
+      if(!eklenecek.length){toast('✅ Havuzdaki tüm kanallar zaten listede');return;}
+      if(!confirm(eklenecek.length+' kanal TV/Video listesine eklenecek.\n\n'
+        +(ids.length-eklenecek.length)+' kanal zaten listede olduğu için atlanacak.\n\nDevam edilsin mi?'))return;
+      window._editVideoLinks=JSON.parse(JSON.stringify(mevcut));
+      eklenecek.forEach(function(id){
+        var c=pool[id]||{};
+        window._editVideoLinks.unshift({
+          id:uid(),title:c.title||'',url:c.url||'',isLive:!!c.isLive,
+          category:c.category||'',logo:c.logo||'',araliklar:c.araliklar||'',
+          sesDilleri:c.sesDilleri||'',createdAt:Date.now(),poolSourceId:id
+        });
+      });
+      S.videoLinks=window._editVideoLinks.slice();
+      window._videoLinksDirty=true;
+      save().then(function(){
+        logAction('📡 Havuzdan toplu gönderim: '+eklenecek.length+' kanal');
+        toast('✅ '+eklenecek.length+' kanal gönderildi');
+        closeSheet();
+        renderVideoLinkAdmin();
+      }).catch(function(e){toast('❌ Gönderilemedi: '+((e&&e.message)||'bağlantı hatası'),'er');});
+    });
+  }).catch(function(){toast('❌ Havuz okunamadı','er');});
+};
 window.ptKanalSaglikTara=function(){
   var kutu=qs('cpSaglikSonuc');if(!kutu)return;
   if(window._ptSaglikCalisiyor){window._ptSaglikIptal=true;return;}
@@ -6924,13 +7092,22 @@ function renderVideoLinkAdmin(){
     var _cift=(_sira%2===1);
     var _harf=(v.title||'?').trim().charAt(0).toUpperCase()||'?';
     var _rozet=v.isLive?'🔴 Canlı':'🎬 Video';
-    return '<div id="vlRow_'+i+'" style="background:'+(_cift?'var(--s2)':'var(--s3)')+';border:1px solid var(--br);border-radius:13px;padding:.6rem;margin-bottom:.7rem;box-shadow:0 2px 8px rgba(0,0,0,.18);transition:outline-color .3s">'
+    return '<div id="vlRow_'+i+'" style="'+(v.gizli?'opacity:.55;':'')+'background:'+(_cift?'var(--s2)':'var(--s3)')+';border:1px solid var(--br);border-radius:13px;padding:.6rem;margin-bottom:.7rem;box-shadow:0 2px 8px rgba(0,0,0,.18);transition:outline-color .3s">'
       +'<div style="display:flex;align-items:center;gap:.5rem;margin:-.15rem -.15rem .5rem;padding:.35rem .45rem;background:var(--s1);border:1px solid var(--br);border-radius:10px">'
         +(v.logo?'<img src="'+escHtml(v.logo)+'" style="width:26px;height:26px;border-radius:7px;object-fit:contain;background:var(--s3);flex-shrink:0;padding:2px;box-sizing:border-box"/>'
                 :'<div style="width:26px;height:26px;border-radius:7px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:900;flex-shrink:0">'+escHtml(_harf)+'</div>')
         +'<div style="flex:1;min-width:0;font-size:.7rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
           +escHtml((v.title||'').trim()||'(başlıksız kayıt)')+'</div>'
         +'<div style="flex-shrink:0;font-size:.58rem;color:var(--mu)">'+_rozet+(v.category?' · '+escHtml(v.category):'')+'</div>'
+        // KULLANICI TALEBİ ("bir kanalı geçici olarak yayından kaldırma - silmeden gizleme"):
+        // Kayıt silinmez; ayarları, aralıkları ve havuz bağlantısı korunur. Kullanıcı tarafında
+        // hiç görünmez, yönetici tek dokunuşla geri açar. Silmeye göre farkı geri dönüşün
+        // kayıpsız olması - bu oturumda silinen bir kanalı geri getirmenin ne kadar zor
+        // olduğunu gördük.
+        +'<button onclick="toggleVideoLinkGizli('+i+')" title="'+(v.gizli?'Yayına al':'Yayından kaldır')+'" '
+          +'style="flex-shrink:0;background:'+(v.gizli?'rgba(239,68,68,.15)':'transparent')+';border:1px solid '
+          +(v.gizli?'rgba(239,68,68,.35)':'var(--br)')+';border-radius:8px;padding:.2rem .4rem;cursor:pointer;'
+          +'font-size:.7rem;line-height:1;min-height:28px;min-width:32px">'+(v.gizli?'🚫':'👁️')+'</button>'
       +'</div>'
       +'<div style="display:flex;gap:.5rem;margin-bottom:.4rem">'
       +'<input value="'+(v.title||'').replace(/"/g,'&quot;')+'" placeholder="Başlık (kullanıcı bunu görecek)" oninput="setVideoLinkField('+i+',\'title\',this.value);clearVlRowWarning('+i+')" style="flex:1;font-size:.74rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif"/>'
@@ -7105,11 +7282,34 @@ window.renameCategory=function(cat){
 };
 window.deleteCategory=function(cat){
   var isLive=!!window._katYonTur;
-  var n=(S.videoLinks||[]).filter(function(v){return v&&!!v.isLive===isLive&&(v.category||'')===cat;}).length;
+  var _etkilenen=(S.videoLinks||[]).filter(function(v){return v&&!!v.isLive===isLive&&(v.category||'')===cat;})
+    .map(function(v){return v.id;});
+  var n=_etkilenen.length;
   if(!confirm('"'+cat+'" kategorisi silinsin mi?\n\n'
     +(n?(n+' kayıt bu kategoriyi kullanıyor. Kayıtlar SİLİNMEZ, yalnızca kategorisiz kalır.')
        :'Bu kategoriyi kullanan kayıt yok.')))return;
-  _kategoriUygula(cat,'').then(function(){toast('🗑️ Kategori silindi: '+cat);});
+  _kategoriUygula(cat,'').then(function(){
+    // Kategori silindiğinde kayıtlar kategorisiz kalır; geri alma hem kategoriyi hem o
+    // kayıtların bağını yeniden kurar - yalnızca adı geri eklemek yetmezdi.
+    ptGeriAlSun('🗑️ "'+cat+'" kategorisi silindi',function(){
+      var l=katListesi(isLive).slice();
+      if(l.indexOf(cat)===-1)l.push(cat);
+      katKaydet(isLive,l).then(function(){
+        if(!Array.isArray(window._editVideoLinks))window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
+        window._editVideoLinks.forEach(function(v){
+          if(v&&!!v.isLive===isLive&&_etkilenen.indexOf(v.id)!==-1)v.category=cat;
+        });
+        S.videoLinks=window._editVideoLinks.slice();
+        window._videoLinksDirty=true;
+        return save();
+      }).then(function(){
+        logAction('↩️ Kategori silme geri alındı: '+cat);
+        toast('↩️ Geri alındı');
+        renderVideoLinkAdmin();
+        openCategoryManager(isLive);
+      });
+    });
+  });
 };
 function promptNewVideoCategory(i){
   _catPromptTargetIdx=i;
@@ -7309,6 +7509,7 @@ function renderChannelPoolSheet(pool){
   var ids=Object.keys(pool);
   var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Buraya eklenen kanallar hiçbir lige veya "TV/Video" listesine bağlı değildir - o liste her ne sebeple silinirse silinsin, buradakiler SİZ silmediğiniz sürece SİLİNMEZ. Buradan istediğiniz kanalı "📡 TV Tarafına Gönder" ile canlı listeye ekleyebilir/geri yükleyebilirsiniz.</div>';
   html+='<button class="btn bg" onclick="openCreateChannelPoolEntry()" style="width:100%;margin-bottom:.6rem">➕ Havuza Yeni Kanal Oluştur</button>';
+  html+='<button onclick="ptHavuzTopluGonder()" style="width:100%;min-height:34px;margin-bottom:.4rem;background:var(--s3);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-size:.7rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">📤 Görünenleri TV/Video Listesine Gönder</button>';
   html+='<button id="cpSaglikBtn" onclick="ptKanalSaglikTara()" style="width:100%;min-height:34px;margin-bottom:.4rem;background:var(--s3);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-size:.7rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">🩺 Havuzu Tara</button>'
     +'<div style="font-size:.6rem;color:var(--mu);line-height:1.5;margin-bottom:.4rem">Tüm adresler sırayla denetlenir. Platform adresleri (YouTube vb.) tarayıcıdan okunamadığı için yalnızca biçim olarak doğrulanır - oynatma garantisi verilmez.</div>'
     +'<div id="cpSaglikSonuc" style="margin-bottom:.6rem"></div>';
@@ -7380,7 +7581,8 @@ function _channelPoolFormHtml(c){
     // vardı - havuzdan gönderilen kanal bu bilgileri taşımadığı için yönetici aynı işi iki
     // kez yapmak zorunda kalıyordu. Alanlar buraya taşındı ve gönderim akışına eklendi.
     +'<div style="font-size:.64rem;color:var(--mu);margin:.7rem 0 .25rem">⏱️ İzleme aralıkları (her satıra bir bölüm)</div>'
-    +'<textarea id="cpAraliklar" rows="3" placeholder="1:23:14 - 1:43:56&#10;2:05:00 - 2:12:30" style="width:100%;box-sizing:border-box;font-size:.68rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;resize:vertical">'+(c.araliklar||'').replace(/</g,'&lt;')+'</textarea>'
+    +'<textarea id="cpAraliklar" rows="3" oninput="ptAralikDenetle(\'cpAraliklar\',\'cpAralikDenetim\')" placeholder="1:23:14 - 1:43:56&#10;2:05:00 - 2:12:30" style="width:100%;box-sizing:border-box;font-size:.68rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;resize:vertical">'+(c.araliklar||'').replace(/</g,'&lt;')+'</textarea>'
+    +'<div id="cpAralikDenetim" style="margin:.3rem 0 .4rem"></div>'
     +'<div style="font-size:.6rem;color:var(--mu);line-height:1.5;margin:.25rem 0 .5rem">Boş bırakılırsa video baştan sona oynar. Birden fazla satır yazarsanız bölümler <b>arka arkaya, kesintisiz</b> oynatılır.</div>'
     +'<button type="button" onclick="ptKanalOnizle(qs(\'cpUrl\')?qs(\'cpUrl\').value:\'\',qs(\'cpTitle\')?qs(\'cpTitle\').value:\'\',qs(\'cpAraliklar\')?qs(\'cpAraliklar\').value:\'\')" style="width:100%;min-height:32px;margin-bottom:.4rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-size:.68rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">👁️ Önizle (görüntü + aralık denetimi)</button>'
     +'<button type="button" onclick="testChannelPoolUrl()" id="cpTestBtn" style="width:100%;min-height:32px;margin-bottom:.4rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-size:.68rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">🔍 Bu Adresi Test Et</button>'
@@ -7393,6 +7595,7 @@ function openCreateChannelPoolEntry(){
   window._cpEditId=null;
   openSheet('➕ Havuza Yeni Kanal',_channelPoolFormHtml(null)
     +'<button class="btn bp" onclick="saveChannelPoolEntry()" style="width:100%;margin-top:.7rem">💾 Havuza Ekle</button>','openCreateChannelPoolEntry');
+  setTimeout(function(){try{ptAralikDenetle('cpAraliklar','cpAralikDenetim');}catch(e){}},60);
 }
 function openEditChannelPoolEntry(pid){
   db.ref('channelPool/'+pid).once('value').then(function(snap){
@@ -7400,6 +7603,9 @@ function openEditChannelPoolEntry(pid){
     window._cpEditId=pid;
     openSheet('✏️ Havuz Kanalını Düzenle',_channelPoolFormHtml(c)
       +'<button class="btn bp" onclick="saveChannelPoolEntry()" style="width:100%;margin-top:.7rem">💾 Kaydet</button>','openEditChannelPoolEntry');
+    // Denetim kutusu form AÇILIRKEN de doldurulur - yalnızca 'oninput' ile bağlasaydık
+    // yönetici bir tuşa basana kadar boş kalır, mevcut aralıkların durumu görünmezdi.
+    setTimeout(function(){try{ptAralikDenetle('cpAraliklar','cpAralikDenetim');}catch(e){}},60);
   });
 }
 function triggerChannelPoolLogoUpload(){
@@ -7550,6 +7756,19 @@ function sendChannelPoolEntryToTv(pid){
     }
   });
 }
+window.toggleVideoLinkGizli=function(i){
+  if(!window._editVideoLinks||!window._editVideoLinks[i])return;
+  var v=window._editVideoLinks[i];
+  v.gizli=!v.gizli;
+  S.videoLinks=window._editVideoLinks.slice();
+  window._videoLinksDirty=true;
+  renderVideoLinkAdmin();
+  save().then(function(){
+    logAction((v.gizli?'🚫 Yayından kaldırıldı: ':'👁️ Yayına alındı: ')+(v.title||''));
+    toast(v.gizli?('🚫 '+(v.title||'Kanal')+' yayından kaldırıldı - kayıt silinmedi')
+                 :('👁️ '+(v.title||'Kanal')+' yayına alındı'));
+  });
+};
 function setVideoLinkField(i,field,val){
   if(!window._editVideoLinks||!window._editVideoLinks[i])return;
   window._editVideoLinks[i][field]=val;
@@ -7677,6 +7896,7 @@ function removeVideoLink(i){
   // silinince yapıldığı gibi) öksüz kalmasın diye temizlenir.
   if(window._editVideoLinks&&window._editVideoLinks[i]&&window._editVideoLinks[i].premium&&S.premiumPrices)delete S.premiumPrices['ch_'+window._editVideoLinks[i].id];
   var _silinenId=(window._editVideoLinks[i]||{}).id||'';
+  var _silinenKayit=JSON.parse(JSON.stringify(window._editVideoLinks[i]||{}));
   window._editVideoLinks.splice(i,1);
   // KÖK SEBEP DÜZELTMESİ (kullanıcı bildirdi: "TV/Video sekmesinde kanal kaldırılıyor fakat
   // Puan Tablosu tarafında görünmeye devam ediyor. Havuzda 'ekle' deyince 'zaten mevcut'
@@ -7704,7 +7924,20 @@ function removeVideoLink(i){
   // "zaten mevcut" yanlış alarmı üretilemez.
   // ══════════════════════════════════════════════════════════════════════════════════════
   save().then(function(){
-    toast('🗑️ Kanal kaldırıldı');
+    // Silinen kaydın TAM kopyası ve konumu saklanır - geri alma onu aynı sıraya koyar.
+    // Sona eklemek, yöneticinin özenle kurduğu sıralamayı bozardı.
+    var _yedek=_silinenKayit,_yer=i;
+    ptGeriAlSun('🗑️ "'+((_yedek&&_yedek.title)||'Kanal')+'" kaldırıldı',function(){
+      if(!Array.isArray(window._editVideoLinks))window._editVideoLinks=JSON.parse(JSON.stringify(S.videoLinks||[]));
+      window._editVideoLinks.splice(Math.min(_yer,window._editVideoLinks.length),0,_yedek);
+      S.videoLinks=window._editVideoLinks.slice();
+      window._videoLinksDirty=true;
+      renderVideoLinkAdmin();
+      save().then(function(){
+        logAction('↩️ Silme geri alındı: '+((_yedek&&_yedek.title)||''));
+        toast('↩️ Geri alındı');
+      });
+    });
     if(!_silinenId||!_curLeagueId)return;
     var yol=db.ref('leagues/'+_curLeagueId+'/videoLinks');
     yol.once('value').then(function(sn){
@@ -8643,7 +8876,7 @@ function deleteTickerAnnouncement(id){
   db.ref(_yol).once('value').then(function(sn){
     // Önce kopyala, sonra sil - sıra tersse silinen veri geri alınamaz olurdu.
     copaAt('Şerit Duyurusu',((sn.val()||{}).text||id),_yol,sn.val());
-  }).catch(function(){});
+  }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
   db.ref(_yol).remove().then(function(){
     toast('🗑️ Çöp kutusuna taşındı');
     renderTickerAnnList();
@@ -11241,7 +11474,7 @@ function cleanupVisitorActionLogs(){
           var updates={};
           keys.slice(0,fazla).forEach(function(k){updates[k]=null;});
           toplamSilinen+=fazla;
-          actRef.update(updates).catch(function(){}).then(function(){sonrakiZiyaretci(idx+1);});
+          actRef.update(updates).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}}).then(function(){sonrakiZiyaretci(idx+1);});
         }else{
           sonrakiZiyaretci(idx+1);
         }
@@ -13256,7 +13489,7 @@ function requestAdmTrimWakeLock(){
   }catch(e){DiagSil('requestAdmTrimWakeLock',e);}
 }
 function releaseAdmTrimWakeLock(){
-  try{if(_admTrimWakeLock){var wl=_admTrimWakeLock;_admTrimWakeLock=null;wl.release().catch(function(){});}}catch(e){DiagSil('releaseAdmTrimWakeLock',e);}
+  try{if(_admTrimWakeLock){var wl=_admTrimWakeLock;_admTrimWakeLock=null;wl.release().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});}}catch(e){DiagSil('releaseAdmTrimWakeLock',e);}
 }
 function trimAdminVideoClientSide(file,startSec,endSec,onProgress,callback){
   if(typeof MediaRecorder==='undefined'){callback(new Error('Tarayıcınız video kırpmayı desteklemiyor. Lütfen videoyu bilgisayarınızın kendi düzenleyicisiyle kısaltıp tekrar deneyin'));return;}
@@ -13288,7 +13521,7 @@ function trimAdminVideoClientSide(file,startSec,endSec,onProgress,callback){
           webmFixDurationInPlace(recordedBlob,_recordedMs,function(fixedBlob){callback(null,fixedBlob);});
         };
         recorder.onerror=function(e){fail('Kayıt sırasında hata: '+((e&&e.error&&e.error.message)||'bilinmeyen'));};
-        video.play().catch(function(){});
+        video.play().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
         recorder.start();
         var startTs=performance.now();
         var timer=setInterval(function(){
@@ -20249,7 +20482,7 @@ window.saveBulkScores = async function(wrap) {
             if(b)DEV_INFO.tarayici=b.brand+' '+b.version;
           }
           kaydetCihazKarti();
-        }).catch(function(){});
+        }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
       }
     }catch(e){}
   })();
@@ -20295,7 +20528,7 @@ window.saveBulkScores = async function(wrap) {
         kimlikHata:(window._authSonda&&window._authSonda.hata)||null,
         kaynakProtokol:location.protocol,
         kullanici:whoAmI(),app:APP,appLabel:APP_LABEL,sonGorulme:now
-      }).catch(function(){});
+      }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
     }catch(e){}
   }
 
@@ -20425,7 +20658,7 @@ window.saveBulkScores = async function(wrap) {
       (kayitlar||[]).forEach(function(r){
         kayitAnahtarlari(r).forEach(function(a){upd['diagnostics/copied/'+DEV_ID+'/'+a]=t;v=true;});
       });
-      if(v)db.ref().update(upd).catch(function(){});
+      if(v)db.ref().update(upd).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
     }catch(e){}
   }
 /* ── UZAKTAN SENSÖR TESTİ (cihaz tarafı) ────────────────────────────────────────────
@@ -20526,7 +20759,7 @@ window.saveBulkScores = async function(wrap) {
         kind:rec.k,title:rec.t,detail:rec.d?JSON.stringify(rec.d).slice(0,900):null,
         user:whoAmI(),ts:rec.ts,ua:(navigator.userAgent||'').slice(0,140),
         dev:DEV_ID,rid:rec.rid||null
-      }).catch(function(){});
+      }).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
       // Kayıt gönderen her cihazın kimlik kartı da güncel tutulur (kullanıcı adı değişmiş
       // olabilir: anonim gezerken hata oluştu, sonra giriş yaptı).
       kaydetCihazKarti();
@@ -20616,7 +20849,7 @@ window.saveBulkScores = async function(wrap) {
     try{
       var db=(window.firebase&&firebase.database)?firebase.database():null;
       if(!db)return;
-      db.ref('diagnostics/missing/'+APP).set(MISSING).catch(function(){});
+      db.ref('diagnostics/missing/'+APP).set(MISSING).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
     }catch(e){}
   }
   // Bir hata yığınındaki fonksiyon adlarını modül tablosuyla eşleştirerek sorumlu modülü bulur.
@@ -21175,7 +21408,7 @@ function createNewAdminAccount(){
     })
     .then(function(uid){
       // İkincil bağlantıdan çıkılır ki o oturum ortalıkta kalmasın.
-      return ikincilAuth.signOut().catch(function(){}).then(function(){return uid;});
+      return ikincilAuth.signOut().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}}).then(function(){return uid;});
     })
     .then(function(uid){
       logAction('➕ Yeni yönetici hesabı oluşturuldu: '+em+(kisitli?(' ('+Object.keys(secilen).length+' izinle sınırlı)'):' (tam yetki)'));
@@ -21189,7 +21422,7 @@ function createNewAdminAccount(){
       toast('✅ Yeni yönetici eklendi');
     })
     .catch(function(e){
-      ikincilAuth.signOut().catch(function(){});
+      ikincilAuth.signOut().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
       var mesaj=escHtml(typeof _authHataTr==='function'?_authHataTr(e):((e&&e.message)||'oluşturulamadı'));
       // Firebase "geçersiz" derken sebebini söylemez. En sık iki sebep için ipucu eklenir -
       // ama bu bir KISITLAMA değil, yalnızca yardım: adresi siz belirlersiniz.
@@ -21450,7 +21683,7 @@ function copyRemoteSensorResult(devKey){
     if(!txt){toast('Önce sonucu görüntüleyin','er');return;}
     if(typeof admGlobalCopyText==='function')admGlobalCopyText(txt,'📋 Ölçüm kopyalandı');
     else if(navigator.clipboard)navigator.clipboard.writeText(txt);
-    db.ref('diagnostics/copied/'+devKey+'/'+anahtar).set(Date.now()).catch(function(){});
+    db.ref('diagnostics/copied/'+devKey+'/'+anahtar).set(Date.now()).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
   });
 }
 
@@ -21583,7 +21816,7 @@ function runDiagHealthCheck(){
     if(i>=testler.length){bitir();return;}
     var t=testler[i++],ad=t[0],yol=t[1],tip=t[2];
     var p=(tip==='read')?db.ref(yol).once('value')
-      :db.ref(yol).set(Date.now()).then(function(){return db.ref(yol).remove().catch(function(){});});
+      :db.ref(yol).set(Date.now()).then(function(){return db.ref(yol).remove().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});});
     p.then(function(){out.push(_dhcSatir(ad,'ok','izin var'));yaz();sonraki();})
      .catch(function(e){
         var m=(e&&e.message)||'bilinmeyen hata';
@@ -22499,8 +22732,8 @@ function diagClearRemoteLogs(){
     })).then(function(){
       // Damgalar ve sensör sonuçları - başarısızlıkları asıl sonucu etkilemez.
       return Promise.all([
-        db.ref('diagnostics/copied').remove().catch(function(){}),
-        db.ref('diagnostics/sensorResults').remove().catch(function(){})
+        db.ref('diagnostics/copied').remove().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}}),
+        db.ref('diagnostics/sensorResults').remove().catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}})
       ]);
     }).then(function(){
       if(!_anahtarlar.length){toast('Silinecek sunucu kaydı yok');return;}
@@ -24111,7 +24344,7 @@ function diagClearRemoteLogs(){
           admGlobalCopyText(txt,'📋 Kopyalandı');
           btnEl.textContent='✅ Kopyalandı';
         }else{
-          if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).catch(function(){});
+          if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(txt).catch(function(_hata){try{DiagSil('sozYakalama',_hata,{anlami:'Bir ağ ya da veritabanı işlemi başarısız oldu; sonucu hiçbir yere yazılmıyordu.',oneri:'Tekrarlıyorsa bağlantı ya da veritabanı yetki kuralı sorunu olabilir. Kaydın hangi işlemde oluştuğu üstündeki fonksiyon adından anlaşılır.'});}catch(_d){}});
           else{var ta=document.createElement('textarea');ta.value=txt;ta.style.cssText='position:fixed;opacity:0';document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e2){}ta.remove();}
           btnEl.textContent='✅ Kopyalandı';
         }
