@@ -2216,7 +2216,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-04-R';
+window.APP_BUILD='2026-09-05-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -23225,9 +23225,21 @@ window.PTPlayer=(function(){
       // örneklemeyi çalıştırıp kaydı denemek, modülün sonradan açıldığı durumları da kapsar.
       if(DiagCore.isOn&&!DiagCore.isOn('pt_gecis'))return;
       var ornekler=[],bas=Date.now();
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KÖK SEBEP DÜZELTMESİ (raporda 100+ kayıt: "Cannot read properties of null
+      // (reading '_taniT')" - her 2-3 saniyede bir tekrarlıyordu):
+      // Koruma satırı ŞÖYLEYDİ:  if(!S){clearInterval(S._taniT);return;}
+      // Yani S boş olduğunda S._taniT okunuyordu - hatayı ÖNLEMEK için yazılan satırın
+      // kendisi hata fırlatıyordu. Üstelik zamanlayıcı da durdurulamadığı için hata sonsuza
+      // kadar tekrarlıyor, oynatıcı kapandıktan sonra bile çalışmaya devam ediyordu.
+      // ÇÖZÜM: Zamanlayıcı kimliği YEREL bir değişkende tutulur. S yok olsa bile o değişken
+      // erişilebilir kalır ve durdurma her koşulda çalışır.
+      // DERS: Bir nesnenin varlığını denetleyen satır, o nesnenin İÇİNDEN bir şey okumamalı.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      var _taniTid=null;
       clearInterval(S._taniT);
-      S._taniT=setInterval(function(){
-        if(!S){clearInterval(S._taniT);return;}
+      _taniTid=setInterval(function(){
+        if(!S){clearInterval(_taniTid);return;}
         // ══════════════════════════════════════════════════════════════════════════════
         // KÖK SEBEP DÜZELTMESİ (raporda görüldü: "ornekler: [object Object] | [object
         // Object] | ..." - 30 örneğin TAMAMI okunamaz):
@@ -23320,7 +23332,7 @@ window.PTPlayer=(function(){
               return _x?(_x.classList.contains('ptp-mm-on')?1:'var-kapali'):0;
             }catch(e){return '?';}})());
         if(ornekler.length>=30){
-          clearInterval(S._taniT);
+          clearInterval(_taniTid);
           DiagCore.kaydet('pt_gecis','bilgi','Geçiş tanı örneklemesi · '+etiket,{
             // Sürüm de kayda yazılır - "uygulama hangi sürümü çalıştırıyor" sorusunu her
             // raporda tek bakışta cevaplar; önbellek/eski sürüm şüphesi böylece elenir.
@@ -23337,6 +23349,10 @@ window.PTPlayer=(function(){
           });
         }
       },100);
+      // Dışarıdan durdurulabilmesi için kimlik oynatıcı durumuna da yazılır
+      // (ör. destroy() sırasında). Yerel değişken ise S yok olduğunda bile geçerli
+      // kalır - asıl koruma odur.
+      S._taniT=_taniTid;
     }catch(e){}
   }
   function ptpGecisOrtusuAc(){
@@ -31990,14 +32006,32 @@ window.voteMvp=function(matchId,player){
         var orn=[].concat((r.ornekler&&r.ornekler.ortulme)||[],(r.ornekler&&r.ornekler.kayma)||[],
                           (r.ornekler&&r.ornekler.kontrast)||[],(r.ornekler&&r.ornekler.harf)||[],
                           (r.ornekler&&r.ornekler.bosAlan)||[],(r.ornekler&&r.ornekler.asiriBosluk)||[]);
+        // ══════════════════════════════════════════════════════════════════════════════
+        // KULLANICI BİLDİRDİ ("bütün hata yakalama kodlarında sensör testi çalışmıyor"):
+        // İKİ ayrı sebep vardı.
+        // 1) Sonuç kutusu 'e.target.parentNode.parentNode' ile yerleştiriliyordu. Panel
+        //    yapısı modülden modüle değiştiği için bu zincir çoğu yerde YANLIŞ öğeye
+        //    çıkıyor, kutu görünmeyen bir yere ekleniyordu - düğme çalışıyor ama sonuç
+        //    hiçbir yerde görünmüyordu. Artık panelin KENDİSİNE ekleniyor; zincir tahmini yok.
+        // 2) Sonda YALNIZCA yerleşim sensörünü ölçer (örtülme, kayma, kontrast...). Düğme
+        //    ise her modülün panelinde duruyor. Yerleşim dışı bir modülde ölçüm boş dönüyor,
+        //    kullanıcı da "bozuk" sanıyordu. Artık ne ölçtüğü açıkça yazılıyor.
+        // ══════════════════════════════════════════════════════════════════════════════
         var det=el.querySelector('[data-x="sensorOut"]');
-        if(!det){det=document.createElement('div');det.setAttribute('data-x','sensorOut');
+        if(!det){
+          det=document.createElement('div');det.setAttribute('data-x','sensorOut');
           det.style.cssText='margin-top:.5rem;font-size:.58rem;line-height:1.5;color:#e2e8f0;background:rgba(0,0,0,.3);border-radius:8px;padding:.45rem';
-          e.target.parentNode.parentNode.appendChild(det);}
+          var _hedef=el.querySelector('[data-x="govde"]')||el;
+          try{_hedef.appendChild(det);}catch(_e){try{el.appendChild(det);}catch(_e2){}}
+        }
         // Uzun listeler ekrana sığmadığı için sonuç metin olarak da kopyalanabilir.
         window._sonSensorSonucPT=r;
         // Kopyalama kuralı hata kayıtlarındakiyle aynı: aynı ölçüm iki kez kopyalanamaz.
         det.innerHTML='<button onclick="window._ptSensorKopyala&&window._ptSensorKopyala()" style="width:100%;background:#7c3aed;border:none;border-radius:7px;padding:.3rem;color:#fff;font-size:.58rem;font-weight:800;cursor:pointer;margin-bottom:.35rem;min-height:28px">📋 Sonucu Kopyala</button>'
+          +'<div style="color:#94a3b8;margin-bottom:.3rem">Bu ölçüm <b>yerleşim sensörünü</b> çalıştırır '
+            +'(örtülme, kayma, kontrast, dokunma hedefi, okunabilirlik). Diğer modüller kendi '
+            +'kayıtlarını hata OLUŞTUĞU anda üretir - onlar için ölçüm düğmesi yoktur, '
+            +'sorunu yeniden deneyin ve kayıtlara bakın.</div>'
           +(r.hata?('<b style="color:#f87171">Hata: '+esc(r.hata)+'</b>')
           :('<b>Ekran:</b> '+esc(String(r.ekran))+'<br><b>İncelenen düğüm:</b> '+r.incelenenDugum
             +(r.dugumButcesiDoldu?' <span style="color:#fbbf24">(bütçe doldu)</span>':'')
