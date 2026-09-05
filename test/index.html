@@ -2188,15 +2188,34 @@ const app=firebase.initializeApp(FB);
   try{
     if(!window.firebase||!firebase.database)return;
     firebase.database().ref('appBranding/homeIcon').on('value',function(sn){
-      var url=sn.val();
-      if(!url)return;
+      // Simge tanımlı DEĞİLSE de devam edilir: manifest dosyası bulunmayan klasörlerde
+      // (ör. /test/) yerleşik varsayılanla en azından geçerli bir manifest kurulur.
+      // Aksi halde tarayıcının elinde hiç manifest olmaz ve kısayol genel harf yer
+      // tutucusuyla eklenir - kullanıcının test klasöründe gördüğü "G" harfi buydu.
+      var url=sn.val()||'icon-192.png';
       try{
         var el=document.getElementById('ptAppleIcon');
         if(el)el.setAttribute('href',url);
       }catch(e){}
-      // Manifest'i baştan üret: yalnızca simge alanı değişir, kalan alanlar dosyadakiyle
-      // aynı kalsın diye önce mevcut manifest okunur.
-      fetch('manifest.json',{cache:'no-store'}).then(function(r){return r.json();}).then(function(m){
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KULLANICI BİLDİRDİ (test klasöründe simge yerine genel "G" harfi çıktı):
+      // Manifest önce dosyadan okunuyordu. Test klasörüne yalnızca index.html ve admin.html
+      // yüklendiği için 'manifest.json' orada YOK - okuma başarısız olunca simge hiç
+      // uygulanmıyordu. Üstelik sayfadaki sabit manifest bağlantısı da 404 verdiği için
+      // telefonun elinde HİÇBİR simge kalmıyor ve genel harf yer tutucusu çıkıyordu.
+      // ÇÖZÜM: Dosya okunabiliyorsa alanları korunur; okunamıyorsa YERLEŞİK varsayılan
+      // kullanılır. Böylece manifest dosyası olmayan bir klasörde bile simge çalışır.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      var _varsayilanManifest={
+        name:'Puan Tablosu',short_name:'Puan Tablosu',
+        start_url:'.',scope:'.',display:'standalone',
+        background_color:'#0b0b14',theme_color:'#7c3aed'
+      };
+      fetch('manifest.json',{cache:'no-store'})
+        .then(function(r){return r.ok?r.json():_varsayilanManifest;})
+        .catch(function(){return _varsayilanManifest;})
+        .then(function(m){
+        if(!m||typeof m!=='object')m=_varsayilanManifest;
         m.icons=[
           {src:url,sizes:'192x192',type:'image/png',purpose:'any'},
           {src:url,sizes:'512x512',type:'image/png',purpose:'any'},
@@ -2211,8 +2230,8 @@ const app=firebase.initializeApp(FB);
         }
       }).catch(function(e){
         try{DiagSil('anaEkranSimgesi',e,{
-          anlami:'Ana ekran simgesi güncellenemedi; dosyadaki varsayılan simge geçerli kalır.',
-          oneri:'manifest.json okunamıyor olabilir - dosyanın yüklü ve erişilebilir olduğunu doğrulayın.'});}catch(_d){}
+          anlami:'Ana ekran simgesi manifest\'e yazılamadı; kısayolda genel bir yer tutucu çıkabilir.',
+          oneri:'Simge adresine erişilebildiğini doğrulayın. Manifest dosyası olmayan klasörlerde yerleşik varsayılan kullanılır, bu hata alınmamalıdır.'});}catch(_d){}
       });
     });
   }catch(e){}
@@ -2260,7 +2279,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-06-B';
+window.APP_BUILD='2026-09-06-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
