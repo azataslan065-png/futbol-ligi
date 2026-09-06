@@ -2279,7 +2279,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-06-E';
+window.APP_BUILD='2026-09-06-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22669,8 +22669,32 @@ window.PTPlayer=(function(){
           // bildiriyor. Bu, kullanıcının aralık dışına çıkması DEĞİL, konumun henüz
           // bilinmemesidir - kayıt "konumSn: 0 · asimSn: 7635" gibi anlamsız değerler
           // üretiyordu. Oynatma gerçekten akmaya başlayana kadar sınır denetimi yapılmaz.
+          // ══════════════════════════════════════════════════════════════════════════════
+          // YANLIŞ ALARM DÜZELTMESİ (rapor: "konumSn: 14371597 · asimSn: 14364446"):
+          // 14 milyon saniye = 166 gün. Video 2 saatlik. Yani konum değeri BOZUK - gömülü
+          // oynatıcı bazen anlamsız bir sayı bildiriyor (büyük ihtimalle zaman damgası ya da
+          // yarım okunmuş bir mesaj). Denetim bunu gerçek sanıp "kullanıcı aralık dışına
+          // çıktı" diye hata üretiyordu; oysa kullanıcı hiçbir şey yapmamıştı.
+          // Konum, videonun SÜRESİYLE karşılaştırılarak doğrulanır. Süreyi belirgin biçimde
+          // aşan bir değer fiziksel olarak imkânsızdır ve YOK SAYILIR - üzerine işlem de
+          // yapılmaz, kayıt da üretilmez.
+          // Süre henüz bilinmiyorsa makul bir üst sınır (24 saat) kullanılır: gerçek bir
+          // videonun bunu aşması beklenmez, bozuk değerler ise çok daha büyüktür.
+          // ══════════════════════════════════════════════════════════════════════════════
           var asim=0;
-          var _konumGuvenilir=(!duraklad&&t>0.5);
+          var _sure=(S.video&&isFinite(S.video.duration)&&S.video.duration>0)?S.video.duration:0;
+          var _ustSinir=_sure>0?(_sure+120):86400;
+          var _konumMakul=(isFinite(t)&&t>=0&&t<=_ustSinir);
+          if(!_konumMakul&&simdi-(sonDurum.bozukKonumUyari||0)>60000){
+            sonDurum.bozukKonumUyari=simdi;
+            ptpGecisKaydet('uyari','Oynatıcı anlamsız bir konum bildirdi',
+              {bildirilenSn:Math.round(t),videoSuresiSn:Math.round(_sure),ustSinirSn:Math.round(_ustSinir),
+               anlami:'Konum videonun süresinden çok büyük - değer bozuk. Aralık denetimi bu turu atladı, '
+                 +'kullanıcı etkilenmedi.',
+               oneri:'Tekrarlıyorsa gömülü oynatıcıdan gelen durum mesajı yarım okunuyor olabilir; '
+                 +'ptpGomuluMedya içindeki mesaj çözümlemesine bakın.'});
+          }
+          var _konumGuvenilir=(!duraklad&&t>0.5&&_konumMakul);
           if(_konumGuvenilir){
             if(a.bit>0&&t>a.bit+1.5)asim=t-a.bit;
             else if(a.bas>0&&t<a.bas-1.5)asim=a.bas-t;
