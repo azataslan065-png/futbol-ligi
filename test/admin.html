@@ -1607,7 +1607,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-06-W';
+window.APP_BUILD='2026-09-06-X';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6939,6 +6939,144 @@ window.ptGeriAlSun=function(aciklama,geriAlFn,sure){
     },sure||12000);
   }catch(e){}
 };
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// M3U LİSTESİ İÇE AKTARMA (kullanıcı: "yeni bir kanal eklerken adresini bulmak istiyorum")
+// NEDEN BU YOL: "Kanal adı ver, çalışan yayın linki bul" diyen bir servis yok; tarayıcı da
+// CORS kısıtı yüzünden başka siteleri okuyup adres çıkaramaz. Ama halka açık M3U listeleri
+// (iptv-org gibi) kanal adı + logo + yayın adresini bir arada veriyor. Yönetici listeyi bir
+// kez içe aktarır, aradığı kanalı listeden seçer - adres aramaya gerek kalmaz.
+// AYRIŞTIRMA: M3U biçimi #EXTINF satırında ad ve öznitelikleri, ONDAN SONRAKİ ilk boş
+// olmayan satırda adresi taşır. Yorum satırları (#) atlanır.
+// SINIR - AÇIKÇA SÖYLENMELİ: Listedeki her adres çalışmaz; bazıları ölü, bazıları bölge
+// kısıtlı olur. İçe aktarım bunu denetlemez - sonrasında "🩺 Havuzu Tara" ile ayıklanır.
+// Bu yüzden içe aktarma ekranında da o adım hatırlatılır.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+window._m3uKanallar=[];
+window.ptM3uAyristir=function(metin){
+  var satirlar=String(metin||'').split(/\r?\n/);
+  var out=[],bekleyen=null;
+  satirlar.forEach(function(sat){
+    var t=sat.trim();
+    if(!t)return;
+    if(t.indexOf('#EXTINF')===0){
+      // Ad: son virgülden sonrası. Öznitelikler tırnak içinde gelir.
+      var ad=t.substring(t.lastIndexOf(',')+1).trim();
+      var logo=(/tvg-logo="([^"]*)"/.exec(t)||[])[1]||'';
+      var grup=(/group-title="([^"]*)"/.exec(t)||[])[1]||'';
+      bekleyen={title:ad||'(adsız)',logo:logo,category:grup};
+    }else if(t.charAt(0)==='#'){
+      return;                                  // diğer yönerge satırları
+    }else if(bekleyen){
+      bekleyen.url=t;out.push(bekleyen);bekleyen=null;
+    }
+  });
+  return out;
+};
+window.ptM3uAc=function(){
+  var html=''
+    +'<div style="font-size:.66rem;color:var(--mu);line-height:1.6;margin-bottom:.7rem">'
+      +'Hazır bir kanal listesi (M3U) içe aktarın. Kanal adı, logo ve yayın adresi otomatik '
+      +'doldurulur - adres aramanıza gerek kalmaz.<br/>'
+      +'<b style="color:var(--tx)">Listedeki her adres çalışmayabilir.</b> İçe aktardıktan '
+      +'sonra <b style="color:var(--tx)">🩺 Havuzu Tara</b> ile ölü adresleri ayıklayın.'
+    +'</div>'
+    +'<span class="lbl">Liste adresi (M3U/M3U8)</span>'
+    +'<input id="m3uUrl" placeholder="https://.../liste.m3u" style="width:100%;box-sizing:border-box;margin-bottom:.4rem"/>'
+    +'<button class="btn bg" onclick="ptM3uGetir()" style="width:100%;margin-bottom:.5rem">📥 Listeyi Getir</button>'
+    +'<div style="font-size:.62rem;color:var(--mu);text-align:center;margin-bottom:.5rem">— ya da —</div>'
+    +'<span class="lbl">Liste içeriğini yapıştır</span>'
+    +'<textarea id="m3uMetin" rows="4" placeholder="#EXTM3U ile başlayan içeriği buraya yapıştırın" style="width:100%;box-sizing:border-box;font-size:.66rem;padding:.4rem .6rem;background:var(--s3);border:1px solid var(--br);border-radius:8px;color:var(--tx);font-family:Outfit,sans-serif;resize:vertical"></textarea>'
+    +'<button class="btn bg" onclick="ptM3uYapistirilaniIsle()" style="width:100%;margin:.4rem 0 .6rem">📋 Yapıştırılanı Çöz</button>'
+    +'<div id="m3uSonuc"></div>';
+  openSheet('📥 M3U Listesi İçe Aktar',html,'ptM3uAc');
+};
+window.ptM3uGetir=function(){
+  var u=qs('m3uUrl')?qs('m3uUrl').value.trim():'';
+  if(!u){toast('❌ Adres girin','er');return;}
+  var k=qs('m3uSonuc');if(k)k.innerHTML='<div style="font-size:.7rem;color:var(--mu)">⏳ Liste alınıyor…</div>';
+  fetch(u,{cache:'no-store'}).then(function(r){
+    if(!r.ok)throw new Error('Sunucu '+r.status+' döndürdü');
+    return r.text();
+  }).then(function(t){ptM3uListele(t);}).catch(function(e){
+    if(k)k.innerHTML='<div style="font-size:.68rem;color:#f87171;line-height:1.6">❌ Alınamadı: '
+      +escHtml((e&&e.message)||'bağlantı hatası')
+      +'<br/><span style="color:var(--mu)">Sunucu tarayıcıdan okunmaya izin vermiyor olabilir (CORS). '
+      +'Bu durumda listeyi bir sekmede açıp içeriğini kopyalayın ve aşağıya yapıştırın.</span></div>';
+  });
+};
+window.ptM3uYapistirilaniIsle=function(){
+  var t=qs('m3uMetin')?qs('m3uMetin').value:'';
+  if(!t.trim()){toast('❌ İçerik boş','er');return;}
+  ptM3uListele(t);
+};
+function ptM3uListele(metin){
+  var k=qs('m3uSonuc');if(!k)return;
+  var liste=ptM3uAyristir(metin);
+  window._m3uKanallar=liste;
+  if(!liste.length){
+    k.innerHTML='<div style="font-size:.68rem;color:#f87171">Geçerli kanal bulunamadı. İçerik M3U biçiminde mi?</div>';
+    return;
+  }
+  k.innerHTML='<div style="display:flex;align-items:center;gap:.5rem;margin:.6rem 0 .4rem">'
+      +'<span style="flex:1;font-size:.7rem;font-weight:800">'+liste.length+' kanal bulundu</span>'
+      +'<button onclick="ptM3uHepsiniSec(true)" style="background:var(--s3);border:1px solid var(--br);border-radius:8px;padding:.3rem .5rem;font-size:.62rem;color:var(--tx);cursor:pointer;font-family:Outfit,sans-serif">Tümünü seç</button>'
+      +'<button onclick="ptM3uHepsiniSec(false)" style="background:var(--s3);border:1px solid var(--br);border-radius:8px;padding:.3rem .5rem;font-size:.62rem;color:var(--mu);cursor:pointer;font-family:Outfit,sans-serif">Temizle</button>'
+    +'</div>'
+    +'<input id="m3uAra" placeholder="🔍 Kanal ara" oninput="ptM3uSuz()" style="width:100%;box-sizing:border-box;font-size:.7rem;margin-bottom:.5rem"/>'
+    +'<div id="m3uListe" style="max-height:46vh;overflow-y:auto"></div>'
+    +'<button class="btn bp" onclick="ptM3uHavuzaEkle()" style="width:100%;margin-top:.6rem">➕ Seçilenleri Havuza Ekle</button>';
+  ptM3uSuz();
+}
+window.ptM3uSuz=function(){
+  var kutu=qs('m3uListe');if(!kutu)return;
+  var q=(qs('m3uAra')?qs('m3uAra').value:'').trim().toLocaleLowerCase('tr');
+  var html=window._m3uKanallar.map(function(c,i){
+    if(q&&((c.title||'')+' '+(c.category||'')).toLocaleLowerCase('tr').indexOf(q)===-1)return '';
+    return '<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;background:'
+      +(i%2?'var(--s2)':'var(--s3)')+';border:1px solid var(--br);border-radius:9px;margin-bottom:.3rem;cursor:pointer">'
+      +'<input type="checkbox" class="m3uSec" data-i="'+i+'"'+(c._sec?' checked':'')+' style="flex-shrink:0;width:18px;height:18px"/>'
+      +(c.logo?'<img src="'+escHtml(c.logo)+'" style="width:24px;height:24px;border-radius:6px;object-fit:contain;background:var(--s1);flex-shrink:0"/>':'')
+      +'<div style="flex:1;min-width:0">'
+        +'<div style="font-size:.72rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(c.title)+'</div>'
+        +(c.category?'<div style="font-size:.58rem;color:var(--mu)">'+escHtml(c.category)+'</div>':'')
+      +'</div></label>';
+  }).join('');
+  kutu.innerHTML=html||'<div style="font-size:.68rem;color:var(--mu);padding:.6rem">Eşleşen kanal yok</div>';
+  // Seçim, süzgeç değişse bile korunsun diye kaydın KENDİSİNDE tutulur.
+  kutu.querySelectorAll('.m3uSec').forEach(function(cb){
+    cb.addEventListener('change',function(){
+      var it=window._m3uKanallar[Number(cb.getAttribute('data-i'))];
+      if(it)it._sec=cb.checked;
+    });
+  });
+};
+window.ptM3uHepsiniSec=function(deger){
+  var q=(qs('m3uAra')?qs('m3uAra').value:'').trim().toLocaleLowerCase('tr');
+  window._m3uKanallar.forEach(function(c){
+    if(q&&((c.title||'')+' '+(c.category||'')).toLocaleLowerCase('tr').indexOf(q)===-1)return;
+    c._sec=!!deger;   // yalnızca GÖRÜNENLER etkilenir - süzgeç varken "tümü" beklenmedik olurdu
+  });
+  ptM3uSuz();
+};
+window.ptM3uHavuzaEkle=function(){
+  var secili=window._m3uKanallar.filter(function(c){return c._sec;});
+  if(!secili.length){toast('❌ Hiç kanal seçilmedi','er');return;}
+  if(!confirm(secili.length+' kanal havuza eklenecek.\n\nHepsi CANLI YAYIN olarak işaretlenir. '
+    +'Adreslerin çalıştığı denetlenmez - sonrasında 🩺 Havuzu Tara ile ayıklayın.\n\nDevam edilsin mi?'))return;
+  var isler=secili.map(function(c){
+    var pid=uid();
+    return db.ref('channelPool/'+pid).set({
+      title:c.title||'',url:c.url||'',isLive:true,
+      category:c.category||'',logo:c.logo||'',createdAt:Date.now()
+    });
+  });
+  Promise.all(isler).then(function(){
+    logAction('📥 M3U listesinden '+secili.length+' kanal havuza eklendi');
+    toast('✅ '+secili.length+' kanal havuza eklendi');
+    closeSheet();
+    openChannelPool();
+  }).catch(function(e){toast('❌ Eklenemedi: '+((e&&e.message)||'hata'),'er');});
+};
 window.ptHavuzTopluGonder=function(){
   db.ref('channelPool').once('value').then(function(sn){
     var pool=sn.val()||{},ids=Object.keys(pool);
@@ -7645,6 +7783,7 @@ function renderChannelPoolSheet(pool){
   var ids=Object.keys(pool);
   var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Buraya eklenen kanallar hiçbir lige veya "TV/Video" listesine bağlı değildir - o liste her ne sebeple silinirse silinsin, buradakiler SİZ silmediğiniz sürece SİLİNMEZ. Buradan istediğiniz kanalı "📡 TV Tarafına Gönder" ile canlı listeye ekleyebilir/geri yükleyebilirsiniz.</div>';
   html+='<button class="btn bg" onclick="openCreateChannelPoolEntry()" style="width:100%;margin-bottom:.6rem">➕ Havuza Yeni Kanal Oluştur</button>';
+  html+='<button onclick="ptM3uAc()" style="width:100%;min-height:34px;margin-bottom:.4rem;background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.4);border-radius:9px;color:#10b981;font-size:.7rem;font-weight:800;cursor:pointer;font-family:Outfit,sans-serif">📥 M3U Listesi İçe Aktar (hazır kanallar)</button>';
   html+='<button onclick="ptHavuzTopluGonder()" style="width:100%;min-height:34px;margin-bottom:.4rem;background:var(--s3);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-size:.7rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">📤 Görünenleri TV/Video Listesine Gönder</button>';
   html+='<button id="cpSaglikBtn" onclick="ptKanalSaglikTara()" style="width:100%;min-height:34px;margin-bottom:.4rem;background:var(--s3);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-size:.7rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">🩺 Havuzu Tara</button>'
     +'<div style="font-size:.6rem;color:var(--mu);line-height:1.5;margin-bottom:.4rem">Tüm adresler sırayla denetlenir. Platform adresleri (YouTube vb.) tarayıcıdan okunamadığı için yalnızca biçim olarak doğrulanır - oynatma garantisi verilmez.</div>'
