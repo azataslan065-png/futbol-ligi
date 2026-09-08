@@ -939,6 +939,12 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
       <button class="btn bp" onclick="saveLgSettings()" style="width:100%;margin-top:.45rem;margin-bottom:.65rem">💾 Lig Ayarlarını Kaydet</button>
       <div style="border-top:1px solid var(--br);padding-top:.6rem;margin-top:.2rem;margin-bottom:.6rem">
         <button class="btn by" onclick="openAdminMenuOrderEditor()" style="width:100%;margin-bottom:.6rem">🔀 Menü Sıralamasını Düzenle</button>
+        <!-- KULLANICI TALEBİ ("admin, hata yakalama kodunu arama motorunda da aratıp açabilir,
+             kapatabilir"): Yönetim araçlarında arama kutusu HİÇ YOKTU - araç sayısı arttıkça
+             aranan şeyi bulmak listeyi baştan sona okumayı gerektiriyordu.
+             Arama hem araçları hem TEŞHİS MODÜLLERİNİ kapsar; modüle dokunmak onu açıp
+             kapatır, ayrı bir ekrana girmeye gerek kalmaz. -->
+        <input id="adminMenuAra" placeholder="🔍 Araç veya teşhis modülü ara..." oninput="renderAdminMenuButtons()" style="width:100%;box-sizing:border-box;margin-bottom:.6rem"/>
         <div id="adminMenuButtonsBox"></div>
       </div>
       <div style="border-top:1px solid var(--br);padding-top:.6rem;margin-top:.2rem">
@@ -1601,7 +1607,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-06-S';
+window.APP_BUILD='2026-09-06-V';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -2374,6 +2380,36 @@ function getAdminMenuGroups(){
 }
 function renderAdminMenuButtons(){
   var box=qs('adminMenuButtonsBox');if(!box)return;
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // ARAMA: Boşken menü her zamanki gruplu hâliyle çizilir - mevcut davranış korunur.
+  // Bir şey yazıldığında gruplama bırakılıp DÜZ bir sonuç listesi gösterilir; teşhis
+  // modülleri de bu listeye karışır ve dokununca açılıp kapanır.
+  // Türkçe harf ayrımı yapılmaz (İ/ı/ş...), aksi halde "sıralama" yazan kullanıcı
+  // "Sıralama" başlıklı aracı bulamazdı.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  var _ara=(qs('adminMenuAra')?qs('adminMenuAra').value:'').trim().toLocaleLowerCase('tr');
+  if(_ara){
+    var _tum=ADMIN_MENU_ITEMS.concat(ptDiagAramaKayitlari());
+    var _bulunan=_tum.filter(function(it){
+      return ((it.label||'')+' '+(it.id||'')).toLocaleLowerCase('tr').indexOf(_ara)!==-1;
+    });
+    if(!_bulunan.length){
+      box.innerHTML='<div style="font-size:.7rem;color:var(--mu);padding:.8rem;text-align:center">'
+        +'"'+escHtml(_ara)+'" ile eşleşen araç ya da modül yok</div>';
+      return;
+    }
+    box.innerHTML='<div style="font-size:.62rem;color:var(--mu);margin-bottom:.4rem">'
+      +_bulunan.length+' sonuç</div>'
+      +_bulunan.map(function(it){
+        // Teşhis modülleri ayrı bir işleve gider; normal araçlar kendi fonksiyonunu çağırır.
+        var tik=(it.fn.indexOf('ptDiagModulAcKapa:')===0)
+          ? ('ptDiagModulAcKapa(\''+it.fn.slice(18)+'\');renderAdminMenuButtons();')
+          : (it.fn+'()');
+        return '<button class="btn bgh" onclick="'+tik+'" style="width:100%;margin-bottom:.4rem;text-align:left">'
+          +it.icon+' '+escHtml(it.label)+'</button>';
+      }).join('');
+    return;
+  }
   var groups=getAdminMenuGroups();
   var byId={};
   ADMIN_MENU_ITEMS.forEach(function(it){byId[it.id]=it;});
@@ -12841,27 +12877,15 @@ function revokePremiumCode(codeId){
 // ilgilidir, belirli bir lig/sezonla değil. S içinde saklansaydı, "Yeni Sezona Geç" işlemi
 // (yeni bir Firebase düğümü oluşturduğu için) TÜM sürüm geçmişini sıfırlardı - bu kritik
 // hata kapsamlı tarama sırasında farkedilip düzeltildi.
-var DEFAULT_VERSIONS=[
-  {v:'v3.4.1',date:'2026',notes:['Renk paleti seçildikten kısa süre sonra eski paletine dönmesi düzeltildi - eski tema sistemi kişisel palet seçiminizi periyodik olarak eziyordu','Kart Saydamlığı artık palet veya tema değiştirdiğinizde kaybolmuyor; ek olarak Buzlu Cam (blur), Kenarlık Saydamlığı ve Parlaklık filtreleri eklendi','Admin panelinde ek yönetici hesabı oluşturulduğunda girişin başarısız olması düzeltildi - artık önce lig seçilip o ligin hesaplarıyla giriş yapılabiliyor','Admin herhangi bir kaydetme işlemi yaptığında Puan Tablosu kullanıcılarının çevrimiçi kaydının tamamen silinmesine sebep olan kritik veri kaybı hatası düzeltildi','Devre arası/uzatma süresi girilirken "İlk Yarı" butonunun çalışmaması ve kaydın kaybolması düzeltildi','Oyuncu değişikliği yapıldığında giren oyuncunun hem ilk 11 hem yedeklerde aynı anda görünmesi, çıkan oyuncunun yedeklere hiç eklenmemesi düzeltildi','Sohbet ekranından yorum yanıtlama ve düzenleme işlemlerinin çalışmaması düzeltildi','Admin yeni sezona geçtiğinde veya başka bir lige geçiş yaptığında Puan Tablosu kullanıcılarının bunu görmemesi (birden fazla senaryoda) düzeltildi','Maç başladı/bitti, kendi kalesine gol ve penaltı olayları için özel tasarım ikonlar eklendi (düdük, kırmızı top, kale+top kombinasyonları)','Sohbet sistemi eklendi: Fikstür ve Sonuçlar yorumları artık ortak bir mesaj havuzunu paylaşıyor, her mesajın kaynağı (Sohbet/Fikstür/Sonuçlar) rozetle gösteriliyor','@bahsetme sistemi: yorum yazarken "@" ile kullanıcı önerileri çıkıyor, etiketlenen isimler renkli gösteriliyor','Maç hatırlatıcısı: Fikstür\'deki maçlara zil ikonuyla hatırlatma kurulabiliyor, maç başlamadan önce bildirim gösteriliyor','Maç Detayı ekranına takımları vurgulayan "Puan Durumu" sekmesi eklendi','Admin panelinden alt menü sekme sırası değiştirilebiliyor','Takım kadrosu ekranına gerçek saha görünümü ve diziliş seçici eklendi, admin\'in seçtiği diziliş Puan Tablosunda gösteriliyor','Diziliş sayısı 14\'ten en yaygın 6 tanesine (4-4-2, 4-3-3, 4-2-3-1, 3-5-2, 3-4-3, 5-3-2) düşürüldü','Puan Tablosu sayı renkleri artık her sütun için (lig sıralama numarası dahil) ayrı ayrı ayarlanabiliyor','Sıralama satır boşluğu -10px ile +30px arasında ayarlanabiliyor','Açıklama (lejant) işareti için 8 farklı stil seçeneği eklendi (daire, kare, çizgi, elmas, üçgen, yıldız, altıgen, halka)','8 yeni takım kart tasarımı eklendi (toplam 16 seçenek)','Arama motoruna Takım/Oyuncu/Lig filtreleri eklendi, eşleşen harfler renk paletiyle vurgulanıyor','Fikstür ve Sonuçlar sekmelerine tarih şeridi ve Puan Durumu özet kartı eklendi','Giriş ekranı için admin panelinden ayrı bir tema/görsel yüklenebiliyor (ana arkaplan ayarından bağımsız)','Arkaplan teması ve yorum fotoğraflarında HEIC/HEIF (iPhone formatı) seçildiğinde sessizce başarısız olma sorunu düzeltildi, artık net hata mesajı veriliyor','Bazı admin ayarlarının (açıklama işareti stili, kart saydamlığı, giriş teması, sekme sırası) sayfa yenilendiğinde sıfırlanması düzeltildi','Sezonun 11i artık sezon biter bitmez oluşturuluyor, yeterli katkı verisi olmayan pozisyonlar her takımdan dengeli şekilde rastgele tamamlanıyor','Admin panelinden toplu fikstür silme, toplu takım silme ve toplu skor sıfırlama eklendi','Puan cezası uygulandığında takım puanı artık eksiye düşebiliyor','Bazı hatalar düzeltildi']},
-  {v:'v3.4.0',date:'2026',notes:['Haftanın 11i saha çizgileri Fikstür sekmesindeki gerçek saha oranlarına göre yeniden çizildi, kale sahası eklendi','Haftanın 11i artık her zaman aynı veriden aynı sonucu üretiyor - önceden sayfa periyodik senkronize olduğunda (yaklaşık 15 saniyede bir) rastgele değişebiliyordu','Maç Akış Özeti ve Sezon Özeti kartları artık önce ekranda gösteriliyor, isterseniz indirebilir veya paylaşabilirsiniz','Maç Akış Özeti önizlemesi açıkken kısa süre sonra kendiliğinden kapanması düzeltildi','Gol Kralı, Asist Kralı ve En Az Gol Yiyen Kaleci artık ayrı butonlar - tıklayınca tam liste açılıyor, en iyi sonuca ulaşan oyuncu listede daha büyük gösteriliyor','En Çok Gol Atan Takım ve En Çok Kart Gören Takım kategorileri Sezon Özetine eklendi','Oyuncu profiline haftalık gol/asist performans grafiği eklendi','Admin panelinde gizli "Yedek Oyuncu Havuzu" eklendi - buraya eklenen oyuncular Puan Tablosunda görünmez, kadroya çıkarılana kadar','Çevrimiçi/çevrimdışı durumu artık kullanıcı listesiyle profil detayında her zaman aynı şekilde gösteriliyor (önceden tutarsız olabiliyordu)','Bazı Türkçe isimlerde (örn İ harfiyle başlayanlarda) tekrar giriş yapıldığında yeni kayıt oluşması düzeltildi','Puan cezası uygulanırken artık sebep yazılması istenmiyor','14 farklı saha dizilişi (Diamond, Noel Ağacı, WM, Piramit ve diğerleri) eklendi, hepsi hatasız çalışıyor','Bazı hatalar düzeltildi']},
-  {v:'v3.3.0',date:'2026',notes:['Maç düzenleme formundaki Hakem, Yardımcı Hakem, Spiker, Yorumcu ve Stadyum alanlarının görünmemesine sebep olan eski/çakışan kod kaldırıldı - bu alanlar artık doğru şekilde açılıyor','Fikstür oluşturma ve BAY sistemini engelleyen eski/çakışan kod kaldırıldı - BAY artık doğru çalışıyor','Çevrimiçi/çevrimdışı durum takibi daha güvenilir bir yönteme göre yeniden yazıldı, kısa bağlantı kesintilerinde artık hatalı şekilde çevrimdışı görünmüyor','Kullanıcı detayı artık açıkken canlı güncelleniyor (online/offline durumu, profil bilgileri anlık yansıyor)','Bazı hatalar düzeltildi']},
-  {v:'v3.2.0',date:'2026',notes:['Fikstür oluşturulurken hakem, yardımcı hakem, spiker ve yorumcu artık admin\'in oluşturduğu havuzdan otomatik atanıyor','Takım sayısı tek olduğunda BAY sistemi devreye giriyor, ilgili haftada "BAY Haftasında" etiketiyle gösteriliyor','Kayıtlı kullanıcıların çevrimiçi/çevrimdışı durumu artık daha güvenilir şekilde anlık takip ediliyor','Kullanıcı detayında artık o kullanıcının tüm yorum, fotoğraf ve video paylaşımları görüntülenebiliyor','Maç detayındaki kadro sahası yeniden tasarlandı: admin Lig sekmesinden Dik veya Yatay görünüm seçebiliyor, önizleme ile','Bazı hatalar düzeltildi']},
-  {v:'v3.1.0',date:'2026',notes:['Sosyal medya video linkleri (Instagram/Facebook/X) artık sadece oynat kutusu olarak gösteriliyor, açıklama yazısı yok','Yorumlara birden fazla fotoğraf (en fazla 6) ve video (en fazla 3) ekleme desteği','Admin → Yönetim sekmesinde kayıtlı kullanıcılar listesine tıklayınca detaylı profil görüntüleme eklendi (avatar, favori takım, palet, işlem geçmişi)','Takım Kart Görünümü için admin panelinde canlı önizleme eklendi','Fikstür oluşturma artık her takım çiftinin ev sahipliğini kesin olarak değiştiriyor (önceden bazı çiftlerde değişmiyordu)','Puan cezası uygulanırken sebep yazılması artık zorunlu','Aynı takımın tekrarlanan cezaları artık tek satırda toplu gösteriliyor','Ceza ikonu (⛔️) artık diğer açıklama ikonlarıyla aynı boyutta','Aktif Cezalar listesine kısmi puan indirme özelliği eklendi (cezanın tamamını silmek zorunda kalmadan)','Admin panelindeki tüm görsel yükleme alanları 10MB sınırına kadar destekliyor','Hareketli tema hız aralığı 0.1x - 5x olarak genişletildi','Bazı hatalar düzeltildi']},
-  {v:'v3.0.0',date:'2026',notes:['Profil ayarları (tema, palet, fotoğraf, favori takım) artık sezon/lig değişse de korunuyor','Sezonlara hızlı erişim için üst menüye "📅 Sezon" butonu eklendi','Admin için Hakem Havuzu sistemi: orta hakem ve yardımcı hakemleri ekleyip maç düzenlerken listeden seçebiliyorsunuz','Hareketli arkaplan temalarına 6 yeni seçenek eklendi: Döndürme, Süzülme, Nabız, Dalga, Renk Geçişi, Sallanma','Hareketli temalar için hız ayarı eklendi (0.3x - 3x arası)','Yeni Sezona Geç ve Yeni Lig Oluştur işlemlerine onay diyaloğu eklendi (Onaylıyorum/Onaylamıyorum)','Bazı hatalar düzeltildi']},
-  {v:'v2.9.0',date:'2026',notes:['Puan tablosunda hafta seçildiğinde, o haftaya kadar oynanmış tüm maçların kümülatif puan durumu gösteriliyor','Sonuçlar sekmesine "Hafta" filtresi eklendi, seçilen haftanın sonuçları gösteriliyor','Maç detayındaki "Karne" sekmesi "Maç Akışı" olarak yeniden adlandırıldı','Maç düzenleme formuna Yardımcı Hakem 1-2, Spiker ve Yorumcu alanları eklendi, admin artık bu bilgileri serbestçe girebiliyor','Maç detay ekranında yardımcı hakem bilgileri de gösteriliyor','Bazı hatalar düzeltildi']},
-  {v:'v2.8.0',date:'2026',notes:['Sıralama satır boşluğu aralığı 0-30px aralığına genişletildi, admin panelinde canlı kart önizlemesi eklendi','Hareketli (animasyonlu) arkaplan temaları eklendi: Nefes Alma, Kayma, Parıltı — admin istediği temaya uygulayıp önizleyebiliyor','Bazı hatalar düzeltildi']},
-  {v:'v2.7.0',date:'2026',notes:['Canlı Tablo Modu artık hafta filtresi aktifken de doğru çalışıyor','Hafta seçici özel tasarlanmış kart görünümüne çevrildi (renkli durum noktaları ile)','Admin panelinden tek tıkla skor sıfırlama: seçilen maç oynanmamış durumuna döner, Fikstüre geri taşınır','Yeni Sezona Geç artık tüm lig ayarlarını (logo, tema, arkaplan, kart stili, sayı renkleri, sıralama boşluğu, puan sistemi) da taşıyor','Geçmiş sezonlar artık silinmiyor, "finished" olarak işaretleniyor','Puan Tablosuna yeni "📜 Geçmiş Sezonlar" ekranı eklendi, bitmiş sezonların tam puan tablosu görüntülenebiliyor']},
-  {v:'v2.6.0',date:'2026',notes:['Sıralama satır boşluğu admin tarafından piksel hassasiyetinde ayarlanabiliyor','Puan tablosuna "Genel / Ev Sahibi / Deplasman" filtre butonları eklendi','Puan tablosuna "Hafta" seçici eklendi, sadece seçilen haftanın maçlarına göre sıralama gösteriliyor','Haftalar artık oynanmış / kısmen oynanmış / oynanmamış olarak otomatik işaretleniyor']},
-  {v:'v2.5.6',date:'2026',notes:['Noktalı Doku temasının hiç görünmemesi sorunu düzeltildi (geçersiz CSS sözdizimi kaynaklıydı)','Açık/Koyu mod arkaplan filtre sorunu giderildi','6 yeni hazır tema eklendi: Gece Lacivert, Kor Işıltısı, Petek Doku (koyu), Taze Nane, Yumuşak Şeftali, Petek Açık (açık tema)','Takım kart görünümüne 4 yeni seçenek: Cam Efekti, Degrade Zemin, Yuvarlak Hap, Madalyon']},
-  {v:'v2.5.5',date:'2026',notes:['Arkaplan filtreleri (bulanıklık, doygunluk, parlaklık, opaklık) artık anlık ve güvenilir şekilde kaydediliyor','Mobil dokunmatik kaydırıcılarda kayıt kaçırma sorunu düzeltildi']},
-  {v:'v2.5.4',date:'2026',notes:['Arkaplan teması artık tüm menülerde tam ekran ve tutarlı görünüyor (önceden içerik bitince kesiliyordu)','Kupa ağacı ve grup görünümleri de arkaplan temasını alıyor','Admin için canlı arkaplan önizlemesi (telefon mockup görünümü)','3 yeni filtre: Bulanıklık, Doygunluk, Parlaklık — sadece arkaplanı etkiler, yazı/kartları bulanıklaştırmaz']},
-  {v:'v2.5.3',date:'2026',notes:['Yorum düzenleme (kendi yorumun veya Geliştirici herkesinkini)','Video ekleme: galeriden video (max 45sn, 7MB — Firebase veritabanı sınırına göre mümkün olan en yüksek değer)','Video linki: YouTube (Shorts dahil), Instagram, Facebook, X — gerçek gömülü oynatıcı','Facebook video gömme özelliğinin ilk yüklemede çalışmama sorunu düzeltildi','"Anlatım" sekmesi adı "Yorumlar" olarak değiştirildi']},
-  {v:'v2.5.2',date:'2026',notes:['Takım kart görünümü admin tarafından özelleştirilebilir (4 stil)','3 yeni premium renk paleti (Platin, Şampanya, Zümrüt)','Yorumlara yanıt verme','Yorumlara fotoğraf ekleme','Yorum/fotoğraf için emoji tepkileri','Yorum sabitleme (Geliştirici yetkisi)','Geliştirici girişi ve rozeti','Puan tablosu sayı renkleri admin kontrolü','Açık/Koyu tema için ayrı arkaplan temaları','Çoklu cihaz: açık maç detayı artık anlık güncelleniyor','Fotoğraf yükleme limiti 8MB sınırına çıkarıldı, hata mesajları netleştirildi']},
-  {v:'v2.5.1',date:'2026',notes:['Kalıcı kullanıcı profil sistemi (isme bağlı tema/favori/avatar)','Profil fotoğrafı yükleme','8 renk paleti + açık/koyu mod ayrı seçim','Yeni Sezona Geç (takım/kadro kopyalama)','Kalıcı Takımlar havuzu (lig bağımsız)','Sezon dili güncellemesi','Maç detayında saha dizilimli Kadro sekmesi','Takım detayında Oyuncular sekmesi','Form sekmesinde son maç vurgusu','İstatistiklerde Ev/Deplasman ve Takım Detayı']},
-  {v:'v2.0.0',date:'2025',notes:['Mor/Premium yeni arayüz','Giriş ekranı (isim zorunlu)','Penaltı sistemi (Firebase güvenli)','Canlı kart tüm olaylar','H2H karşılaştırma','Kadro sayfası + fotoğraf','Arama (takım/oyuncu)','Paylaş butonu','Uzatma & penaltı akışı','Lig Analizi sekmesi','Takım karşılaştırma','Maç tahmini','Kazanma serisi istatistiği']},
-  {v:'v1.5.0',date:'2025',notes:['Otomatik fikstür (Round Robin)','Toplu skor girişi','Sezon arşivi','Hakem/TV/Stadyum bilgisi','Tema seçici (6 tema)','Lig logosu yükleme','Oyuncu fotoğrafı kadro']},
-  {v:'v1.0.0',date:'2025',notes:['İlk sürüm','Firebase gerçek zamanlı','Takım/maç/kadro yönetimi','Canlı maç paneli','Penaltı paneli','Puan tablosu','Form & istatistik']}
-];
+// KULLANICI TALEBİ ("artık admin yenilikleri kendisi düzenliyor, o eski notları tamamen
+// kaldır"): Burada kod içine gömülü, elle yazılmış uzun bir sürüm notu listesi vardı.
+// Sürüm notları artık YALNIZCA yönetici panelinden düzenlenir ve Firebase'deki
+// 'appVersionHistory' yolunda saklanır. Kodda ikinci bir kaynak tutmak iki soruna yol
+// açıyordu: yönetici listeyi boşalttığında eski notlar geri geliyordu ve kod ile ekranda
+// görünen içerik birbirinden ayrışıyordu.
+// Liste BOŞ bırakıldı - silinmedi, çünkü getVersions() bunu yedek olarak okuyor. Yönetici
+// hiç not girmemişse artık boş bir liste görünür, eskimiş notlar değil.
+var DEFAULT_VERSIONS=[];
 var _globalVersionHistory=null; // Firebase'den yüklenene kadar null - bu sırada DEFAULT_VERSIONS gösterilir.
 // HATA DÜZELTMESİ (kullanıcı bildirdi: "Yenilikler tamamen silinince tekrar yükleniyor"):
 // Firebase Realtime Database, BOŞ bir diziyi ([]) sildiğinizde bunu geri okurken "null" olarak
@@ -22195,6 +22219,48 @@ function openDiagnosticsManager(){
   if(_diagUnseenErrorCount>0){_diagUnseenErrorCount=0;renderAdminMenuButtons();}
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// TEŞHİS MODÜLLERİNİ ARAMAYA AÇMA (kullanıcı: "admin, hata yakalama kodunu arama motorunda da
+// aratıp açabilir, kapatabilir")
+// Şimdiye kadar arama yalnızca "Hata Yakalama Kodları" ekranının KENDİSİNİ buluyordu; hangi
+// modülün açık olduğunu görmek ya da tek bir modülü açıp kapatmak için ekranı açıp listede
+// aramak gerekiyordu. Modül sayısı arttıkça bu zahmetli hale geldi.
+// Artık her modül arama kaydına AYRI bir giriş olarak eklenir: aranınca doğrudan bulunur,
+// dokununca AÇIP KAPATIR ve durumunu bildirir - ekranı açmaya gerek kalmaz.
+// Kayıtlar çalışma anında üretilir; yeni bir modül eklendiğinde arama listesine kendiliğinden
+// girer, elle güncelleme gerekmez (bu dosyada iki listenin ayrı yaşamasından kaynaklanan
+// sorunları daha önce yaşadık).
+function ptDiagAramaKayitlari(){
+  try{
+    var flags=(window.DiagCore&&DiagCore.flags())||{};
+    var out=[];
+    diagAllModules().forEach(function(grp){
+      (grp.mods||[]).forEach(function(m){
+        out.push({
+          id:'diagmod_'+m.id,
+          icon:(flags[m.id]===true?'🟢':'⚪'),
+          label:'Teşhis: '+m.label+(flags[m.id]===true?' (açık)':' (kapalı)'),
+          fn:'ptDiagModulAcKapa:'+m.id
+        });
+      });
+    });
+    return out;
+  }catch(e){return [];}
+}
+window.ptDiagModulAcKapa=function(modId){
+  // Açma/kapama bilgisi Firebase'de 'diagnostics/flags/{modulId}' altında tutulur; ekrandaki
+  // liste de aynı yolu dinlediği için değişiklik her iki yerde anında görünür.
+  try{
+    var flags=(window.DiagCore&&DiagCore.flags())||{};
+    var acik=flags[modId]===true;
+    var ad=modId;
+    diagAllModules().forEach(function(g){(g.mods||[]).forEach(function(m){if(m.id===modId)ad=m.label;});});
+    db.ref('diagnostics/flags/'+modId).set(!acik).then(function(){
+      toast((acik?'⚪ Kapatıldı: ':'🟢 Açıldı: ')+ad);
+      logAction((acik?'⚪ Teşhis modülü kapatıldı: ':'🟢 Teşhis modülü açıldı: ')+ad);
+    }).catch(function(e){toast('❌ Değiştirilemedi: '+((e&&e.message)||'hata'),'er');});
+  }catch(e){toast('❌ Değiştirilemedi','er');}
+};
 function diagAllModules(){
   var admMods=(window.DiagCore&&DiagCore.modules)||[];
   return [{app:'pt',appLabel:'📱 Puan Tablosu',mods:DIAG_PT_MODULES},
