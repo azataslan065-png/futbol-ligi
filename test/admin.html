@@ -1607,7 +1607,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-07-A';
+window.APP_BUILD='2026-09-07-B';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -7106,8 +7106,24 @@ window.ptM3uSuz=function(){
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:.72rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(c.title)+'</div>'
         +(c.category?'<div style="font-size:.58rem;color:var(--mu)">'+escHtml(c.category)+'</div>':'')
-      +'</div></label>';
+      +'</div>'
+      // KULLANICI TALEBİ ("izleme için canlı önizleme paneli"): Listelerdeki adreslerin bir
+      // kısmı ölü ya da bölge kısıtlı. Havuza ekleyip sonra taramak yerine, eklemeden ÖNCE
+      // burada izlenebilir - yalnızca çalışanlar seçilir, havuz baştan temiz kalır.
+      // Düğme etiketin İÇİNDE ama tıklama yayılımı durdurulur; yoksa önizlemeye basmak
+      // kanalı seçili/seçimsiz yapardı.
+      +'<button onclick="event.preventDefault();event.stopPropagation();ptM3uOnizle('+i+')" '
+        +'title="Önizle" style="flex-shrink:0;background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.4);'
+        +'color:#10b981;border-radius:8px;padding:.3rem .5rem;font-size:.7rem;cursor:pointer;'
+        +'min-height:32px;min-width:36px;font-family:Outfit,sans-serif">▶</button>'
+      +'</label>'
+      // Önizleme SATIR İÇİNDE, bu kutunun içinde açılır - ayrı bir ekran açılsaydı içe
+      // aktarma paneli kapanır ve yapılan seçimler kaybolurdu.
+      +'<div id="m3uOnizle_'+i+'" style="display:none;margin:-.15rem 0 .45rem"></div>';
   }).join('');
+  // Liste yeniden çizildiğinde önceki önizleme kutusu DOM'dan gitti; kaydı sıfırlanmazsa
+  // artık var olmayan bir kutuyu kapatmaya çalışırdık.
+  window._m3uAcikOnizle=null;
   kutu.innerHTML=html||'<div style="font-size:.68rem;color:var(--mu);padding:.6rem">Eşleşen kanal yok</div>';
   // Seçim, süzgeç değişse bile korunsun diye kaydın KENDİSİNDE tutulur.
   kutu.querySelectorAll('.m3uSec').forEach(function(cb){
@@ -7116,6 +7132,37 @@ window.ptM3uSuz=function(){
       if(it)it._sec=cb.checked;
     });
   });
+};
+// Listedeki bir kanalı eklemeden önce izler. Mevcut önizleme ekranı yeniden kullanılır -
+// ikinci bir oynatıcı yazmak, iki yerde ayrışacak iki kod demekti.
+window.ptM3uOnizle=function(i){
+  var c=(window._m3uKanallar||[])[i];
+  if(!c){toast('Kanal bulunamadı','er');return;}
+  if(!c.url){toast('❌ Bu kaydın adresi yok','er');return;}
+  ptKanalOnizle(c.url,c.title||'',''); 
+};
+// Aynı anda YALNIZCA bir önizleme açık kalır: birden çok canlı yayını aynı anda çalıştırmak
+// hem bant genişliğini hem telefonu zorlar, sesleri de üst üste biner.
+window._m3uAcikOnizle=null;
+window.ptM3uOnizle=function(i){
+  var c=window._m3uKanallar[i];if(!c)return;
+  var kutu=qs('m3uOnizle_'+i);if(!kutu)return;
+  // Başka bir önizleme açıksa kapat - içeriği boşaltmak videoyu da durdurur.
+  if(window._m3uAcikOnizle!==null&&window._m3uAcikOnizle!==i){
+    var eski=qs('m3uOnizle_'+window._m3uAcikOnizle);
+    if(eski){eski.innerHTML='';eski.style.display='none';}
+  }
+  // Zaten açıksa kapat (aynı düğme aç/kapat olarak çalışır).
+  if(kutu.style.display!=='none'&&kutu.innerHTML){
+    kutu.innerHTML='';kutu.style.display='none';window._m3uAcikOnizle=null;return;
+  }
+  window._m3uAcikOnizle=i;
+  kutu.style.display='';
+  kutu.innerHTML='<video src="'+escHtml(c.url||'')+'" controls autoplay playsinline '
+    +'style="width:100%;aspect-ratio:16/9;border-radius:10px;background:#000"></video>'
+    +'<div style="font-size:.58rem;color:var(--mu);line-height:1.5;margin-top:.25rem">'
+    +'Oynamıyorsa yayın ölü, bölge kısıtlı ya da tarayıcının doğrudan desteklemediği bir '
+    +'biçimde olabilir - kanalın kesin bozuk olduğu anlamına gelmez.</div>';
 };
 window.ptM3uHepsiniSec=function(deger){
   var q=(qs('m3uAra')?qs('m3uAra').value:'').trim().toLocaleLowerCase('tr');
