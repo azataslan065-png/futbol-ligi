@@ -1079,6 +1079,9 @@ iframe.ptp-video{pointer-events:none}
 /* TEŞHİS RAPORU DÜZELTMESİ ("Yazı okunamayacak kadar küçüldü · span#ptpLive · 8.8px
    (eşik 9px) · '🔴 CANLI'"): .55rem = 8.8px, okunabilirlik eşiğinin hemen altındaydı.
    Canlı rozeti oynatıcının EN ÖNEMLİ durum göstergesi - .62rem'e (9.9px) çıkarıldı. */
+/* Kanal logosu - üst barda, CANLI rozetiyle kanal adı arasında. Yüksekliği rozetle aynı
+   hizada tutulur ki satır dengeli görünsün; geniş logolar orana göre kısalır. */
+.ptp-kanal-logo{height:20px;max-width:64px;object-fit:contain;flex-shrink:0;border-radius:4px}
 .ptp-live{background:#dc2626;color:#fff;font-size:.62rem;font-weight:900;padding:.14rem .4rem;border-radius:5px;flex-shrink:0}
 .ptp-live.ptp-behind{background:#64748b}
 .ptp-btn{background:rgba(0,0,0,.42);border:none;border-radius:9px;min-width:34px;height:34px;color:#fff;font-size:.9rem;
@@ -2347,7 +2350,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-07-B';
+window.APP_BUILD='2026-09-07-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -25699,7 +25702,7 @@ window.PTPlayer=(function(){
         S.aralikIdx=0;S._aralikBitti=false;S._basUygulandi=false;S._hazirlikYapildi=false;
         ptpYedekTemizle();   // yeni videoya geçiliyor - eski videonun yedeği geçersiz
       }catch(e){}
-      if(switchSourceInPlace(yeniUrl,hedef.title||'',!!hedef.isLive,hedef.id)){
+      if(switchSourceInPlace(yeniUrl,hedef.title||'',!!hedef.isLive,hedef.id,null,hedef.logo||'')){
         try{ptpAralikBekcisiBaslat();}catch(e){}
         return;
       }
@@ -26789,8 +26792,19 @@ window.PTPlayer=(function(){
         +'<div class="ptp-lockbar"><button class="ptp-btn" id="ptpLockBtn" title="Ekran kilidi">🔓</button></div>'
         +'<div class="ptp-ov" id="ptpOv">'
           +'<div class="ptp-top">'
-            +'<span class="ptp-live" id="ptpLive" style="'+(canli?'':'display:none;')+'">🔴 CANLI</span>'
-            +'<div class="ptp-title">'+(opt.title||'').replace(/</g,'&lt;')+'</div>'
+            // KULLANICI TALEBİ ("sol üstteki CANLI rozeti ve kanal ismi ayrı ayrı açılıp
+            // kapatılabilsin, ayrıca kanal logosu ekle"):
+            // Üç öğe de YÖNETİCİ ayarına bağlı. Varsayılan: rozet ve ad AÇIK, logo AÇIK.
+            // Ayarlar 'D' üzerinden okunur, yani ligden bağımsız değil - yönetici paneli
+            // neyi seçerse tüm kullanıcılarda o geçerli olur.
+            // Logo, kanal kaydındaki 'logo' alanından gelir; tanımsızsa hiç çizilmez -
+            // boş bir kare göstermek görüntüyü kirletirdi.
+            +((window.D&&D.oynaticiCanliRozeti===false)?''
+              :'<span class="ptp-live" id="ptpLive" style="'+(canli?'':'display:none;')+'">🔴 CANLI</span>')
+            +((window.D&&D.oynaticiKanalLogosu===false)||!opt.logo?''
+              :'<img class="ptp-kanal-logo" id="ptpKanalLogo" src="'+String(opt.logo).replace(/"/g,'&quot;')+'" alt=""/>')
+            +((window.D&&D.oynaticiKanalAdi===false)?''
+              :'<div class="ptp-title">'+(opt.title||'').replace(/</g,'&lt;')+'</div>')
             // HATA DÜZELTMESİ (kullanıcı bildirdi: "ekran modu düğmesini göremedim" - KÖK
             // SEBEP BULUNDU): Bu düğme önceden aşağıdaki .ptp-row'daydı - o satırda ⏮️ ⏹️ ⏭️
             // 🔊 [ses kaydırıcısı] [CANLIYA DÖN] [1x hız] [⬜] [⛶] SIĞMIYOR (CSS: flex-wrap:
@@ -27789,7 +27803,7 @@ window.PTPlayer=(function(){
     if(prevBtn)prevBtn.disabled=!S.isLive&&i<=0;
     if(nextBtn)nextBtn.disabled=!S.isLive&&(i<0||i>=list.length-1);
   }
-  function switchSourceInPlace(newUrl,newTitle,newIsLive,newVideoId,newAraliklar){
+  function switchSourceInPlace(newUrl,newTitle,newIsLive,newVideoId,newAraliklar,newLogo){
     if(!S)return false;
     // KÖK SEBEP DÜZELTMESİ (kullanıcı: "kumanda üzerinden videolar arası değişim olmuyor"):
     // Yeni videonun KENDİ sahne aralıkları var. Eskiden bu alan hiç tazelenmiyordu; yerinde
@@ -27811,6 +27825,15 @@ window.PTPlayer=(function(){
     S.recoverCount=0;S.proxyIdx=null;
     var titleEl=S.root&&S.root.querySelector('.ptp-title');
     if(titleEl)titleEl.textContent=newTitle||'';
+    // Kanal logosu da tazelenir - yerinde geçişte üst bar yeniden çizilmediği için elle
+    // güncellenmeli. Yeni kanalın logosu yoksa öğe gizlenir; eskisi ekranda kalmamalı.
+    try{
+      var _lg=el('ptpKanalLogo');
+      if(_lg){
+        if(newLogo){_lg.src=newLogo;_lg.style.display='';}
+        else _lg.style.display='none';
+      }
+    }catch(e){}
     var liveEl=el('ptpLive');
     if(liveEl)liveEl.style.display=S.isLive?'':'none';
     var goLiveBtn=el('ptpGoLive');
@@ -27990,7 +28013,7 @@ window.openVideoWatch=function(videoId,secenek){
   var _yerindeIstendi=!!(secenek&&secenek.yerinde);
   if(_yerindeIstendi&&window.PTPlayer&&PTPlayer.isActive()&&document.getElementById('ptPlayerHost')&&_turAyni&&typeof PTPlayer.switchSourceInPlace==='function'){
     var _yeniAr=ptAraliklariCoz(v.araliklar,v.basSure,v.bitSure);
-    if(PTPlayer.switchSourceInPlace(urlOnceden,v.title||'',!!v.isLive,videoId,_yeniAr)){
+    if(PTPlayer.switchSourceInPlace(urlOnceden,v.title||'',!!v.isLive,videoId,_yeniAr,v.logo||'')){
       if(window.PTSheetNav)PTSheetNav.mark('videoWatch_'+videoId);
       return;
     }
@@ -28100,7 +28123,7 @@ window.openVideoWatch=function(videoId,secenek){
   // kanal geçişi, iki kanalın teknik olarak farklı motorlarla açılmasına rağmen KESİNTİSİZ
   // görünür - ekran modu, tam ekran ve kumanda aynen devam eder.
   if(ozelOynatici&&window.PTPlayer){
-    PTPlayer.mount('ptPlayerHost',{url:url,title:v.title||'',isLive:!!v.isLive,videoId:videoId,
+    PTPlayer.mount('ptPlayerHost',{url:url,title:v.title||'',logo:v.logo||'',isLive:!!v.isLive,videoId:videoId,
       // Yöneticinin tanımladığı ek ses dilleri (bkz. PTPlayer içindeki ptpDilListesi notu).
       sesDilleri:v.sesDilleri||'',dilAnaAd:v.dilAnaAd||'',
       // Yöneticinin belirlediği izleme aralığı (bkz. PTPlayer içindeki aralık notu).

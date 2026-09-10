@@ -1607,7 +1607,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-07-B';
+window.APP_BUILD='2026-09-07-C';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -7351,6 +7351,27 @@ window.testVideoLink=function(i,otomatik){
 // Kenar büyütme oranı: oynatıcı, platformun başlık/paylaş/logo şeritlerini görüş alanının
 // dışına itmek için gömülü pencereyi büyütür; bu değer o büyütmenin oranıdır. Büyütme
 // videonun BULUNMADIĞI boş yönde yapıldığı için görüntüden bir şey kaybedilmez.
+// KULLANICI TALEBİ ("sol üstteki CANLI rozeti ve kanal ismi ayrı ayrı açılıp kapatılabilsin,
+// ayrıca kanal logosu ekle"): Üç öğe de bağımsız denetlenir - kimi yönetici sade bir görüntü
+// isteyip hepsini kapatabilir, kimi yalnızca logoyu bırakabilir.
+window.setOynaticiUstBar=function(alan,acik){
+  var gecerli={oynaticiCanliRozeti:'🔴 CANLI rozeti',oynaticiKanalAdi:'Kanal adı',oynaticiKanalLogosu:'Kanal logosu'};
+  if(!gecerli[alan])return;
+  S[alan]=!!acik;
+  save().then(function(){
+    ustBarButonlariTazele();
+    toast((acik?'👁️ Gösteriliyor: ':'🚫 Gizlendi: ')+gecerli[alan]);
+  });
+};
+function ustBarButonlariTazele(){
+  [['oynaticiCanliRozeti','ubCanli'],['oynaticiKanalAdi','ubAd'],['oynaticiKanalLogosu','ubLogo']]
+  .forEach(function(p){
+    var acik=(S[p[0]]!==false);
+    var on=qs(p[1]+'On'),off=qs(p[1]+'Off');
+    if(on){on.style.background=acik?'var(--ac)':'var(--s2)';on.style.color=acik?'#fff':'var(--tx)';}
+    if(off){off.style.background=!acik?'var(--rd,#dc2626)':'var(--s2)';off.style.color=!acik?'#fff':'var(--tx)';}
+  });
+}
 window.setKenarBuyutme=function(v){
   var n=Number(v);
   if(!isFinite(n))n=1.6;
@@ -7372,6 +7393,7 @@ window.setKesintisizGecis=function(v){
   save().then(function(){
     kgButonlariTazele();
   try{kbEtiketTazele();}catch(e){}
+  try{ustBarButonlariTazele();}catch(e){}
     toast(v?'🎬 Kesintisiz geçiş açık':'⛔ Kesintisiz geçiş kapalı');
   });
 };
@@ -18876,6 +18898,12 @@ function listenToLeague(leagueId){
       // Kenar büyütme OKUMA tarafına da eklenmeli - yalnızca yazma tarafına eklenen bir alan
       // ilk senkronda sessizce silinir (bkz. corsProxy notu).
       S.kenarBuyutme=(d.kenarBuyutme===undefined||d.kenarBuyutme===null)?1.6:Number(d.kenarBuyutme);
+      // Oynatıcı üst bar öğeleri - üçü de varsayılan AÇIK. Yalnızca açıkça false yazıldığında
+      // gizlenir; tanımsız değer "kapalı" sayılsaydı ayar hiç kaydedilmemiş liglerde üst bar
+      // boş görünürdü (bkz. corsProxy tuzağı notu - okuma tarafına eklemek şart).
+      S.oynaticiCanliRozeti=(d.oynaticiCanliRozeti!==false);
+      S.oynaticiKanalAdi=(d.oynaticiKanalAdi!==false);
+      S.oynaticiKanalLogosu=(d.oynaticiKanalLogosu!==false);
       S.season=d.season||'1. Sezon';
       S.teams=d.teams||{};
       S.matches=d.matches||{};
@@ -22447,6 +22475,23 @@ function openDiagnosticsManager(){
       +'<div style="display:flex;justify-content:space-between;font-size:.58rem;color:var(--mu);margin-top:-.15rem">'
         +'<span>kapalı</span><span>%200</span><span>%400</span>'
       +'</div>'
+      +'<div style="height:1px;background:var(--br);margin:.7rem 0"></div>'
+      +'<div style="font-size:.7rem;font-weight:800;margin-bottom:.25rem">🏷️ Oynatıcı Üst Barı</div>'
+      +'<div style="font-size:.62rem;color:var(--mu);line-height:1.6;margin-bottom:.5rem">'
+        +'Oynatıcının sol üstünde görünen öğeler. Her biri bağımsız açılıp kapatılır - sade bir '
+        +'görüntü için hepsini kapatabilir ya da yalnızca logoyu bırakabilirsiniz.'
+        +'<br/>Logo, kanalın kendi kaydındaki görselden gelir; logosu olmayan kanalda hiç çizilmez.'
+      +'</div>'
+      +['oynaticiCanliRozeti|ubCanli|🔴 CANLI rozeti',
+        'oynaticiKanalAdi|ubAd|Kanal adı',
+        'oynaticiKanalLogosu|ubLogo|Kanal logosu'].map(function(sat){
+        var p=sat.split('|');
+        return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">'
+          +'<span style="flex:1;font-size:.7rem;font-weight:700">'+p[2]+'</span>'
+          +'<button id="'+p[1]+'On" onclick="setOynaticiUstBar(\''+p[0]+'\',true)" style="min-height:32px;padding:.3rem .7rem;border-radius:9px;border:1.5px solid var(--br);background:var(--s2);color:var(--tx);font-size:.66rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">Göster</button>'
+          +'<button id="'+p[1]+'Off" onclick="setOynaticiUstBar(\''+p[0]+'\',false)" style="min-height:32px;padding:.3rem .7rem;border-radius:9px;border:1.5px solid var(--br);background:var(--s2);color:var(--tx);font-size:.66rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">Gizle</button>'
+        +'</div>';
+      }).join('')
     +'</div>'
     +'<div id="diagModuleList"></div>'
     +'<div style="height:1px;background:var(--br);margin:1rem 0"></div>'
