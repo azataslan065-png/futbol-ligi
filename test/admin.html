@@ -1620,7 +1620,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-07-D';
+window.APP_BUILD='2026-09-07-E';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -7378,18 +7378,48 @@ window.setOynaticiUstBar=function(alan,acik){
 };
 // Ayar satırları çalışma anında çizilir - üç öğe de aynı kalıptan üretilir, birini
 // eklemek/çıkarmak tek satırlık iş olsun diye.
+// KULLANICI TALEBİ ("hangisinin önce olacağı şekilde sıralamayı da seçebilir"):
+// Satırlar artık KAYITLI SIRAYA göre çizilir ve her satırda ▲▼ düğmeleri var. Böylece
+// yönetici hem neyin görüneceğine hem hangi sırada duracağına aynı yerden karar verir.
+var UST_BAR_OGE={
+  canli:{anahtar:'oynaticiCanliRozeti',btn:'ubCanli',ad:'🔴 CANLI rozeti'},
+  logo:{anahtar:'oynaticiKanalLogosu',btn:'ubLogo',ad:'Kanal logosu'},
+  ad:{anahtar:'oynaticiKanalAdi',btn:'ubAd',ad:'Kanal adı'}
+};
+function ustBarSirasi(){
+  var v=(Array.isArray(S.oynaticiUstBarSira)&&S.oynaticiUstBarSira.length)
+    ? S.oynaticiUstBarSira.slice() : ['canli','logo','ad'];
+  // Eksik kalan öğe sona eklenir - yeni bir öğe tanımlandığında sıralama kendiliğinden
+  // tamamlanır, yönetici baştan kurmak zorunda kalmaz.
+  ['canli','logo','ad'].forEach(function(k){if(v.indexOf(k)===-1)v.push(k);});
+  return v.filter(function(k){return !!UST_BAR_OGE[k];});
+}
+window.ustBarSiraTasi=function(k,yon){
+  var v=ustBarSirasi(),i=v.indexOf(k);
+  if(i===-1)return;
+  var j=i+yon;
+  if(j<0||j>=v.length)return;
+  var t=v[i];v[i]=v[j];v[j]=t;
+  S.oynaticiUstBarSira=v;
+  save().then(function(){ustBarAyarlariCiz();toast('↕️ Sıra güncellendi');});
+};
 function ustBarAyarlariCiz(){
   var kutu=qs('ustBarAyarlari');if(!kutu)return;
-  kutu.innerHTML=['oynaticiCanliRozeti|ubCanli|🔴 CANLI rozeti',
-    'oynaticiKanalAdi|ubAd|Kanal adı',
-    'oynaticiKanalLogosu|ubLogo|Kanal logosu'].map(function(sat){
-    var p=sat.split('|');
-    return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">'
-      +'<span style="flex:1;font-size:.72rem;font-weight:700">'+p[2]+'</span>'
-      +'<button id="'+p[1]+'On" onclick="setOynaticiUstBar(\''+p[0]+'\',true)" style="min-height:32px;padding:.3rem .7rem;border-radius:9px;border:1.5px solid var(--br);background:var(--s2);color:var(--tx);font-size:.66rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">Göster</button>'
-      +'<button id="'+p[1]+'Off" onclick="setOynaticiUstBar(\''+p[0]+'\',false)" style="min-height:32px;padding:.3rem .7rem;border-radius:9px;border:1.5px solid var(--br);background:var(--s2);color:var(--tx);font-size:.66rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">Gizle</button>'
+  var sira=ustBarSirasi();
+  kutu.innerHTML=sira.map(function(k,idx){
+    var o=UST_BAR_OGE[k];
+    return '<div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem">'
+      +'<span style="flex-shrink:0;font-size:.62rem;color:var(--mu);min-width:1.1rem">'+(idx+1)+'.</span>'
+      +'<button onclick="ustBarSiraTasi(\''+k+'\',-1)"'+(idx===0?' disabled':'')
+        +' style="flex-shrink:0;min-height:32px;min-width:30px;border-radius:8px;border:1px solid var(--br);background:var(--s2);color:var(--tx);cursor:pointer;opacity:'+(idx===0?'.35':'1')+'">▲</button>'
+      +'<button onclick="ustBarSiraTasi(\''+k+'\',1)"'+(idx===sira.length-1?' disabled':'')
+        +' style="flex-shrink:0;min-height:32px;min-width:30px;border-radius:8px;border:1px solid var(--br);background:var(--s2);color:var(--tx);cursor:pointer;opacity:'+(idx===sira.length-1?'.35':'1')+'">▼</button>'
+      +'<span style="flex:1;min-width:0;font-size:.72rem;font-weight:700">'+o.ad+'</span>'
+      +'<button id="'+o.btn+'On" onclick="setOynaticiUstBar(\''+o.anahtar+'\',true)" style="flex-shrink:0;min-height:32px;padding:.3rem .6rem;border-radius:9px;border:1.5px solid var(--br);background:var(--s2);color:var(--tx);font-size:.64rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">Göster</button>'
+      +'<button id="'+o.btn+'Off" onclick="setOynaticiUstBar(\''+o.anahtar+'\',false)" style="flex-shrink:0;min-height:32px;padding:.3rem .6rem;border-radius:9px;border:1.5px solid var(--br);background:var(--s2);color:var(--tx);font-size:.64rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif">Gizle</button>'
     +'</div>';
-  }).join('');
+  }).join('')
+  +'<div style="font-size:.6rem;color:var(--mu);margin-top:.3rem">▲▼ ile sırayı değiştirin - üstteki öğe oynatıcıda solda görünür.</div>';
   ustBarButonlariTazele();
 }
 function ustBarButonlariTazele(){
@@ -18934,6 +18964,9 @@ function listenToLeague(leagueId){
       S.oynaticiCanliRozeti=(d.oynaticiCanliRozeti!==false);
       S.oynaticiKanalAdi=(d.oynaticiKanalAdi!==false);
       S.oynaticiKanalLogosu=(d.oynaticiKanalLogosu!==false);
+      // Sıra: kayıtlı değilse varsayılan CANLI → logo → ad (eski düzen korunur).
+      S.oynaticiUstBarSira=(Array.isArray(d.oynaticiUstBarSira)&&d.oynaticiUstBarSira.length)
+        ? d.oynaticiUstBarSira.slice() : ['canli','logo','ad'];
       S.season=d.season||'1. Sezon';
       S.teams=d.teams||{};
       S.matches=d.matches||{};
