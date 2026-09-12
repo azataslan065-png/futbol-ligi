@@ -10200,10 +10200,10 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
     // 1. ADIM: Bu maç kümesinde forma giymiş (90 dk oynamış sayılan, yani ilk 11'de yer alan)
     // TÜM oyuncuların havuzunu çıkar - bu, "katkısı olmayan ama format tamamlamak için
     // kullanılabilecek" oyuncuları da içerir.
-    const allFielded={}; // key: name|teamId -> {name,teamId,position,photo,number,goals,assists,yellow,red}
+    const allFielded={}; // key: name|teamId -> {name,teamId,position,photo,number,goals,assists,yellow,red,ratings}
     function getOrCreate(name,tid,position,photo,number){
       const k=name+'|'+tid;
-      if(!allFielded[k])allFielded[k]={name,teamId:tid,position,photo,number,goals:0,assists:0,yellow:0,red:0};
+      if(!allFielded[k])allFielded[k]={name,teamId:tid,position,photo,number,goals:0,assists:0,yellow:0,red:0,ratings:[]};
       return allFielded[k];
     }
     matchesForB11.forEach(m=>{
@@ -10241,24 +10241,43 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
       });
     });
 
-    // 3. ADIM: En az gol yiyen kaleciyi bul.
+    // 2b. ADIM: KULLANICI TALEBİ: Haftanın/Sezonun 11i artık admin'in maç sonrası girdiği
+    // oyuncu puanına (1.1-10.0) göre belirlenir - eskiden kullanılan sabit gol=3/asist=2/
+    // sarı=-1/kırmızı=-3 puanlaması SEÇİM için artık kullanılmıyor (gol/asist/kart sayıları
+    // hâlâ üstte toplanıyor, ama sadece Kadro/istatistik gösterimleri için). Bir oyuncunun bu
+    // maç kümesinde birden fazla puanlanmış maçı varsa (sezon modu) ORTALAMASI alınır.
+    matchesForB11.forEach(m=>{
+      [['home',m.homeId],['away',m.awayId]].forEach(([side,tid])=>{
+        const team=D.teams[tid];if(!team)return;
+        const ratingsForSide=(m.ratings&&m.ratings[side])||{};
+        Object.keys(ratingsForSide).forEach(name=>{
+          const n=Number(ratingsForSide[name]);
+          if(isNaN(n))return;
+          const k=name+'|'+tid;
+          if(allFielded[k])allFielded[k].ratings.push(n);
+        });
+      });
+    });
+
+    // 3. ADIM: Kaleci seçimi de artık puana göre yapılıyor (aşağıdaki 4. adıma dahil) - burada
+    // sadece SAHA ÜZERİNDEKİ 🧤 rozetinin göstereceği yenilen gol sayısı (gösterim amaçlı,
+    // seçimi etkilemez) takım bazında toplanır.
     const gkByTeamB11={};
     matchesForB11.forEach(m=>{
       [['home',m.homeId,m.awayGoals],['away',m.awayId,m.homeGoals]].forEach(([,tid,conceded])=>{
         const team=D.teams[tid];if(!team)return;
-        const sq=team.squad||{};
-        const gk=(sq.starting||[]).find(p=>p&&p.position==='KL');
-        if(!gk)return;
-        if(!gkByTeamB11[tid])gkByTeamB11[tid]={name:gk.name,teamId:tid,conceded:0,photo:gk.photo,number:gk.number};
+        if(!gkByTeamB11[tid])gkByTeamB11[tid]={conceded:0};
         gkByTeamB11[tid].conceded+=(conceded||0);
       });
     });
-    const bestGkB11=Object.values(gkByTeamB11).sort((a,b)=>a.conceded-b.conceded)[0];
 
-    // 4. ADIM: Tüm havuzu skora göre sırala. Katkısı olanlar (score>0) öne çıkar,
-    // katkısı olmayanlar (score===0) listenin sonunda kalır - ama 11'i tamamlamak
-    // gerektiğinde onlar da kullanılabilir (kullanıcı talebi: 4-4-3 formatı tamamlanmalı).
-    const allScored=Object.values(allFielded).map(p=>({...p,score:(p.goals*3)+(p.assists*2)-(p.yellow*1)-(p.red*3)})).sort((a,b)=>b.score-a.score);
+    // 4. ADIM: Tüm havuzu ORTALAMA PUANA göre sırala. Puanı girilmiş olanlar (score>0) öne
+    // çıkar, puanı olmayanlar listenin sonunda kalır - ama 11'i tamamlamak gerektiğinde onlar
+    // da kullanılabilir (kullanıcı talebi: format her zaman tamamlanmalı).
+    const allScored=Object.values(allFielded).map(p=>{
+      const avgRating=p.ratings.length?(p.ratings.reduce((s,v)=>s+v,0)/p.ratings.length):null;
+      return {...p,avgRating,score:avgRating!=null?avgRating:-1};
+    }).sort((a,b)=>b.score-a.score);
 
     // 4-3-3 formatı: 1 KL, 4 DEF, 3 MID, 3 FWD (toplam 11 - "4-4-3" kaleciyle 12 olurdu, futbolda
     // geçerli bir dizilim değildir; istenen anlam kaleciyle birlikte 11 kişilik 4-3-3 dizilimidir).
@@ -10312,7 +10331,11 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
       return picked.slice(0,count);
     }
     const pickedB11=[],usedB11=[];
-    if(bestGkB11){pickedB11.push({...bestGkB11,position:'KL'});usedB11.push(bestGkB11.name);}
+    pickGroupB11(['KL'],1,usedB11).forEach(p=>{
+      const gkInfo=gkByTeamB11[p.teamId];
+      pickedB11.push({...p,conceded:gkInfo?gkInfo.conceded:0});
+      usedB11.push(p.name);
+    });
     pickGroupB11(DEF_B11,4,usedB11).forEach(p=>{pickedB11.push(p);usedB11.push(p.name);});
     pickGroupB11(MID_B11,3,usedB11).forEach(p=>{pickedB11.push(p);usedB11.push(p.name);});
     pickGroupB11(FWD_B11,3,usedB11).forEach(p=>{pickedB11.push(p);usedB11.push(p.name);});
@@ -11902,6 +11925,17 @@ function confirmDownloadMatchCard(){
 function renderMdKadro(id,m,h,a){
   const orientation=D.pitchOrientation||'vertical';
   const PC={'KL':'#f59e0b','STP1':'#60a5fa','STP2':'#60a5fa','SĞB':'#60a5fa','SLB':'#60a5fa','GÖ':'#34d399','DOS':'#34d399','OOS':'#34d399','SĞK':'#a78bfa','SLK':'#a78bfa','SF':'#f87171','GF':'#f87171'};
+  // KULLANICI TALEBİ: Maç bittikten sonra admin'in girdiği oyuncu puanı (1.1-10.0), Mackolik
+  // tarzı bir rozet olarak Kadro sekmesindeki saha görünümünde oyuncunun altında gösterilir.
+  // Maçtaki EN YÜKSEK puanı alan oyuncu(lar) ★ ile işaretlenir.
+  const _mRatings=m.ratings||{};
+  const matchBestRating=(()=>{
+    let best=null;
+    ['home','away'].forEach(side=>{
+      Object.values(_mRatings[side]||{}).forEach(v=>{const n=Number(v);if(!isNaN(n)&&(best===null||n>best))best=n;});
+    });
+    return best;
+  })();
   const FORMATIONS_KADRO={
     '4-4-2':[1,4,4,2],
     '4-3-3':[1,4,3,3],
@@ -12038,9 +12072,16 @@ function renderMdKadro(id,m,h,a){
         const subBadge=p._subbedIn?'<span class="pitch-badge" style="background:#7c3aed">🔄</span>':'';
         // Sakatlık/ceza rozeti - admin'in kadro ekranında işaretlediği durum PT'de görünür.
         const statusBadge=p.status==='injured'?'<span class="pitch-badge" style="background:#f97316">🤕</span>':p.status==='suspended'?'<span class="pitch-badge" style="background:#dc2626">⛔</span>':'';
+        // Admin'in girdiği maç puanı (1.1-10.0) - renk skalası Mackolik'teki gibi: <7 amber,
+        // 7-7.9 yeşil, 8+ mavi. Maçın en yüksek puanlısı ★ ile öne çıkar.
+        const ratingVal=(_mRatings[teamSideKey]&&_mRatings[teamSideKey][p.name]!=null)?Number(_mRatings[teamSideKey][p.name]):null;
+        const ratingColor=ratingVal==null?'':ratingVal>=8?'#60a5fa':ratingVal>=7?'#34d399':'#eab308';
+        const isBestRating=ratingVal!=null&&matchBestRating!=null&&Math.abs(ratingVal-matchBestRating)<0.001;
+        const ratingHtml=ratingVal!=null?`<div style="margin-top:2px;background:${ratingColor};color:#0a0a12;font-size:.44rem;font-weight:900;border-radius:6px;padding:.03rem .3rem;white-space:nowrap">${isBestRating?'★ ':''}${ratingVal.toFixed(1)}</div>`:'';
         pitchHtml+=`<div class="pitch-player" style="${posStyle}" onclick="event.stopPropagation();showPlayerDetail('${t.id}','${clickSection}',${clickIdx})">
           <div class="pitch-dot" style="border-color:${p.status?'#f97316':c};width:28px;height:28px;position:relative">${photoHtml}${badges||subBadge||statusBadge?`<div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);display:flex;gap:1px;white-space:nowrap">${badges}${subBadge}${statusBadge}</div>`:''}</div>
           <div class="pitch-name" style="font-size:.46rem">${p.name.split(' ').pop()}</div>
+          ${ratingHtml}
         </div>`;
       });
     });
