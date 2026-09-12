@@ -2383,7 +2383,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-08-M';
+window.APP_BUILD='2026-09-08-N';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -25967,10 +25967,37 @@ window.PTPlayer=(function(){
     var box=el('ptpChBox');if(box)box.remove();
     var bd=el('ptpChBackdrop');if(bd)bd.remove();
     if(S){clearTimeout(S.chAutoT);S.chOpen=false;}
+    // Liste kanal seçilmeden kapandıysa saklanan tam ekran bilgisi geçersizdir. Kalırsa,
+    // kullanıcının çok sonra açtığı bir video yanlışlıkla tam ekran başlardı.
+    // NOT: Kanal seçildiğinde openVideoWatch bu bilgiyi ZATEN okuyup temizlemiş oluyor -
+    // yani buradaki temizlik yalnızca "seçim yapılmadan kapandı" durumunu yakalar.
+    window._ptListeAcilisTamEkran=false;
   }
   function openChannelListOverlay(){
     if(!S)return;
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // KÖK SEBEP BULUNDU (teşhis: damgaYasiMs=17216):
+    // Kullanıcı tam ekranda kanal listesini açıyor, listede 17 saniye geziniyor, sonra bir
+    // kanala dokunuyor. O ANDA tam ekran çoktan kapanmış oluyor - liste açılırken çıkılıyor.
+    // Bu yüzden geçiş anında bakan bütün kontrollerim boş dönüyordu; dört turdur yanlış anı
+    // ölçüyordum. Doğru an, listenin AÇILDIĞI andır.
+    // Tam ekran durumu burada saklanır; kanal seçildiğinde openVideoWatch bunu okur ve yeni
+    // oynatıcıyı tam ekran açar. Liste kanal seçilmeden kapanırsa bayrak temizlenir, aksi
+    // halde sonraki açılış yanlışlıkla tam ekran olurdu.
+    // ══════════════════════════════════════════════════════════════════════════════════
+    try{
+      window._ptListeAcilisTamEkran=!!(window._ptTamEkranAcik
+        ||document.querySelector('.ptp.ptp-fs')
+        ||document.querySelector('.ptf-fs')
+        ||document.body.classList.contains('ptp-fs-active')
+        ||document.fullscreenElement||document.webkitFullscreenElement);
+    }catch(e){window._ptListeAcilisTamEkran=false;}
+    // DİKKAT - SIRA ÖNEMLİ: closeChannelList() bu bayrağı temizliyor (seçim yapılmadan
+    // kapanma durumu için). Bu yüzden yakalanan değer önce yerel bir değişkene alınır ve
+    // temizlikten SONRA geri yazılır. Aksi halde kendi kaydımı kendi elimle siliyordum.
+    var _yakalanan=window._ptListeAcilisTamEkran;
     closePanel();closeChannelList();
+    window._ptListeAcilisTamEkran=_yakalanan;
     S.chOpen=true;S.chBuf='';S.chTab=S.chTab||'kumanda';
     // KÖK SEBEP DÜZELTMESİ: position:fixed KULLANILIYOR (absolute DEĞİL) - bu, kutunun
     // boyutunu oynatıcının kendi (küçük olabilen) alanından TAMAMEN bağımsız, VIEWPORT'a
@@ -28227,14 +28254,19 @@ window.openVideoWatch=function(videoId,secenek){
     // süre geçtiği için damga geçersizdir ve tam ekran başlamaz.
     // Örnekleyici yarım saniyede bir çalıştığı için damga en fazla o kadar eski olabilir;
     // geçiş sırasındaki yıkım da eklenince 3 saniyelik pencere güvenli bir sınır.
+    // Kanal listesi açıldığı andaki tam ekran durumu ASIL ölçüttür (bkz. openChannelListOverlay
+     // içindeki kök sebep notu). Okunduktan sonra temizlenir - tek seferlik bir bilgidir.
+    var _listedenTam=!!window._ptListeAcilisTamEkran;
+    window._ptListeAcilisTamEkran=false;
     var _yeniKapandi=(Date.now()-(window._ptSonTamEkranZamani||0))<3000;
-    var _oncekiTam=!!(window._ptTamEkranAcik||_yeniKapandi||_tamKok||_tamFrame||_tamGovde||_tamNative);
+    var _oncekiTam=!!(_listedenTam||window._ptTamEkranAcik||_yeniKapandi||_tamKok||_tamFrame||_tamGovde||_tamNative);
     // Hangi işaretin dolu olduğu kayda geçer - bir dahaki raporda tespitin neden
     // başarısız olduğu (hepsi false ise) ya da hangi yolun kullanıldığı görülür.
     try{
       if(!_oncekiTam)DiagSil('tamEkranAlgilanmadi',new Error('Geçiş anında tam ekran işareti yok'),{
         kok:_tamKok,frame:_tamFrame,govde:_tamGovde,nativeFs:_tamNative,
         bayrak:!!window._ptTamEkranAcik,
+        listedenTam:_listedenTam,
         damgaYasiMs:(window._ptSonTamEkranZamani?(Date.now()-window._ptSonTamEkranZamani):null),
         videoKutusuSinif:(document.getElementById('videoPlayerBox')||{}).className||'(kutu yok)',
         anlami:'Kullanıcı tam ekranda olduğunu söylüyor ama hiçbir tam ekran işareti bulunamadı.',
