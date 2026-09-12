@@ -2355,7 +2355,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-08-C';
+window.APP_BUILD='2026-09-08-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -10249,16 +10249,32 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
     // 3. ADIM: En az gol yiyen kaleciyi bul.
     const gkByTeamB11={};
     matchesForB11.forEach(m=>{
-      [['home',m.homeId,m.awayGoals],['away',m.awayId,m.homeGoals]].forEach(([,tid,conceded])=>{
+      [['home',m.homeId,m.awayGoals],['away',m.awayId,m.homeGoals]].forEach(([taraf,tid,conceded])=>{
         const team=D.teams[tid];if(!team)return;
         const sq=team.squad||{};
         const gk=(sq.starting||[]).find(p=>p&&p.position==='KL');
         if(!gk)return;
-        if(!gkByTeamB11[tid])gkByTeamB11[tid]={name:gk.name,teamId:tid,conceded:0,photo:gk.photo,number:gk.number};
+        if(!gkByTeamB11[tid])gkByTeamB11[tid]={name:gk.name,teamId:tid,conceded:0,photo:gk.photo,number:gk.number,position:'KL',_puanlar:[]};
         gkByTeamB11[tid].conceded+=(conceded||0);
+        // KULLANICI TALEBİ ("haftanın kadrosuna kaleciye de ekle"): Kaleci ayrı havuzdan
+        // seçildiği için puan alanı hiç hesaplanmıyordu. Oynadığı maçların puanları burada
+        // toplanır, ortalaması aşağıda alınır.
+        var _gp=ptOyuncuPuani(m,gk.name,taraf,'KL');
+        if(_gp!=null)gkByTeamB11[tid]._puanlar.push(_gp);
       });
     });
-    const bestGkB11=Object.values(gkByTeamB11).sort((a,b)=>a.conceded-b.conceded)[0];
+    Object.values(gkByTeamB11).forEach(function(g){
+      var a=g._puanlar||[];
+      g.puan=a.length?Math.round((a.reduce(function(x,y){return x+y;},0)/a.length)*10)/10:null;
+    });
+    // Sıralama artık PUANA göre: en az gol yiyen değil, en iyi performans gösteren seçilir.
+    // Puan yoksa (maçlar oynanmamış) eski ölçüte - yenilen gol sayısına - düşülür.
+    const bestGkB11=Object.values(gkByTeamB11).sort(function(a,b){
+      if(a.puan!=null&&b.puan!=null)return b.puan-a.puan;
+      if(a.puan!=null)return -1;
+      if(b.puan!=null)return 1;
+      return a.conceded-b.conceded;
+    })[0];
 
     // 4. ADIM: Tüm havuzu skora göre sırala. Katkısı olanlar (score>0) öne çıkar,
     // katkısı olmayanlar (score===0) listenin sonunda kalır - ama 11'i tamamlamak
@@ -10381,8 +10397,11 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
         // KULLANICI TALEBİ ("oyuncu puanları haftanın kadrosu bölümünde de görülecek"):
         // Performans puanı katkı satırının başına eklenir - gol/asist bilgisi de korunur,
         // çünkü puanın NEDEN yüksek olduğunu gösteren şey o.
-        const _puanRozet=(p.puan!=null)?(ptPuanRozeti(p.puan)+' '):'';
-        const contrib=_puanRozet+(p.position==='KL'?`🧤${p.conceded??0}`:`${renderStatEventIconHtml('goal')}${p.goals||0} ${renderStatEventIconHtml('assist')}${p.assists||0}`);
+        // KULLANICI TALEBİ ("sadece bu puanlar görünsün, gol ve asisti kaldır; kaleciye de
+        // ekle"): Katkı satırı yalnızca performans puanını gösterir. Gol/asist ve kalecinin
+        // yediği gol bilgisi kaldırıldı - puan zaten onları içeriyor ve satır sadeleşti.
+        // Kaleci de aynı rozeti alır; önceden yalnızca 🧤 sayısı görünüyordu.
+        const contrib=(p.puan!=null)?ptPuanRozeti(p.puan):'';
         pitchHtml+=`<div class="pitch-player" style="left:${xPos}%;top:${yPos}%">
           <div class="pitch-dot" style="width:38px;height:38px">${photoHtml}</div>
           <div class="pitch-name" style="font-size:.52rem;font-weight:800">${(p.name||'?').split(' ').pop()}</div>
@@ -11986,9 +12005,11 @@ function ptOyuncuPuani(m,oyuncuAdi,takimTarafi,mevki){
 function ptPuanRozeti(puan){
   if(puan==null)return '';
   var renk=(puan>=8)?'#3b82f6':(puan>=7)?'#22c55e':(puan>=6)?'#f59e0b':'#ef4444';
-  return '<span style="display:inline-block;background:'+renk+';color:#fff;font-size:.6rem;'
-    +'font-weight:900;padding:.1rem .3rem;border-radius:5px;min-width:1.9rem;text-align:center">'
-    +puan.toFixed(1)+'</span>';
+  // KULLANICI BİLDİRDİ ("biraz küçült ve oyuncu ismine daha yakın tut, tutarsız görünüyor"):
+  // Rozet isimden kopuk ve iri duruyordu; saha kartlarının ölçeğine göre küçültüldü.
+  return '<span style="display:inline-block;background:'+renk+';color:#fff;font-size:.5rem;'
+    +'font-weight:900;padding:0 .22rem;border-radius:4px;min-width:1.5rem;text-align:center;'
+    +'line-height:1.35">'+puan.toFixed(1)+'</span>';
 }
 function renderMdKadro(id,m,h,a){
   const orientation=D.pitchOrientation||'vertical';
@@ -12136,7 +12157,8 @@ function renderMdKadro(id,m,h,a){
             // Performans puanı - sahadaki oyuncu kartının altında. Maç bitmemişse
             // ptOyuncuPuani null döner ve hiçbir şey çizilmez.
             var _pn=ptOyuncuPuani(m,p.name,teamSideKey,p.position);
-            return _pn==null?'':('<div style="margin-top:1px">'+ptPuanRozeti(_pn)+'</div>');
+            // Negatif üst boşluk: isim satırının hemen altına otursun, arada boşluk kalmasın.
+            return _pn==null?'':('<div style="margin-top:-1px;line-height:1">'+ptPuanRozeti(_pn)+'</div>');
           })()}
         </div>`;
       });
