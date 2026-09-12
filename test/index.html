@@ -2355,7 +2355,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-08-A';
+window.APP_BUILD='2026-09-08-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -10200,18 +10200,23 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
     // 1. ADIM: Bu maç kümesinde forma giymiş (90 dk oynamış sayılan, yani ilk 11'de yer alan)
     // TÜM oyuncuların havuzunu çıkar - bu, "katkısı olmayan ama format tamamlamak için
     // kullanılabilecek" oyuncuları da içerir.
-    const allFielded={}; // key: name|teamId -> {name,teamId,position,photo,number,goals,assists,yellow,red,ratings}
+    const allFielded={}; // key: name|teamId -> {name,teamId,position,photo,number,goals,assists,yellow,red}
     function getOrCreate(name,tid,position,photo,number){
       const k=name+'|'+tid;
-      if(!allFielded[k])allFielded[k]={name,teamId:tid,position,photo,number,goals:0,assists:0,yellow:0,red:0,ratings:[]};
+      if(!allFielded[k])allFielded[k]={name,teamId:tid,position,photo,number,goals:0,assists:0,yellow:0,red:0,_maclar:[]};
       return allFielded[k];
     }
     matchesForB11.forEach(m=>{
-      [['home',m.homeId],['away',m.awayId]].forEach(([,tid])=>{
+      [['home',m.homeId],['away',m.awayId]].forEach(([taraf,tid])=>{
         const team=D.teams[tid];if(!team)return;
         const sq=team.squad||{};
         (sq.starting||[]).forEach(p=>{
-          if(p&&p.name)getOrCreate(p.name,tid,p.position,p.photo,p.number);
+          if(!p||!p.name)return;
+          const kayit=getOrCreate(p.name,tid,p.position,p.photo,p.number);
+          // Oyuncunun bu dönemde oynadığı maçlar biriktirilir - performans puanı
+          // ortalaması bunlardan hesaplanır (bkz. 4. ADIM).
+          kayit._maclar=kayit._maclar||[];
+          kayit._maclar.push({mac:m,taraf:taraf});
         });
       });
     });
@@ -10241,42 +10246,41 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
       });
     });
 
-    // 2b. ADIM: KULLANICI TALEBİ: Haftanın/Sezonun 11i artık admin'in maç sonrası girdiği
-    // oyuncu puanına (1.1-10.0) göre belirlenir - eskiden kullanılan sabit gol=3/asist=2/
-    // sarı=-1/kırmızı=-3 puanlaması SEÇİM için artık kullanılmıyor (gol/asist/kart sayıları
-    // hâlâ üstte toplanıyor, ama sadece Kadro/istatistik gösterimleri için). Bir oyuncunun bu
-    // maç kümesinde birden fazla puanlanmış maçı varsa (sezon modu) ORTALAMASI alınır.
-    matchesForB11.forEach(m=>{
-      [['home',m.homeId],['away',m.awayId]].forEach(([side,tid])=>{
-        const team=D.teams[tid];if(!team)return;
-        const ratingsForSide=(m.ratings&&m.ratings[side])||{};
-        Object.keys(ratingsForSide).forEach(name=>{
-          const n=Number(ratingsForSide[name]);
-          if(isNaN(n))return;
-          const k=name+'|'+tid;
-          if(allFielded[k])allFielded[k].ratings.push(n);
-        });
-      });
-    });
-
-    // 3. ADIM: Kaleci seçimi de artık puana göre yapılıyor (aşağıdaki 4. adıma dahil) - burada
-    // sadece SAHA ÜZERİNDEKİ 🧤 rozetinin göstereceği yenilen gol sayısı (gösterim amaçlı,
-    // seçimi etkilemez) takım bazında toplanır.
+    // 3. ADIM: En az gol yiyen kaleciyi bul.
     const gkByTeamB11={};
     matchesForB11.forEach(m=>{
       [['home',m.homeId,m.awayGoals],['away',m.awayId,m.homeGoals]].forEach(([,tid,conceded])=>{
         const team=D.teams[tid];if(!team)return;
-        if(!gkByTeamB11[tid])gkByTeamB11[tid]={conceded:0};
+        const sq=team.squad||{};
+        const gk=(sq.starting||[]).find(p=>p&&p.position==='KL');
+        if(!gk)return;
+        if(!gkByTeamB11[tid])gkByTeamB11[tid]={name:gk.name,teamId:tid,conceded:0,photo:gk.photo,number:gk.number};
         gkByTeamB11[tid].conceded+=(conceded||0);
       });
     });
+    const bestGkB11=Object.values(gkByTeamB11).sort((a,b)=>a.conceded-b.conceded)[0];
 
-    // 4. ADIM: Tüm havuzu ORTALAMA PUANA göre sırala. Puanı girilmiş olanlar (score>0) öne
-    // çıkar, puanı olmayanlar listenin sonunda kalır - ama 11'i tamamlamak gerektiğinde onlar
-    // da kullanılabilir (kullanıcı talebi: format her zaman tamamlanmalı).
+    // 4. ADIM: Tüm havuzu skora göre sırala. Katkısı olanlar (score>0) öne çıkar,
+    // katkısı olmayanlar (score===0) listenin sonunda kalır - ama 11'i tamamlamak
+    // gerektiğinde onlar da kullanılabilir (kullanıcı talebi: 4-4-3 formatı tamamlanmalı).
+    // KULLANICI TALEBİ ("haftanın ve sezonun kadrosu oyuncu puanlarına göre belirlensin,
+    // puanlar haftanın kadrosu bölümünde de görülsün"):
+    // Sıralama artık maç kartlarındakiyle AYNI performans puanını kullanıyor (ptOyuncuPuani).
+    // Önceden buradaki formül ayrıydı (gol*3 + asist*2 ...) ve kadroda görünen puanla
+    // tutarsızdı - aynı oyuncu iki yerde farklı değerlendirilmiş gibi görünüyordu.
+    // Oyuncunun puanı, o dönemde OYNADIĞI maçlardaki puanlarının ortalamasıdır: tek maçta
+    // parlayan biri, her hafta istikrarlı oynayanın önüne geçmesin diye.
     const allScored=Object.values(allFielded).map(p=>{
-      const avgRating=p.ratings.length?(p.ratings.reduce((s,v)=>s+v,0)/p.ratings.length):null;
-      return {...p,avgRating,score:avgRating!=null?avgRating:-1};
+      var toplam=0,adet=0;
+      (p._maclar||[]).forEach(function(mm){
+        var pn=ptOyuncuPuani(mm.mac,p.name,mm.taraf,p.position);
+        if(pn!=null){toplam+=pn;adet++;}
+      });
+      var ort=adet?Math.round((toplam/adet)*10)/10:null;
+      // Puan hesaplanamadıysa (maç bitmemiş ya da olay yok) eski katkı formülüne düşülür;
+      // böylece 11 her koşulda tamamlanır.
+      return {...p, puan:ort,
+        score:(ort!=null?ort:((p.goals*3)+(p.assists*2)-(p.yellow*1)-(p.red*3))/5)};
     }).sort((a,b)=>b.score-a.score);
 
     // 4-3-3 formatı: 1 KL, 4 DEF, 3 MID, 3 FWD (toplam 11 - "4-4-3" kaleciyle 12 olurdu, futbolda
@@ -10331,11 +10335,7 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
       return picked.slice(0,count);
     }
     const pickedB11=[],usedB11=[];
-    pickGroupB11(['KL'],1,usedB11).forEach(p=>{
-      const gkInfo=gkByTeamB11[p.teamId];
-      pickedB11.push({...p,conceded:gkInfo?gkInfo.conceded:0});
-      usedB11.push(p.name);
-    });
+    if(bestGkB11){pickedB11.push({...bestGkB11,position:'KL'});usedB11.push(bestGkB11.name);}
     pickGroupB11(DEF_B11,4,usedB11).forEach(p=>{pickedB11.push(p);usedB11.push(p.name);});
     pickGroupB11(MID_B11,3,usedB11).forEach(p=>{pickedB11.push(p);usedB11.push(p.name);});
     pickGroupB11(FWD_B11,3,usedB11).forEach(p=>{pickedB11.push(p);usedB11.push(p.name);});
@@ -10378,7 +10378,11 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
         const xPos=line.length>1?16+((i)/(line.length-1))*68:50;
         const team=D.teams[p.teamId]||{};
         const photoHtml=p.photo?`<img src="${p.photo}" onerror="this.style.display='none'"/>`:(p.name||'?').slice(0,2).toUpperCase();
-        const contrib=p.position==='KL'?`🧤${p.conceded??0}`:`${renderStatEventIconHtml('goal')}${p.goals||0} ${renderStatEventIconHtml('assist')}${p.assists||0}`;
+        // KULLANICI TALEBİ ("oyuncu puanları haftanın kadrosu bölümünde de görülecek"):
+        // Performans puanı katkı satırının başına eklenir - gol/asist bilgisi de korunur,
+        // çünkü puanın NEDEN yüksek olduğunu gösteren şey o.
+        const _puanRozet=(p.puan!=null)?(ptPuanRozeti(p.puan)+' '):'';
+        const contrib=_puanRozet+(p.position==='KL'?`🧤${p.conceded??0}`:`${renderStatEventIconHtml('goal')}${p.goals||0} ${renderStatEventIconHtml('assist')}${p.assists||0}`);
         pitchHtml+=`<div class="pitch-player" style="left:${xPos}%;top:${yPos}%">
           <div class="pitch-dot" style="width:38px;height:38px">${photoHtml}</div>
           <div class="pitch-name" style="font-size:.52rem;font-weight:800">${(p.name||'?').split(' ').pop()}</div>
@@ -11922,20 +11926,72 @@ function confirmDownloadMatchCard(){
 }
 
 
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// OYUNCU PERFORMANS PUANI (1.1 - 10.0)
+// KULLANICI TALEBİ: Maç bittikten sonra her oyuncuya performansına göre puan verilsin;
+// gol, asist ve süre puanı artırsın. Haftanın ve sezonun kadrosu bu puanlara göre belirlensin.
+//
+// NEDEN HESAPLANIYOR, KAYDEDİLMİYOR: Puan tamamen maç olaylarından türer. Kaydedilseydi
+// yönetici bir golü sonradan düzelttiğinde puan eski hâlinde kalırdı; ayrıca ligin her
+// maçı için ayrı bir kayıt dalı gerekirdi. Hesaplama ucuz ve her zaman güncel.
+//
+// PUANLAMA - AÇIKÇA YAZILIYOR Kİ TARTIŞILABİLİR OLSUN:
+//   Taban            6.0   (oynayan herkes buradan başlar)
+//   Gol             +1.2   forvet dışı mevkilerde daha değerli sayılmaz - sadelik tercih edildi
+//   Asist           +0.8
+//   Kendi kalesine  -1.5
+//   Sarı kart       -0.3
+//   Kırmızı kart    -1.5   (çift sarıdan kırmızı da aynı)
+//   Takım galibiyeti+0.4 / beraberlik +0.1 / yenilgi -0.2
+//   Kalede gol yememe (KL) +0.8   kaleci performansının tek ölçülebilir göstergesi bu
+//   Yedek kalıp oyuna girmeyen oyuncu puan ALMAZ (null döner) - oynamayana not verilmez.
+// Sonuç 1.1 ile 10.0 arasına sıkıştırılır.
+//
+// SINIR - DÜRÜSTÇE: Bu puan, gerçek maç izleme verisi (pas isabeti, ikili mücadele, koşu)
+// olmadan üretiliyor. Elimizde yalnızca gol/asist/kart ve sonuç var. Yani gerçek bir
+// performans ölçümü DEĞİL, mevcut verinin makul bir özeti. Gol atmayan ama iyi oynayan
+// oyuncu ile vasat oynayan aynı puanı alabilir.
+function ptOyuncuPuani(m,oyuncuAdi,takimTarafi,mevki){
+  try{
+    if(!m||!oyuncuAdi)return null;
+    // Maç bitmemişse puan verilmez - yarım maçta performans değerlendirilemez.
+    var bitti=(m.status==='finished'||m.status==='ft'||m.finished===true
+      ||(m.homeScore!=null&&m.awayScore!=null&&m.status!=='live'));
+    if(!bitti)return null;
+    var p=6.0, ev=(m.events||[]);
+    var gol=0,asist=0,kk=0,sari=0,kirmizi=0;
+    ev.forEach(function(e){
+      if(!e)return;
+      var ayniTaraf=(e.team===takimTarafi);
+      if(e.player===oyuncuAdi&&ayniTaraf){
+        if(e.type==='goal'||e.type==='pen_goal')gol++;
+        else if(e.type==='og')kk++;
+        else if(e.type==='yellow')sari++;
+        else if(e.type==='red'||e.type==='yellow2red')kirmizi++;
+      }
+      if(e.player2===oyuncuAdi&&ayniTaraf&&(e.type==='goal'||e.type==='pen_goal'))asist++;
+    });
+    p+=gol*1.2+asist*0.8-kk*1.5-sari*0.3-kirmizi*1.5;
+    var hs=Number(m.homeScore),as=Number(m.awayScore);
+    if(isFinite(hs)&&isFinite(as)){
+      var bizim=(takimTarafi==='home')?hs:as, rakip=(takimTarafi==='home')?as:hs;
+      p+=(bizim>rakip)?0.4:(bizim===rakip?0.1:-0.2);
+      if(mevki==='KL'&&rakip===0)p+=0.8;
+    }
+    return Math.max(1.1,Math.min(10,Math.round(p*10)/10));
+  }catch(e){return null;}
+}
+// Puan rozeti - mackolik benzeri renk kodu: yüksek mavi, orta yeşil, düşük turuncu.
+function ptPuanRozeti(puan){
+  if(puan==null)return '';
+  var renk=(puan>=8)?'#3b82f6':(puan>=7)?'#22c55e':(puan>=6)?'#f59e0b':'#ef4444';
+  return '<span style="display:inline-block;background:'+renk+';color:#fff;font-size:.6rem;'
+    +'font-weight:900;padding:.1rem .3rem;border-radius:5px;min-width:1.9rem;text-align:center">'
+    +puan.toFixed(1)+'</span>';
+}
 function renderMdKadro(id,m,h,a){
   const orientation=D.pitchOrientation||'vertical';
   const PC={'KL':'#f59e0b','STP1':'#60a5fa','STP2':'#60a5fa','SĞB':'#60a5fa','SLB':'#60a5fa','GÖ':'#34d399','DOS':'#34d399','OOS':'#34d399','SĞK':'#a78bfa','SLK':'#a78bfa','SF':'#f87171','GF':'#f87171'};
-  // KULLANICI TALEBİ: Maç bittikten sonra admin'in girdiği oyuncu puanı (1.1-10.0), Mackolik
-  // tarzı bir rozet olarak Kadro sekmesindeki saha görünümünde oyuncunun altında gösterilir.
-  // Maçtaki EN YÜKSEK puanı alan oyuncu(lar) ★ ile işaretlenir.
-  const _mRatings=m.ratings||{};
-  const matchBestRating=(()=>{
-    let best=null;
-    ['home','away'].forEach(side=>{
-      Object.values(_mRatings[side]||{}).forEach(v=>{const n=Number(v);if(!isNaN(n)&&(best===null||n>best))best=n;});
-    });
-    return best;
-  })();
   const FORMATIONS_KADRO={
     '4-4-2':[1,4,4,2],
     '4-3-3':[1,4,3,3],
@@ -12072,16 +12128,15 @@ function renderMdKadro(id,m,h,a){
         const subBadge=p._subbedIn?'<span class="pitch-badge" style="background:#7c3aed">🔄</span>':'';
         // Sakatlık/ceza rozeti - admin'in kadro ekranında işaretlediği durum PT'de görünür.
         const statusBadge=p.status==='injured'?'<span class="pitch-badge" style="background:#f97316">🤕</span>':p.status==='suspended'?'<span class="pitch-badge" style="background:#dc2626">⛔</span>':'';
-        // Admin'in girdiği maç puanı (1.1-10.0) - renk skalası Mackolik'teki gibi: <7 amber,
-        // 7-7.9 yeşil, 8+ mavi. Maçın en yüksek puanlısı ★ ile öne çıkar.
-        const ratingVal=(_mRatings[teamSideKey]&&_mRatings[teamSideKey][p.name]!=null)?Number(_mRatings[teamSideKey][p.name]):null;
-        const ratingColor=ratingVal==null?'':ratingVal>=8?'#60a5fa':ratingVal>=7?'#34d399':'#eab308';
-        const isBestRating=ratingVal!=null&&matchBestRating!=null&&Math.abs(ratingVal-matchBestRating)<0.001;
-        const ratingHtml=ratingVal!=null?`<div style="margin-top:2px;background:${ratingColor};color:#0a0a12;font-size:.44rem;font-weight:900;border-radius:6px;padding:.03rem .3rem;white-space:nowrap">${isBestRating?'★ ':''}${ratingVal.toFixed(1)}</div>`:'';
         pitchHtml+=`<div class="pitch-player" style="${posStyle}" onclick="event.stopPropagation();showPlayerDetail('${t.id}','${clickSection}',${clickIdx})">
           <div class="pitch-dot" style="border-color:${p.status?'#f97316':c};width:28px;height:28px;position:relative">${photoHtml}${badges||subBadge||statusBadge?`<div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);display:flex;gap:1px;white-space:nowrap">${badges}${subBadge}${statusBadge}</div>`:''}</div>
           <div class="pitch-name" style="font-size:.46rem">${p.name.split(' ').pop()}</div>
-          ${ratingHtml}
+          ${(function(){
+            // Performans puanı - sahadaki oyuncu kartının altında. Maç bitmemişse
+            // ptOyuncuPuani null döner ve hiçbir şey çizilmez.
+            var _pn=ptOyuncuPuani(m,p.name,teamSideKey,p.position);
+            return _pn==null?'':('<div style="margin-top:1px">'+ptPuanRozeti(_pn)+'</div>');
+          })()}
         </div>`;
       });
     });
