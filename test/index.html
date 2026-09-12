@@ -2355,7 +2355,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-08-J';
+window.APP_BUILD='2026-09-08-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -14912,6 +14912,10 @@ window.closeSheet=function(e){
     // izleme konumu kaydedilir. Aksi halde ekran kapansa bile yayın arka planda veri çekmeye
     // devam ederdi (pil ve mobil veri israfı).
     if(window.PTPlayer&&PTPlayer.isActive())PTPlayer.destroy();
+    // Oynatıcı TAMAMEN kapanıyorsa tam ekran bayrağı da sıfırlanır. Yalnızca kanal
+    // değişiminde korunmalı; ekran kapatıldıktan sonra kalırsa bir dahaki açılış
+    // yanlışlıkla tam ekran başlar.
+    window._ptTamEkranAcik=false;
     // Gömülü oynatıcı kabuğu (PTFrame) da kapanmalı - açık kalırsa tam ekran ve yön kilidi
     // menü kapandıktan sonra da sürer, telefon yatayda takılı kalırdı.
     if(window.PTFrame&&PTFrame.aktif())PTFrame.kapat();
@@ -22320,6 +22324,11 @@ window.PTFrame=(function(){
     // Tam ekran görünümü KENDİ sınıfımızla sağlanır; native tam ekran yalnızca durum
     // çubuğunu da gizlemek için ek olarak denenir (reddedilirse görünüm yine tam ekrandır).
     var acik=b.classList.toggle('ptf-fs');
+    // TEŞHİS SONUCU: Kanal değişiminde tam ekran DOM'a bakılarak anlaşılmaya çalışılıyordu,
+    // ama kayıt "(kutu yok)" dedi - oynatıcı, openVideoWatch çalışmadan ÖNCE yok ediliyor.
+    // Yani bakılacak DOM kalmıyor. Durum artık bir BAYRAKTA tutulur: yok etme bayrağı
+    // silmez, geçişten sonra okunabilir. Üç düzeltmenin tutmamasının sebebi buydu.
+    window._ptTamEkranAcik=acik;
     try{
       var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
       if(acik&&!fsEl){
@@ -25388,6 +25397,7 @@ window.PTPlayer=(function(){
     if(!root.classList.contains('ptp-fs')){
       root.classList.add('ptp-fs');
       document.body.classList.add('ptp-fs-active');
+      window._ptTamEkranAcik=true;   // bkz. gömülü oynatıcıdaki bayrak notu
       showControls();
       // Aynı sebeple tam ekrana GİRERKEN de yeniden ölçülür.
       setTimeout(function(){if(S&&(S.rotate===90||S.rotate===270))applyVisual();},60);
@@ -25457,6 +25467,7 @@ window.PTPlayer=(function(){
     }else{
       root.classList.remove('ptp-fs');
       document.body.classList.remove('ptp-fs-active');
+      window._ptTamEkranAcik=false;
       S.fsFromRotate=false;
       S.fsFromRemote=false;
       // Tam ekrandan çıkınca sahne küçülür; döndürülmüş video kutusu piksel ölçülü olduğundan
@@ -28173,7 +28184,10 @@ window.openVideoWatch=function(videoId,secenek){
     var _tamFrame=!!document.querySelector('.ptf-fs');
     var _tamGovde=document.body.classList.contains('ptp-fs-active');
     var _tamNative=!!(document.fullscreenElement||document.webkitFullscreenElement);
-    var _oncekiTam=!!(_tamKok||_tamFrame||_tamGovde||_tamNative);
+    // Bayrak ASIL kaynaktır: DOM yok edilmiş olsa bile doğru değeri taşır. DOM kontrolleri
+    // yedek olarak kalır - bayrak bir şekilde kurulmamışsa (ör. tam ekran başka bir yoldan
+    // açıldıysa) onlar devreye girer.
+    var _oncekiTam=!!(window._ptTamEkranAcik||_tamKok||_tamFrame||_tamGovde||_tamNative);
     // Hangi işaretin dolu olduğu kayda geçer - bir dahaki raporda tespitin neden
     // başarısız olduğu (hepsi false ise) ya da hangi yolun kullanıldığı görülür.
     try{
