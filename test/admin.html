@@ -664,6 +664,24 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
           <input type="range" id="lpBlurRange" min="0" max="20" value="0" oninput="onLpBlurInput(this.value)" style="flex:1;accent-color:#7c3aed"/>
           <span style="color:#e0e0f0;font-size:.62rem;font-weight:700;width:38px;text-align:right" id="lpBlurVal">0px</span>
         </div>
+        <!-- KULLANICI TALEBİ ("daha fazla filtre"): Parlaklık, kontrast, doygunluk, gri ton,
+             sepya ve saydamlık. Hepsi aynı kalıptan üretilir; yeni bir filtre eklemek tek
+             satırlık iş olsun diye. -->
+        <div id="lpFiltreler"></div>
+        <!-- KULLANICI TALEBİ ("unsurları taşıyabilmek için dokunma dışında yeni bir sistem"):
+             Sürükleme dar ekranda hassas değil ve blok küçükse tutulamıyor. Ok tuşlarıyla
+             adım adım taşıma bunu çözer: her dokunuş %1, uzun basılı tutmak hızlandırmaz -
+             kasıtlı olarak, çünkü amaç ince ayar. %5'lik büyük adım için ⇧ düğmeleri var. -->
+        <div style="display:flex;align-items:center;gap:.4rem;margin:.5rem 0 .45rem">
+          <span style="color:#c4b5fd;font-size:.62rem;font-weight:700;flex-shrink:0">🎯 Taşı</span>
+          <div style="flex:1;display:flex;gap:.25rem;justify-content:center">
+            <button onclick="lpTasi(-1,0)" style="flex:1;min-height:34px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:8px;color:#fff;font-size:.8rem;cursor:pointer">◀</button>
+            <button onclick="lpTasi(0,-1)" style="flex:1;min-height:34px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:8px;color:#fff;font-size:.8rem;cursor:pointer">▲</button>
+            <button onclick="lpTasi(0,1)" style="flex:1;min-height:34px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:8px;color:#fff;font-size:.8rem;cursor:pointer">▼</button>
+            <button onclick="lpTasi(1,0)" style="flex:1;min-height:34px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.22);border-radius:8px;color:#fff;font-size:.8rem;cursor:pointer">▶</button>
+            <button onclick="lpTasi(0,0,true)" title="Ortala" style="flex:1;min-height:34px;background:rgba(124,58,237,.3);border:1px solid rgba(124,58,237,.5);border-radius:8px;color:#fff;font-size:.7rem;cursor:pointer">⌖</button>
+          </div>
+        </div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">
           <span style="color:#e0e0f0;font-size:.64rem">Konum: <b id="llpCoordValFull" style="color:#c084fc">50%, 12%</b></span>
           <div style="display:flex;gap:.35rem">
@@ -1564,6 +1582,76 @@ window.ptTestVeriKopyala=function(){
       setTimeout(altYerAc,300);
       window.addEventListener('resize',altYerAc);
       b._ptYerAc=altYerAc;
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // KULLANICI TALEBİ ("test verisi butonu taşınabilir olmalı"): Düğme sabit konumdaydı
+      // ve altına denk gelen düğmeleri örtüyordu (teşhis raporlarında defalarca göründü).
+      // Artık basılı tutup sürüklenebiliyor; konum cihazda saklanır, sonraki açılışta korunur.
+      // DOKUNUŞ İLE SÜRÜKLEMEYİ AYIRMA: 6 pikselden az hareket "dokunuş" sayılır ve düğme
+      // normal işini yapar. Bu eşik olmasaydı her dokunuşta düğme birkaç piksel kayar ve
+      // tıklama tetiklenmezdi.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      (function ptTestDugmesiSurukle(){
+        var bas=null,tasindi=false;
+        try{
+          var kayit=JSON.parse(localStorage.getItem('pt_testBtnPos')||'null');
+          if(kayit&&kayit.l!=null&&kayit.t!=null){
+            b.style.left=kayit.l+'px';b.style.top=kayit.t+'px';
+            b.style.right='auto';b.style.bottom='auto';
+          }
+        }catch(e){}
+        function konumSinirla(l,t){
+          var g=b.offsetWidth||120,y=b.offsetHeight||40;
+          return {l:Math.max(4,Math.min(window.innerWidth-g-4,l)),
+                  t:Math.max(4,Math.min(window.innerHeight-y-4,t))};
+        }
+        function basla(e){
+          var n=e.touches?e.touches[0]:e;
+          var r=b.getBoundingClientRect();
+          bas={x:n.clientX,y:n.clientY,l:r.left,t:r.top};
+          tasindi=false;
+        }
+        function hareket(e){
+          if(!bas)return;
+          var n=e.touches?e.touches[0]:e;
+          var dx=n.clientX-bas.x,dy=n.clientY-bas.y;
+          if(!tasindi&&Math.abs(dx)+Math.abs(dy)<6)return;   // henüz dokunuş sayılır
+          tasindi=true;
+          if(e.cancelable)e.preventDefault();                // sayfanın kaymasını engelle
+          var k=konumSinirla(bas.l+dx,bas.t+dy);
+          b.style.left=k.l+'px';b.style.top=k.t+'px';
+          b.style.right='auto';b.style.bottom='auto';
+        }
+        function bitir(){
+          if(!bas)return;
+          if(tasindi){
+            try{
+              var r=b.getBoundingClientRect();
+              localStorage.setItem('pt_testBtnPos',JSON.stringify({l:Math.round(r.left),t:Math.round(r.top)}));
+            }catch(e){}
+          }
+          bas=null;
+          // Sürükleme bittiyse tıklamayı yut - parmak kaldırıldığında düğme çalışmasın.
+          if(tasindi)setTimeout(function(){tasindi=false;},60);
+        }
+        b.addEventListener('touchstart',basla,{passive:true});
+        b.addEventListener('touchmove',hareket,{passive:false});
+        b.addEventListener('touchend',bitir);
+        b.addEventListener('mousedown',function(e){basla(e);
+          document.addEventListener('mousemove',hareket);
+          document.addEventListener('mouseup',function u(){bitir();
+            document.removeEventListener('mousemove',hareket);
+            document.removeEventListener('mouseup',u);});
+        });
+        b.addEventListener('click',function(e){
+          if(tasindi){e.preventDefault();e.stopPropagation();}
+        },true);
+        window.addEventListener('resize',function(){
+          try{
+            var r=b.getBoundingClientRect();
+            if(r.left||r.top){var k=konumSinirla(r.left,r.top);b.style.left=k.l+'px';b.style.top=k.t+'px';}
+          }catch(e){}
+        });
+      })();
       // TEŞHİS RAPORU DÜZELTMESİ (çok sayıda "öğe üstü örtülüyor" kaydı): Tam genişlikteki
       // düğme, sayfa kaydırıldıkça alta denk gelen HER düğmenin üstüne biniyordu - "Takım
       // Ekle", "Sil", "Kapalı" gibi. Sayfaya alt boşluk eklemek yalnızca EN SON öğeyi
@@ -1630,7 +1718,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-08-F';
+window.APP_BUILD='2026-09-08-G';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -11770,6 +11858,7 @@ function selectLpBlock(blockId){
 }
 // Seçili bloğun mevcut ölçek/blur değerlerini alt bardaki slider'lara yansıtır.
 function syncLpControlsToSelected(){
+  try{lpFiltreleriCiz();}catch(e){}
   var b=_lpBlocks[_lpSelectedBlock]; if(!b)return;
   var scaleR=qs('lpScaleRange'),scaleV=qs('lpScaleVal');
   if(scaleR)scaleR.value=b.scale||100;
@@ -11799,8 +11888,57 @@ function onLpBlurInput(v){
   var blurV=qs('lpBlurVal'); if(blurV)blurV.textContent=v+'px';
   applyLpBlockStyle(_lpSelectedBlock);
 }
+// Filtre tanımları tek listede - yeni bir filtre eklemek buraya bir satır yazmak demek.
+var LP_FILTRELER=[
+  {k:'brightness',ad:'☀️ Parlaklık',min:20,max:200,vars:100,birim:'%'},
+  {k:'contrast',  ad:'◑ Kontrast',  min:20,max:200,vars:100,birim:'%'},
+  {k:'saturate',  ad:'🎨 Doygunluk',min:0, max:200,vars:100,birim:'%'},
+  {k:'grayscale', ad:'⬜ Gri Ton',  min:0, max:100,vars:0,  birim:'%'},
+  {k:'sepia',     ad:'🟤 Sepya',    min:0, max:100,vars:0,  birim:'%'},
+  {k:'opacity',   ad:'👁️ Saydamlık',min:10,max:100,vars:100,birim:'%'}
+];
+function lpFiltreleriCiz(){
+  var kutu=qs('lpFiltreler'); if(!kutu)return;
+  var b=_lpBlocks[_lpSelectedBlock]||{};
+  kutu.innerHTML=LP_FILTRELER.map(function(f){
+    var deger=(b[f.k]==null)?f.vars:b[f.k];
+    return '<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">'
+      +'<span style="color:#c4b5fd;font-size:.62rem;font-weight:700;flex-shrink:0;min-width:5.4rem">'+f.ad+'</span>'
+      +'<input type="range" min="'+f.min+'" max="'+f.max+'" value="'+deger+'" '
+        +'oninput="onLpFiltre(\''+f.k+'\',this.value)" style="flex:1;accent-color:#7c3aed"/>'
+      +'<span style="color:#e0e0f0;font-size:.62rem;font-weight:700;width:38px;text-align:right" id="lpF_'+f.k+'">'+deger+f.birim+'</span>'
+    +'</div>';
+  }).join('');
+}
+window.onLpFiltre=function(anahtar,v){
+  var b=_lpBlocks[_lpSelectedBlock]; if(!b)return;
+  b[anahtar]=Number(v);
+  var et=qs('lpF_'+anahtar); if(et)et.textContent=v+'%';
+  applyLpBlockStyle(_lpSelectedBlock);
+};
+// Ok tuşlarıyla taşıma. Blok henüz "serbest" değilse önce serbest bırakılır ve mevcut
+// görünen konumundan başlar - aksi halde ilk dokunuşta ekranın ortasına sıçrardı.
+window.lpTasi=function(dx,dy,ortala){
+  var b=_lpBlocks[_lpSelectedBlock]; if(!b)return;
+  if(!b.free){
+    b.free=true;
+    if(b.x==null)b.x=50;
+    if(b.y==null)b.y=(_lpSelectedBlock==='logo')?18:(_lpSelectedBlock==='titleGroup'?40:66);
+  }
+  if(ortala){b.x=50;}
+  else{
+    b.x=Math.max(0,Math.min(100,(b.x==null?50:b.x)+dx));
+    b.y=Math.max(0,Math.min(100,(b.y==null?50:b.y)+dy));
+  }
+  applyLpBlockStyle(_lpSelectedBlock);
+  var c=qs('llpCoordValFull');
+  if(c)c.textContent=Math.round(b.x)+'%, '+Math.round(b.y)+'%';
+};
 function resetSelectedLpBlock(){
+  // Sıfırlama artık filtreleri de temizler - önceden yalnızca konum/boyut/bulanıklık
+  // sıfırlanıyordu, yeni filtreler blokta kalıyordu.
   _lpBlocks[_lpSelectedBlock]={free:false,scale:100,blur:0,hidden:false};
+  try{lpFiltreleriCiz();}catch(e){}
   syncLpControlsToSelected();
   applyAllLpBlocks();
 }
@@ -11822,7 +11960,18 @@ function applyLpBlockStyle(blockId){
   el.style.top=y+'%';
   var scalePart=(b.scale&&b.scale!==100)?' scale('+(b.scale/100)+')':'';
   el.style.transform='translateX(-50%)'+scalePart;
-  el.style.filter=b.blur?('blur('+b.blur+'px)'):'';
+  // KULLANICI TALEBİ ("daha fazla filtre"): Filtreler tek bir zincirde birleştirilir.
+  // Varsayılan değerler (parlaklık/kontrast/doygunluk 100, diğerleri 0) zincire HİÇ
+  // eklenmez - gereksiz filter işlemi tarayıcıyı yorar ve bazı cihazlarda yazıyı bulanıklaştırır.
+  var _f=[];
+  if(b.blur)_f.push('blur('+b.blur+'px)');
+  if(b.brightness!=null&&b.brightness!==100)_f.push('brightness('+b.brightness+'%)');
+  if(b.contrast!=null&&b.contrast!==100)_f.push('contrast('+b.contrast+'%)');
+  if(b.saturate!=null&&b.saturate!==100)_f.push('saturate('+b.saturate+'%)');
+  if(b.grayscale)_f.push('grayscale('+b.grayscale+'%)');
+  if(b.sepia)_f.push('sepia('+b.sepia+'%)');
+  if(b.opacity!=null&&b.opacity!==100)el.style.opacity=(b.opacity/100);else el.style.opacity='';
+  el.style.filter=_f.join(' ');
   el.classList.toggle('lp-selected',_lpSelectedBlock===blockId);
 }
 function applyAllLpBlocks(){
