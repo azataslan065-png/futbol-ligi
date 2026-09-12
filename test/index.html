@@ -2355,7 +2355,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-08-K';
+window.APP_BUILD='2026-09-08-L';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -14912,9 +14912,15 @@ window.closeSheet=function(e){
     // izleme konumu kaydedilir. Aksi halde ekran kapansa bile yayın arka planda veri çekmeye
     // devam ederdi (pil ve mobil veri israfı).
     if(window.PTPlayer&&PTPlayer.isActive())PTPlayer.destroy();
-    // Oynatıcı TAMAMEN kapanıyorsa tam ekran bayrağı da sıfırlanır. Yalnızca kanal
-    // değişiminde korunmalı; ekran kapatıldıktan sonra kalırsa bir dahaki açılış
-    // yanlışlıkla tam ekran başlar.
+    // TEŞHİS SONUCU (bayrak da false geldi): Sıfırlama BURAYA konmuştu - ama KANAL DEĞİŞİMİ
+    // de bu kapatma yolundan geçiyor. Yani bayrak, openVideoWatch onu okumadan hemen önce
+    // siliniyordu. Kendi düzeltmem kendini bozuyordu.
+    // ÇÖZÜM: Bayrak burada silinir ama silinmeden ÖNCE zamanı damgalanır. Kanal değişiminde
+    // kapanma ile yeniden açılma arasında saniyeler değil milisaniyeler var; kullanıcı
+    // oynatıcıyı gerçekten kapattığında ise aradan çok daha uzun süre geçer.
+    // Bu ayrım sayesinde hem kanal değişiminde tam ekran korunur, hem de kapatıp tekrar
+    // açtığında yanlışlıkla tam ekran başlamaz.
+    if(window._ptTamEkranAcik)window._ptSonTamEkranZamani=Date.now();
     window._ptTamEkranAcik=false;
     // Gömülü oynatıcı kabuğu (PTFrame) da kapanmalı - açık kalırsa tam ekran ve yön kilidi
     // menü kapandıktan sonra da sürer, telefon yatayda takılı kalırdı.
@@ -28187,12 +28193,19 @@ window.openVideoWatch=function(videoId,secenek){
     // Bayrak ASIL kaynaktır: DOM yok edilmiş olsa bile doğru değeri taşır. DOM kontrolleri
     // yedek olarak kalır - bayrak bir şekilde kurulmamışsa (ör. tam ekran başka bir yoldan
     // açıldıysa) onlar devreye girer.
-    var _oncekiTam=!!(window._ptTamEkranAcik||_tamKok||_tamFrame||_tamGovde||_tamNative);
+    // Kanal değişiminde oynatıcı bu satırdan hemen ÖNCE yok edilmiş oluyor; o yıkım
+    // bayrağı silerken zaman damgası bırakır. 2 saniyeden yeni bir damga "aynı geçişin
+    // parçası" sayılır. Kullanıcı oynatıcıyı kapatıp sonra açtığında aradan çok daha uzun
+    // süre geçtiği için damga geçersizdir ve tam ekran başlamaz.
+    var _yeniKapandi=(Date.now()-(window._ptSonTamEkranZamani||0))<2000;
+    var _oncekiTam=!!(window._ptTamEkranAcik||_yeniKapandi||_tamKok||_tamFrame||_tamGovde||_tamNative);
     // Hangi işaretin dolu olduğu kayda geçer - bir dahaki raporda tespitin neden
     // başarısız olduğu (hepsi false ise) ya da hangi yolun kullanıldığı görülür.
     try{
       if(!_oncekiTam)DiagSil('tamEkranAlgilanmadi',new Error('Geçiş anında tam ekran işareti yok'),{
         kok:_tamKok,frame:_tamFrame,govde:_tamGovde,nativeFs:_tamNative,
+        bayrak:!!window._ptTamEkranAcik,
+        damgaYasiMs:(window._ptSonTamEkranZamani?(Date.now()-window._ptSonTamEkranZamani):null),
         videoKutusuSinif:(document.getElementById('videoPlayerBox')||{}).className||'(kutu yok)',
         anlami:'Kullanıcı tam ekranda olduğunu söylüyor ama hiçbir tam ekran işareti bulunamadı.',
         oneri:'videoKutusuSinif alanındaki sınıf listesine bakın - tam ekranı gösteren gerçek sınıf orada görünür.'});
