@@ -2355,7 +2355,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-07-E';
+window.APP_BUILD='2026-09-08-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22683,6 +22683,10 @@ window.PTPlayer=(function(){
       if(S._gecisKilit)return;
       ptpDuraklatOrtusuGuncelle();
       ptpGomuluKenarKirp();   // kenar şeritlerini görüş alanı dışında tut
+      // Yönetici üst bar ayarını değiştirdiğinde oynatıcı AÇIKKEN de uygulansın. İmza
+      // değişmedikçe hiçbir şey yapılmaz - her turda yeniden çizmek düğme dinleyicilerini
+      // koparır ve gereksiz DOM işi yaratırdı (bkz. ptpUstBarTazele).
+      try{ptpUstBarTazele();}catch(e){}
       // GÜVENCE: Oynatıcı duraklamış durumdaysa maske ekranda OLMALI. Durum bildirimi
       // kaçırıldıysa (paket düşmesi, sekme arka plana alındı vb.) bu tur onu geri koyar -
       // böylece platformun kalıcı duraklatma simgesi hiçbir koşulda açıkta kalmaz.
@@ -22927,6 +22931,55 @@ window.PTPlayer=(function(){
   // gömülü platformlarda oynatıcı karşı tarafa aittir; arka plan davranışını onlar belirler
   // ve dışarıdan değiştirilemez. Ayar açık olsa bile YouTube videosu arka planda durabilir.
   // Ekran modu, oran ve tam ekran durumu bu davranışı ETKİLEMEZ - hepsinde aynı çalışır.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // ÜST BAR ÖĞELERİ - TEK KAYNAK ve CANLI TAZELEME
+  // KULLANICI BİLDİRDİ ("yapılan değişiklikler uygulanmıyor"): Üst bar oynatıcı KURULURKEN
+  // bir kez çiziliyordu. Yönetici görünürlüğü ya da sırayı değiştirdiğinde, oynatıcı zaten
+  // açık olduğu için ekranda hiçbir şey değişmiyordu - ancak kapatıp açınca görünüyordu.
+  // ÇÖZÜM: Öğeler burada üretilir ve ayar imzası değiştiğinde üst bar YENİDEN çizilir.
+  // İmza karşılaştırması şart: her turda yeniden çizmek, üst bardaki düğmelerin dinleyicilerini
+  // koparır ve gereksiz DOM işi yaratırdı.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  function ptpUstBarImza(){
+    var d=window.D||{};
+    return [d.oynaticiCanliRozeti!==false,d.oynaticiKanalLogosu!==false,d.oynaticiKanalAdi!==false,
+      (Array.isArray(d.oynaticiUstBarSira)?d.oynaticiUstBarSira.join(','):'')].join('|');
+  }
+  function ptpUstBarParcalari(){
+    var d=window.D||{};
+    var varsayilan=['canli','logo','ad'];
+    var sira=(Array.isArray(d.oynaticiUstBarSira)&&d.oynaticiUstBarSira.length)
+      ? d.oynaticiUstBarSira.slice() : varsayilan.slice();
+    varsayilan.forEach(function(k){if(sira.indexOf(k)===-1)sira.push(k);});
+    var canliMi=!!(S&&S.isLive), logo=(S&&S.logo)||'', baslik=(S&&S.title)||'';
+    var parca={
+      canli:(d.oynaticiCanliRozeti===false)?''
+        :'<span class="ptp-live" id="ptpLive" style="'+(canliMi?'':'display:none;')+'">🔴 CANLI</span>',
+      logo:((d.oynaticiKanalLogosu===false)||!logo)?''
+        :'<img class="ptp-kanal-logo" id="ptpKanalLogo" src="'+String(logo).replace(/"/g,'&quot;')+'" alt=""/>',
+      ad:(d.oynaticiKanalAdi===false)?''
+        :'<div class="ptp-title">'+String(baslik).replace(/</g,'&lt;')+'</div>'
+    };
+    // Sağdaki düğmeleri sağa iten doldurucu HER ZAMAN eklenir - kanal adı gizlenince
+    // düğmelerin sola yığılmasının sebebi buydu (kullanıcı bildirdi).
+    return sira.map(function(k){return parca[k]||'';}).join('')+'<div style="flex:1;min-width:0"></div>';
+  }
+  function ptpUstBarTazele(zorla){
+    try{
+      if(!S||!S.root)return;
+      var imza=ptpUstBarImza();
+      if(!zorla&&S._ustBarImza===imza)return;
+      S._ustBarImza=imza;
+      var top=S.root.querySelector('.ptp-top');
+      if(!top)return;
+      // Sağdaki düğmeler korunur; yalnızca SOL bloktaki öğeler yeniden yazılır.
+      var sag=top.querySelector('.ptp-top-sag');
+      if(!sag)return;
+      var yeni=ptpUstBarParcalari();
+      var kap=top.querySelector('.ptp-top-sol');
+      if(kap)kap.innerHTML=yeni;
+    }catch(e){}
+  }
   function ptpMedyaOturumu(acik){
     try{
       if(!('mediaSession' in navigator))return;
@@ -26797,25 +26850,14 @@ window.PTPlayer=(function(){
         +'<div class="ptp-lockbar"><button class="ptp-btn" id="ptpLockBtn" title="Ekran kilidi">🔓</button></div>'
         +'<div class="ptp-ov" id="ptpOv">'
           +'<div class="ptp-top">'
-            // KULLANICI TALEBİ ("sol üstteki CANLI rozeti ve kanal ismi ayrı ayrı açılıp
-            // kapatılabilsin, ayrıca kanal logosu ekle"):
-            // Üç öğe de YÖNETİCİ ayarına bağlı. Varsayılan: rozet ve ad AÇIK, logo AÇIK.
-            // Ayarlar 'D' üzerinden okunur, yani ligden bağımsız değil - yönetici paneli
-            // neyi seçerse tüm kullanıcılarda o geçerli olur.
-            // Logo, kanal kaydındaki 'logo' alanından gelir; tanımsızsa hiç çizilmez -
-            // boş bir kare göstermek görüntüyü kirletirdi.
-            +((window.D&&D.oynaticiCanliRozeti===false)?''
-              :'<span class="ptp-live" id="ptpLive" style="'+(canli?'':'display:none;')+'">🔴 CANLI</span>')
-            +((window.D&&D.oynaticiKanalLogosu===false)||!opt.logo?''
-              :'<img class="ptp-kanal-logo" id="ptpKanalLogo" src="'+String(opt.logo).replace(/"/g,'&quot;')+'" alt=""/>')
-            +((window.D&&D.oynaticiKanalAdi===false)?''
-              :'<div class="ptp-title">'+(opt.title||'').replace(/</g,'&lt;')+'</div>')
-            // KULLANICI BİLDİRDİ ("yukarıdaki butonlar sol tarafa kaymış"):
-            // Sağdaki düğmeleri sağa iten şey, kanal adının 'flex:1' ile bütün boşluğu
-            // kaplamasıydı. Kanal adı gizlenince o itici kayboluyor ve düğmeler logonun
-            // hemen yanına, sola yığılıyordu.
-            // Bu boşluk doldurucu HER ZAMAN var: adın görünüp görünmemesi düzeni bozmaz.
-            +'<div style="flex:1;min-width:0"></div>'
+            // Üst bar İKİ bloğa ayrıldı: soldaki öğeler (rozet/logo/ad) ayar değiştiğinde
+            // yeniden çizilebilsin, sağdaki düğmelerin dinleyicileri bundan etkilenmesin.
+            // Tek blok olsaydı her tazelemede düğmeler de yeniden kurulur, bağlı olayları
+            // koparırdı.
+            +'<div class="ptp-top-sol" style="display:flex;align-items:center;gap:.45rem;flex:1;min-width:0">'
+              +ptpUstBarParcalari()
+            +'</div>'
+            +'<div class="ptp-top-sag" style="display:flex;align-items:center;gap:.35rem;flex-shrink:0">'
             // HATA DÜZELTMESİ (kullanıcı bildirdi: "ekran modu düğmesini göremedim" - KÖK
             // SEBEP BULUNDU): Bu düğme önceden aşağıdaki .ptp-row'daydı - o satırda ⏮️ ⏹️ ⏭️
             // 🔊 [ses kaydırıcısı] [CANLIYA DÖN] [1x hız] [⬜] [⛶] SIĞMIYOR (CSS: flex-wrap:
@@ -26839,6 +26881,7 @@ window.PTPlayer=(function(){
             +'<button class="ptp-btn" id="ptpChlist" title="Kanallar" onclick="PTPlayer.openChannelList()">📺</button>'
             +'<button class="ptp-btn" id="ptpPip" title="Küçük pencere">🗗</button>'
             +'<button class="ptp-btn" id="ptpSet" title="Ayarlar">⚙️</button>'
+          +'</div>'
           +'</div>'
           +'<div class="ptp-mid">'
             // KULLANICI TALEBİ ("sonraki bölüme atlama düğmesi"): Bölümler arasında geçmek
@@ -26939,7 +26982,7 @@ window.PTPlayer=(function(){
       }else{gomulu=false;}
     }
     S={
-      root:root,video:video,gomulu:gomulu,url:opt.url,title:opt.title||'',isLive:canli,videoId:opt.videoId,
+      root:root,video:video,gomulu:gomulu,url:opt.url,title:opt.title||'',logo:opt.logo||'',isLive:canli,videoId:opt.videoId,
       // Kullanıcının seçtiği ses kanalı kanaldan kanala korunur (çift-mono yayınlarda dil
       // tercihi her kanal değişiminde yeniden seçilmek zorunda kalmasın).
       sesKanali:(function(){try{return pref('sesKanali','stereo');}catch(e){return 'stereo';}})(),
@@ -27833,6 +27876,7 @@ window.PTPlayer=(function(){
     ptpFreezeCapture();
     if(!S.isLive&&S.video)savePos(S.videoId,S.video.currentTime,S.video.duration);
     S.url=newUrl;S.title=newTitle||'';S.isLive=!!newIsLive;S.videoId=newVideoId;
+    S.logo=newLogo||'';   // üst bar tazelemesi logoyu buradan okur
     S.recoverCount=0;S.proxyIdx=null;
     var titleEl=S.root&&S.root.querySelector('.ptp-title');
     if(titleEl)titleEl.textContent=newTitle||'';
