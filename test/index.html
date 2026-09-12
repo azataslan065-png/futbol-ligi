@@ -1954,7 +1954,34 @@ window.ptYonuDikeyeDondur=function(){
           window._ptTamEkranAcik=true;
           window._ptSonTamEkranZamani=Date.now();   // "en son şu an tam ekrandı"
         }else if(window._ptTamEkranAcik){
-          window._ptTamEkranAcik=false;             // damga korunur: az önce tam ekrandı
+          window._ptTamEkranAcik=false;
+          // ══════════════════════════════════════════════════════════════════════════════
+          // TAM EKRANIN NEDEN BİTTİĞİNİ AYIRT ETME
+          // Beş turdur "tam ekran hangi anda ölçülmeli" sorusunu çözmeye çalıştım; her
+          // seferinde yakalama noktası yanlış çıktı. Asıl ayrım şu:
+          //   Oynatıcı HÂLÂ duruyor ama tam ekran bitti  → kullanıcı BİLEREK çıktı.
+          //                                                 Tercihi budur, saygı duyulur.
+          //   Oynatıcı da yok olmuş                      → kanal değişimi/yıkım yüzünden
+          //                                                 bitti. Tercih hâlâ "tam ekran".
+          // Bu ayrım sayesinde yakalamanın hangi ekranda yapıldığı önemsizleşiyor.
+          // ══════════════════════════════════════════════════════════════════════════════
+          // Yatay mod da tam ekranla BİRLİKTE korunmalı (kullanıcı: "yatay, dikey veya tam
+          // ekran gibi seçenekler sabit kalmalı"). Kanal değişiminde yalnızca tam ekranı geri
+          // getirmek yetmiyordu - ekran dikeye dönüyor, video küçük bir şeride sıkışıyordu.
+          // Yatay mod tercihi, oynatıcının görsel durumundan okunur (PTPlayer.durum diye
+          // bir dışa açma yok - getVisualState zaten bu bilgiyi taşıyor).
+          try{
+            var _gd=(window.PTPlayer&&PTPlayer.isActive&&PTPlayer.isActive()&&PTPlayer.getVisualState)
+              ?PTPlayer.getVisualState():null;
+            if(_gd)window._ptYatayTercihi=!!_gd.yatayKilit;
+          }catch(e){}
+          var oynaticiDuruyor=!!(document.querySelector('.ptp')||document.getElementById('videoPlayerBox'));
+          if(oynaticiDuruyor){
+            window._ptSonTamEkranZamani=0;     // bilerek çıkıldı - tercih sıfırlanır
+            window._ptTamEkranTercihi=false;
+          }else{
+            window._ptTamEkranTercihi=true;    // yıkım yüzünden bitti - tercih korunur
+          }
         }
       }catch(e){}
     },500);
@@ -2383,7 +2410,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-08-P';
+window.APP_BUILD='2026-09-08-S';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -28173,13 +28200,24 @@ window.PTPlayer=(function(){
     // Kırp/Genişlet) DIŞINDA, kutunun KENDİ şekli de (dikey video algılamasıyla - bkz.
     // .ptp-portrait) kanaldan kanala değişebiliyordu. O da burada yakalanıp korunuyor.
     var stage=S.root&&S.root.querySelector('.ptp-stage');
+    // Yatay mod da görsel duruma dahil (kullanıcı: "yatay, dikey veya tam ekran sabit
+    // kalmalı"). Kanal değişiminde yalnızca ekran modu korunuyordu; ekran dikeye dönünce
+    // video küçük bir şeride sıkışıyordu.
     return {fit:S.fit,zoom:S.zoom,brightness:S.brightness,contrast:S.contrast,saturation:S.saturation,rotate:S.rotate,
+      yatayKilit:!!S.yatayKilit,
       portrait:stage?stage.classList.contains('ptp-portrait'):false};
   }
   function applyVisualState(state){
     if(!S||!state)return;
     S.fit=state.fit;S.zoom=state.zoom;S.brightness=state.brightness;
     S.contrast=state.contrast;S.saturation=state.saturation;S.rotate=state.rotate;
+    // Yatay mod: yalnızca AÇMA yönünde uygulanır. Kapatma yönünde uygulasaydık, tam ekrana
+    // yeni girmiş bir oynatıcıyı geri dikeye çevirebilirdik - çağıranın niyeti "önceki
+    // görünümü koru", "dikeye zorla" değil.
+    if(state.yatayKilit&&!S.yatayKilit){
+      try{if(typeof cihazYatayaKilitle==='function')cihazYatayaKilitle();
+          else S.yatayKilit=true;}catch(e){S.yatayKilit=true;}
+    }
     applyVisual();
     var stage=S.root&&S.root.querySelector('.ptp-stage');
     if(stage){
@@ -28277,8 +28315,15 @@ window.openVideoWatch=function(videoId,secenek){
      // içindeki kök sebep notu). Okunduktan sonra temizlenir - tek seferlik bir bilgidir.
     var _listedenTam=!!window._ptListeAcilisTamEkran;
     window._ptListeAcilisTamEkran=false;
-    var _yeniKapandi=(Date.now()-(window._ptSonTamEkranZamani||0))<3000;
+    // Artık dar bir zaman penceresine değil, TERCİHE bakılıyor: tam ekran yıkım yüzünden
+    // bittiyse tercih korunur ve kullanıcı listede ne kadar gezinirse gezinsin geçerlidir.
+    // Bilerek çıkıldıysa tercih sıfırlandığı için burası false döner.
+    var _yeniKapandi=!!window._ptTamEkranTercihi;
     var _oncekiTam=!!(_listedenTam||window._ptTamEkranAcik||_yeniKapandi||_tamKok||_tamFrame||_tamGovde||_tamNative);
+    // Tercih okundu; yeni oynatıcı tam ekrana geçtiğinde örnekleyici onu zaten yeniden
+    // işaretleyecek. Burada temizlenmezse, kullanıcı tam ekrandan çıkıp uzun süre sonra
+    // başka bir video açtığında o da tam ekran başlardı.
+    window._ptTamEkranTercihi=false;
     // Hangi işaretin dolu olduğu kayda geçer - bir dahaki raporda tespitin neden
     // başarısız olduğu (hepsi false ise) ya da hangi yolun kullanıldığı görülür.
     try{
@@ -28286,6 +28331,7 @@ window.openVideoWatch=function(videoId,secenek){
         kok:_tamKok,frame:_tamFrame,govde:_tamGovde,nativeFs:_tamNative,
         bayrak:!!window._ptTamEkranAcik,
         listedenTam:_listedenTam,
+        tercih:!!window._ptTamEkranTercihi,
         damgaYasiMs:(window._ptSonTamEkranZamani?(Date.now()-window._ptSonTamEkranZamani):null),
         videoKutusuSinif:(document.getElementById('videoPlayerBox')||{}).className||'(kutu yok)',
         anlami:'Kullanıcı tam ekranda olduğunu söylüyor ama hiçbir tam ekran işareti bulunamadı.',
@@ -28492,6 +28538,17 @@ window.openVideoWatch=function(videoId,secenek){
                 return;
               }
               PTPlayer.enterFullscreen();
+              // Tam ekran kurulduktan sonra yatay mod da geri getirilir. Sıra önemli:
+              // önce tam ekran, sonra yön - tersi olursa yerleşim yanlış ölçüyle hesaplanır.
+              if(window._ptYatayTercihi&&typeof PTPlayer.applyVisualState==='function'){
+                setTimeout(function(){
+                  try{
+                    var g=PTPlayer.getVisualState()||{};
+                    g.yatayKilit=true;
+                    PTPlayer.applyVisualState(g);
+                  }catch(e){}
+                },80);
+              }
             }catch(e){}
           },ms);
         });
