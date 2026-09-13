@@ -2411,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-C';
+window.APP_BUILD='2026-09-13-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -10656,6 +10656,73 @@ html+=`<div id="st_homeaway" style="display:${_statTab==='homeaway'?'':'none'}">
   // krallığı varken puan sıralamasının olmaması eksiklikti.
   // ORTALAMA kullanılır, toplam değil: tek maçta parlayan biri, her hafta istikrarlı
   // oynayanın önüne geçmesin. En az 2 maç şartı var - tek maçlık 9.0 sıralamayı bozardı.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // PUAN VERİSİ - TEK KAYNAK
+  // Beş görünüm (puan sıralaması, haftanın oyuncusu, takım ortalaması, kaleciler, gelişim)
+  // aynı hesaba dayanır. Her biri kendi döngüsünü kursaydı aynı iş beş kez yapılır ve
+  // zamanla aralarında tutarsızlık doğardı.
+  const _puanVerisi=(function(){
+    const oyuncular={},haftalik={},takimlar={};
+    Object.values(D.matches||{}).filter(m=>m&&m.played).forEach(m=>{
+      [['home',m.homeId],['away',m.awayId]].forEach(([taraf,tid])=>{
+        const t=D.teams[tid]; if(!t||!t.squad)return;
+        const hafta=m.week||0;
+        (t.squad.starting||[]).forEach(p=>{
+          if(!p||!p.name)return;
+          const pn=ptOyuncuPuani(m,p.name,taraf,p.position);
+          if(pn==null)return;
+          const k=p.name+'|'+tid;
+          if(!oyuncular[k])oyuncular[k]={name:p.name,teamId:tid,photo:p.photo,position:p.position,
+            toplam:0,mac:0,enIyi:0,puanlar:[]};
+          const o=oyuncular[k];
+          o.toplam+=pn;o.mac++;o.puanlar.push({puan:pn,hafta:hafta});
+          if(pn>o.enIyi)o.enIyi=pn;
+          if(!haftalik[hafta]||pn>haftalik[hafta].puan)
+            haftalik[hafta]={puan:pn,name:p.name,teamId:tid,photo:p.photo,position:p.position,hafta:hafta};
+          if(!takimlar[tid])takimlar[tid]={teamId:tid,toplam:0,adet:0};
+          takimlar[tid].toplam+=pn;takimlar[tid].adet++;
+        });
+      });
+    });
+    return {
+      oyuncular:Object.values(oyuncular).map(o=>({...o,ort:Math.round((o.toplam/o.mac)*10)/10})),
+      haftalik:Object.values(haftalik).sort((a,b)=>b.hafta-a.hafta),
+      takimlar:Object.values(takimlar).filter(t=>t.adet>0)
+        .map(t=>({...t,ort:Math.round((t.toplam/t.adet)*10)/10}))
+        .sort((a,b)=>b.ort-a.ort)
+    };
+  })();
+  // Kaleciler ayrı: gol yemeden kapatılan maç ve maç başına yenen gol kaleciye özgü
+  // ölçülerdir; gol/asist sıralamalarında kaleciler hep en altta kalıyordu.
+  const _kaleciler=(function(){
+    const out={};
+    Object.values(D.matches||{}).filter(m=>m&&m.played).forEach(m=>{
+      [['home',m.homeId,Number(m.awayGoals)||0],['away',m.awayId,Number(m.homeGoals)||0]]
+        .forEach(([taraf,tid,yenen])=>{
+          const t=D.teams[tid]; if(!t||!t.squad)return;
+          const gk=(t.squad.starting||[]).find(x=>x&&x.position==='KL');
+          if(!gk||!gk.name)return;
+          const k=gk.name+'|'+tid;
+          if(!out[k])out[k]={name:gk.name,teamId:tid,photo:gk.photo,mac:0,yenen:0,temiz:0,puanT:0,puanN:0};
+          const o=out[k];
+          o.mac++;o.yenen+=yenen;if(yenen===0)o.temiz++;
+          const pn=ptOyuncuPuani(m,gk.name,taraf,'KL');
+          if(pn!=null){o.puanT+=pn;o.puanN++;}
+        });
+    });
+    return Object.values(out).map(o=>({...o,
+      ort:o.puanN?Math.round((o.puanT/o.puanN)*10)/10:null,
+      macBasi:Math.round((o.yenen/Math.max(1,o.mac))*100)/100
+    })).sort((a,b)=>b.temiz-a.temiz||a.macBasi-b.macBasi);
+  })();
+  // Gelişim: maçlar ikiye bölünür, son yarının ortalamasından ilk yarınınki çıkarılır.
+  // En az 4 maç şartı - iki maçlık "gelişim" gürültüden ibaret olurdu.
+  const _gelisim=_puanVerisi.oyuncular.filter(o=>o.mac>=4).map(o=>{
+    const sirali=o.puanlar.slice().sort((a,b)=>a.hafta-b.hafta);
+    const yari=Math.floor(sirali.length/2);
+    const ortalama=a=>a.reduce((x,y)=>x+y.puan,0)/Math.max(1,a.length);
+    return {...o, fark:Math.round((ortalama(sirali.slice(yari))-ortalama(sirali.slice(0,yari)))*10)/10};
+  }).sort((a,b)=>b.fark-a.fark);
   // Mevki süzgeci: forvetler gol attığı için doğal olarak üstte çıkar; defansçılar kendi
   // aralarında karşılaştırılmalı. Süzgeç seçimi sekmeler arası korunur.
   const MEVKI_GRUP={
