@@ -2477,7 +2477,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-14-F';
+window.APP_BUILD='2026-09-14-G';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -6246,6 +6246,40 @@ function _processLogoImg(imgEl){
         ctx.drawImage(testImg,0,0,w,h);
         const imgData=ctx.getImageData(0,0,w,h);
         const data=imgData.data;
+        // ══════════════════════════════════════════════════════════════════════════════════
+        // KULLANICI TALEBİ ("logo renkleri otomatik olarak kanal kartına eklensin"):
+        // Kart zemini önceden kanal ADINDAN türetiliyordu - TRT 1 ile A Spor'un rengi
+        // gerçek logolarıyla hiç ilgisizdi. Artık logonun BASKIN RENGİ ölçülüyor.
+        // Burada hesaplanıyor çünkü piksel verisi ZATEN okunmuş durumda; ayrı bir canvas
+        // turu açmak aynı işi ikinci kez yapmak olurdu.
+        // YÖNTEM: Doygunluğu yüksek pikseller ağırlıklandırılır. Düz ortalama alsaydık
+        // sonuç hep gri çıkardı - logoların çoğu beyaz/siyah zeminli ve ortalama onları
+        // bastırır. Marka rengi, az sayıda ama CANLI pikselde saklıdır.
+        try{
+          var _tR=0,_tG=0,_tB=0,_tW=0;
+          for(var _i=0;_i<data.length;_i+=4){
+            var _a=data[_i+3]; if(_a<128)continue;          // saydam pikseller atlanır
+            var _r=data[_i],_g=data[_i+1],_b=data[_i+2];
+            var _mx=Math.max(_r,_g,_b),_mn=Math.min(_r,_g,_b);
+            var _doygun=_mx-_mn;                             // 0 = gri, yüksek = canlı
+            if(_mx<40||_mn>225)continue;                     // çok koyu/çok açık: marka rengi değil
+            var _ag=_doygun*_doygun;                         // canlı pikseller çok daha ağır
+            _tR+=_r*_ag; _tG+=_g*_ag; _tB+=_b*_ag; _tW+=_ag;
+          }
+          if(_tW>0){
+            var _dr=Math.round(_tR/_tW),_dg=Math.round(_tG/_tW),_db=Math.round(_tB/_tW);
+            window._ptLogoRenkleri=window._ptLogoRenkleri||{};
+            window._ptLogoRenkleri[src]=_dr+','+_dg+','+_db;
+            // Bu logoyu gösteren kartlar varsa zeminleri hemen güncellenir - logo geç
+            // yüklendiğinde kart eski rengiyle kalmasın.
+            try{
+              document.querySelectorAll('[data-logo-kart]').forEach(function(el){
+                if(el.getAttribute('data-logo-kart')===src)
+                  el.style.background='linear-gradient(135deg,rgba('+_dr+','+_dg+','+_db+',.22),rgba('+_dr+','+_dg+','+_db+',.06))';
+              });
+            }catch(e){}
+          }
+        }catch(e){}
         // HATA DÜZELTMESİ (3. TUR - ekran görüntüsüyle 3. kez doğrulandı, kenarlık hâlâ
         // görünüyordu): Eşik 45'ten 60'a YÜKSELTİLDİ - JPEG sıkıştırma artefaktları/gürültüsü
         // yüzünden kenar piksellerinin luminance'ı beklenenden yüksek çıkabiliyordu (özellikle
@@ -21352,14 +21386,23 @@ function renderVideoScreenList(){
       // Renk logonun ADINDAN türetilir (görselden piksel okumak CORS'a takılır ve her
       // çizimde maliyet yaratırdı) - aynı kanal her zaman aynı rengi alır.
       // ══════════════════════════════════════════════════════════════════════════════════
-      const _renkTon=(function(){
-        let h=0; const ad=String(v.title||v.id||'');
-        for(let i=0;i<ad.length;i++)h=(h*31+ad.charCodeAt(i))%360;
-        return h;
-      })();
-      const _kartArka=`linear-gradient(135deg,hsla(${_renkTon},60%,45%,.16),hsla(${(_renkTon+40)%360},60%,45%,.05))`;
+      // KULLANICI TALEBİ ("logo renkleri otomatik olarak kanal kartına eklensin"):
+      // Öncelik LOGONUN GERÇEK RENGİ. Logo henüz yüklenmemişse ya da renk ölçülemiyorsa
+      // (adres yok, CORS engeli) kanal adından türetilen renge düşülür - kart hiçbir
+      // zaman renksiz kalmaz. Logo yüklendiğinde _processLogoImg zemini günceller;
+      // data-logo-kart özniteliği o güncellemenin hedefi bulmasını sağlar.
+      const _olculen=(window._ptLogoRenkleri||{})[v.logo||''];
+      let _kartArka;
+      if(_olculen){
+        _kartArka=`linear-gradient(135deg,rgba(${_olculen},.22),rgba(${_olculen},.06))`;
+      }else{
+        let h=0; const _ad=String(v.title||v.id||'');
+        for(let i=0;i<_ad.length;i++)h=(h*31+_ad.charCodeAt(i))%360;
+        _kartArka=`linear-gradient(135deg,hsla(${h},60%,45%,.16),hsla(${(h+40)%360},60%,45%,.05))`;
+      }
+      const _logoIsaret=v.logo?` data-logo-kart="${escAttr(v.logo)}"`:'';
       if(_videoGorunum==='izgara'&&!reordering){
-        return `<div onclick="openVideoWatch('${v.id}')" style="cursor:pointer;background:${_kartArka};border:1px solid var(--br);border-radius:14px;padding:.5rem .4rem;text-align:center;position:relative">
+        return `<div onclick="openVideoWatch('${v.id}')"${_logoIsaret} style="cursor:pointer;background:${_kartArka};border:1px solid var(--br);border-radius:14px;padding:.5rem .4rem;text-align:center;position:relative">
           <div style="position:relative;width:100%;aspect-ratio:1;border-radius:11px;background:var(--s2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:.35rem">
             ${logoInner}
             ${kilitli?'<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);font-size:1.1rem">🔒</div>':''}
@@ -21369,7 +21412,7 @@ function renderVideoScreenList(){
           <button onclick="ptFavToggle(event,'${escAttr(v.id)}')" title="Favori" style="position:absolute;top:.25rem;right:.25rem;background:rgba(0,0,0,.35);border:none;border-radius:7px;padding:.1rem .25rem;font-size:.7rem;cursor:pointer;line-height:1">${ptFavMi(v.id)?'⭐':'☆'}</button>
         </div>`;
       }
-      return `<div ${reordering?'':`onclick="openVideoWatch('${v.id}')"`} style="background:${_kartArka};display:flex;align-items:center;gap:.7rem;padding:.65rem .2rem;border-bottom:1px solid var(--br);${reordering?'':'cursor:pointer'}">
+      return `<div ${reordering?'':`onclick="openVideoWatch('${v.id}')"`}${_logoIsaret} style="background:${_kartArka};display:flex;align-items:center;gap:.7rem;padding:.65rem .2rem;border-bottom:1px solid var(--br);${reordering?'':'cursor:pointer'}">
         <div style="width:22px;flex-shrink:0;text-align:center;font-size:.68rem;font-weight:700;color:var(--mu)">${channelNoMap.get(v.id)||'?'}</div>
         <div style="position:relative;width:52px;height:52px;flex-shrink:0">
           <div style="width:52px;height:52px;border-radius:13px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:900;color:var(--tx);overflow:hidden;${kilitli?'filter:grayscale(.6) brightness(.6)':''}">${logoInner}</div>
