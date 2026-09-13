@@ -2411,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-N';
+window.APP_BUILD='2026-09-13-P';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -6318,6 +6318,17 @@ function scheduleChatRenderSafely(){
 // kullanılır, AMA yine de o an oynayan bir videoyu veya süren bir dokunuşu asla kesintiye
 // uğratmaz.
 function renderChatScreenSafe(){
+  // KLAVYE KORUMASI: Sohbet canlı olarak yenileniyor (yeni mesaj, tepki vb.). Kullanıcı o
+  // sırada arama kutusuna yazıyorsa, tam çizim kutuyu yok edip klavyeyi kapatır - aramayı
+  // düzeltsek bile arka plandaki yenileme aynı sorunu geri getirirdi.
+  // Arama kutusu ODAKLIYKEN tam çizim ertelenir; yalnızca mesaj listesi tazelenir.
+  try{
+    const inp=document.getElementById('chatAraInp');
+    if(inp&&document.activeElement===inp&&window._chatSonListe){
+      const kap=document.getElementById('chatCommentsList');
+      if(kap){kap.innerHTML=renderChatComments(window._chatSonListe.topLevel,window._chatSonListe.allComments);return;}
+    }
+  }catch(e){}
   if(window._ptPlayingVideoKey)return;
   if(window._ptActiveUploads>0)return;
   if(_isUserTouching){_deferredRenderFns.push(()=>{if(!window._ptPlayingVideoKey&&!(window._ptActiveUploads>0))renderChatScreen();});return;}
@@ -14017,15 +14028,22 @@ function renderChatScreen(){
          koysaydık arama yaparken liste kayar, kutu gözden kaybolurdu.
          Değer her çizimde geri yazılır - aksi halde her tuşta kutu boşalırdı. -->
     <div style="position:relative;margin-bottom:.5rem">
+      <!-- value yalnızca ilk çizimde yazılır; arama artık kutuyu yeniden yaratmadığı için
+           sonraki tuşlarda buraya dokunulmaz. -->
       <input id="chatAraInp" value="${escAttr(window._chatAra||'')}"
         oninput="clearTimeout(window._chatAraT);window._chatAraT=setTimeout(()=>ptChatAra(this.value),250)"
         placeholder="🔍 Mesajlarda ara (metin veya kişi)"
         style="width:100%;box-sizing:border-box;font-size:.74rem;padding:.45rem .6rem;padding-right:2rem;background:var(--s2);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-family:var(--font-family,'Outfit'),sans-serif"/>
-      ${window._chatAra?`<button onclick="ptChatAra('')" title="Temizle"
-        style="position:absolute;right:.3rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--mu);font-size:.9rem;cursor:pointer;padding:.2rem .3rem">✕</button>`:''}
+      <button id="chatAraTemizle" onclick="document.getElementById('chatAraInp').value='';ptChatAra('')" title="Temizle"
+        style="display:${window._chatAra?'':'none'};position:absolute;right:.3rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--mu);font-size:.9rem;cursor:pointer;padding:.2rem .3rem">✕</button>
     </div>
     ${loadOlderBtnHtml}
-    <div id="chatCommentsList" style="margin-bottom:1.3rem;max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch;contain:content">${renderChatComments(topLevel,allComments)}</div>
+    <div id="chatCommentsList" style="margin-bottom:1.3rem;max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch;contain:content">${(function(){
+      // Arama, ekranın tamamını yeniden çizmeden yalnızca BU kabı tazeleyebilsin diye
+      // kaynak listeler saklanır (bkz. ptChatAra içindeki klavye notu).
+      window._chatSonListe={topLevel:topLevel,allComments:allComments};
+      return renderChatComments(topLevel,allComments);
+    })()}</div>
     <div id="chatReplyBanner" style="display:none"></div>
     <div id="chatPhotoPreview" style="display:none;margin-bottom:.4rem"></div>
     <div id="chatVideoPreview" style="display:none;margin-bottom:.4rem"></div>
@@ -14230,26 +14248,29 @@ window.ptChatAra=function(v){
   // verilir. requestAnimationFrame ile beklenir; yeni kutu DOM'a eklenmeden odak verilemez.
   // ══════════════════════════════════════════════════════════════════════════════════════
   window._chatAra=String(v||'');
-  let odakVar=false, imlec=0;
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KULLANICI BİLDİRDİ (ikinci kez): "klavye hâlâ kapanıyor".
+  // İlk denemede odak kaybolduktan SONRA geri verilmeye çalışıldı. Mobilde bu yetmiyor:
+  // klavye bir kez kapandığında programla focus() çağırmak onu geri AÇMIYOR - tarayıcılar
+  // klavyeyi yalnızca kullanıcı dokunuşuyla açar. Yani odağı kaybetmemek gerekiyordu.
+  // ÇÖZÜM: Ekranın tamamı artık yeniden ÇİZİLMİYOR. Yalnızca mesaj listesi kabının içeriği
+  // değiştiriliyor; arama kutusu DOM'da hiç dokunulmadan kalıyor, dolayısıyla odak da
+  // klavye de kaybolmuyor.
+  // Kap bulunamazsa (ekran henüz kurulmamışsa) eski yola düşülür.
+  // ══════════════════════════════════════════════════════════════════════════════════════
   try{
-    const eski=document.getElementById('chatAraInp');
-    if(eski&&document.activeElement===eski){
-      odakVar=true;
-      imlec=eski.selectionStart||String(v||'').length;
+    const kap=document.getElementById('chatCommentsList');
+    const kaynak=window._chatSonListe;
+    if(kap&&kaynak){
+      kap.innerHTML=renderChatComments(kaynak.topLevel,kaynak.allComments);
+      // Temizle düğmesinin görünürlüğü de elle güncellenir - kutuyu yeniden çizmediğimiz
+      // için kendiliğinden değişmez.
+      const tmz=document.getElementById('chatAraTemizle');
+      if(tmz)tmz.style.display=window._chatAra?'':'none';
+      return;
     }
   }catch(e){}
   try{renderChatScreen();}catch(e){}
-  if(odakVar){
-    requestAnimationFrame(function(){
-      try{
-        const yeni=document.getElementById('chatAraInp');
-        if(!yeni)return;
-        yeni.focus({preventScroll:true});
-        // İmleci eski yerine koy - sonuna atlasaydı kelimenin ortasını düzenlemek imkânsızlaşırdı.
-        yeni.setSelectionRange(imlec,imlec);
-      }catch(e){}
-    });
-  }
 };
 // Sohbet aramasında eşleşen harfleri vurgular. TÜM eşleşmeler işaretlenir (highlightMatch
 // yalnızca ilkini bulur) ve metin önce HTML'den kaçırılır - mesaj içeriği kullanıcıdan
