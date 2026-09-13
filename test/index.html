@@ -1991,6 +1991,19 @@ window.ptYonuDikeyeDondur=function(){
 // Ortak pencere sistemi - admin.html'dekiyle AYNI davranış. İki dosya ayrı çalıştığı için
 // kod paylaşılamıyor; ikisi de aynı görsel dili kullansın diye birebir aynı tutuldu.
 // (Tasarım gerekçesi için admin.html içindeki uzun nota bakın.)
+// Durum tanımları - yönetici panelindeki PL_DURUMLAR ile AYNI. İki dosya ayrı çalıştığı
+// için paylaşılamıyor; yeni bir durum eklenirse İKİSİNE de eklenmeli.
+// Eksik kalırsa oyuncu listede görünür ama etiketi "Bilinmeyen" olur - sessizce kaybolmaz.
+var PT_DURUM_ETIKET={
+  injured:{ikon:'🤕',ad:'Sakat'},
+  suspended:{ikon:'⛔',ad:'Cezalı'},
+  cards:{ikon:'🟨',ad:'Kart Cezalısı'},
+  national:{ikon:'🌍',ad:'Milli Takımda'},
+  rest:{ikon:'😴',ad:'Dinlendirildi'},
+  outofsquad:{ikon:'📋',ad:'Kadro Dışı'},
+  ill:{ikon:'🤒',ad:'Hasta'},
+  transfer:{ikon:'🔁',ad:'Transfer Sürecinde'}
+};
 window.ptPencere=function(secenek){
   var o=secenek||{};
   return new Promise(function(cozum){
@@ -2464,7 +2477,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-Y';
+window.APP_BUILD='2026-09-13-Z';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -12583,7 +12596,9 @@ function renderMdKadro(id,m,h,a){
         }
         const subBadge=p._subbedIn?'<span class="pitch-badge" style="background:#7c3aed">🔄</span>':'';
         // Sakatlık/ceza rozeti - admin'in kadro ekranında işaretlediği durum PT'de görünür.
-        const statusBadge=p.status==='injured'?'<span class="pitch-badge" style="background:#f97316">🤕</span>':p.status==='suspended'?'<span class="pitch-badge" style="background:#dc2626">⛔</span>':'';
+        const _dB=p.status?(PT_DURUM_ETIKET[p.status]||{ikon:'❔'}):null;
+        const _dRenk=(p.status==='injured'||p.status==='ill')?'#f97316':(p.status==='suspended'||p.status==='cards')?'#dc2626':'#64748b';
+        const statusBadge=_dB?'<span class="pitch-badge" style="background:'+_dRenk+'">'+_dB.ikon+'</span>':'';
         pitchHtml+=`<div class="pitch-player" style="${posStyle}" onclick="event.stopPropagation();showPlayerDetail('${t.id}','${clickSection}',${clickIdx})">
           <div class="pitch-dot" style="border-color:${p.status?'#f97316':c};width:28px;height:28px;position:relative">${photoHtml}${badges||subBadge||statusBadge?`<div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);display:flex;gap:1px;white-space:nowrap">${badges}${subBadge}${statusBadge}</div>`:''}</div>
           <div class="pitch-name" style="font-size:.46rem">${p.name.split(' ').pop()}</div>
@@ -15634,11 +15649,18 @@ function renderMdAnlati(id,m,h,a){
 // KULLANICI TALEBİ ("Eksikler kadro bölümünde yedeklerin altına, varsa aktif olsun yoksa
 // görünmesin"): Ayrı sekme yerine kadronun devamı oldu. Eksik yoksa blok HİÇ çizilmez -
 // boş bir "eksik yok" kutusu yer kaplardı.
+
 function ptEksiklerBlogu(h,a){
   function takimEksikleri(t){
     if(!t||!t.squad)return [];
     const hepsi=[].concat(t.squad.starting||[],t.squad.bench||[]);
-    return hepsi.filter(p=>p&&p.name&&(p.status==='injured'||p.status==='suspended'));
+    // KULLANICI TALEBİ ("sebebi ne olursa olsun eksikler kadroda görünmeli"): Önceden
+    // yalnızca 'injured' ve 'suspended' listeleniyordu. Dokuz durum eklenince milli takımda
+    // olan ya da kadro dışı bırakılan oyuncular SESSİZCE listeden düşüyordu - yönetici
+    // işaretliyor, hiçbir yerde görünmüyordu.
+    // Artık durumu BOŞ OLMAYAN her oyuncu listelenir; tanınmayan bir durum gelse bile
+    // oyuncu görünür, yalnızca etiketi genel olur.
+    return hepsi.filter(p=>p&&p.name&&p.status);
   }
   const hE=takimEksikleri(h), aE=takimEksikleri(a);
   // SENSÖR: Durumu işaretli ama ADI OLMAYAN kayıt, listede sessizce atlanır. Yönetici
@@ -15661,13 +15683,18 @@ function ptEksiklerBlogu(h,a){
     return `<div style="margin-bottom:.7rem">
       <div style="font-size:.72rem;font-weight:800;margin-bottom:.4rem">${escHtml(t.name||'')} · ${liste.length} eksik</div>
       ${liste.map(p=>{
-        const sakat=(p.status==='injured');
+        const bilgi=PT_DURUM_ETIKET[p.status]||{ikon:'❔',ad:'Kadroda değil'};
+        // Renk: sağlık kaynaklı olanlar turuncu, ceza kırmızı, diğerleri nötr. Hepsini
+        // kırmızı yapmak "her eksiklik bir sorundur" izlenimi verirdi - milli takımda olmak
+        // ya da dinlendirilmek olumsuz bir durum değil.
+        const renk=(p.status==='injured'||p.status==='ill')?'#f97316'
+          :(p.status==='suspended'||p.status==='cards')?'#ef4444':'var(--mu)';
         return `<div style="display:flex;align-items:center;gap:.5rem;padding:.42rem .55rem;background:var(--s2);border:1px solid var(--br);border-radius:10px;margin-bottom:.3rem">
 
           ${p.photo?`<img src="${p.photo}" style="width:26px;height:26px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.style.display='none'"/>`:''}
           <div style="flex:1;min-width:0">
             <div style="font-size:.74rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.name)}</div>
-            <div style="font-size:.58rem;color:${sakat?'#f97316':'#ef4444'};font-weight:700">${sakat?'Sakat':'Cezalı'}${p.position?' · '+escHtml(p.position):''}</div>
+            <div style="font-size:.58rem;color:${renk};font-weight:700">${bilgi.ad}${p.position?' · '+escHtml(p.position):''}</div>
             ${p.statusNote?`<div style="font-size:.58rem;color:var(--mu);line-height:1.4">${escHtml(p.statusNote)}</div>`:''}
           </div>
         </div>`;
@@ -16757,7 +16784,9 @@ function renderTdSquad(tid,t){
   function playerDot(p,xPct,yPct,idx){
     const c=PC[p.position]||'#94a3b8';
     const photoHtml=p.photo?`<img src="${p.photo}" onerror="this.style.display='none'"/>`:p.name.slice(0,2).toUpperCase();
-    const statusBadge=p.status==='injured'?'<div class="pitch-number" style="background:#f97316;top:-8px">🤕</div>':p.status==='suspended'?'<div class="pitch-number" style="background:#dc2626;top:-8px">⛔</div>':'';
+    const _dB2=p.status?(PT_DURUM_ETIKET[p.status]||{ikon:'❔'}):null;
+    const _dRenk2=(p.status==='injured'||p.status==='ill')?'#f97316':(p.status==='suspended'||p.status==='cards')?'#dc2626':'#64748b';
+    const statusBadge=_dB2?'<div class="pitch-number" style="background:'+_dRenk2+';top:-8px">'+_dB2.ikon+'</div>':'';
     return `<div class="pitch-player" style="left:${xPct}%;top:${yPct}%" onclick="showPlayerDetail('${tid}','starting',${idx})">
       <div class="pitch-dot" style="border-color:${p.status?'#f97316':c}">${photoHtml}</div>
       <div class="pitch-name">${p.name.split(' ').pop()}</div>
