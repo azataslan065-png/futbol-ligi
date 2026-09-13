@@ -2411,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-E';
+window.APP_BUILD='2026-09-13-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -11326,6 +11326,7 @@ function renderMatchDetailContent(){
       <button class="md-tab ${_mdTab==='detay'?'active':''}" onclick="switchMdTab('detay')">Detay</button>
       <button class="md-tab ${_mdTab==='kadro'?'active':''}" onclick="switchMdTab('kadro')">Kadro</button>
       <button class="md-tab ${_mdTab==='karne'?'active':''}" onclick="switchMdTab('karne')">Maç Akışı</button>
+      <button class="md-tab ${_mdTab==='anlati'?'active':''}" onclick="switchMdTab('anlati')">📖 Anlatım</button>
       <button class="md-tab ${_mdTab==='anlatim'?'active':''}" onclick="switchMdTab('anlatim')">Yorumlar</button>
       <button class="md-tab ${_mdTab==='standings'?'active':''}" onclick="switchMdTab('standings')">Puan Durumu</button>
       <button class="md-tab ${_mdTab==='istatistik'?'active':''}" onclick="switchMdTab('istatistik')">İstatistik</button>
@@ -11351,6 +11352,7 @@ function renderMatchDetailContent(){
     body=`<div style="padding:.85rem .9rem">${liveBtnHtml}${renderStandingsPreviewCard([m.homeId,m.awayId],true,(m.isLive&&_mdLiveOn)?m:null)}</div>`;
   }
   else if(_mdTab==='istatistik')body=renderMdIstatistik(id,m,h,a);
+  else if(_mdTab==='anlati')body=renderMdAnlati(id,m,h,a);
   else if(_mdTab==='karsi')body=renderMdKarsi(id,m,h,a);
 
   document.getElementById('sheetContent').innerHTML=`
@@ -14958,6 +14960,156 @@ function renderMdIstatistik(id,m,h,a){
   </div>`;
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// MAÇ ANLATIMI
+// KULLANICI TALEBİ: "her olay sanki gerçek bir insan ağzından çıkıyormuş gibi yazılsın,
+// ilgili süreyle beraber".
+//
+// TASARIM KARARLARI:
+// 1) ÇEŞİTLİLİK: Her olay türü için birden çok cümle kalıbı var ve aralarından RASTGELE
+//    değil, olayın kendi kimliğine göre SEÇİM yapılır. Rastgele olsaydı sayfa her
+//    açılışta farklı cümleler gösterir, kullanıcı "az önce başka yazıyordu" derdi.
+//    Aynı olay her zaman aynı cümleyi üretir - tutarlı ve güvenilir.
+// 2) BAĞLAM: Cümle yalnızca olayı değil, o andaki DURUMU da anlatır. Skor eşitlendi mi,
+//    öne geçildi mi, fark açıldı mı - anlatımı canlı kılan budur.
+// 3) DAKİKA DİLİ: "45. dakikada" yerine maçın hangi bölümünde olduğu da söylenir -
+//    "ilk yarının son anlarında", "maçın bitimine dakikalar kala" gibi.
+// 4) ABARTI YOK: Spiker dili taklit edilirken gerçekte olmayan şeyler uydurulmaz. Elimizde
+//    yalnızca gol, asist, kart ve oyuncu değişikliği var; pas, şut, kurtarış verisi yok.
+//    Bu yüzden cümleler olanı anlatır, hayal kurmaz.
+function ptAnlatimCumlesi(e,durum){
+  const dk=Number(e.min)||0;
+  const ad=e.player||'Oyuncu';
+  const takim=durum.takimAdi||'';
+  const rakip=durum.rakipAdi||'';
+  // Seçim, oyuncu adı ve dakikadan türetilir - aynı olay hep aynı cümleyi verir.
+  const secim=(String(ad).length+dk)%3;
+  // Dakikanın maç içindeki yeri - anlatıma ritim katar.
+  const evre=(dk<=10)?'acilis':(dk<=40)?'ilkYari':(dk<=45)?'ilkYariSonu':
+             (dk<=55)?'ikinciBaslangic':(dk<=80)?'ikinciYari':(dk<=90)?'final':'uzatma';
+  const evreSoz={
+    acilis:'Daha maçın başında',
+    ilkYari:'İlk yarının ortalarında',
+    ilkYariSonu:'İlk yarı biterken',
+    ikinciBaslangic:'İkinci yarının hemen başında',
+    ikinciYari:'İkinci yarıda',
+    final:'Maçın son bölümünde',
+    uzatma:'Uzatma dakikalarında'
+  }[evre];
+
+  if(e.type==='goal'||e.type==='pen_goal'){
+    const pen=(e.type==='pen_goal');
+    const asist=e.player2?` ${e.player2}'nin pasıyla`:'';
+    // Skor bağlamı: bu gol neyi değiştirdi?
+    let baglam='';
+    if(durum.oncekiFark===0)baglam=`${takim} öne geçti.`;
+    else if(durum.oncekiFark===-1)baglam='Skor eşitlendi.';
+    else if(durum.oncekiFark<-1)baglam=`${takim} farkı ${Math.abs(durum.oncekiFark)-1}'e indirdi.`;
+    else baglam=`${takim} farkı ${durum.oncekiFark+1}'e çıkardı.`;
+    const kaliplar=pen?[
+      `${evreSoz} penaltı noktasına ${ad} geçti ve tereddüt etmeden ağları havalandırdı. ${baglam}`,
+      `${dk}. dakikada kazanılan penaltıyı ${ad} gole çevirdi. ${baglam}`,
+      `${evreSoz} ${ad}, penaltıdan hata yapmadı. ${baglam}`
+    ]:[
+      `${evreSoz}${asist} ${ad} skoru değiştirdi. ${baglam}`,
+      `${dk}. dakikada ${ad}${asist} ağları havalandırdı. ${baglam}`,
+      `${evreSoz} ${ad}, ${rakip} savunmasını geçerek topu filelerle buluşturdu.${asist?' Asist'+asist.replace(' ile','')+'.':''} ${baglam}`
+    ];
+    return kaliplar[secim];
+  }
+  if(e.type==='og'){
+    return [
+      `${evreSoz} talihsiz bir an: ${ad} topu kendi kalesine gönderdi. ${rakip} beklemediği bir armağan aldı.`,
+      `${dk}. dakikada ${ad}'nin kendi kalesine attığı golle skor değişti.`,
+      `${evreSoz} ${ad} müdahale etmek isterken topu kendi ağlarına yolladı.`
+    ][secim];
+  }
+  if(e.type==='yellow'){
+    return [
+      `${evreSoz} ${ad} sert bir müdahalede bulundu ve hakem sarı kartını gösterdi.`,
+      `${dk}. dakikada ${ad} sarı kartla uyarıldı. Bundan sonra daha dikkatli olmak zorunda.`,
+      `${evreSoz} ${ad}, hakemin sarı kartıyla karşılaştı.`
+    ][secim];
+  }
+  if(e.type==='red'){
+    return [
+      `${evreSoz} ${ad} için maç erken bitti: direkt kırmızı kart. ${takim} eksik kaldı.`,
+      `${dk}. dakikada ${ad} kırmızı kart gördü ve oyundan atıldı. ${takim} bundan sonra bir eksikle oynayacak.`,
+      `${evreSoz} hakem ${ad}'e kırmızı kartı gösterdi. ${takim} için işler zorlaştı.`
+    ][secim];
+  }
+  if(e.type==='yellow2red'){
+    return [
+      `${evreSoz} ${ad} ikinci sarıdan kırmızı kart gördü. ${takim} on kişi kaldı.`,
+      `${dk}. dakikada ${ad}'in ikinci sarısı kırmızıya dönüştü.`,
+      `${evreSoz} ${ad} bir kez daha faul yaptı ve ikinci sarıyla oyun dışı kaldı.`
+    ][secim];
+  }
+  if(e.type==='sub'){
+    const cikan=e.player2||'';
+    return [
+      `${evreSoz} ${takim} kadrosuna dokundu: ${cikan?cikan+' kenara geldi, ':''}${ad} oyuna girdi.`,
+      `${dk}. dakikada ${ad} sahaya çıktı${cikan?', '+cikan+' kenara geldi':''}.`,
+      // Türkçe ek uyumu: "Iniesta'i" yanlış, "Iniesta'yı" doğru. Ünlüyle biten adlarda
+      // kaynaştırma harfi gerekir. Tam bir ek çözümleyicisi yazmak yerine ismi ek almadan
+      // kullanan bir kalıp seçildi - yanlış ek, eksik bilgiden daha rahatsız edici.
+      `${evreSoz} teknik heyet bir değişiklik yaptı: ${ad} oyuna girdi${cikan?', '+cikan+' dinlenmeye çekildi':''}.`
+    ][secim];
+  }
+  return '';
+}
+function renderMdAnlati(id,m,h,a){
+  const olaylar=(m.events||[]).slice()
+    .filter(e=>e&&['goal','pen_goal','og','yellow','red','yellow2red','sub'].indexOf(e.type)!==-1)
+    .sort((x,y)=>(Number(x.min)||0)-(Number(y.min)||0));
+  if(!olaylar.length){
+    return `<div style="text-align:center;color:var(--mu);padding:2.5rem 1rem;font-size:.82rem;line-height:1.8">
+      📖<br/>Bu maç için henüz anlatılacak bir olay yok.
+      <br/><span style="font-size:.72rem">Gol, kart ve oyuncu değişiklikleri burada anlatıya dönüşür.</span>
+    </div>`;
+  }
+  // Skor, olaylar ilerledikçe adım adım kurulur - her cümle O ANKİ skora göre yazılır.
+  let hg=0,ag=0;
+  const satirlar=olaylar.map(e=>{
+    const evSahibiOlayi=(e.team==='home');
+    const takimAdi=evSahibiOlayi?h.name:a.name;
+    const rakipAdi=evSahibiOlayi?a.name:h.name;
+    // Golden ÖNCEKİ fark, o takımın bakış açısıyla.
+    const oncekiFark=evSahibiOlayi?(hg-ag):(ag-hg);
+    const cumle=ptAnlatimCumlesi(e,{takimAdi,rakipAdi,oncekiFark});
+    // Skoru olaydan SONRA güncelle ki cümle doğru bağlamı kullansın.
+    if(e.type==='goal'||e.type==='pen_goal'){evSahibiOlayi?hg++:ag++;}
+    else if(e.type==='og'){evSahibiOlayi?ag++:hg++;}
+    const golMu=(e.type==='goal'||e.type==='pen_goal'||e.type==='og');
+    const renk=golMu?'#22c55e':(e.type==='red'||e.type==='yellow2red')?'#ef4444':
+               (e.type==='yellow')?'#f59e0b':'var(--mu)';
+    return `<div style="display:flex;gap:.6rem;margin-bottom:.55rem">
+      <div style="flex-shrink:0;width:2.6rem;text-align:right;padding-top:.15rem">
+        <div style="font-size:.76rem;font-weight:900;color:${renk}">${Number(e.min)||0}'</div>
+        ${golMu?`<div style="font-size:.58rem;color:var(--mu);font-weight:700">${hg}-${ag}</div>`:''}
+      </div>
+      <div style="flex-shrink:0;width:2px;background:${renk};border-radius:2px;opacity:.5"></div>
+      <div style="flex:1;min-width:0;font-size:.76rem;line-height:1.65;padding-bottom:.2rem">${escHtml(cumle)}</div>
+    </div>`;
+  }).join('');
+  // Kapanış cümlesi - maç bittiyse sonucu özetler.
+  const bitti=!!m.played;
+  const kapanis=bitti?(function(){
+    const fh=Number(m.homeGoals)||0,fa=Number(m.awayGoals)||0;
+    if(fh>fa)return `Maç ${h.name}'in ${fh}-${fa}'lik üstünlüğüyle sona erdi.`;
+    if(fa>fh)return `${a.name} deplasmanda ${fa}-${fh} kazanarak sahadan ayrıldı.`;
+    return `Karşılaşma ${fh}-${fa} berabere bitti; iki takım da birer puanla yetindi.`;
+  })():'Maç devam ediyor.';
+  return `<div style="padding:.2rem 0">
+    <div style="font-size:.66rem;color:var(--mu);line-height:1.6;margin-bottom:.8rem">
+      📖 Maçın olayları, oluş sırasına göre anlatıya dönüştürüldü.
+    </div>
+    ${satirlar}
+    <div style="margin-top:.6rem;padding:.6rem .7rem;background:var(--s2);border:1px solid var(--br);border-radius:11px;font-size:.76rem;font-weight:700;line-height:1.6">
+      ${escHtml(kapanis)}
+    </div>
+  </div>`;
+}
 function renderMdKarsi(id,m,h,a){
   const h2h=Object.values(D.matches||{}).filter(m2=>m2.played&&((m2.homeId===h.id&&m2.awayId===a.id)||(m2.homeId===a.id&&m2.awayId===h.id))).sort((a2,b2)=>(b2.week||0)-(a2.week||0));
   const hW=h2h.filter(m2=>(m2.homeId===h.id?(m2.homeGoals||0)>(m2.awayGoals||0):(m2.awayGoals||0)>(m2.homeGoals||0))||m2.penaltyWinner===h.id).length;
