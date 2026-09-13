@@ -1956,6 +1956,13 @@ window.ptYonuDikeyeDondur=function(){
         }else if(window._ptTamEkranAcik){
           window._ptTamEkranAcik=false;
           // ══════════════════════════════════════════════════════════════════════════════
+          // ESKİ YAKLAŞIM KALDIRILDI (teşhis: tercih=false çıktı):
+          // "Oynatıcı hâlâ duruyorsa kullanıcı bilerek çıkmıştır" varsayımı YANLIŞTI -
+          // kullanıcı 📺 düğmesiyle listeyi açtığında da oynatıcı bir süre DOM'da kalıyor
+          // ve bu, bilerek çıkış sanılıyordu. Tercih artık TAHMİN EDİLMİYOR: yalnızca
+          // kullanıcı tam ekran düğmesine bastığında (toggleFullscreen'in çıkış dalı)
+          // sıfırlanır. Örnekleyici tercihe hiç dokunmaz, sadece zaman damgası tutar.
+          // (eski ayrım notu)
           // TAM EKRANIN NEDEN BİTTİĞİNİ AYIRT ETME
           // Beş turdur "tam ekran hangi anda ölçülmeli" sorusunu çözmeye çalıştım; her
           // seferinde yakalama noktası yanlış çıktı. Asıl ayrım şu:
@@ -1975,13 +1982,7 @@ window.ptYonuDikeyeDondur=function(){
               ?PTPlayer.getVisualState():null;
             if(_gd)window._ptYatayTercihi=!!_gd.yatayKilit;
           }catch(e){}
-          var oynaticiDuruyor=!!(document.querySelector('.ptp')||document.getElementById('videoPlayerBox'));
-          if(oynaticiDuruyor){
-            window._ptSonTamEkranZamani=0;     // bilerek çıkıldı - tercih sıfırlanır
-            window._ptTamEkranTercihi=false;
-          }else{
-            window._ptTamEkranTercihi=true;    // yıkım yüzünden bitti - tercih korunur
-          }
+          // Tercihe dokunulmaz - yalnızca damga güncel kalır.
         }
       }catch(e){}
     },500);
@@ -2410,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-08-S';
+window.APP_BUILD='2026-09-08-T';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -22409,6 +22410,7 @@ window.PTFrame=(function(){
     // Yani bakılacak DOM kalmıyor. Durum artık bir BAYRAKTA tutulur: yok etme bayrağı
     // silmez, geçişten sonra okunabilir. Üç düzeltmenin tutmamasının sebebi buydu.
     window._ptTamEkranAcik=acik;
+    window._ptTamEkranTercihi=acik;   // gömülü oynatıcıda da aynı kural
     try{
       var fsEl=document.fullscreenElement||document.webkitFullscreenElement;
       if(acik&&!fsEl){
@@ -25478,6 +25480,7 @@ window.PTPlayer=(function(){
       root.classList.add('ptp-fs');
       document.body.classList.add('ptp-fs-active');
       window._ptTamEkranAcik=true;   // bkz. gömülü oynatıcıdaki bayrak notu
+      window._ptTamEkranTercihi=true;   // kullanıcı tam ekran istedi - kanal değişse de sürsün
       showControls();
       // Aynı sebeple tam ekrana GİRERKEN de yeniden ölçülür.
       setTimeout(function(){if(S&&(S.rotate===90||S.rotate===270))applyVisual();},60);
@@ -25548,6 +25551,9 @@ window.PTPlayer=(function(){
       root.classList.remove('ptp-fs');
       document.body.classList.remove('ptp-fs-active');
       window._ptTamEkranAcik=false;
+      // BURASI gerçek çıkış: kullanıcı ⛶ düğmesine bastı ya da kod bilinçli olarak çıktı.
+      // Tercih yalnızca burada sıfırlanır - yıkım/geçiş sırasında DEĞİL.
+      window._ptTamEkranTercihi=false;
       S.fsFromRotate=false;
       S.fsFromRemote=false;
       // Tam ekrandan çıkınca sahne küçülür; döndürülmüş video kutusu piksel ölçülü olduğundan
@@ -28320,10 +28326,8 @@ window.openVideoWatch=function(videoId,secenek){
     // Bilerek çıkıldıysa tercih sıfırlandığı için burası false döner.
     var _yeniKapandi=!!window._ptTamEkranTercihi;
     var _oncekiTam=!!(_listedenTam||window._ptTamEkranAcik||_yeniKapandi||_tamKok||_tamFrame||_tamGovde||_tamNative);
-    // Tercih okundu; yeni oynatıcı tam ekrana geçtiğinde örnekleyici onu zaten yeniden
-    // işaretleyecek. Burada temizlenmezse, kullanıcı tam ekrandan çıkıp uzun süre sonra
-    // başka bir video açtığında o da tam ekran başlardı.
-    window._ptTamEkranTercihi=false;
+    // Tercih BURADA temizlenmez: kullanıcı arka arkaya kanal değiştirebilir ve her seferinde
+    // tam ekran sürmeli. Temizleme yalnızca gerçek çıkışta (⛶ düğmesi) yapılır.
     // Hangi işaretin dolu olduğu kayda geçer - bir dahaki raporda tespitin neden
     // başarısız olduğu (hepsi false ise) ya da hangi yolun kullanıldığı görülür.
     try{
