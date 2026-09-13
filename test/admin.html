@@ -1724,7 +1724,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-U';
+window.APP_BUILD='2026-09-13-W';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6192,7 +6192,7 @@ function openKadro(tid){
         :'<div style="width:50px;height:50px;border-radius:50%;background:var(--s3);border:2px dashed var(--br);display:flex;align-items:center;justify-content:center;font-size:1.2rem;margin:0 auto .25rem">'+(isEmpty?'➕':'👤')+'</div>';
       var posBtns=POSITIONS.map(function(pos){return '<button class="pbtn" onclick="setPlPos(\'starting\','+i+',\''+pos+'\')" style="background:'+(pl.position===pos?PC[pos]+'22':'transparent')+';border:1px solid '+(pl.position===pos?PC[pos]:'var(--br)')+';color:'+(pl.position===pos?PC[pos]:'var(--mu2)')+'">'+pos+'</button>';}).join('');
       var status=pl.status||'';
-      var statusBadge=isEmpty?'':'<button onclick="cyclePlStatus(\'starting\','+i+')" title="Sakatlik/Ceza" style="position:absolute;top:3px;left:3px;background:'+(status==='injured'?'rgba(249,115,22,.85)':status==='suspended'?'rgba(239,68,68,.85)':'rgba(255,255,255,.12)')+';border:none;border-radius:50%;width:19px;height:19px;font-size:.62rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:2">'+(status==='injured'?'\ud83e\udd15':status==='suspended'?'\u26d4':'\u00b7')+'</button>';
+      var statusBadge=isEmpty?'':'<button onclick="cyclePlStatus(\'starting\','+i+')" title="Oyuncu durumu" style="position:absolute;top:-4px;left:-4px;background:'+(status?'var(--ac)':'var(--s3)')+';border:2px solid '+(status?'var(--ac2,#9d5cf0)':'var(--br)')+';box-shadow:0 2px 8px rgba(0,0,0,.35);border-radius:50%;width:30px;height:30px;font-size:.85rem;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:3">'+(status?ptDurumBilgi(status).ikon:'\ud83e\ude7a')+'</button>';
       return '<div style="background:var(--s2);border:1px solid '+(pl.position?c+'44':'var(--br)')+';border-radius:11px;padding:.55rem .45rem .48rem;text-align:center;position:relative">'
         +statusBadge
         +'<div onclick="triggerPlPhoto(\'starting\','+i+')" style="cursor:pointer;position:relative;display:inline-block;margin-bottom:.22rem">'+av+'<div style="position:absolute;bottom:1px;right:1px;background:var(--ac);border-radius:50%;width:15px;height:15px;display:flex;align-items:center;justify-content:center;font-size:.58rem">📷</div></div>'
@@ -6274,37 +6274,96 @@ function bindKadroInputs(){
 }
 
 // ── OYUNCU DEĞİŞİKLİĞİ (İlk 11 ↔ Yedek) ──
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// OYUNCU DURUMU (kullanıcı talebi: "daha fazla olasılık ekle; cezalı kart sınırı vb.")
+// Önceden üç hâl arasında DÖNÜLÜYORDU (normal → sakat → cezalı). Seçenek sayısı artınca
+// döngü kullanışsız hâle gelir: istediğiniz hâle ulaşmak için birkaç kez dokunmak gerekir
+// ve yanlışlıkla geçilir. Artık bir SEÇİM penceresi açılıyor.
+// Sebep alanı da burada soruluyor; önceki tasarımda ayrı bir prompt çıkıyordu.
+var PL_DURUMLAR=[
+  {k:'',          ikon:'✅', ad:'Normal',            aciklama:'Oynayabilir'},
+  {k:'injured',   ikon:'🤕', ad:'Sakat',             aciklama:'Sakatlık nedeniyle yok'},
+  {k:'suspended', ikon:'⛔', ad:'Cezalı',            aciklama:'Disiplin cezası'},
+  {k:'cards',     ikon:'🟨', ad:'Kart Cezalısı',     aciklama:'Sarı kart sınırını doldurdu'},
+  {k:'national',  ikon:'🌍', ad:'Milli Takımda',     aciklama:'Milli takım görevinde'},
+  {k:'rest',      ikon:'😴', ad:'Dinlendirildi',     aciklama:'Teknik heyet kararı'},
+  {k:'outofsquad',ikon:'📋', ad:'Kadro Dışı',        aciklama:'Kadroya alınmadı'},
+  {k:'ill',       ikon:'🤒', ad:'Hasta',             aciklama:'Sağlık sorunu'},
+  {k:'transfer',  ikon:'🔁', ad:'Transfer Sürecinde',aciklama:'Takımdan ayrılabilir'}
+];
+window.ptDurumBilgi=function(k){
+  for(var i=0;i<PL_DURUMLAR.length;i++)if(PL_DURUMLAR[i].k===(k||''))return PL_DURUMLAR[i];
+  return PL_DURUMLAR[0];
+};
 function cyclePlStatus(section,idx){
   var t=S.teams[_kadroTid];if(!t||!t.squad)return;
   var arr=t.squad[section];if(!arr||!arr[idx])return;
-  var cur=arr[idx].status||'';
-  var next=cur===''?'injured':cur==='injured'?'suspended':'';
-  arr[idx].status=next;
-  // KULLANICI TALEBİ ("eksikleri de nedenleriyle beraber yönetici belirlesin"): Durum
-  // işaretlenirken sebep de sorulur. Boş bırakılabilir - zorunlu kılmak, hızlıca işaretlemek
-  // isteyen yöneticiyi yavaşlatırdı. Sebep girilirse Puan Tablosu'ndaki eksikler listesinde
-  // oyuncunun altında görünür.
-  if(next){
-    var _mevcut=arr[idx].statusNote||'';
-    var _sebep=prompt((next==='injured'?'🤕 Sakatlık sebebi':'⛔ Ceza sebebi')
-      +' (isteğe bağlı - boş bırakabilirsiniz)\n\nÖrnek: '
-      +(next==='injured'?'Sağ diz, 3 hafta':'Kırmızı kart cezası, 2 maç'),_mevcut);
-    // İptal edilirse (null) eski sebep korunur; boş yazılırsa sebep silinir.
-    if(_sebep!==null)arr[idx].statusNote=_sebep.trim();
-  }else{
-    delete arr[idx].statusNote;   // normale döndüyse sebep de anlamsızlaşır
-  }
-  // KULLANICI TALEBİ: Sakatlık/Ceza Geçmişi Zaman Çizelgesi - her durum değişikliği bir
-  // geçmiş kaydına eklenir (Puan Tablosu'nda oyuncunun geçmişini görebilmek için).
-  if(!arr[idx].statusHistory)arr[idx].statusHistory=[];
-  arr[idx].statusHistory.push({status:next||'healthy',date:new Date().toLocaleDateString('tr-TR'),ts:Date.now()});
-  if(arr[idx].statusHistory.length>20)arr[idx].statusHistory=arr[idx].statusHistory.slice(-20); // Şişmeyi önlemek için son 20 kayıt tutulur.
-  save().then(function(){
-    openKadro(_kadroTid);
-    if(next)toast((next==='injured'?'🤕 Sakat':'⛔ Cezalı')+' olarak işaretlendi');
-    else toast('✅ Durum normale döndü');
-  });
+  var oyuncu=arr[idx];
+  var cur=oyuncu.status||'';
+  // Sarı kart sayısı - "Kart Cezalısı" seçeneğini önerirken kullanılır.
+  var sari=0;
+  try{
+    Object.values(S.matches||{}).forEach(function(m){
+      (m.events||[]).forEach(function(e){
+        if(e&&e.player===oyuncu.name&&(e.type==='yellow'))sari++;
+      });
+    });
+  }catch(e){}
+  var LIMIT=(S.lgConfig&&S.lgConfig.yellowLimit)||4;
+  var html='<div style="display:flex;flex-direction:column;gap:.35rem;max-height:52vh;overflow-y:auto">'
+    +PL_DURUMLAR.map(function(d){
+      var secili=(d.k===cur);
+      return '<button onclick="ptDurumSec(\''+section+'\','+idx+',\''+d.k+'\')" '
+        +'style="display:flex;align-items:center;gap:.6rem;text-align:left;width:100%;min-height:44px;'
+        +'padding:.5rem .7rem;border-radius:11px;cursor:pointer;font-family:Outfit,sans-serif;'
+        +'background:'+(secili?'var(--ac)':'var(--s2)')+';color:'+(secili?'var(--ac-tx,#fff)':'var(--tx)')+';'
+        +'border:1.5px solid '+(secili?'var(--ac)':'var(--br)')+'">'
+        +'<span style="font-size:1.05rem;flex-shrink:0">'+d.ikon+'</span>'
+        +'<span style="flex:1;min-width:0">'
+          +'<span style="display:block;font-size:.78rem;font-weight:800">'+d.ad+'</span>'
+          +'<span style="display:block;font-size:.62rem;opacity:.75">'+d.aciklama+'</span>'
+        +'</span>'
+        +(secili?'<span style="flex-shrink:0;font-size:.7rem">✓</span>':'')
+        +'</button>';
+    }).join('')
+    +'</div>'
+    // Kart sınırı uyarısı - yönetici saymak zorunda kalmasın.
+    +(sari>=LIMIT?'<div style="margin-top:.6rem;padding:.5rem .65rem;border-radius:10px;font-size:.68rem;line-height:1.55;'
+      +'background:rgba(251,191,36,.14);border:1px solid rgba(251,191,36,.4);color:#fbbf24">'
+      +'⚠️ Bu oyuncunun '+sari+' sarı kartı var (sınır '+LIMIT+'). Kart cezası gerekebilir.</div>'
+      :(sari?'<div style="margin-top:.6rem;font-size:.64rem;color:var(--mu);text-align:center">'
+        +'Sarı kart: '+sari+' / '+LIMIT+'</div>':''));
+  openSheet('🩺 '+(oyuncu.name||'Oyuncu')+' — Durum',html,'openKadro:'+_kadroTid);
 }
+// Seçim yapıldıktan sonra sebep sorulur ve kaydedilir.
+window.ptDurumSec=function(section,idx,yeniDurum){
+  var t=S.teams[_kadroTid];if(!t||!t.squad)return;
+  var arr=t.squad[section];if(!arr||!arr[idx])return;
+  var oyuncu=arr[idx];
+  var bilgi=ptDurumBilgi(yeniDurum);
+  function kaydet(sebep){
+    oyuncu.status=yeniDurum;
+    if(yeniDurum){
+      if(sebep!=null)oyuncu.statusNote=String(sebep).trim();
+    }else{
+      delete oyuncu.statusNote;   // normale döndüyse sebep anlamsızlaşır
+    }
+    // Geçmiş kaydı - oyuncunun durum çizelgesinde görünür.
+    if(!oyuncu.statusHistory)oyuncu.statusHistory=[];
+    oyuncu.statusHistory.push({status:yeniDurum||'healthy',not:oyuncu.statusNote||'',
+      date:new Date().toLocaleDateString('tr-TR'),ts:Date.now()});
+    if(oyuncu.statusHistory.length>20)oyuncu.statusHistory=oyuncu.statusHistory.slice(-20);
+    save().then(function(){
+      closeSheet();
+      openKadro(_kadroTid);
+      toast(bilgi.ikon+' '+(yeniDurum?bilgi.ad+' olarak işaretlendi':'Durum normale döndü'));
+    });
+  }
+  if(!yeniDurum){kaydet(null);return;}
+  ptSor('Sebep (isteğe bağlı - boş bırakabilirsiniz)',oyuncu.statusNote||'',
+    {baslik:bilgi.ikon+' '+bilgi.ad,ikon:'',ipucu:'Örn: Sağ diz, 3 hafta'})
+    .then(function(sebep){ kaydet(sebep); });
+};
 
 function openSwapPicker(startingIdx){
   var t=S.teams[_kadroTid];if(!t)return;
