@@ -2411,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-T';
+window.APP_BUILD='2026-09-13-U';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -15293,7 +15293,22 @@ function ptAnlatimCumlesi(e,durum){
   // Maç bölümleri
   if(e.type==='match_start')return 'Hakemin düdüğüyle birlikte mücadele başladı!';
   if(e.type==='half_time')return 'İlk yarı sona erdi. Takımlar soyunma odasına gidiyor.';
-  if(e.type==='extra_time')return `Hakem ${dk?dk+' dakikalık ':''}uzatma süresi verdi.`;
+  if(e.type==='extra_time'){
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "uzatma 90 dakika uzatıldı diye kaydediliyor"):
+    // Uzatma SÜRESİ 'extraMin' alanında; 'min' ise olayın maç dakikasıdır (45 ya da 90).
+    // Yanlış alanı okuduğum için "90 dakikalık uzatma" yazıyordu.
+    const sure=Number(e.extraMin);
+    const yariAdi=(e.half===1||String(e.min)==='45')?'İlk yarının':'Karşılaşmanın';
+    if(!isFinite(sure)||sure<=0){
+      // Uzatma girilmemişse bunu da anlatmak gerekir - sessiz kalmak "veri yok" hissi verir.
+      return `${yariAdi} normal süresi tamamlandı, hakem uzatma vermedi.`;
+    }
+    return [
+      `${yariAdi} normal süresi doldu; hakem ${sure} dakika uzatma verdi.`,
+      `Dördüncü hakem ${sure} dakikalık uzatma süresini gösterdi.`,
+      `${yariAdi} bitimine ${sure} dakika eklendi.`
+    ][(sure+String(e.id||'').length)%3];
+  }
   if(e.type==='match_end')return 'Hakem son düdüğü çaldı, mücadele tamamlandı.';
   if(e.type==='free_comment')return e.note||e.text||'';
   return '';
@@ -15449,7 +15464,17 @@ function renderMdAnlati(id,m,h,a){
       `<b>${escHtml(t.name||'')}</b> son maçları: ${kutular} <span style="font-size:.6rem;color:var(--mu)">(eskiden yeniye)</span>`,'var(--mu)'));
   });
   // ── OLAYLAR ──
-  const olaylar=(m.events||[]).slice().sort((x,y)=>(Number(x.min)||0)-(Number(y.min)||0));
+  // KULLANICI TALEBİ ("önce uzatmayı yazsın, sonra maçın bittiğini söylesin"):
+  // Uzatma ve maç sonu aynı dakikada (90) kaydediliyor; yalnızca dakikaya göre sıralamak
+  // ikisinin sırasını rastgele bırakıyordu. Eşit dakikada olay TÜRÜNE göre ikinci bir
+  // sıralama uygulanır: uzatma bitişten, devre arası da uzatmadan sonra gelir.
+  const OLAY_SIRA={match_start:0,goal:1,pen_goal:1,pen_awarded:1,pen_miss:1,og:1,
+    yellow:1,red:1,yellow2red:1,sub:1,extra_time:2,half_time:3,match_end:4};
+  const olaylar=(m.events||[]).slice().sort((x,y)=>{
+    const d=(Number(x.min)||0)-(Number(y.min)||0);
+    if(d!==0)return d;
+    return (OLAY_SIRA[x.type]!=null?OLAY_SIRA[x.type]:1)-(OLAY_SIRA[y.type]!=null?OLAY_SIRA[y.type]:1);
+  });
   if(!olaylar.length){
     mesajlar.push(ptAnlatiSatir('⏳',null,'','Mücadele henüz başlamadı, olaylar burada anlatılacak.','var(--mu)'));
   }
