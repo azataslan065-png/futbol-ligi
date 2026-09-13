@@ -2411,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-K';
+window.APP_BUILD='2026-09-13-L';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -13999,6 +13999,17 @@ function renderChatScreen(){
       <button onclick="closeSheet()" style="background:var(--s2);border:1px solid var(--br);border-radius:8px;width:28px;height:28px;color:var(--tx);font-size:.85rem;cursor:pointer">✕</button>
     </div>
     ${pinnedBtnHtml}
+    <!-- KULLANICI TALEBİ ("sohbette arama"): Kutu mesaj listesinin ÜSTÜNDE duruyor; altına
+         koysaydık arama yaparken liste kayar, kutu gözden kaybolurdu.
+         Değer her çizimde geri yazılır - aksi halde her tuşta kutu boşalırdı. -->
+    <div style="position:relative;margin-bottom:.5rem">
+      <input id="chatAraInp" value="${escAttr(window._chatAra||'')}"
+        oninput="clearTimeout(window._chatAraT);window._chatAraT=setTimeout(()=>ptChatAra(this.value),250)"
+        placeholder="🔍 Mesajlarda ara (metin veya kişi)"
+        style="width:100%;box-sizing:border-box;font-size:.74rem;padding:.45rem .6rem;padding-right:2rem;background:var(--s2);border:1px solid var(--br);border-radius:9px;color:var(--tx);font-family:var(--font-family,'Outfit'),sans-serif"/>
+      ${window._chatAra?`<button onclick="ptChatAra('')" title="Temizle"
+        style="position:absolute;right:.3rem;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--mu);font-size:.9rem;cursor:pointer;padding:.2rem .3rem">✕</button>`:''}
+    </div>
     ${loadOlderBtnHtml}
     <div id="chatCommentsList" style="margin-bottom:1.3rem;max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch;contain:content">${renderChatComments(topLevel,allComments)}</div>
     <div id="chatReplyBanner" style="display:none"></div>
@@ -14187,7 +14198,40 @@ window.loadOlderChatMessages=function(){
     if(newList)newList.scrollTop=newList.scrollHeight-prevScrollHeight;
   });
 };
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// SOHBETTE ARAMA (kullanıcı talebi)
+// Sohbet birikince geçmiş bir konuşmayı bulmak imkânsızlaşıyordu; uygulamadaki diğer
+// listelerde arama vardı, burada yoktu.
+// Arama METİN ve YAZAR ADI üzerinde çalışır. Türkçe harf ayrımı yapılmaz (İ/ı/ş) - aksi
+// halde "maç" yazan kullanıcı "Maç" geçen mesajı bulamazdı.
+// Süzgeç YANITLARI da kapsar: eşleşme bir yanıttaysa üst mesaj da listede kalır, yoksa
+// bağlamsız bir yanıt görünür ve kullanıcı neye cevap verildiğini anlayamazdı.
+window._chatAra='';
+window.ptChatAra=function(v){
+  window._chatAra=String(v||'');
+  try{renderChatScreen();}catch(e){}
+};
+function ptChatSuz(liste,allComments){
+  const q=(window._chatAra||'').trim().toLocaleLowerCase('tr');
+  if(!q)return liste;
+  function eslesir(c){
+    if(!c)return false;
+    const metin=((c.text||'')+' '+(c.userName||c.name||'')).toLocaleLowerCase('tr');
+    return metin.indexOf(q)!==-1;
+  }
+  const tumu=allComments||liste;
+  return liste.filter(c=>{
+    if(eslesir(c))return true;
+    // Yanıtlarından biri eşleşiyorsa üst mesaj da kalsın - bağlam korunur.
+    return (tumu||[]).some(x=>x&&String(x.replyTo)===String(c.id)&&eslesir(x));
+  });
+}
 function renderChatComments(topLevel,allComments){
+  const _q=(window._chatAra||'').trim();
+  topLevel=ptChatSuz(topLevel,allComments);
+  if(_q&&!topLevel.length)return `<div style="font-size:.76rem;color:var(--mu);text-align:center;padding:1.5rem 0;line-height:1.7">
+    🔍<br/>"${escHtml(_q)}" ile eşleşen mesaj yok.
+  </div>`;
   if(!topLevel.length)return '<div style="font-size:.74rem;color:var(--mu);text-align:center;padding:1.2rem 0">Henüz mesaj yok, ilk mesajı sen yaz!</div>';
   // KULLANICI TALEBİ: Yanıtlar artık üst mesajın altına gömülü ayrı bir dal olarak
   // gruplanmıyor - her mesaj (yanıt olsun olmasın) normal akışta kendi zaman sırasındaki
@@ -20755,6 +20799,15 @@ window.filterVideoScreenList=function(q){
   window._videoScreenSearchFocused=true;
   renderVideoScreenList();
 };
+// Görünüm tercihi cihazda saklanır - her açılışta yeniden seçmek zahmet olurdu.
+var _videoGorunum=(function(){
+  try{return localStorage.getItem('pt_videoGorunum')||'liste';}catch(e){return 'liste';}
+})();
+window.ptVideoGorunumDegis=function(k){
+  _videoGorunum=(k==='izgara')?'izgara':'liste';
+  try{localStorage.setItem('pt_videoGorunum',_videoGorunum);}catch(e){}
+  renderVideoScreenList();
+};
 function renderVideoScreenList(){
   const tab=window._videoScreenTab||'tv';
   const q=(window._videoScreenQuery||'').trim().toLocaleLowerCase('tr');
@@ -20861,8 +20914,21 @@ function renderVideoScreenList(){
     </div>
     ${searchHtml}
     ${catHtml}
+    <!-- KULLANICI TALEBİ ("ızgara görünümü"): Kanal sayısı arttıkça tek sütun liste uzuyor
+         ve logolar küçük kalıyor. Izgara, logoları öne çıkarır ve ekranda daha çok kanal
+         gösterir. Seçim cihazda saklanır - her açılışta yeniden seçmek zahmet olurdu. -->
+    ${toplamSayi>1?`<div style="display:flex;gap:.3rem;margin-bottom:.5rem;justify-content:flex-end">
+      ${[['liste','☰','Liste'],['izgara','▦','Izgara']].map(([k,ik,ad])=>
+        `<button onclick="ptVideoGorunumDegis('${k}')" title="${ad}"
+          style="min-height:30px;min-width:38px;border-radius:8px;cursor:pointer;font-family:inherit;font-size:.78rem;
+          background:${_videoGorunum===k?'var(--ac)':'var(--s2)'};color:${_videoGorunum===k?'var(--ac-tx,#fff)':'var(--tx)'};
+          border:1.5px solid ${_videoGorunum===k?'var(--ac)':'var(--br)'}">${ik}</button>`).join('')}
+    </div>`:''}
     ${reorderBtnHtml}
     ${!list.length?`<div style="text-align:center;padding:2rem 1rem;color:var(--mu);font-size:.78rem">${q?'🔍 "'+q+'" ile eşleşen bir sonuç bulunamadı':(tab==='tv'?'Henüz canlı yayın eklenmedi':'Henüz video eklenmedi')}</div>`:
+    (_videoGorunum==='izgara'&&!reordering
+      ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:.5rem">'
+      : '')+
     list.map(function(v,idx){
       // KULLANICI TALEBİ ("kanal listesini paylaştığım örnek gibi tasarla" - EPG referansı) +
       // ("yönetici eklediği kanallara logo da ekleyebilmeli"): Referanstaki gibi BÜYÜKÇE bir
@@ -20887,7 +20953,33 @@ function renderVideoScreenList(){
       // KULLANICI TALEBİ ("kullanıcı kendi sıralamasını düzenleyebilir"): Sıralama modunda
       // satıra tıklamak video AÇMAZ, yukarı/aşağı okları görünür - karışıklık olmasın diye
       // normal "izle" tıklaması bu modda devre dışı bırakılır.
-      return `<div ${reordering?'':`onclick="openVideoWatch('${v.id}')"`} style="display:flex;align-items:center;gap:.7rem;padding:.65rem .2rem;border-bottom:1px solid var(--br);${reordering?'':'cursor:pointer'}">
+      // ══════════════════════════════════════════════════════════════════════════════════
+      // IZGARA KARTI (kullanıcı talebi) + LOGO RENGİ
+      // Izgarada logo öne çıkar, ad altında iki satıra kadar sarar. Sıralama modunda ızgara
+      // KULLANILMAZ - yukarı/aşağı okları ızgarada anlamsızdır, orada liste zorunlu.
+      // LOGO RENGİ: Kartın arkasına logodan türetilen hafif bir degrade konur. Renk,
+      // kanal kimliğinden gelir; sabit bir palet kullansaydık kanallar birbirine benzerdi.
+      // Renk logonun ADINDAN türetilir (görselden piksel okumak CORS'a takılır ve her
+      // çizimde maliyet yaratırdı) - aynı kanal her zaman aynı rengi alır.
+      // ══════════════════════════════════════════════════════════════════════════════════
+      const _renkTon=(function(){
+        let h=0; const ad=String(v.title||v.id||'');
+        for(let i=0;i<ad.length;i++)h=(h*31+ad.charCodeAt(i))%360;
+        return h;
+      })();
+      const _kartArka=`linear-gradient(135deg,hsla(${_renkTon},60%,45%,.16),hsla(${(_renkTon+40)%360},60%,45%,.05))`;
+      if(_videoGorunum==='izgara'&&!reordering){
+        return `<div onclick="openVideoWatch('${v.id}')" style="cursor:pointer;background:${_kartArka};border:1px solid var(--br);border-radius:14px;padding:.5rem .4rem;text-align:center;position:relative">
+          <div style="position:relative;width:100%;aspect-ratio:1;border-radius:11px;background:var(--s2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:.35rem">
+            ${logoInner}
+            ${kilitli?'<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);font-size:1.1rem">🔒</div>':''}
+          </div>
+          <div style="font-size:.68rem;font-weight:800;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escAttr(v.title||'')}</div>
+          <div style="font-size:.56rem;color:var(--mu);margin-top:.1rem">${v.isLive?'🔴 Canlı':'🎬 Video'}</div>
+          <button onclick="ptFavToggle(event,'${escAttr(v.id)}')" title="Favori" style="position:absolute;top:.25rem;right:.25rem;background:rgba(0,0,0,.35);border:none;border-radius:7px;padding:.1rem .25rem;font-size:.7rem;cursor:pointer;line-height:1">${ptFavMi(v.id)?'⭐':'☆'}</button>
+        </div>`;
+      }
+      return `<div ${reordering?'':`onclick="openVideoWatch('${v.id}')"`} style="background:${_kartArka};display:flex;align-items:center;gap:.7rem;padding:.65rem .2rem;border-bottom:1px solid var(--br);${reordering?'':'cursor:pointer'}">
         <div style="width:22px;flex-shrink:0;text-align:center;font-size:.68rem;font-weight:700;color:var(--mu)">${channelNoMap.get(v.id)||'?'}</div>
         <div style="position:relative;width:52px;height:52px;flex-shrink:0">
           <div style="width:52px;height:52px;border-radius:13px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:900;color:var(--tx);overflow:hidden;${kilitli?'filter:grayscale(.6) brightness(.6)':''}">${logoInner}</div>
@@ -20905,7 +20997,7 @@ function renderVideoScreenList(){
           <button onclick="moveVideoScreenItem('${tab}','${v.id}',1)" ${idx===list.length-1?'disabled':''} style="width:30px;height:30px;border-radius:8px;border:1px solid var(--br);background:var(--s3);color:${idx===list.length-1?'var(--mu)':'var(--tx)'};font-size:.9rem;cursor:${idx===list.length-1?'default':'pointer'}">↓</button>
         </div>`:'<div style="color:var(--mu);font-size:.9rem;flex-shrink:0">▶</div>'}
       </div>`;
-    }).join('')}`;
+    }).join('')+(_videoGorunum==='izgara'&&!reordering?'</div>':'')}`;
   document.getElementById('sheetContent').innerHTML=html;
   // HATA ÖNLEME: Arama kutusunu her tuş vuruşunda TÜM sheetContent'i yeniden çizerek
   // güncelliyoruz (basitlik için) - bu normalde kutunun odağını/imleç konumunu KAYBETTİRİR.
