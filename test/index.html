@@ -2411,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-H';
+window.APP_BUILD='2026-09-13-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -11394,7 +11394,6 @@ function renderMatchDetailContent(){
       <button class="md-tab ${_mdTab==='kadro'?'active':''}" onclick="switchMdTab('kadro')">Kadro</button>
       <button class="md-tab ${_mdTab==='karne'?'active':''}" onclick="switchMdTab('karne')">Maç Akışı</button>
       <button class="md-tab ${_mdTab==='anlati'?'active':''}" onclick="switchMdTab('anlati')">📖 Anlatım</button>
-      <button class="md-tab ${_mdTab==='eksik'?'active':''}" onclick="switchMdTab('eksik')">🤕 Eksikler</button>
       <button class="md-tab ${_mdTab==='anlatim'?'active':''}" onclick="switchMdTab('anlatim')">Yorumlar</button>
       <button class="md-tab ${_mdTab==='standings'?'active':''}" onclick="switchMdTab('standings')">Puan Durumu</button>
       <button class="md-tab ${_mdTab==='istatistik'?'active':''}" onclick="switchMdTab('istatistik')">İstatistik</button>
@@ -11421,7 +11420,6 @@ function renderMatchDetailContent(){
   }
   else if(_mdTab==='istatistik')body=renderMdIstatistik(id,m,h,a);
   else if(_mdTab==='anlati')body=renderMdAnlati(id,m,h,a);
-  else if(_mdTab==='eksik')body=renderMdEksikler(id,m,h,a);
   else if(_mdTab==='karsi')body=renderMdKarsi(id,m,h,a);
 
   document.getElementById('sheetContent').innerHTML=`
@@ -12581,6 +12579,7 @@ function renderMdKadro(id,m,h,a){
           ${awayData.benchHtml}
         </div>
       </div>
+      ${ptEksiklerBlogu(h,a)}
       ${!m.played?`<div style="margin-top:.7rem;padding:.6rem .7rem;background:rgba(124,58,237,.06);border:1px solid rgba(124,58,237,.2);border-radius:10px;font-size:.66rem;color:var(--mu);text-align:center"><b style="color:#a78bfa">📋 Olası Kadro / İlk 11 Tahmini</b><br/>Admin son güncellediği kadroyu gösterir, maça kadar değişebilir.</div>`:''}
     </div>`;
   }else{
@@ -12622,6 +12621,7 @@ function renderMdKadro(id,m,h,a){
           ${awayData.benchHtml}
         </div>
       </div>
+      ${ptEksiklerBlogu(h,a)}
       ${!m.played?`<div style="margin-top:.7rem;padding:.6rem .7rem;background:rgba(124,58,237,.06);border:1px solid rgba(124,58,237,.2);border-radius:10px;font-size:.66rem;color:var(--mu);text-align:center"><b style="color:#a78bfa">📋 Olası Kadro / İlk 11 Tahmini</b><br/>Admin son güncellediği kadroyu gösterir, maça kadar değişebilir.</div>`:''}
     </div>`;
   }
@@ -15221,19 +15221,61 @@ function renderMdAnlati(id,m,h,a){
       `Geçmiş ${gecmis.length} karşılaşmada ${escHtml(h.name||'')} ${hW}, ${escHtml(a.name||'')} ${aW} galibiyet aldı`
       +(br?`, ${br} maç berabere bitti`:'')+`. Gol dağılımı ${hG}-${aG}.`,'var(--mu)'));
   })();
+  // ── SIRALAMA BAĞLAMI (kullanıcı talebi: "ilgili takımların değişen puanları,
+  // sıralamaları, olası maç senaryoları") ──
+  // Tablo iki kez hesaplanır: bu maç HARİÇ (öncesi) ve bu maç DAHİL (sonrası). Fark,
+  // anlatıma "kaç sıra yükseldi / kaç puana çıktı" gibi somut bilgi katar.
+  // Puan tablosuyla aynı fonksiyon (calcS) kullanılır - kendi hesabımı yazsaydım puan
+  // cezaları ve averaj kuralları ayrışır, iki ekran farklı sıralama gösterirdi.
+  function tabloHesapla(macHaric){
+    try{
+      const mac={};
+      Object.entries(D.matches||{}).forEach(([k,x])=>{
+        if(macHaric&&x&&String(x.id)===String(m.id))return;
+        mac[k]=x;
+      });
+      return calcS(D.teams||{},mac,null)||[];
+    }catch(e){return [];}
+  }
+  function sirada(tablo,tid){
+    for(let i=0;i<tablo.length;i++)if(String(tablo[i].id)===String(tid))return {sira:i+1,satir:tablo[i]};
+    return null;
+  }
+  const tabloOnce=tabloHesapla(true);
+  const hOnce=sirada(tabloOnce,m.homeId), aOnce=sirada(tabloOnce,m.awayId);
+  if(hOnce&&aOnce){
+    mesajlar.push(ptAnlatiSatir('📋',null,'',
+      `Maç öncesi tabloda <b>${escHtml(h.name||'')}</b> ${hOnce.sira}. sırada ${hOnce.satir.P} puanla, `
+      +`<b>${escHtml(a.name||'')}</b> ${aOnce.sira}. sırada ${aOnce.satir.P} puanla yer alıyor.`,'var(--mu)'));
+    // Olası senaryolar - galibiyet hâlinde nereye çıkılır
+    const kazanmaPuani=(D.lgConfig&&D.lgConfig.winPts)||3;
+    const beraberlikPuani=(D.lgConfig&&D.lgConfig.drawPts)||1;
+    mesajlar.push(ptAnlatiSatir('🔮',null,'',
+      `Kazanan taraf ${kazanmaPuani} puan alacak: ${escHtml(h.name||'')} galip gelirse ${hOnce.satir.P+kazanmaPuani}, `
+      +`${escHtml(a.name||'')} kazanırsa ${aOnce.satir.P+kazanmaPuani} puana ulaşır. `
+      +`Beraberlikte iki takım da ${beraberlikPuani} puanla yetinir.`,'var(--mu)'));
+  }
   // Form - son 5 maç
   [[h,m.homeId],[a,m.awayId]].forEach(([t,tid])=>{
     const son=Object.values(D.matches||{}).filter(x=>x&&x.played&&(x.homeId===tid||x.awayId===tid))
       .sort((x,y)=>(y.week||0)-(x.week||0)).slice(0,5);
     if(!son.length)return;
-    const harf=son.map(x=>{
+    // KULLANICI TALEBİ ("son beş maç bilgisini gösterirken bizim kutuları göstersin"):
+    // Düz harf dizisi yerine takım detayındaki renkli kutular kullanılır - en son maç
+    // çerçeveyle işaretlenir, orada da öyle. İki ekran aynı görsel dili konuşsun.
+    const renkH={G:'#22c55e',B:'#f59e0b',M:'#ef4444'};
+    const sonuclar=son.map(x=>{
       const ev=(x.homeId===tid);
       const g=ev?(Number(x.homeGoals)||0):(Number(x.awayGoals)||0);
       const y=ev?(Number(x.awayGoals)||0):(Number(x.homeGoals)||0);
       return g>y?'G':(g<y?'M':'B');
-    }).reverse().join(' · ');
+    }).reverse();
+    const kutular=sonuclar.map((r,i)=>{
+      const sonMac=(i===sonuclar.length-1);
+      return `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;background:${renkH[r]};color:#fff;font-size:.6rem;font-weight:900;margin-right:${sonMac?'0':'.22rem'}${sonMac?';outline:2px solid var(--tx);outline-offset:1px':''}">${r}</span>`;
+    }).join('');
     mesajlar.push(ptAnlatiSatir('🔥',null,'',
-      `<b>${escHtml(t.name||'')}</b> son maçları: ${harf} (eskiden yeniye).`,'var(--mu)'));
+      `<b>${escHtml(t.name||'')}</b> son maçları: ${kutular} <span style="font-size:.6rem;color:var(--mu)">(eskiden yeniye)</span>`,'var(--mu)'));
   });
   // ── OLAYLAR ──
   const olaylar=(m.events||[]).slice().sort((x,y)=>(Number(x.min)||0)-(Number(y.min)||0));
@@ -15254,7 +15296,11 @@ function renderMdAnlati(id,m,h,a){
     const renk=golMu?'#22c55e':(e.type==='red'||e.type==='yellow2red')?'#ef4444':
                (e.type==='yellow')?'#f59e0b':(e.type==='pen_awarded'||e.type==='pen_miss')?'#3b82f6':'var(--mu)';
     const bolumMu=['match_start','half_time','extra_time','match_end'].indexOf(e.type)!==-1;
-    mesajlar.push(ptAnlatiSatir(getEventEmoji(e.type),bolumMu?null:(Number(e.min)||0),
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: anlatımda emoji yerine ham adres yazıyordu):
+    // getEventEmoji() DEĞERİ döndürür - yönetici görsel yüklediyse bu bir URL'dir ve
+    // metin olarak basılınca adres görünür. renderStatEventIconHtml() aynı değeri alır ama
+    // görselse <img> etiketine sarar. Diğer ekranlar zaten bunu kullanıyordu.
+    mesajlar.push(ptAnlatiSatir(renderStatEventIconHtml(e.type),bolumMu?null:(Number(e.min)||0),
       golMu?`${hg}-${ag}`:'',escHtml(cumle),renk,golMu||bolumMu));
   });
   // ── MAÇ SONU RAPORU ──
@@ -15281,6 +15327,24 @@ function renderMdAnlati(id,m,h,a){
         ${olaylar.filter(e=>e.type==='red'||e.type==='yellow2red').length} kırmızı kart çıktı.
         ${olaylar.filter(e=>e.type==='sub').length} oyuncu değişikliği yapıldı.
       </div>
+      ${(function(){
+        // Maçtan SONRAKİ tablo ile öncekini karşılaştır - puan ve sıra değişimi.
+        const tabloSonra=tabloHesapla(false);
+        const hS=sirada(tabloSonra,m.homeId), aS=sirada(tabloSonra,m.awayId);
+        if(!hS||!aS||!hOnce||!aOnce)return '';
+        function degisim(ad,once,sonra){
+          const puanFark=sonra.satir.P-once.satir.P;
+          const siraFark=once.sira-sonra.sira;   // pozitif = yükseldi
+          const siraSoz=siraFark>0?`${siraFark} sıra yükselerek `:(siraFark<0?`${Math.abs(siraFark)} sıra gerileyerek `:'');
+          return `<b>${escHtml(ad)}</b> ${puanFark>0?'+'+puanFark+' puan alarak ':'puan alamadan '}`
+            +`${siraSoz}${sonra.sira}. sıraya yerleşti (${sonra.satir.P} puan).`;
+        }
+        return `<div style="font-size:.72rem;line-height:1.7;margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--br)">
+          <div style="font-weight:800;margin-bottom:.25rem">📊 Tabloya Etkisi</div>
+          ${degisim(h.name||'',hOnce,hS)}<br/>
+          ${degisim(a.name||'',aOnce,aS)}
+        </div>`;
+      })()}
     </div>`);
   }
   return `<div style="padding:.2rem 0">
@@ -15300,24 +15364,19 @@ function renderMdAnlati(id,m,h,a){
 // durumunu değil. Geçmiş bir maça bakıldığında bugün sakat olan biri listede görünür,
 // oysa o maçta oynamış olabilir. Tarihsel durum tutulmadığı için bu kaçınılmaz; ekranda
 // da bu not yazılı ki yanlış okunmasın.
-function renderMdEksikler(id,m,h,a){
+// KULLANICI TALEBİ ("Eksikler kadro bölümünde yedeklerin altına, varsa aktif olsun yoksa
+// görünmesin"): Ayrı sekme yerine kadronun devamı oldu. Eksik yoksa blok HİÇ çizilmez -
+// boş bir "eksik yok" kutusu yer kaplardı.
+function ptEksiklerBlogu(h,a){
   function takimEksikleri(t){
     if(!t||!t.squad)return [];
     const hepsi=[].concat(t.squad.starting||[],t.squad.bench||[]);
     return hepsi.filter(p=>p&&p.name&&(p.status==='injured'||p.status==='suspended'));
   }
   const hE=takimEksikleri(h), aE=takimEksikleri(a);
-  if(!hE.length&&!aE.length){
-    return `<div style="text-align:center;color:var(--mu);padding:2rem 1rem;font-size:.8rem;line-height:1.7">
-      ✅<br/>İki takımda da işaretli eksik oyuncu yok.
-      <br/><span style="font-size:.7rem">Sakatlık ve ceza durumu yönetici panelinden işaretlenir.</span>
-    </div>`;
-  }
+  if(!hE.length&&!aE.length)return '';
   function blok(t,liste){
-    if(!liste.length)return `<div style="margin-bottom:.7rem">
-      <div style="font-size:.72rem;font-weight:800;margin-bottom:.35rem">${escHtml(t.name||'')}</div>
-      <div style="font-size:.7rem;color:var(--mu)">Eksik oyuncu yok.</div>
-    </div>`;
+    if(!liste.length)return '';
     return `<div style="margin-bottom:.7rem">
       <div style="font-size:.72rem;font-weight:800;margin-bottom:.4rem">${escHtml(t.name||'')} · ${liste.length} eksik</div>
       ${liste.map(p=>{
@@ -15328,17 +15387,18 @@ function renderMdEksikler(id,m,h,a){
           <div style="flex:1;min-width:0">
             <div style="font-size:.74rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(p.name)}</div>
             <div style="font-size:.58rem;color:${sakat?'#f97316':'#ef4444'};font-weight:700">${sakat?'Sakat':'Cezalı'}${p.position?' · '+escHtml(p.position):''}</div>
+            ${p.statusNote?`<div style="font-size:.58rem;color:var(--mu);line-height:1.4">${escHtml(p.statusNote)}</div>`:''}
           </div>
         </div>`;
       }).join('')}
     </div>`;
   }
-  return `<div style="padding:.2rem 0">
+  return `<div style="margin-top:.8rem;padding-top:.7rem;border-top:1px solid var(--br)">
+    <div style="font-size:.66rem;font-weight:800;color:var(--mu);margin-bottom:.5rem;text-transform:uppercase">🤕 Eksikler</div>
     ${blok(h,hE)}
     ${blok(a,aE)}
-    <div style="font-size:.6rem;color:var(--mu);line-height:1.6;padding:.5rem .6rem;background:var(--s2);border-radius:9px">
-      ℹ️ Bu liste oyuncuların <b>bugünkü</b> durumunu gösterir, maç tarihindeki durumunu değil.
-      Geçmiş maçlarda yanıltıcı olabilir.
+    <div style="font-size:.58rem;color:var(--mu);line-height:1.6">
+      ℹ️ Oyuncuların <b>bugünkü</b> durumu gösterilir; geçmiş maçlarda yanıltıcı olabilir.
     </div>
   </div>`;
 }
