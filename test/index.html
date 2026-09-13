@@ -2477,7 +2477,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-14-B';
+window.APP_BUILD='2026-09-14-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -15290,18 +15290,98 @@ function ptAnlatimCumlesi(e,durum){
   const ad=e.player||'Oyuncu';
   const takim=durum.takimAdi||'';
   const rakip=durum.rakipAdi||'';
-  const secim=(String(ad).length+dk)%3;
-  const evre=(dk<=10)?'acilis':(dk<=40)?'ilkYari':(dk<=45)?'ilkYariSonu':
-             (dk<=55)?'ikinciBaslangic':(dk<=80)?'ikinciYari':(dk<=90)?'final':'uzatma';
-  const evreSoz={
-    acilis:'Daha maçın başında',
-    ilkYari:'İlk yarının ortalarında',
-    ilkYariSonu:'İlk yarı biterken',
-    ikinciBaslangic:'İkinci yarının hemen başında',
-    ikinciYari:'İkinci yarıda',
-    final:'Maçın son bölümünde',
-    uzatma:'Uzatma dakikalarında'
-  }[evre];
+  // Kalıp seçimi dakikaya da bağlı: ardışık olaylar farklı kalıp alsın diye. Aynı olay
+  // her zaman aynı sonucu verir - sayfa her açıldığında cümle değişmez.
+  function sec(liste){ return liste[(String(ad).length+dk*3)%liste.length]; }
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KELİME YUVALARI (kullanıcı talebi: "çeşitli kelime boşlukları")
+  // Kalıp sayısını artırmak tek başına yetmiyor: aynı kalıp ikinci kez çıktığında birebir
+  // aynı görünüyordu. Artık kalıpların içindeki anahtar kelimeler de değişken.
+  // Örnek: "ağları havalandırdı" / "fileleri sarstı" / "topu ağlara gönderdi" - aynı kalıp,
+  // farklı cümle. 6 kalıp × 4 kelime = 24 farklı sonuç; kullanıcı aynı cümleyi zor görür.
+  // Seçim FARKLI bir çarpanla yapılır (dk*7) - kalıpla aynı olsaydı ikisi birlikte
+  // döner, çeşitlilik artmazdı. Yine de belirlenimci: aynı olay hep aynı cümleyi verir.
+  function kw(liste){ return liste[(String(ad).length*2+dk*7)%liste.length]; }
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // TÜRKÇE EK UYUMU (kullanıcı bildirdi: "saçma deyişler olmasın")
+  // "Rodri'e sarı kart" yanlıştı - ünlüyle biten adlarda kaynaştırma harfi gerekir:
+  // "Rodri'ye". Ayrıca ünlü uyumu var: "Messi'ye" ama "Maldini'ye", "Pelé'ye" / "Ramos'a".
+  // Tam bir çözümleyici yazmak yerine iki kuralı uyguluyoruz: son ünlü kalın mı ince mi,
+  // ve son harf ünlü mü. Bu, futbolcu adlarının neredeyse tamamını doğru çeker.
+  function ek(isim,tur){
+    var t=String(isim||'').trim();
+    if(!t)return t;
+    var son=t[t.length-1].toLocaleLowerCase('tr');
+    var unluMu='aeıioöuüéèáà'.indexOf(son)!==-1;
+    // Son ünlüyü bul. Türkçede -e/-a eki İKİLİ uyuma (kalın/ince), -in/-i ekleri DÖRTLÜ
+    // uyuma tabidir: a,ı→ı · e,i→i · o,u→u · ö,ü→ü. Üçlü ayrım yapmazsak "Gattuso'nın"
+    // gibi kulağı tırmalayan sonuçlar çıkar - doğrusu "Gattuso'nun".
+    var kalin=true, dar='i';
+    for(var i=t.length-1;i>=0;i--){
+      var c=t[i].toLocaleLowerCase('tr');
+      if('aâ'.indexOf(c)!==-1){kalin=true;dar='ı';break;}
+      if('ı'.indexOf(c)!==-1){kalin=true;dar='ı';break;}
+      if('ou'.indexOf(c)!==-1){kalin=true;dar='u';break;}
+      if('ei'.indexOf(c)!==-1){kalin=false;dar='i';break;}
+      if('öü'.indexOf(c)!==-1){kalin=false;dar='ü';break;}
+      if('éè'.indexOf(c)!==-1){kalin=false;dar='i';break;}
+    }
+    if(tur==='e')return t+"'"+(unluMu?(kalin?'ya':'ye'):(kalin?'a':'e'));
+    if(tur==='in')return t+"'"+(unluMu?('n'+dar+'n'):(dar+'n'));
+    if(tur==='i')return t+"'"+(unluMu?('y'+dar):dar);
+    return t;
+  }
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KULLANICI BİLDİRDİ ("hakemin defterine girdi / erken duş yaptı gibi ifadeler saçma,
+  // inandırıcılığı zayıflatıyor"): İlk havuzda klişe spiker deyişleri vardı. Bunlar
+  // gerçek maç anlatımında kullanılmıyor; abartılı ve yapmacık duruyor.
+  // YENİ ÖLÇÜT: Her ifade, sakin bir maç anlatıcısının kuracağı cümle olmalı. Olanı
+  // anlatmalı, süslememeli. Şüphe duyduğum her ifadeyi çıkardım - çeşitlilik uğruna
+  // inandırıcılıktan ödün vermek yanlış takas.
+  // ÇIKARILANLAR: "hakemin defterine girdi", "erken duş aldı", "soyunma odasının yolunu
+  // tuttu", "meşin yuvarlağı ağlara yolladı", "yeşil sahaya adım attı", "umutlandı".
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  const K={
+    golAtti:kw(['topu ağlara gönderdi','fileleri buldu','topu filelere gönderdi',
+                'skoru değiştirdi','topu ağlara yolladı']),
+    golKaydetti:kw(['golü attı','skoru değiştirdi','golü kaydetti','takımını öne geçirdi']),
+    sertMudahale:kw(['sert bir müdahalede bulundu','faul yaptı','rakibini düşürdü',
+                     'geç müdahale etti','kurallara aykırı bir hareket yaptı']),
+    uyarildi:kw(['sarı kart gördü','sarı kartla cezalandırıldı','uyarı aldı','sarı kartla uyarıldı']),
+    oyunDisi:kw(['oyundan atıldı','sahayı terk etti','oyun dışı kaldı','kırmızı kartla çıktı']),
+    firsat:kw(['önemli bir fırsat yakaladı','skoru değiştirme şansı buldu',
+               'öne geçme fırsatı elde etti','beklediği fırsatı yakaladı']),
+    kaciriyor:kw(['fileleri bulamadı','skoru değiştiremedi','fırsatı değerlendiremedi',
+                  'topu dışarı gönderdi']),
+    girdi:kw(['oyuna girdi','sahaya çıktı','oyuna dahil oldu','forma giydi']),
+    ciktiKenar:kw(['kenara geldi','oyundan çıktı','yerini bıraktı','dinlenmeye çekildi']),
+    savunmaGecti:kw(['aşarak','geçerek','arasından sıyrılarak','arkasına sarkarak']),
+    zorlasti:kw(['işler zorlaştı','planlar değişti','durum güçleşti','maçın seyri değişebilir'])
+  };
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KULLANICI BİLDİRDİ ("çok fazla 'ilk yarı - ikinci yarı' ifadesi kullanılıyor"):
+  // Her evrenin TEK bir ifadesi vardı; arka arkaya gelen olaylar aynı sözle başlıyordu
+  // ("İlk yarının ortalarında..." üç kez üst üste). Artık her evrenin birkaç farklı
+  // ifadesi var ve seçim DAKİKAYA bağlı - farklı dakikadaki olaylar farklı söz alır,
+  // ama aynı olay her açılışta aynı cümleyi verir (tutarlılık korunur).
+  // Bazı ifadeler zamanı hiç anmıyor ("Tam da beklenen anda") - sürekli dakika vurgusu
+  // anlatımı rapora çevirir; spiker her cümlede saat söylemez.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  const evre=(dk<=10)?'acilis':(dk<=25)?'ilkCeyrek':(dk<=40)?'ilkYari':(dk<=45)?'ilkYariSonu':
+             (dk<=55)?'ikinciBaslangic':(dk<=70)?'ikinciYari':(dk<=80)?'sonCeyrek':(dk<=90)?'final':'uzatma';
+  const EVRE_SOZLERI={
+    acilis:['Daha maçın başında','Henüz ısınma bitmemişken','Mücadelenin ilk dakikalarında','Maç yeni başlamışken'],
+    ilkCeyrek:['İlk çeyrekte','Oyun henüz oturmamışken','Karşılaşmanın erken bölümünde','İlk yarının açılış dakikalarında'],
+    ilkYari:['İlk yarının ortalarında','Oyunun dengelendiği anlarda','Devre ilerlerken','Tempo yükselirken'],
+    ilkYariSonu:['İlk yarı biterken','Devre arasına girilirken','Soyunma odası yolunda','İlk 45 tamamlanmak üzereyken'],
+    ikinciBaslangic:['İkinci yarının hemen başında','Devre arası sonrası','Sahaya dönüldüğünde','İkinci yarı açılırken'],
+    ikinciYari:['İkinci yarıda','Oyun yeniden hızlanırken','Mücadelenin bu bölümünde','Saha ortasındaki çekişme sürerken'],
+    sonCeyrek:['Son çeyreğe girilirken','Maç kritik bir noktadayken','Yorgunluk hissedilmeye başlarken','Final bölümüne yaklaşırken'],
+    final:['Maçın son bölümünde','Bitiş düdüğüne az kala','Son dakikalarda','Zaman daralırken'],
+    uzatma:['Uzatma dakikalarında','Hakemin eklediği sürede','Maçın son saniyelerinde','Uzatmalarda']
+  };
+  const _sozler=EVRE_SOZLERI[evre]||EVRE_SOZLERI.ikinciYari;
+  const evreSoz=_sozler[dk%_sozler.length];
 
   if(e.type==='goal'||e.type==='pen_goal'){
     const pen=(e.type==='pen_goal');
@@ -15311,68 +15391,88 @@ function ptAnlatimCumlesi(e,durum){
     else if(durum.oncekiFark===-1)baglam='Skor eşitlendi.';
     else if(durum.oncekiFark<-1)baglam=`${takim} farkı ${Math.abs(durum.oncekiFark)-1}'e indirdi.`;
     else baglam=`${takim} farkı ${durum.oncekiFark+1}'e çıkardı.`;
-    return (pen?[
+    return sec(pen?[
       `${evreSoz} penaltı noktasına ${ad} geçti ve tereddüt etmeden ağları havalandırdı. ${baglam}`,
       `${dk}. dakikada kazanılan penaltıyı ${ad} gole çevirdi. ${baglam}`,
-      `${evreSoz} ${ad}, penaltıdan hata yapmadı. ${baglam}`
+      `${evreSoz} ${ad}, penaltıdan hata yapmadı. ${baglam}`,
+      `Beyaz noktaya ${ad} geçti ve kaleciye şans tanımadı. ${baglam}`,
+      `${ad} penaltıyı soğukkanlılıkla kullandı. ${baglam}`
     ]:[
-      `${evreSoz}${asist} ${ad} skoru değiştirdi. ${baglam}`,
-      `${dk}. dakikada ${ad}${asist} ağları havalandırdı. ${baglam}`,
-      `${evreSoz} ${ad}, ${rakip} savunmasını geçerek topu filelerle buluşturdu. ${baglam}`
-    ])[secim];
+      `${evreSoz}${asist} ${ad} ${K.golAtti}. ${baglam}`,
+      `${dk}. dakikada ${ad}${asist} ${K.golAtti}. ${baglam}`,
+      `${evreSoz} ${ad}, ${rakip} savunmasını ${K.savunmaGecti} ${K.golAtti}. ${baglam}`,
+      `${ad} fırsatı değerlendirdi${asist} ve ${K.golKaydetti}. ${baglam}`,
+      `${evreSoz} ağlar havalandı. Golü ${ad} kaydetti${asist?' ('+e.player2+' asisti)':''}. ${baglam}`,
+      `${rakip} savunmasındaki boşluğu ${ad} değerlendirdi ve ${K.golAtti}. ${baglam}`
+    ]);
   }
   // Penaltı olaylarının TAMAMI (kullanıcı talebi): kazanılan, kaçan ve gole çevrilen.
   if(e.type==='pen_awarded'){
-    return [
-      `${evreSoz} hakem penaltı noktasını gösterdi! ${takim} büyük bir fırsat yakaladı.`,
+    return sec([
+      `${evreSoz} hakem penaltı noktasını gösterdi! ${takim} ${K.firsat}.`,
       `${dk}. dakikada ${takim} lehine penaltı kararı çıktı. ${rakip} savunması itiraz ediyor.`,
-      `${evreSoz} ceza sahasında yaşanan pozisyonun ardından hakem penaltıya hükmetti.`
-    ][secim];
+      `${evreSoz} ceza sahasında yaşanan pozisyonun ardından hakem penaltıya hükmetti.`,
+      `Hakem tereddüt etmeden beyaz noktayı gösterdi. ${takim} için altın fırsat.`,
+      `Ceza sahasındaki mücadelenin ardından karar penaltı: ${takim} öne geçebilir.`
+    ]);
   }
   if(e.type==='pen_miss'){
-    return [
+    return sec([
       `${evreSoz} ${ad} penaltıyı kaçırdı! ${takim} altın değerinde bir fırsatı harcadı.`,
       `${dk}. dakikada ${ad}'in penaltı vuruşu gole dönüşmedi. ${rakip} bu işten kârlı çıktı.`,
-      `${evreSoz} penaltı noktasından ${ad} skoru değiştiremedi.`
-    ][secim];
+      `${evreSoz} penaltı noktasından ${ad} ${K.kaciriyor}.`,
+      `${ad} beyaz noktadan ${K.kaciriyor}; ${rakip} rahat bir nefes aldı.`,
+      `Penaltı vuruşunda ${ad} ${K.kaciriyor}, skor değişmedi.`
+    ]);
   }
   if(e.type==='og'){
-    return [
+    return sec([
       `${evreSoz} talihsiz bir an: ${ad} topu kendi kalesine gönderdi. ${rakip} beklemediği bir armağan aldı.`,
       `${dk}. dakikada ${ad}'nin kendi kalesine attığı golle skor değişti.`,
-      `${evreSoz} ${ad} müdahale etmek isterken topu kendi ağlarına yolladı.`
-    ][secim];
+      `${evreSoz} ${ad} müdahale etmek isterken topu kendi ağlarına yolladı.`,
+      `Kötü bir tesadüf: ${ad}'nin uzaklaştırma denemesi kendi filelerinde son buldu.`,
+      `${ad} topa dokundu ama yanlış yöne; ${rakip} armağan bir gol buldu.`
+    ]);
   }
   if(e.type==='yellow'){
-    return [
-      `${evreSoz} ${ad} sert bir müdahalede bulundu ve hakem sarı kartını gösterdi.`,
-      `${dk}. dakikada ${ad} sarı kartla uyarıldı. Bundan sonra daha dikkatli olmak zorunda.`,
-      `${evreSoz} ${ad}, hakemin sarı kartıyla karşılaştı.`
-    ][secim];
+    return sec([
+      `${evreSoz} ${ad} ${K.sertMudahale} ve hakem sarı kartını gösterdi.`,
+      `${dk}. dakikada ${ad} ${K.uyarildi}. Bundan sonra daha dikkatli olmak zorunda.`,
+      `${evreSoz} ${ad}, hakemin sarı kartıyla karşılaştı.`,
+      `Hakem ${ek(ad,'i')} uyardı; bundan sonrası daha temkinli geçecek.`,
+      `${ad} faulünün bedelini sarı kartla ödedi.`,
+      `${ad} ${K.sertMudahale} ve ${K.uyarildi}.`
+    ]);
   }
   if(e.type==='red'){
-    return [
+    return sec([
       `${evreSoz} ${ad} için maç erken bitti: direkt kırmızı kart. ${takim} eksik kaldı.`,
-      `${dk}. dakikada ${ad} kırmızı kart gördü ve oyundan atıldı. ${takim} bir eksikle oynayacak.`,
-      `${evreSoz} hakem ${ad}'e kırmızı kartı gösterdi. ${takim} için işler zorlaştı.`
-    ][secim];
+      `${dk}. dakikada ${ad} kırmızı kart gördü ve ${K.oyunDisi}. ${takim} bir eksikle oynayacak.`,
+      `${evreSoz} hakem ${ad}'e kırmızı kartı gösterdi. ${takim} için işler zorlaştı.`,
+      `${ad} doğrudan kırmızı kart gördü ve ${K.oyunDisi}. ${takim} on kişi kaldı.`,
+      `Hakem hiç düşünmeden kırmızıyı çıkardı; ${ad} ${K.oyunDisi}, ${takim} sayıca eksik.`
+    ]);
   }
   if(e.type==='yellow2red'){
-    return [
+    return sec([
       `${evreSoz} ${ad} ikinci sarıdan kırmızı kart gördü. ${takim} on kişi kaldı.`,
       `${dk}. dakikada ${ad}'in ikinci sarısı kırmızıya dönüştü.`,
-      `${evreSoz} ${ad} bir kez daha faul yaptı ve ikinci sarıyla oyun dışı kaldı.`
-    ][secim];
+      `${evreSoz} ${ad} bir kez daha faul yaptı ve ikinci sarıyla oyun dışı kaldı.`,
+      `${ad} uyarıyı dikkate almadı; ikinci sarı kırmızıyı getirdi. ${takim} eksik.`,
+      `Tekrarlanan faul ${ad}'e ikinci sarıyı ve çıkış yolunu gösterdi.`
+    ]);
   }
   if(e.type==='sub'){
     const cikan=e.player2||'';
-    return [
-      `${evreSoz} ${takim} kadrosuna dokundu: ${cikan?cikan+' kenara geldi, ':''}${ad} oyuna girdi.`,
-      `${dk}. dakikada ${ad} sahaya çıktı${cikan?', '+cikan+' kenara geldi':''}.`,
-      // Türkçe ek uyumu: "Iniesta'i" yanlış olurdu. Tam bir ek çözümleyicisi yerine ismi
-      // ek almadan kullanan kalıp seçildi - yanlış ek, eksik bilgiden daha rahatsız edici.
-      `${evreSoz} teknik heyet bir değişiklik yaptı: ${ad} oyuna girdi${cikan?', '+cikan+' dinlenmeye çekildi':''}.`
-    ][secim];
+    // Türkçe ek uyumu: "Iniesta'i" yanlış olurdu. Tam bir ek çözümleyicisi yerine isimleri
+    // ek almadan kullanan kalıplar seçildi - yanlış ek, eksik bilgiden daha rahatsız edici.
+    return sec([
+      `${evreSoz} ${takim} kadrosuna dokundu: ${cikan?cikan+' '+K.ciktiKenar+', ':''}${ad} ${K.girdi}.`,
+      `${dk}. dakikada ${ad} oyuna girdi${cikan?', yerini aldığı isim '+cikan:''}.`,
+      `${evreSoz} teknik heyet bir değişiklik yaptı: ${ad} ${K.girdi}${cikan?', '+cikan+' '+K.ciktiKenar:''}.`,
+      `${takim} taze güç istedi: ${ad} sahada${cikan?', '+cikan+' kenarda':''}.`,
+      `Kenardan işaret geldi; ${ad} ${K.girdi}${cikan?', yerini aldığı isim '+cikan:''}.`
+    ]);
   }
   // Maç bölümleri
   if(e.type==='match_start')return 'Hakemin düdüğüyle birlikte mücadele başladı!';
