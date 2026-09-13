@@ -1724,7 +1724,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-X';
+window.APP_BUILD='2026-09-13-Y';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6280,6 +6280,69 @@ function bindKadroInputs(){
 // döngü kullanışsız hâle gelir: istediğiniz hâle ulaşmak için birkaç kez dokunmak gerekir
 // ve yanlışlıkla geçilir. Artık bir SEÇİM penceresi açılıyor.
 // Sebep alanı da burada soruluyor; önceki tasarımda ayrı bir prompt çıkıyordu.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ORTAK PENCERE SİSTEMİ
+// Tarayıcının kendi confirm/prompt/alert kutuları uygulamanın görsel diline uymuyor: sistem
+// yazı tipi, tema desteği yok, metin biçimlendirilemiyor.
+// z-index EN ÜST değerde: sayfada 2147483647 kullanan öğeler var (test şeridi, yüzen düğme).
+// Daha düşük bir değer verilseydi pencere açılır ama ARKADA kalırdı - kullanıcı hiçbir şey
+// olmadığını sanardı. Bu hata bir kez yaşandı.
+window.ptPencere=function(secenek){
+  var o=secenek||{};
+  return new Promise(function(cozum){
+    var eski=document.getElementById('ptModalKat');
+    if(eski&&eski.parentNode)eski.parentNode.removeChild(eski);
+    var kat=document.createElement('div');
+    kat.id='ptModalKat';
+    kat.style.cssText='position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;'
+      +'justify-content:center;padding:1.1rem;background:rgba(0,0,0,.55);backdrop-filter:blur(3px)';
+    var tehlike=!!o.tehlikeli, girdiVar=(o.tur==='girdi');
+    kat.innerHTML=
+      '<div style="width:100%;max-width:340px;background:var(--s,#12121a);border:1px solid var(--br,#2d2d50);'
+        +'border-radius:16px;padding:1rem 1.05rem;box-shadow:0 18px 50px rgba(0,0,0,.5);font-family:Outfit,sans-serif">'
+      +(o.baslik?'<div style="font-size:.92rem;font-weight:900;color:var(--tx,#f0f0ff);margin-bottom:.45rem;line-height:1.35">'
+        +(o.ikon?o.ikon+' ':'')+o.baslik+'</div>':'')
+      +(o.mesaj?'<div style="font-size:.76rem;color:var(--mu,#8888bb);line-height:1.65;margin-bottom:'+(girdiVar?'.6rem':'.9rem')+'">'
+        +o.mesaj+'</div>':'')
+      +(girdiVar?'<input id="ptModalGirdi" value="'+String(o.deger||'').replace(/"/g,'&quot;')+'" '
+        +'placeholder="'+String(o.ipucu||'').replace(/"/g,'&quot;')+'" '
+        +'style="width:100%;box-sizing:border-box;margin-bottom:.9rem;padding:.55rem .7rem;border-radius:10px;'
+        +'background:var(--s3,#22223a);border:1.5px solid var(--br,#2d2d50);color:var(--tx,#f0f0ff);'
+        +'font-size:.8rem;font-family:Outfit,sans-serif"/>':'')
+      +'<div style="display:flex;gap:.5rem">'
+        +(o.tur==='bilgi'?'':'<button id="ptModalIptal" style="flex:1;min-height:40px;border-radius:11px;cursor:pointer;'
+          +'background:var(--s2,#1a1a28);border:1.5px solid var(--br,#2d2d50);color:var(--tx,#f0f0ff);'
+          +'font-size:.76rem;font-weight:700;font-family:Outfit,sans-serif">'+(o.iptalYazi||'Vazgeç')+'</button>')
+        +'<button id="ptModalTamam" style="flex:1;min-height:40px;border-radius:11px;cursor:pointer;border:none;'
+          +'background:'+(tehlike?'#dc2626':'var(--ac,#7c3aed)')+';color:'+(tehlike?'#fff':'var(--ac-tx,#fff)')+';'
+          +'font-size:.76rem;font-weight:800;font-family:Outfit,sans-serif">'+(o.tamamYazi||'Tamam')+'</button>'
+      +'</div></div>';
+    document.body.appendChild(kat);
+    function kapat(sonuc){try{if(kat.parentNode)kat.parentNode.removeChild(kat);}catch(e){}cozum(sonuc);}
+    var girdi=kat.querySelector('#ptModalGirdi');
+    if(girdi)setTimeout(function(){try{girdi.focus();girdi.select();}catch(e){}},60);
+    var tmm=kat.querySelector('#ptModalTamam');
+    if(tmm)tmm.onclick=function(){kapat(girdiVar?(girdi?girdi.value:''):true);};
+    var ipt=kat.querySelector('#ptModalIptal');
+    if(ipt)ipt.onclick=function(){kapat(girdiVar?null:false);};
+    kat.addEventListener('click',function(e){if(e.target===kat)kapat(girdiVar?null:false);});
+    if(girdi)girdi.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();kapat(girdi.value);}});
+  });
+};
+window.ptOnay=function(mesaj,secenek){
+  var o=secenek||{};
+  return ptPencere({tur:'onay',baslik:o.baslik||'Onay',mesaj:mesaj,ikon:o.ikon||'❓',
+    tehlikeli:o.tehlikeli,tamamYazi:o.tamamYazi||'Evet',iptalYazi:o.iptalYazi||'Vazgeç'});
+};
+window.ptSor=function(mesaj,varsayilan,secenek){
+  var o=secenek||{};
+  return ptPencere({tur:'girdi',baslik:o.baslik||'Bilgi Girin',mesaj:mesaj,ikon:o.ikon||'✏️',
+    deger:varsayilan,ipucu:o.ipucu,tamamYazi:o.tamamYazi||'Kaydet'});
+};
+window.ptBilgi=function(mesaj,secenek){
+  var o=secenek||{};
+  return ptPencere({tur:'bilgi',baslik:o.baslik||'Bilgi',mesaj:mesaj,ikon:o.ikon||'ℹ️',tamamYazi:'Tamam'});
+};
 var PL_DURUMLAR=[
   {k:'',          ikon:'✅', ad:'Normal',            aciklama:'Oynayabilir'},
   {k:'injured',   ikon:'🤕', ad:'Sakat',             aciklama:'Sakatlık nedeniyle yok'},
@@ -6371,8 +6434,22 @@ window.ptDurumSec=function(section,idx,yeniDurum){
     });
   }
   if(!yeniDurum){kaydet(null);return;}
-  ptSor('Sebep (isteğe bağlı - boş bırakabilirsiniz)',oyuncu.statusNote||'',
-    {baslik:bilgi.ikon+' '+bilgi.ad,ikon:'',ipucu:'Örn: Sağ diz, 3 hafta'})
+  // KULLANICI TALEBİ ("admin ilgili raporun yanına ekstra sebep yazabilsin"): Sebep hem
+  // kadro ekranındaki rozette hem Puan Tablosu'ndaki eksikler listesinde görünür.
+  // Duruma göre farklı örnek verilir - boş bir kutuya "ne yazsam" diye bakmak zaman kaybı.
+  var ornek={
+    injured:'Örn: Sağ diz sakatlığı, yaklaşık 3 hafta',
+    suspended:'Örn: Kulüp disiplin kurulu kararı, 2 maç',
+    cards:'Örn: 4 sarı kart sınırı doldu, 1 maç ceza',
+    national:'Örn: A Milli Takım kampında',
+    rest:'Örn: Yoğun fikstür, dinlendirildi',
+    outofsquad:'Örn: Teknik heyet kararıyla kadro dışı',
+    ill:'Örn: Grip, birkaç gün',
+    transfer:'Örn: Transfer görüşmeleri sürüyor'
+  }[yeniDurum]||'Kısa bir açıklama yazabilirsiniz';
+  ptSor('Bu bilgi eksikler listesinde oyuncunun altında görünür. Boş bırakabilirsiniz.',
+    oyuncu.statusNote||'',
+    {baslik:bilgi.ikon+' '+bilgi.ad+' — Sebep',ikon:'',ipucu:ornek,tamamYazi:'Kaydet'})
     .then(function(sebep){ kaydet(sebep); });
 };
 
