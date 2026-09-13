@@ -2411,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-P';
+window.APP_BUILD='2026-09-13-R';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -14301,14 +14301,28 @@ function ptChatSuz(liste,allComments){
   if(!q)return liste;
   function eslesir(c){
     if(!c)return false;
-    const metin=((c.text||'')+' '+(c.userName||c.name||'')).toLocaleLowerCase('tr');
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "kişi araması yapınca kişi görünmüyor"):
+    // Yazar adı için 'userName' ve 'name' alanları aranıyordu - bu projede ikisi de yok,
+    // doğru alan 'c.user'. Yanlış alan yüzünden kişi araması HİÇ eşleşmiyordu.
+    const yazar=(c.user||c.userName||c.name||'');
+    const metin=((c.text||'')+' '+yazar).toLocaleLowerCase('tr');
     return metin.indexOf(q)!==-1;
   }
   const tumu=allComments||liste;
-  // SENSÖR: Arama kutusu doluyken hiçbir mesaj eşleşmiyorsa bu NORMAL olabilir - ama
-  // süzgecin kendisi bozuksa da aynı sonuç çıkar ve ikisi ayırt edilemez. Liste dolu
-  // olmasına rağmen hiç eşleşme yoksa kayda geçer; tekrarlıyorsa süzgeçte sorun vardır.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KİŞİ ARAMASI vs METİN ARAMASI (kullanıcı talebi: "sadece ilgili kişinin yazdıkları")
+  // Aranan ifade bir YAZAR ADIYLA tam eşleşiyorsa bu bir kişi aramasıdır: yalnızca o
+  // kişinin mesajları gösterilir. Bağlam için üst mesajları da tutmak, kişi ararken
+  // BAŞKALARININ mesajlarını listeye sokardı - istenen bu değil.
+  // Metin aramasında ise bağlam korunur: eşleşme bir yanıttaysa üst mesaj da kalır, yoksa
+  // neye cevap verildiği anlaşılmaz.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  const yazarlar=new Set((tumu||[]).map(c=>(c&&(c.user||c.userName||c.name)||'').toLocaleLowerCase('tr')).filter(Boolean));
+  const kisiAramasi=yazarlar.has(q);
   const _sonuc=liste.filter(c=>{
+    if(kisiAramasi){
+      return ((c&&(c.user||c.userName||c.name))||'').toLocaleLowerCase('tr')===q;
+    }
     if(eslesir(c))return true;
     // Yanıtlarından biri eşleşiyorsa üst mesaj da kalsın - bağlam korunur.
     return (tumu||[]).some(x=>x&&String(x.replyTo)===String(c.id)&&eslesir(x));
