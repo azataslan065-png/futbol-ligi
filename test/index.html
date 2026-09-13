@@ -2411,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-13-B';
+window.APP_BUILD='2026-09-13-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -10058,7 +10058,7 @@ function renderStats(){
   // istatistik sekmesinde ilgili emojiler varsa güncellensin." - Gol/Asist/Kart sekmeleri
   // Maç Akışı'ndaki AYNI olay tipleriyle eşleşiyor - artık admin'in özelleştirdiği (ya da
   // varsayılan) emojiler burada da kullanılıyor, sabit değil.
-  const tabs=[{id:'seasonsummary',icon:'🏆',label:'Sezon Özeti'},{id:'goals',icon:renderStatEventIconHtml('goal'),label:'Gol'},{id:'assists',icon:renderStatEventIconHtml('assist'),label:'Asist'},{id:'yellow',icon:renderStatEventIconHtml('yellow'),label:'Sarı'},{id:'red',icon:renderStatEventIconHtml('red'),label:'Kırmızı'},{id:'yellow2red',icon:renderStatEventIconHtml('yellow2red'),label:'2. Sarı-Kırmızı'},{id:'streak',icon:'🔥',label:'Seri'},{id:'minutes',icon:'⏱️',label:'Gol Dakikası'},{id:'best11',icon:'⭐',label:'Haftanın 11i'},{id:'homeaway',icon:'🏠',label:'Ev/Dep'},{id:'teamtotals',icon:'📊',label:'Takım Detayı'},{id:'referees',icon:'⚖️',label:'Hakemler'},{id:'rating',icon:'⭐',label:'Puan Sıralaması'},{id:'mvp',icon:'👑',label:'En Değerli Oyuncu'},{id:'career',icon:'📈',label:'Kariyer Geçmişi'},{id:'motm',icon:'🌟',label:'Maçın Adamları'}];
+  const tabs=[{id:'seasonsummary',icon:'🏆',label:'Sezon Özeti'},{id:'goals',icon:renderStatEventIconHtml('goal'),label:'Gol'},{id:'assists',icon:renderStatEventIconHtml('assist'),label:'Asist'},{id:'yellow',icon:renderStatEventIconHtml('yellow'),label:'Sarı'},{id:'red',icon:renderStatEventIconHtml('red'),label:'Kırmızı'},{id:'yellow2red',icon:renderStatEventIconHtml('yellow2red'),label:'2. Sarı-Kırmızı'},{id:'streak',icon:'🔥',label:'Seri'},{id:'minutes',icon:'⏱️',label:'Gol Dakikası'},{id:'best11',icon:'⭐',label:'Haftanın 11i'},{id:'homeaway',icon:'🏠',label:'Ev/Dep'},{id:'teamtotals',icon:'📊',label:'Takım Detayı'},{id:'referees',icon:'⚖️',label:'Hakemler'},{id:'rating',icon:'⭐',label:'Puan Sıralaması'},{id:'weekstar',icon:'🏅',label:'Haftanın Oyuncusu'},{id:'teamrating',icon:'📐',label:'Takım Puanı'},{id:'keepers',icon:'🧤',label:'Kaleciler'},{id:'growth',icon:'📈',label:'En Çok Gelişen'},{id:'mvp',icon:'👑',label:'En Değerli Oyuncu'},{id:'career',icon:'📈',label:'Kariyer Geçmişi'},{id:'motm',icon:'🌟',label:'Maçın Adamları'}];
   let html=`<div class="stat-tab-row">${tabs.map(t=>`<button onclick="showStatTab('${t.id}')" id="stab_${t.id}" class="stat-tab${t.id===_statTab?' active':''}">${t.icon} ${t.label}</button>`).join('')}</div>`;
 
   const renderList=(arr,field,icon,color,label)=>{
@@ -10656,29 +10656,30 @@ html+=`<div id="st_homeaway" style="display:${_statTab==='homeaway'?'':'none'}">
   // krallığı varken puan sıralamasının olmaması eksiklikti.
   // ORTALAMA kullanılır, toplam değil: tek maçta parlayan biri, her hafta istikrarlı
   // oynayanın önüne geçmesin. En az 2 maç şartı var - tek maçlık 9.0 sıralamayı bozardı.
+  // Mevki süzgeci: forvetler gol attığı için doğal olarak üstte çıkar; defansçılar kendi
+  // aralarında karşılaştırılmalı. Süzgeç seçimi sekmeler arası korunur.
+  const MEVKI_GRUP={
+    hepsi:{ad:'Tümü',mevkiler:null},
+    def:{ad:'Defans',mevkiler:['STP1','STP2','SĞB','SLB']},
+    orta:{ad:'Orta Saha',mevkiler:['GÖ','DOS','OOS','SĞK','SLK']},
+    for:{ad:'Forvet',mevkiler:['SF','GF']}
+  };
+  if(!window._puanMevki)window._puanMevki='hepsi';
   const _puanSira=(function(){
-    const oyuncular={};
-    Object.values(D.matches||{}).filter(m=>m&&m.played).forEach(m=>{
-      [['home',m.homeId],['away',m.awayId]].forEach(([taraf,tid])=>{
-        const t=D.teams[tid]; if(!t||!t.squad)return;
-        (t.squad.starting||[]).forEach(p=>{
-          if(!p||!p.name)return;
-          const pn=ptOyuncuPuani(m,p.name,taraf,p.position);
-          if(pn==null)return;
-          const k=p.name+'|'+tid;
-          if(!oyuncular[k])oyuncular[k]={name:p.name,teamId:tid,photo:p.photo,position:p.position,toplam:0,mac:0,enIyi:0};
-          const o=oyuncular[k];
-          o.toplam+=pn;o.mac++;if(pn>o.enIyi)o.enIyi=pn;
-        });
-      });
-    });
-    return Object.values(oyuncular).filter(o=>o.mac>=2)
-      .map(o=>({...o,ort:Math.round((o.toplam/o.mac)*10)/10}))
+    const g=MEVKI_GRUP[window._puanMevki]||MEVKI_GRUP.hepsi;
+    return _puanVerisi.oyuncular
+      .filter(o=>o.mac>=2&&(!g.mevkiler||g.mevkiler.indexOf(o.position)!==-1))
       .sort((a,b)=>b.ort-a.ort||b.mac-a.mac);
   })();
   html+=`<div id="st_rating" style="display:${_statTab==='rating'?'':'none'}">
-    <div style="font-size:.68rem;color:var(--mu);line-height:1.6;margin-bottom:.6rem">
+    <div style="font-size:.68rem;color:var(--mu);line-height:1.6;margin-bottom:.5rem">
       Oynadığı maçlardaki performans puanlarının ortalaması. En az 2 maç oynayan oyuncular listelenir.
+    </div>
+    <div style="display:flex;gap:.3rem;margin-bottom:.6rem;flex-wrap:wrap">
+      ${Object.keys(MEVKI_GRUP).map(k=>`<button onclick="window._puanMevki='${k}';withHScrollPreserved(renderStats);"
+        style="flex:1;min-width:4rem;min-height:32px;border-radius:9px;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif;font-size:.66rem;font-weight:700;
+        background:${window._puanMevki===k?'var(--ac)':'var(--s2)'};color:${window._puanMevki===k?'var(--ac-tx,#fff)':'var(--tx)'};
+        border:1.5px solid ${window._puanMevki===k?'var(--ac)':'var(--br)'}">${MEVKI_GRUP[k].ad}</button>`).join('')}
     </div>
     ${_puanSira.length?_puanSira.slice(0,30).map((o,i)=>{
       const t=D.teams[o.teamId]||{};
@@ -10692,6 +10693,85 @@ html+=`<div id="st_homeaway" style="display:${_statTab==='homeaway'?'':'none'}">
         ${ptPuanRozeti(o.ort)}
       </div>`;
     }).join(''):'<div style="text-align:center;color:var(--mu);padding:2rem 1rem;font-size:.8rem;line-height:1.7">⭐<br/>Henüz yeterli maç oynanmadı.<br/><span style="font-size:.7rem">En az 2 maç oynayan oyuncular burada listelenir.</span></div>'}
+  </div>`;
+  // Haftanın oyuncusu: performans puanına dayanır. "Maçın Adamı" ise kullanıcı oylamasıyla
+  // seçilir - ikisi farklı şeyler, bilerek ayrı tutuldu (halkın seçtiği / sayıların seçtiği).
+  html+=`<div id="st_weekstar" style="display:${_statTab==='weekstar'?'':'none'}">
+    <div style="font-size:.68rem;color:var(--mu);line-height:1.6;margin-bottom:.6rem">
+      Her haftanın en yüksek performans puanını alan oyuncusu. Oylamayla seçilen "Maçın Adamı"ndan farklıdır - bu, sayıların seçimidir.
+    </div>
+    ${_puanVerisi.haftalik.length?_puanVerisi.haftalik.map(h=>{
+      const t=D.teams[h.teamId]||{};
+      return `<div style="display:flex;align-items:center;gap:.55rem;padding:.5rem .6rem;background:var(--s2);border:1px solid var(--br);border-radius:11px;margin-bottom:.35rem">
+        <span style="flex-shrink:0;min-width:2.6rem;text-align:center;font-size:.6rem;font-weight:800;color:var(--mu)">${h.hafta}. hafta</span>
+        ${h.photo?`<img src="${h.photo}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.style.display='none'"/>`:''}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.78rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">🏅 ${escHtml(h.name)}</div>
+          <div style="font-size:.6rem;color:var(--mu)">${escHtml(t.name||'')}</div>
+        </div>
+        ${ptPuanRozeti(h.puan)}
+      </div>`;
+    }).join(''):'<div style="text-align:center;color:var(--mu);padding:2rem 1rem;font-size:.8rem">🏅<br/>Henüz oynanmış maç yok.</div>'}
+  </div>`;
+  // Takım puanı: puan tablosu SONUÇLARI gösterir, bu ise PERFORMANSI. İkisi ayrışabilir -
+  // alt sıradaki bir takımın iyi oynadığı ya da tersi buradan görünür.
+  html+=`<div id="st_teamrating" style="display:${_statTab==='teamrating'?'':'none'}">
+    <div style="font-size:.68rem;color:var(--mu);line-height:1.6;margin-bottom:.6rem">
+      Takımın ilk 11'indeki oyuncuların performans puanı ortalaması. Puan tablosu sonuçları gösterir; bu, oynanan futbolu gösterir.
+    </div>
+    ${_puanVerisi.takimlar.length?_puanVerisi.takimlar.map((tr,i)=>{
+      const t=D.teams[tr.teamId]||{};
+      return `<div style="display:flex;align-items:center;gap:.55rem;padding:.5rem .6rem;background:${i%2?'var(--s2)':'var(--s3)'};border:1px solid var(--br);border-radius:11px;margin-bottom:.35rem">
+        <span style="flex-shrink:0;width:1.5rem;text-align:center;font-size:.72rem;font-weight:900;color:${i<3?'#fbbf24':'var(--mu)'}">${i+1}</span>
+        ${t.logo?`<img src="${t.logo}" style="width:26px;height:26px;object-fit:contain;flex-shrink:0" onerror="this.style.display='none'"/>`:''}
+        <div style="flex:1;min-width:0;font-size:.78rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(t.name||'')}</div>
+        ${ptPuanRozeti(tr.ort)}
+      </div>`;
+    }).join(''):'<div style="text-align:center;color:var(--mu);padding:2rem 1rem;font-size:.8rem">📐<br/>Henüz oynanmış maç yok.</div>'}
+  </div>`;
+  // Kaleciler: gol/asist sıralamalarında hep en altta kalıyorlardı. Kendi ölçüleriyle
+  // (gol yemeden kapatılan maç, maç başına yenen gol) ayrı listelenirler.
+  html+=`<div id="st_keepers" style="display:${_statTab==='keepers'?'':'none'}">
+    <div style="font-size:.68rem;color:var(--mu);line-height:1.6;margin-bottom:.6rem">
+      Kalecilere özel ölçüler. Sıralama gol yemeden kapatılan maç sayısına, eşitlikte maç başına yenen gole göredir.
+    </div>
+    ${_kaleciler.length?_kaleciler.map((g,i)=>{
+      const t=D.teams[g.teamId]||{};
+      return `<div style="display:flex;align-items:center;gap:.55rem;padding:.5rem .6rem;background:${i%2?'var(--s2)':'var(--s3)'};border:1px solid var(--br);border-radius:11px;margin-bottom:.35rem">
+        <span style="flex-shrink:0;width:1.5rem;text-align:center;font-size:.72rem;font-weight:900;color:${i<3?'#fbbf24':'var(--mu)'}">${i+1}</span>
+        ${g.photo?`<img src="${g.photo}" style="width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.style.display='none'"/>`:''}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.76rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(g.name)}</div>
+          <div style="font-size:.6rem;color:var(--mu)">${escHtml(t.name||'')} · ${g.mac} maç · maç başı ${g.macBasi} gol</div>
+        </div>
+        <div style="flex-shrink:0;text-align:center">
+          <div style="font-size:.5rem;color:var(--mu)">GOL YEMEDİ</div>
+          <div style="font-size:.82rem;font-weight:900;color:#22c55e">${g.temiz}</div>
+        </div>
+        ${g.ort!=null?ptPuanRozeti(g.ort):''}
+      </div>`;
+    }).join(''):'<div style="text-align:center;color:var(--mu);padding:2rem 1rem;font-size:.8rem">🧤<br/>Henüz oynanmış maç yok.</div>'}
+  </div>`;
+  // Gelişim: oynadığı maçlar ikiye bölünür, ikinci yarının ortalamasından ilk yarınınki
+  // çıkarılır. En az 4 maç şartı var - iki maçlık "gelişim" gürültüden ibaret olurdu.
+  html+=`<div id="st_growth" style="display:${_statTab==='growth'?'':'none'}">
+    <div style="font-size:.68rem;color:var(--mu);line-height:1.6;margin-bottom:.6rem">
+      Oyuncunun son maçlarındaki ortalaması ile ilk maçlarındaki ortalamasının farkı. En az 4 maç oynayanlar listelenir.
+    </div>
+    ${_gelisim.length?_gelisim.slice(0,20).map((o,i)=>{
+      const t=D.teams[o.teamId]||{};
+      const artis=o.fark>0;
+      return `<div style="display:flex;align-items:center;gap:.55rem;padding:.5rem .6rem;background:${i%2?'var(--s2)':'var(--s3)'};border:1px solid var(--br);border-radius:11px;margin-bottom:.35rem">
+        ${o.photo?`<img src="${o.photo}" style="width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.style.display='none'"/>`:''}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.76rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(o.name)}</div>
+          <div style="font-size:.6rem;color:var(--mu)">${escHtml(t.name||'')} · ${o.mac} maç · ortalama ${o.ort.toFixed(1)}</div>
+        </div>
+        <div style="flex-shrink:0;font-size:.78rem;font-weight:900;color:${artis?'#22c55e':(o.fark<0?'#ef4444':'var(--mu)')}">
+          ${artis?'▲':(o.fark<0?'▼':'—')} ${Math.abs(o.fark).toFixed(1)}
+        </div>
+      </div>`;
+    }).join(''):'<div style="text-align:center;color:var(--mu);padding:2rem 1rem;font-size:.8rem;line-height:1.7">📈<br/>Henüz yeterli maç oynanmadı.<br/><span style="font-size:.7rem">En az 4 maç oynayan oyuncular burada listelenir.</span></div>'}
   </div>`;
   html+=`<div id="st_mvp" style="display:${_statTab==='mvp'?'':'none'}">
     <div style="font-size:.66rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">👑 Gol=4p, Asist=3p, Sarı Kart=-1p, Kırmızı Kart=-3p formülüyle otomatik hesaplanır.</div>
@@ -10806,7 +10886,7 @@ html+=`<div id="st_homeaway" style="display:${_statTab==='homeaway'?'':'none'}">
     el.insertAdjacentHTML('afterbegin',scenBtn);
   }catch(e){DiagSil('renderStandings/senaryoButonu',e);}
 }
-window.showStatTab=function(tab){_statTab=tab;['seasonsummary','goals','assists','yellow','red','yellow2red','streak','minutes','best11','rating','homeaway','teamtotals','referees','mvp','career','motm'].forEach(t=>{const d=document.getElementById('st_'+t);const b=document.getElementById('stab_'+t);if(d)d.style.display=t===tab?'':'none';if(b){b.classList.toggle('active',t===tab);}});};
+window.showStatTab=function(tab){_statTab=tab;['seasonsummary','goals','assists','yellow','red','yellow2red','streak','minutes','best11','rating','weekstar','teamrating','keepers','growth','homeaway','teamtotals','referees','mvp','career','motm'].forEach(t=>{const d=document.getElementById('st_'+t);const b=document.getElementById('stab_'+t);if(d)d.style.display=t===tab?'':'none';if(b){b.classList.toggle('active',t===tab);}});};
 
 // ═══ AVERAJ SENARYOLARI ═══
 window._scenarioSelected=window._scenarioSelected||{};
