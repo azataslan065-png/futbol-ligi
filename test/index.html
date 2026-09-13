@@ -2411,7 +2411,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-08-U';
+window.APP_BUILD='2026-09-13-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -10058,7 +10058,7 @@ function renderStats(){
   // istatistik sekmesinde ilgili emojiler varsa güncellensin." - Gol/Asist/Kart sekmeleri
   // Maç Akışı'ndaki AYNI olay tipleriyle eşleşiyor - artık admin'in özelleştirdiği (ya da
   // varsayılan) emojiler burada da kullanılıyor, sabit değil.
-  const tabs=[{id:'seasonsummary',icon:'🏆',label:'Sezon Özeti'},{id:'goals',icon:renderStatEventIconHtml('goal'),label:'Gol'},{id:'assists',icon:renderStatEventIconHtml('assist'),label:'Asist'},{id:'yellow',icon:renderStatEventIconHtml('yellow'),label:'Sarı'},{id:'red',icon:renderStatEventIconHtml('red'),label:'Kırmızı'},{id:'yellow2red',icon:renderStatEventIconHtml('yellow2red'),label:'2. Sarı-Kırmızı'},{id:'streak',icon:'🔥',label:'Seri'},{id:'minutes',icon:'⏱️',label:'Gol Dakikası'},{id:'best11',icon:'⭐',label:'Haftanın 11i'},{id:'homeaway',icon:'🏠',label:'Ev/Dep'},{id:'teamtotals',icon:'📊',label:'Takım Detayı'},{id:'referees',icon:'⚖️',label:'Hakemler'},{id:'mvp',icon:'👑',label:'En Değerli Oyuncu'},{id:'career',icon:'📈',label:'Kariyer Geçmişi'},{id:'motm',icon:'🌟',label:'Maçın Adamları'}];
+  const tabs=[{id:'seasonsummary',icon:'🏆',label:'Sezon Özeti'},{id:'goals',icon:renderStatEventIconHtml('goal'),label:'Gol'},{id:'assists',icon:renderStatEventIconHtml('assist'),label:'Asist'},{id:'yellow',icon:renderStatEventIconHtml('yellow'),label:'Sarı'},{id:'red',icon:renderStatEventIconHtml('red'),label:'Kırmızı'},{id:'yellow2red',icon:renderStatEventIconHtml('yellow2red'),label:'2. Sarı-Kırmızı'},{id:'streak',icon:'🔥',label:'Seri'},{id:'minutes',icon:'⏱️',label:'Gol Dakikası'},{id:'best11',icon:'⭐',label:'Haftanın 11i'},{id:'homeaway',icon:'🏠',label:'Ev/Dep'},{id:'teamtotals',icon:'📊',label:'Takım Detayı'},{id:'referees',icon:'⚖️',label:'Hakemler'},{id:'rating',icon:'⭐',label:'Puan Sıralaması'},{id:'mvp',icon:'👑',label:'En Değerli Oyuncu'},{id:'career',icon:'📈',label:'Kariyer Geçmişi'},{id:'motm',icon:'🌟',label:'Maçın Adamları'}];
   let html=`<div class="stat-tab-row">${tabs.map(t=>`<button onclick="showStatTab('${t.id}')" id="stab_${t.id}" class="stat-tab${t.id===_statTab?' active':''}">${t.icon} ${t.label}</button>`).join('')}</div>`;
 
   const renderList=(arr,field,icon,color,label)=>{
@@ -10495,7 +10495,11 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
   // listede görünür.
   const allMatchesPlayedForB11=Object.keys(D.matches||{}).length>0&&Object.values(D.matches||{}).every(m=>m.played);
   const b11SelectOptions=[...playedWeeksB11.map(w=>`<option value="${w}" ${String(window._b11SelectedWeek)===String(w)?'selected':''}>${w}. Hafta</option>`),
-    ...(allMatchesPlayedForB11?[`<option value="season" ${window._b11SelectedWeek==='season'?'selected':''}>🏆 Sezonun 11i</option>`]:[])].join('');
+    // Sezonun 11'i önceden YALNIZCA tüm maçlar oynandığında görünüyordu. Oysa sezon
+    // ortasında "şu ana kadarki en iyi 11" en az sezon sonundaki kadar ilgi çekici ve
+    // veri zaten mevcut. Artık oynanmış en az bir hafta varsa görünür; sezon bitmediyse
+    // başlık bunu açıkça söyler ki yanlış anlaşılmasın.
+    ...(playedWeeksB11.length?[`<option value="season" ${window._b11SelectedWeek==='season'?'selected':''}>🏆 ${allMatchesPlayedForB11?'Sezonun 11i':'Sezonun 11i (şu ana kadar)'}</option>`]:[])].join('');
   // Sezon henüz bitmediyse ve önceden "season" seçiliyse (örn. sezon yeniden başladıysa),
   // geçerli bir haftaya otomatik dön.
   if(window._b11SelectedWeek==='season'&&!allMatchesPlayedForB11)window._b11SelectedWeek=playedWeeksB11[0]||'';
@@ -10640,6 +10644,50 @@ html+=`<div id="st_homeaway" style="display:${_statTab==='homeaway'?'':'none'}">
     });
   });
   const mvpList=Object.entries(mvpScores).map(([name,s])=>({name,...s})).sort((a,b)=>b.pts-a.pts).slice(0,10);
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // PUAN SIRALAMASI
+  // Performans puanı hesaplanıyor ve maç kadrosunda gösteriliyordu, ama "en yüksek ortalama
+  // puana sahip oyuncular kimler" sorusunun cevabı hiçbir yerde yoktu. Gol ve asist
+  // krallığı varken puan sıralamasının olmaması eksiklikti.
+  // ORTALAMA kullanılır, toplam değil: tek maçta parlayan biri, her hafta istikrarlı
+  // oynayanın önüne geçmesin. En az 2 maç şartı var - tek maçlık 9.0 sıralamayı bozardı.
+  const _puanSira=(function(){
+    const oyuncular={};
+    Object.values(D.matches||{}).filter(m=>m&&m.played).forEach(m=>{
+      [['home',m.homeId],['away',m.awayId]].forEach(([taraf,tid])=>{
+        const t=D.teams[tid]; if(!t||!t.squad)return;
+        (t.squad.starting||[]).forEach(p=>{
+          if(!p||!p.name)return;
+          const pn=ptOyuncuPuani(m,p.name,taraf,p.position);
+          if(pn==null)return;
+          const k=p.name+'|'+tid;
+          if(!oyuncular[k])oyuncular[k]={name:p.name,teamId:tid,photo:p.photo,position:p.position,toplam:0,mac:0,enIyi:0};
+          const o=oyuncular[k];
+          o.toplam+=pn;o.mac++;if(pn>o.enIyi)o.enIyi=pn;
+        });
+      });
+    });
+    return Object.values(oyuncular).filter(o=>o.mac>=2)
+      .map(o=>({...o,ort:Math.round((o.toplam/o.mac)*10)/10}))
+      .sort((a,b)=>b.ort-a.ort||b.mac-a.mac);
+  })();
+  html+=`<div id="st_rating" style="display:${_statTab==='rating'?'':'none'}">
+    <div style="font-size:.68rem;color:var(--mu);line-height:1.6;margin-bottom:.6rem">
+      Oynadığı maçlardaki performans puanlarının ortalaması. En az 2 maç oynayan oyuncular listelenir.
+    </div>
+    ${_puanSira.length?_puanSira.slice(0,30).map((o,i)=>{
+      const t=D.teams[o.teamId]||{};
+      return `<div style="display:flex;align-items:center;gap:.55rem;padding:.5rem .6rem;background:${i%2?'var(--s2)':'var(--s3)'};border:1px solid var(--br);border-radius:11px;margin-bottom:.35rem">
+        <span style="flex-shrink:0;width:1.5rem;text-align:center;font-size:.72rem;font-weight:900;color:${i<3?'#fbbf24':'var(--mu)'}">${i+1}</span>
+        ${o.photo?`<img src="${o.photo}" style="width:30px;height:30px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.style.display='none'"/>`:''}
+        <div style="flex:1;min-width:0">
+          <div style="font-size:.76rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(o.name)}</div>
+          <div style="font-size:.6rem;color:var(--mu)">${escHtml(t.name||'')} · ${o.mac} maç · en iyi ${o.enIyi.toFixed(1)}</div>
+        </div>
+        ${ptPuanRozeti(o.ort)}
+      </div>`;
+    }).join(''):'<div style="text-align:center;color:var(--mu);padding:2rem 1rem;font-size:.8rem;line-height:1.7">⭐<br/>Henüz yeterli maç oynanmadı.<br/><span style="font-size:.7rem">En az 2 maç oynayan oyuncular burada listelenir.</span></div>'}
+  </div>`;
   html+=`<div id="st_mvp" style="display:${_statTab==='mvp'?'':'none'}">
     <div style="font-size:.66rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">👑 Gol=4p, Asist=3p, Sarı Kart=-1p, Kırmızı Kart=-3p formülüyle otomatik hesaplanır.</div>
     ${!mvpList.length?'<div style="text-align:center;color:var(--mu);padding:1.5rem;font-size:.78rem">Henüz veri yok</div>':mvpList.map((p,i)=>`
@@ -10753,7 +10801,7 @@ html+=`<div id="st_homeaway" style="display:${_statTab==='homeaway'?'':'none'}">
     el.insertAdjacentHTML('afterbegin',scenBtn);
   }catch(e){DiagSil('renderStandings/senaryoButonu',e);}
 }
-window.showStatTab=function(tab){_statTab=tab;['seasonsummary','goals','assists','yellow','red','yellow2red','streak','minutes','best11','homeaway','teamtotals','referees','mvp','career','motm'].forEach(t=>{const d=document.getElementById('st_'+t);const b=document.getElementById('stab_'+t);if(d)d.style.display=t===tab?'':'none';if(b){b.classList.toggle('active',t===tab);}});};
+window.showStatTab=function(tab){_statTab=tab;['seasonsummary','goals','assists','yellow','red','yellow2red','streak','minutes','best11','rating','homeaway','teamtotals','referees','mvp','career','motm'].forEach(t=>{const d=document.getElementById('st_'+t);const b=document.getElementById('stab_'+t);if(d)d.style.display=t===tab?'':'none';if(b){b.classList.toggle('active',t===tab);}});};
 
 // ═══ AVERAJ SENARYOLARI ═══
 window._scenarioSelected=window._scenarioSelected||{};
@@ -15903,6 +15951,45 @@ window.showPlayerDetail=function(teamId,section,idx){
 
   // KULLANICI TALEBİ: Sakatlık/Ceza Geçmişi Zaman Çizelgesi - admin'in geçmişte işaretlediği
   // tüm durum değişikliklerini (sakat/cezalı/normale döndü) tarih sırasıyla gösterir.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // PERFORMANS PUANI GEÇMİŞİ
+  // Puanlar hesaplanıyor ve maç kadrosunda görünüyordu, ama oyuncunun KENDİ sayfasında
+  // yoktu - "bu oyuncu sezon boyunca nasıl gidiyor" sorusunun cevabı hiçbir yerde yoktu.
+  // Ortalama, en iyi/en kötü ve son maçların puanları birlikte gösterilir; tek bir sayı
+  // yanıltıcı olurdu (9.0 ortalama iki maçtan da gelebilir, on maçtan da).
+  const _puanGecmisi=(function(){
+    const out=[];
+    Object.values(D.matches||{}).filter(m=>m.played&&(m.homeId===teamId||m.awayId===teamId))
+      .sort((a,b)=>(a.week||0)-(b.week||0)).forEach(m=>{
+        const taraf=(m.homeId===teamId)?'home':'away';
+        const pn=ptOyuncuPuani(m,p.name,taraf,p.position);
+        if(pn!=null)out.push({puan:pn,hafta:m.week||0,mac:m});
+      });
+    return out;
+  })();
+  const puanGecmisiHtml=_puanGecmisi.length?(function(){
+    const ort=Math.round((_puanGecmisi.reduce((a,b)=>a+b.puan,0)/_puanGecmisi.length)*10)/10;
+    const enIyi=Math.max(..._puanGecmisi.map(x=>x.puan));
+    const enKotu=Math.min(..._puanGecmisi.map(x=>x.puan));
+    // Son 10 maç, eskiden yeniye - form eğilimi soldan sağa okunsun.
+    const son=_puanGecmisi.slice(-10);
+    return `<div style="background:var(--s2);border-radius:12px;padding:.6rem .7rem;margin-bottom:.6rem">
+      <div style="font-size:.62rem;font-weight:800;color:var(--mu);margin-bottom:.5rem;text-transform:uppercase">⭐ Performans Puanı</div>
+      <div style="display:flex;gap:.5rem;margin-bottom:.55rem">
+        <div style="flex:1;text-align:center"><div style="font-size:.56rem;color:var(--mu)">ORTALAMA</div>${ptPuanRozeti(ort)}</div>
+        <div style="flex:1;text-align:center"><div style="font-size:.56rem;color:var(--mu)">EN İYİ</div>${ptPuanRozeti(enIyi)}</div>
+        <div style="flex:1;text-align:center"><div style="font-size:.56rem;color:var(--mu)">EN DÜŞÜK</div>${ptPuanRozeti(enKotu)}</div>
+        <div style="flex:1;text-align:center"><div style="font-size:.56rem;color:var(--mu)">MAÇ</div><div style="font-size:.76rem;font-weight:900">${_puanGecmisi.length}</div></div>
+      </div>
+      <div style="display:flex;gap:.25rem;flex-wrap:wrap;align-items:flex-end">
+        ${son.map(x=>`<div style="flex:1;min-width:1.8rem;text-align:center">
+          <div style="font-size:.5rem;color:var(--mu);margin-bottom:1px">${x.hafta}.H</div>
+          ${ptPuanRozeti(x.puan)}
+        </div>`).join('')}
+      </div>
+      ${_puanGecmisi.length>10?'<div style="font-size:.56rem;color:var(--mu);margin-top:.35rem;text-align:right">son 10 maç</div>':''}
+    </div>`;
+  })():'';
   const statusHistoryHtml=(p.statusHistory&&p.statusHistory.length)?`<div style="background:var(--s2);border-radius:12px;padding:.6rem .7rem;margin-bottom:.6rem">
     <div style="font-size:.62rem;font-weight:800;color:var(--mu);margin-bottom:.4rem;text-transform:uppercase">📋 Sakatlık/Ceza Geçmişi</div>
     ${p.statusHistory.slice().reverse().slice(0,8).map(h=>{
@@ -15968,6 +16055,7 @@ window.showPlayerDetail=function(teamId,section,idx){
       <div style="font-size:.68rem;color:var(--mu);margin-top:.3rem">${t.name} ${section==='bench'?'· Yedek Kadro':'· İlk 11'}</div>
     </div>
     ${cardWarning}
+    ${puanGecmisiHtml}
     ${statusHistoryHtml}
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:.35rem;margin-bottom:.5rem">
       ${[['Maç',apps,'var(--tx)'],['Gol',goals,'#4ade80'],['Asist',assists,'#60a5fa'],['Sarı',yellow,'#fbbf24'],['Kırmızı',red,'#f87171']].map(([l,v,col])=>`<div style="background:var(--s2);border-radius:9px;padding:.45rem .2rem;text-align:center"><div style="font-size:1.05rem;font-weight:900;color:${col}">${v}</div><div style="font-size:.56rem;color:var(--mu)">${l}</div></div>`).join('')}
@@ -26696,17 +26784,12 @@ window.PTPlayer=(function(){
       // ayarlarında değil. Varsayılan KAPALI: arka planda çalmak veri ve pil harcar,
       // kullanıcı istemeden başlamamalı.
       h+=opt('🎧 Arka planda oynat',pref('arkaPlan',false),'toggle:arkaplan');
-      // ══════════════════════════════════════════════════════════════════════════════════
-      // KULLANICI AYARI - OTOMATİK ALGILAMA YERİNE
-      // Sekiz tur boyunca "kullanıcı tam ekranda mıydı" sorusunu OTOMATİK yanıtlamaya
-      // çalıştım. Son ölçüm (damgaYasiMs=null) şunu gösterdi: yarım saniyede bir bakan
-      // örnekleyici, oturum boyunca HİÇ tam ekran görmedi. Yani kullanıcının gördüğü tam
-      // ekran, tarayıcının da kodun da bildiği hiçbir işarete karşılık gelmiyor - bu ortamda
-      // güvenilir biçimde ALGILANAMIYOR.
-      // Bu yüzden karar kullanıcıya bırakıldı: açıksa kanal değişiminde tam ekran ve yatay
-      // mod her koşulda geri kurulur, algılamaya hiç bakılmaz. Kapalıysa eski davranış sürer.
-      // Varsayılan KAPALI - istemeyen kullanıcıya sürpriz tam ekran açmaz.
-      h+=opt('⛶ Kanal değişince tam ekranda kal',pref('tamEkranKoru',false),'toggle:tamekrankoru');
+      // NOT: Burada "⛶ Kanal değişince tam ekranda kal" ayarı vardı. Kanal değişiminde tam
+      // ekranın korunması sorunu çözülemedi (bkz. tamEkranAlgilanmadi teşhis kaydı: bu
+      // ortamda tam ekran güvenilir biçimde algılanamıyor) ve ayar da işe yaramadı.
+      // Çalışmayan bir düğme kullanıcıyı yanıltır ve yer kaplar - kaldırıldı.
+      // Altyapı (örnekleyici, tercih bayrağı, teşhis kaydı) yerinde bırakıldı; ileride
+      // sebep bulunursa ayar tek satırla geri gelir.
       // KULLANICI TALEBİ ("telefon kumanda işlevi görürken projeksiyonda oynatıcı açık
       // kalıyor, kumanda için bir ayar ekleyin"): Projeksiyon (ya da herhangi bir "gösterim"
       // cihazı) uzaktan kumanda edilmeye BAŞLADIĞINDA, o cihazın KENDİ ekranına yanlışlıkla
@@ -26860,12 +26943,6 @@ window.PTPlayer=(function(){
       if(a==='toggle:autoplay'){setPref('autoplay',!pref('autoplay',true));panelYenile('main');return;}
       if(a==='toggle:saver'){var d=!pref('dataSaver',false);setPref('dataSaver',d);applyPreferredQuality();showToastMsg(d?'📉 Veri tasarrufu açık':'Veri tasarrufu kapalı');panelYenile('main');return;}
       if(a==='toggle:rot'){setPref('autoRotate',!pref('autoRotate',true));panelYenile('main');return;}
-      if(a==='toggle:tamekrankoru'){
-        var _tk=!pref('tamEkranKoru',false);
-        setPref('tamEkranKoru',_tk);
-        showToastMsg(_tk?'⛶ Kanal değişince tam ekran korunacak':'⛶ Kapalı');
-        panelYenile('main');return;
-      }
       if(a==='toggle:arkaplan'){
         var _yeni=!pref('arkaPlan',false);
         setPref('arkaPlan',_yeni);
@@ -28344,11 +28421,9 @@ window.openVideoWatch=function(videoId,secenek){
     var _yeniKapandi=!!window._ptTamEkranTercihi;
     // Kullanıcı ayarı her şeyin ÜSTÜNDE: açıksa algılamaya hiç bakılmaz (bkz. oynatıcı
     // ayarlarındaki uzun not - bu ortamda tam ekran güvenilir biçimde algılanamıyor).
-    // Oynatıcı tercihleri 'pt_playerPrefs' altında tutuluyor; pref() oynatıcının içinde
-    // kapalı olduğu için buradan doğrudan okunur.
-    var _kullaniciIstiyor=false;
-    try{_kullaniciIstiyor=(JSON.parse(localStorage.getItem('pt_playerPrefs')||'{}').tamEkranKoru===true);}catch(e){}
-    var _oncekiTam=!!(_kullaniciIstiyor||_listedenTam||window._ptTamEkranAcik||_yeniKapandi||_tamKok||_tamFrame||_tamGovde||_tamNative);
+    // NOT: Burada bir kullanıcı ayarı ('tamEkranKoru') okunuyordu. Ayar işe yaramadığı için
+    // arayüzden kaldırıldı; okuma da kaldırıldı ki var olmayan bir tercihe bakmayalım.
+    var _oncekiTam=!!(_listedenTam||window._ptTamEkranAcik||_yeniKapandi||_tamKok||_tamFrame||_tamGovde||_tamNative);
     // Tercih BURADA temizlenmez: kullanıcı arka arkaya kanal değiştirebilir ve her seferinde
     // tam ekran sürmeli. Temizleme yalnızca gerçek çıkışta (⛶ düğmesi) yapılır.
     // Hangi işaretin dolu olduğu kayda geçer - bir dahaki raporda tespitin neden
