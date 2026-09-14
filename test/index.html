@@ -2477,7 +2477,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-14-G';
+window.APP_BUILD='2026-09-14-J';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -12214,6 +12214,45 @@ function shareCardImage(dataUrl,filename){
 function generateMatchSummaryCard(matchId){
   window._diagScreen='pt_cards';
   const m=D.matches[matchId];if(!m)return;
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // YÖNETİCİ SİMGELERİNİ ÖNCEDEN YÜKLE
+  // Canvas çizimi eşzamanlıdır: drawImage ancak YÜKLENMİŞ bir görseli çizebilir. Bu yüzden
+  // kart oluşturulmadan önce, bu maçta geçen olay türlerinin görselleri toplanıp yüklenir.
+  // Yükleme başarısız olursa (adres bozuk, ağ yok) o tür emojiye düşer - kart yine üretilir.
+  // Tamamlanmayı beklemek için kısa bir zaman sınırı var; bir görsel takılırsa kart
+  // süresiz gecikmesin.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  (function _simgeleriYukle(){
+    try{
+      window._ptKartSimgeleri=window._ptKartSimgeleri||{};
+      var bekleyen=0;
+      var turler={};
+      (m.events||[]).forEach(function(e){ if(e&&e.type)turler[e.type]=1; });
+      turler['assist']=1;
+      Object.keys(turler).forEach(function(t){
+        if(window._ptKartSimgeleri[t])return;            // zaten yüklü
+        var v=getEventEmoji(t);
+        if(!isImageIconValue(v))return;                   // emoji ise yüklemeye gerek yok
+        var im=new Image();
+        im.crossOrigin='anonymous';                       // canvas'ı kirletmemek için
+        bekleyen++;
+        im.onload=function(){
+          window._ptKartSimgeleri[t]=im;
+          // Son görsel de yüklendiyse kartı BİR KEZ yeniden üret - ilk çizimde görseller
+          // henüz hazır değildi ve emojiye düşülmüştü. Bayrak sonsuz döngüyü önler.
+          if(--bekleyen<=0&&!window._ptKartTekrar){
+            window._ptKartTekrar=true;
+            setTimeout(function(){
+              try{generateMatchSummaryCard(matchId);}catch(e){}
+              window._ptKartTekrar=false;
+            },40);
+          }
+        };
+        im.onerror=function(){bekleyen--;};                // sessizce emojiye düşülür
+        im.src=v;
+      });
+    }catch(e){}
+  })();
   const h=D.teams[m.homeId]||{},a=D.teams[m.awayId]||{};
   const evs=(m.events||[]).slice().sort((x,y)=>(x.min||0)-(y.min||0));
   const homeEvs=evs.filter(e=>e.team==='home');
@@ -12335,8 +12374,21 @@ function generateMatchSummaryCard(matchId){
       const startY=y;
       const lineH=46;
 
+      // KULLANICI BİLDİRDİ ("maç akış özeti yöneticinin emojilerini kullanmıyor"):
+      // eventIconCanvas(), yönetici GÖRSEL yüklediyse varsayılan emojiye düşüyordu -
+      // "canvas'a görsel çizilemez" varsayımıyla. Oysa ctx.drawImage tam da bunu yapar;
+      // tek şart görselin ÖNCEDEN yüklenmiş olması (çizim anı eşzamanlı).
+      // Görseller kart çizilmeden önce toplanıp yüklenir (bkz. _simgeleriYukle).
       function drawEventRow(e,x,colW,align,y){
         const icon=eventIconCanvas(e.type);
+        // Yönetici görseli varsa onu çiz; yoksa emoji metni kullanılır.
+        const _gorsel=(window._ptKartSimgeleri||{})[e.type];
+        function simgeCiz(sx,sy){
+          if(_gorsel){
+            try{ctx.drawImage(_gorsel,sx-11,sy-12,22,22);return true;}catch(_e){}
+          }
+          return false;
+        }
         // Dakika rozeti
         ctx.fillStyle='rgba(255,255,255,.06)';
         const badgeX=align==='left'?x:x+colW-44;
@@ -12351,12 +12403,12 @@ function generateMatchSummaryCard(matchId){
         ctx.font='14px Arial';
         if(align==='left'){
           ctx.textAlign='left';
-          ctx.fillText(icon,x+52,y+1);
+          if(!simgeCiz(x+60,y+1))ctx.fillText(icon,x+52,y+1);
           ctx.font='600 13px Arial';ctx.fillStyle='#f3f4f6';
           ctx.fillText(truncate(txt,22),x+78,y+1);
         }else{
           ctx.textAlign='right';
-          ctx.fillText(icon,x+colW-52,y+1);
+          if(!simgeCiz(x+colW-60,y+1))ctx.fillText(icon,x+colW-52,y+1);
           ctx.font='600 13px Arial';ctx.fillStyle='#f3f4f6';
           ctx.fillText(truncate(txt,22),x+colW-78,y+1);
         }
@@ -12638,12 +12690,12 @@ function renderMdKadro(id,m,h,a){
         const stats=playerStats[p.name];
         let badges='';
         if(stats){
-          if(stats.goals)badges+=`<span class="pitch-badge" style="background:#16a34a">⚽${stats.goals>1?stats.goals:''}</span>`;
-          if(stats.assists)badges+=`<span class="pitch-badge" style="background:#0ea5e9">🅰️${stats.assists>1?stats.assists:''}</span>`;
-          if(stats.red)badges+=`<span class="pitch-badge" style="background:#dc2626">🟥</span>`;
-          else if(stats.yellow)badges+=`<span class="pitch-badge" style="background:#eab308">🟨</span>`;
+        if(stats.goals)badges+=`<span class="pitch-badge" style="background:#16a34a">${renderStatEventIconHtml('goal')}${stats.goals>1?stats.goals:''}</span>`;
+        if(stats.assists)badges+=`<span class="pitch-badge" style="background:#0ea5e9">${renderStatEventIconHtml('assist')}${stats.assists>1?stats.assists:''}</span>`;
+        if(stats.red)badges+=`<span class="pitch-badge" style="background:#dc2626">${renderStatEventIconHtml('red')}</span>`;
+        else if(stats.yellow)badges+=`<span class="pitch-badge" style="background:#eab308">${renderStatEventIconHtml('yellow')}</span>`;
         }
-        const subBadge=p._subbedIn?'<span class="pitch-badge" style="background:#7c3aed">🔄</span>':'';
+      const subBadge=p._subbedIn?`<span class="pitch-badge" style="background:#7c3aed">${renderStatEventIconHtml('sub')}</span>`:'';
         // Sakatlık/ceza rozeti - admin'in kadro ekranında işaretlediği durum PT'de görünür.
         const _dB=p.status?(PT_DURUM_ETIKET[p.status]||{ikon:'❔'}):null;
         const _dRenk=(p.status==='injured'||p.status==='ill')?'#f97316':(p.status==='suspended'||p.status==='cards')?'#dc2626':'#64748b';
