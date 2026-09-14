@@ -2477,7 +2477,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-14-L';
+window.APP_BUILD='2026-09-14-M';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -12937,8 +12937,26 @@ function renderMdKarne(id,m,h,a){
   // önce eklenen süreyi gösterir, sonra düdüğü çalar.
   // Eşit dakikada olay TÜRÜNE göre ikinci sıralama: normal olaylar → uzatma → devre/bitiş.
   const AKIS_SIRA={match_start:0,extra_time:2,half_time:3,match_end:4};
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // ZAMAN İŞARETLERİ İÇİN ETKİN DAKİKA
+  // KÖK SEBEP (kullanıcı iki kez bildirdi): Bu işaretler GERÇEK dakikalarıyla kaydediliyor
+  // ve birbirleriyle tutarsız: 'match_end' maçın bittiği dakikayı taşıyor (test maçında 22),
+  // 'extra_time' ise ait olduğu devrenin sonunu (90). Ham dakikaya göre sıralayınca bitiş
+  // işareti uzatmadan ÖNCE geliyordu - tür sıralaması hiç devreye girmiyordu, çünkü
+  // dakikalar eşit değildi.
+  // ÇÖZÜM: Bu işaretler için dakika yerine MANTIKSAL KONUM kullanılır:
+  //   devre arası ve 1. devre uzatması  → 45
+  //   maç sonu ve 2. devre uzatması     → listenin sonu
+  // Eşitlikte tür sırası devreye girer: uzatma her zaman işaretten önce.
+  function _isaretDakika(e){
+    if(!e)return 0;
+    if(e.type==='match_end')return 1e6;
+    if(e.type==='extra_time')return (e.half===1||String(e.min)==='45')?45:(1e6-1);
+    if(e.type==='half_time')return 45;
+    return Number(e.min)||0;
+  }
   const evsAll=(m.events||[]).slice().sort((a,b)=>{
-    const d=(a.min||0)-(b.min||0);
+    const d=_isaretDakika(a)-_isaretDakika(b);
     if(d!==0)return d;
     const sa=(AKIS_SIRA[a.type]!=null?AKIS_SIRA[a.type]:1);
     const sb=(AKIS_SIRA[b.type]!=null?AKIS_SIRA[b.type]:1);
@@ -15770,8 +15788,27 @@ function renderMdAnlati(id,m,h,a){
   // sıralama uygulanır: uzatma bitişten, devre arası da uzatmadan sonra gelir.
   const OLAY_SIRA={match_start:0,goal:1,pen_goal:1,pen_awarded:1,pen_miss:1,og:1,
     yellow:1,red:1,yellow2red:1,sub:1,extra_time:2,half_time:3,match_end:4};
+
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // ZAMAN İŞARETLERİ İÇİN ETKİN DAKİKA
+  // KÖK SEBEP (kullanıcı iki kez bildirdi): Bu işaretler GERÇEK dakikalarıyla kaydediliyor
+  // ve birbirleriyle tutarsız: 'match_end' maçın bittiği dakikayı taşıyor (test maçında 22),
+  // 'extra_time' ise ait olduğu devrenin sonunu (90). Ham dakikaya göre sıralayınca bitiş
+  // işareti uzatmadan ÖNCE geliyordu - tür sıralaması hiç devreye girmiyordu, çünkü
+  // dakikalar eşit değildi.
+  // ÇÖZÜM: Bu işaretler için dakika yerine MANTIKSAL KONUM kullanılır:
+  //   devre arası ve 1. devre uzatması  → 45
+  //   maç sonu ve 2. devre uzatması     → listenin sonu
+  // Eşitlikte tür sırası devreye girer: uzatma her zaman işaretten önce.
+  function _isaretDakika(e){
+    if(!e)return 0;
+    if(e.type==='match_end')return 1e6;
+    if(e.type==='extra_time')return (e.half===1||String(e.min)==='45')?45:(1e6-1);
+    if(e.type==='half_time')return 45;
+    return Number(e.min)||0;
+  }
   const olaylar=(m.events||[]).slice().sort((x,y)=>{
-    const d=(Number(x.min)||0)-(Number(y.min)||0);
+    const d=_isaretDakika(x)-_isaretDakika(y);
     if(d!==0)return d;
     return (OLAY_SIRA[x.type]!=null?OLAY_SIRA[x.type]:1)-(OLAY_SIRA[y.type]!=null?OLAY_SIRA[y.type]:1);
   });
