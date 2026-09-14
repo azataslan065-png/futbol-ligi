@@ -2477,7 +2477,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-14-J';
+window.APP_BUILD='2026-09-14-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -12257,7 +12257,11 @@ function generateMatchSummaryCard(matchId){
   const evs=(m.events||[]).slice().sort((x,y)=>(x.min||0)-(y.min||0));
   const homeEvs=evs.filter(e=>e.team==='home');
   const awayEvs=evs.filter(e=>e.team==='away');
-  const maxRows=Math.max(homeEvs.length,awayEvs.length,1);
+  // KULLANICI TALEBI ("takim detayindaki akis gibi olsun"): Kart iki sutundan TEK
+  // MERKEZI ZAMAN CIZELGESINE cevrildi. Olaylar artik ikiye bolunmuyor, hepsi dakika
+  // sirasiyla alt alta diziliyor - bu yuzden satir sayisi TOPLAM olay sayisidir.
+  // Eski hesap (iki sutunun uzun olani) karti kisa birakir, alttaki olaylar kirpilirdi.
+  const maxRows=Math.max(evs.length,1);
 
   const canvas=document.createElement('canvas');
   const W=750;
@@ -12357,19 +12361,19 @@ function generateMatchSummaryCard(matchId){
       ctx.beginPath();ctx.moveTo(45,y);ctx.lineTo(W-45,y);ctx.stroke();
       y+=30;
 
-      // İki sütun başlıkları: EV solda, DEP sağda
+      // MERKEZI ZAMAN CIZELGESI - Mac Akisi sekmesindeki duzenin ayni.
+      // Dakika rozeti ORTADA, olay ait oldugu takimin tarafina yazilir. Boylece hem zaman
+      // sirasi hem takim ayrimi tek bakista gorunur; iki ayri sutunda okurken 'hangisi
+      // once oldu' sorusu cevapsiz kaliyordu.
       const colMidX=W/2;
-      const leftColX=45,leftColW=colMidX-65;
-      const rightColX=colMidX+20,rightColW=W-45-rightColX;
+      const leftColX=45,leftColW=colMidX-70;
+      const rightColX=colMidX+70,rightColW=W-45-rightColX;
       ctx.font='bold 13px Arial';
       ctx.fillStyle='#60a5fa';ctx.textAlign='left';
-      ctx.fillText('EV — '+truncate(h.name||'?',18),leftColX,y);
+      ctx.fillText(truncate(h.name||'?',18),leftColX,y);
       ctx.fillStyle='#fb923c';ctx.textAlign='right';
-      ctx.fillText('DEP — '+truncate(a.name||'?',18),W-45,y);
-      // Dikey ayraç çizgisi
-      ctx.strokeStyle='rgba(255,255,255,.06)';ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(colMidX,y+10);ctx.lineTo(colMidX,H-70);ctx.stroke();
-      y+=30;
+      ctx.fillText(truncate(a.name||'?',18),W-45,y);
+      y+=28;
 
       const startY=y;
       const lineH=46;
@@ -12389,12 +12393,14 @@ function generateMatchSummaryCard(matchId){
           }
           return false;
         }
-        // Dakika rozeti
-        ctx.fillStyle='rgba(255,255,255,.06)';
-        const badgeX=align==='left'?x:x+colW-44;
-        ctx.beginPath();ctxRoundRect(ctx,badgeX,y-16,44,24,7);ctx.fill();
+        // Dakika rozeti MERKEZDE - zaman ekseninin uzerine oturur. Onceden satirin kendi
+        // kenarindaydi ve iki sutun arasinda zaman sirasi takip edilemiyordu.
+        ctx.fillStyle='rgba(255,255,255,.10)';
+        const badgeX=colMidX-22;
+        ctx.beginPath();ctxRoundRect(ctx,badgeX,y-16,44,24,12);ctx.fill();
+        ctx.strokeStyle='rgba(255,255,255,.14)';ctx.lineWidth=1;ctx.stroke();
         ctx.fillStyle='#d1d5db';ctx.font='600 12px Arial';ctx.textAlign='center';
-        ctx.fillText((e.min||0)+"'",badgeX+22,y+1);
+        ctx.fillText((e.min||0)+"'",colMidX,y+1);
 
         // İkon + oyuncu adı
         let txt=e.player||'';
@@ -12402,29 +12408,34 @@ function generateMatchSummaryCard(matchId){
         if(e.type==='sub'&&e.player2)txt=truncate(e.player2,12)+'↔'+truncate(e.player,12);
         ctx.font='14px Arial';
         if(align==='left'){
-          ctx.textAlign='left';
-          if(!simgeCiz(x+60,y+1))ctx.fillText(icon,x+52,y+1);
-          ctx.font='600 13px Arial';ctx.fillStyle='#f3f4f6';
-          ctx.fillText(truncate(txt,22),x+78,y+1);
-        }else{
+          // Sol taraf SAĞA yaslanır - metin eksene doğru akar, aradaki boşluk eşit kalır.
           ctx.textAlign='right';
-          if(!simgeCiz(x+colW-60,y+1))ctx.fillText(icon,x+colW-52,y+1);
           ctx.font='600 13px Arial';ctx.fillStyle='#f3f4f6';
-          ctx.fillText(truncate(txt,22),x+colW-78,y+1);
+          ctx.fillText(truncate(txt,20),colMidX-56,y+1);
+          if(!simgeCiz(colMidX-36,y+1)){ctx.font='14px Arial';ctx.textAlign='center';ctx.fillText(icon,colMidX-36,y+1);}
+        }else{
+          ctx.textAlign='left';
+          ctx.font='600 13px Arial';ctx.fillStyle='#f3f4f6';
+          ctx.fillText(truncate(txt,20),colMidX+56,y+1);
+          if(!simgeCiz(colMidX+36,y+1)){ctx.font='14px Arial';ctx.textAlign='center';ctx.fillText(icon,colMidX+36,y+1);}
         }
       }
 
-      if(!homeEvs.length&&!awayEvs.length){
+      if(!evs.length){
         ctx.textAlign='center';ctx.fillStyle='#6b7280';ctx.font='15px Arial';
-        ctx.fillText('Bu maçta kayıtlı bir olay bulunmuyor',W/2,startY+10);
+        ctx.fillText('Bu macta kayitli bir olay bulunmuyor',W/2,startY+10);
       }else{
-        homeEvs.forEach((e,i)=>{
+        // Dikey eksen: ilk olaydan sonuncuya kadar uzanan ince cizgi.
+        const sonY=startY+(Math.min(evs.length,Math.floor((H-70-startY)/lineH))-1)*lineH;
+        ctx.strokeStyle='rgba(255,255,255,.10)';ctx.lineWidth=2;
+        ctx.beginPath();ctx.moveTo(colMidX,startY-14);ctx.lineTo(colMidX,sonY+14);ctx.stroke();
+        // Olaylar DAKIKA SIRASIYLA tek listede; taraf, satirin hangi yana yazilacagini belirler.
+        evs.forEach((e,i)=>{
           const ry=startY+i*lineH;
-          if(ry<H-70)drawEventRow(e,leftColX,leftColW,'left',ry);
-        });
-        awayEvs.forEach((e,i)=>{
-          const ry=startY+i*lineH;
-          if(ry<H-70)drawEventRow(e,rightColX,rightColW,'right',ry);
+          if(ry>=H-70)return;
+          const evSahibi=(e.team==='home');
+          drawEventRow(e,evSahibi?leftColX:rightColX,evSahibi?leftColW:rightColW,
+                       evSahibi?'left':'right',ry);
         });
       }
 
