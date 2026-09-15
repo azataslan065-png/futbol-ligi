@@ -415,7 +415,53 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
     <button class="ntab" onclick="showTab('scores',this)">🏆 Skorlar</button>
     <button class="ntab" onclick="showTab('live',this)">🔴 Canlı</button>
     <button class="ntab" onclick="showTab('league',this)">⚙️ Lig</button>
+    <button class="ntab" onclick="showTab('transfer',this)">💰 Transfer</button>
     <button class="ntab" id="adminTabBtn" onclick="showTab('admin',this)">🛠️ Yönetim</button>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════════════════════
+       TRANSFER - oyuncu havuzu, ekonomi ayarlari, kullanici onaylari
+       Tasarim belgesi: tasarim.md - Adim 1
+       ══════════════════════════════════════════════════════════════════════════════ -->
+  <div id="pg-transfer" class="pg">
+    <div class="card">
+      <h2>💵 Ekonomi</h2>
+      <p class="hint">Mac basina kazanc. Degisiklik aninda gecerli olur; oynanmis
+        maclarin kazanci geriye donuk hesaplanmaz.</p>
+      <div class="row"><span>Galibiyet</span>
+        <input type="number" id="ekGalibiyet" value="50" min="0" style="width:90px"></div>
+      <div class="row"><span>Beraberlik</span>
+        <input type="number" id="ekBeraberlik" value="10" min="0" style="width:90px"></div>
+      <div class="row"><span>Maglubiyet</span>
+        <input type="number" id="ekMaglubiyet" value="0" min="0" style="width:90px"></div>
+      <button class="btn bgh" onclick="ekonomiKaydet()">Kaydet</button>
+    </div>
+
+    <div class="card">
+      <h2>👤 Oyuncu Havuzu</h2>
+      <p class="hint">Satisa sunulacak oyuncular. Guc 1-99 arasi; baslangic kadrolari
+        30-40 araliginda otomatik uretilir, buraya eklenmez.</p>
+      <div class="row"><span>Ad</span><input id="ohAd" placeholder="Oyuncu adi"></div>
+      <div class="row"><span>Mevki</span>
+        <select id="ohMevki">
+          <option>KL</option><option>STP</option><option>SĞB</option><option>SLB</option>
+          <option>GÖ</option><option>DOS</option><option>OOS</option>
+          <option>SĞK</option><option>SLK</option><option selected>SF</option><option>GF</option>
+        </select></div>
+      <div class="row"><span>Guc</span>
+        <input type="number" id="ohGuc" value="70" min="1" max="99" style="width:90px"></div>
+      <div class="row"><span>Fiyat</span>
+        <input type="number" id="ohFiyat" value="200" min="0" style="width:90px"></div>
+      <button class="btn bgh" onclick="oyuncuHavuzaEkle()">➕ Havuza Ekle</button>
+      <div id="havuzListe" style="margin-top:.7rem"></div>
+    </div>
+
+    <div class="card">
+      <h2>✅ Kullanici Onaylari</h2>
+      <p class="hint">Kullanici takimini kendi secer; onaylanana kadar maca giremez.
+        Ayni takimi iki kisi secerse yalnizca birini onaylayin.</p>
+      <div id="onayListe"></div>
+    </div>
   </div>
 
   <!-- TAKIMLAR -->
@@ -1745,7 +1791,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-14-M';
+window.APP_BUILD='2026-09-14-N';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -2692,7 +2738,7 @@ var _kadroTid = '';
 // gerçekte hiçbir kısıtlama uygulamıyordu. Artık rol GERÇEKTEN uygulanıyor.
 var _myAdminRole=sessionStorage.getItem('admRole')||'full';
 var ROLE_ALLOWED_TABS={
-  full:['teams','fixture','scores','live','league','admin'],
+  full:['teams','fixture','scores','live','league','transfer','admin'],
   scores:['fixture','scores','live'], // Sadece Skor: maç sonucu girme + canlı maç yönetimi + fikstür görüntüleme
   squad:['teams','fixture'] // Sadece Kadro: takım/oyuncu/kadro düzenleme + fikstür görüntüleme
 };
@@ -6379,6 +6425,177 @@ window.ptDurumBilgi=function(k){
   for(var i=0;i<PL_DURUMLAR.length;i++)if(PL_DURUMLAR[i].k===(k||''))return PL_DURUMLAR[i];
   return PL_DURUMLAR[0];
 };
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// TRANSFER SISTEMI - Adim 1 (tasarim.md)
+// Oyuncu havuzu, ekonomi ayarlari ve kullanici onaylari. Bu ekran YONETICIYE aittir;
+// kullanici tarafi (satin alma) ayri bir adimda eklenecek.
+//
+// VERI YOLU - onemli: Oyuncu havuzu 'oyuncuHavuzu', ekonomi 'globalAdminSettings/ekonomi',
+// kullanicilar 'kullanicilar' altinda. Bunlar mevcut lig verisinden (S) AYRI tutulur -
+// lig silinse/arsivlense bile transfer verisi ve kullanici paralari kaybolmamali.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+var _havuz = {};        // oyuncuId -> kayit
+var _kullanicilar = {}; // uid -> kayit
+var EKONOMI_VARSAYILAN = { galibiyet:50, beraberlik:10, maglubiyet:0 };
+
+function transferDinle(){
+  try{
+    var db = firebase.database();
+    db.ref('oyuncuHavuzu').on('value', function(snap){
+      _havuz = snap.val() || {};
+      havuzCiz();
+    });
+    db.ref('kullanicilar').on('value', function(snap){
+      _kullanicilar = snap.val() || {};
+      onayCiz();
+    });
+    db.ref('globalAdminSettings/ekonomi').on('value', function(snap){
+      var e = snap.val() || EKONOMI_VARSAYILAN;
+      var g=qs('ekGalibiyet'), b=qs('ekBeraberlik'), m=qs('ekMaglubiyet');
+      if(g) g.value = (e.galibiyet!=null?e.galibiyet:50);
+      if(b) b.value = (e.beraberlik!=null?e.beraberlik:10);
+      if(m) m.value = (e.maglubiyet!=null?e.maglubiyet:0);
+    });
+  }catch(e){
+    try{ if(window.DiagSil) DiagSil('transferDinle', e, {
+      anlami:'Transfer verisi dinlenemedi; havuz ve onay listeleri bos gorunur.',
+      oneri:'Firebase baglantisini ve veritabani kurallarini denetleyin.'}); }catch(_d){}
+  }
+}
+
+function ekonomiKaydet(){
+  var e = {
+    galibiyet: Math.max(0, parseInt(qs('ekGalibiyet').value,10) || 0),
+    beraberlik: Math.max(0, parseInt(qs('ekBeraberlik').value,10) || 0),
+    maglubiyet: Math.max(0, parseInt(qs('ekMaglubiyet').value,10) || 0)
+  };
+  firebase.database().ref('globalAdminSettings/ekonomi').set(e)
+    .then(function(){ toast('💵 Ekonomi kaydedildi'); })
+    .catch(function(err){ toast('❌ Kaydedilemedi','er'); });
+}
+
+// Guc degerinden nitelik turetilir. Oyunda nitelikler 1.0 civari carpanlardir; 50 guc
+// notr (1.00), 99 guc yaklasik 1.25, 30 guc yaklasik 0.90 olur.
+// Tek bir 'guc' alani tutmak, uc ayri deger istemekten daha kolay yonetilir - yonetici
+// oyuncu eklerken tek sayi girer.
+function gucCarpan(guc){
+  var g = Math.max(1, Math.min(99, Number(guc)||50));
+  return Math.round((0.80 + (g/99)*0.45) * 100) / 100;
+}
+
+function oyuncuHavuzaEkle(){
+  var ad = (qs('ohAd').value||'').trim();
+  if(!ad){ toast('❌ Oyuncu adi girin','er'); return; }
+  var guc = Math.max(1, Math.min(99, parseInt(qs('ohGuc').value,10) || 70));
+  var fiyat = Math.max(0, parseInt(qs('ohFiyat').value,10) || 0);
+  var mevki = qs('ohMevki').value;
+  var c = gucCarpan(guc);
+  var kayit = {
+    ad: ad, mevki: mevki, guc: guc,
+    // Mevkiye gore hafif egilim: forvet sut, orta saha pas yonunde.
+    hiz: c, sut: Math.round(c*(mevki==='SF'||mevki==='GF'?1.10:0.95)*100)/100,
+    pas: Math.round(c*(mevki==='DOS'||mevki==='OOS'||mevki==='GÖ'?1.08:0.96)*100)/100,
+    sahip: null, baslangic: false, alisFiyat: 0,
+    satista: true, fiyat: fiyat,
+    macSayisi: 0, puanToplam: 0,
+    eklenmeTs: Date.now()
+  };
+  firebase.database().ref('oyuncuHavuzu').push(kayit)
+    .then(function(){
+      qs('ohAd').value='';
+      toast('➕ '+ad+' havuza eklendi');
+    })
+    .catch(function(){ toast('❌ Eklenemedi','er'); });
+}
+
+function havuzCiz(){
+  var kutu = qs('havuzListe'); if(!kutu) return;
+  var ids = Object.keys(_havuz);
+  if(!ids.length){ kutu.innerHTML = '<p class="hint">Havuzda oyuncu yok.</p>'; return; }
+  // Satistakiler once, sonra sahipli olanlar - yonetici cogunlukla satisla ilgilenir.
+  ids.sort(function(a,b){
+    var A=_havuz[a], B=_havuz[b];
+    if(!!A.sahip !== !!B.sahip) return A.sahip ? 1 : -1;
+    return (B.guc||0)-(A.guc||0);
+  });
+  kutu.innerHTML = ids.map(function(id){
+    var o = _havuz[id] || {};
+    var sahipAd = o.sahip ? ((_kullanicilar[o.sahip]||{}).ad || 'bilinmeyen') : null;
+    return '<div class="scard"><div style="display:flex;align-items:center;gap:.5rem;justify-content:space-between">'
+      +'<div style="flex:1;min-width:0">'
+        +'<b>'+escAttr(o.ad||'')+'</b> <span style="opacity:.6;font-size:.7rem">'+escAttr(o.mevki||'')+'</span>'
+        +'<div style="font-size:.66rem;opacity:.65">guc '+(o.guc||0)
+          +(sahipAd ? ' - sahip: '+escAttr(sahipAd) : ' - havuzda')+'</div>'
+      +'</div>'
+      +(o.sahip ? '' :
+        '<input type="number" value="'+(o.fiyat||0)+'" min="0" style="width:82px" '
+        +'onchange="havuzFiyatGuncelle(\''+id+'\', this.value)">'
+        +'<button class="btn bgh" style="min-height:30px;min-width:34px;padding:.35rem .5rem" '
+        +'onclick="havuzSatisAcKapa(\''+id+'\')" title="Satista mi">'+(o.satista?'🟢':'⛔')+'</button>')
+      +'<button class="btn" style="min-height:30px;min-width:34px;padding:.35rem .5rem;'
+        +'background:rgba(239,68,68,.15);color:#dc2626;border:1px solid rgba(239,68,68,.45)" '
+        +'onclick="havuzSil(\''+id+'\')">🗑</button>'
+    +'</div></div>';
+  }).join('');
+}
+
+function havuzFiyatGuncelle(id, v){
+  var f = Math.max(0, parseInt(v,10) || 0);
+  firebase.database().ref('oyuncuHavuzu/'+id+'/fiyat').set(f)
+    .then(function(){ toast('💰 Fiyat guncellendi'); })
+    .catch(function(){ toast('❌ Guncellenemedi','er'); });
+}
+function havuzSatisAcKapa(id){
+  var o = _havuz[id]; if(!o) return;
+  firebase.database().ref('oyuncuHavuzu/'+id+'/satista').set(!o.satista)
+    .catch(function(){ toast('❌ Degistirilemedi','er'); });
+}
+function havuzSil(id){
+  var o = _havuz[id] || {};
+  // Sahipli oyuncu silinirse kullanicinin kadrosunda bosluk kalir - once uyarilir.
+  ptOnay((o.sahip ? 'Bu oyuncu bir kullaniciya ait. Silinirse kadrosundan dusulur.<br><br>' : '')
+    +'<b>'+escAttr(o.ad||'')+'</b> havuzdan silinsin mi?',
+    {baslik:'Oyuncuyu Sil', ikon:'🗑', tehlikeli:true, tamamYazi:'Sil'})
+    .then(function(ok){
+      if(!ok) return;
+      firebase.database().ref('oyuncuHavuzu/'+id).remove()
+        .then(function(){ toast('🗑 Silindi'); })
+        .catch(function(){ toast('❌ Silinemedi','er'); });
+    });
+}
+
+function onayCiz(){
+  var kutu = qs('onayListe'); if(!kutu) return;
+  var ids = Object.keys(_kullanicilar);
+  var bekleyen = ids.filter(function(u){ return (_kullanicilar[u]||{}).durum !== 'onayli'; });
+  if(!ids.length){ kutu.innerHTML = '<p class="hint">Henuz kayitli kullanici yok.</p>'; return; }
+  kutu.innerHTML = ids.map(function(uid){
+    var k = _kullanicilar[uid] || {};
+    var tak = (S.teams && S.teams[k.takimId]) ? S.teams[k.takimId].name : (k.takimId||'-');
+    var onayli = (k.durum === 'onayli');
+    // Ayni takimi secen baska onayli kullanici var mi - catisma uyarisi.
+    var catisma = !onayli && ids.some(function(u2){
+      return u2!==uid && (_kullanicilar[u2]||{}).takimId===k.takimId
+             && (_kullanicilar[u2]||{}).durum==='onayli';
+    });
+    return '<div class="scard"><div style="display:flex;align-items:center;gap:.5rem;justify-content:space-between">'
+      +'<div style="flex:1;min-width:0">'
+        +'<b>'+escAttr(k.ad||'(adsiz)')+'</b>'
+        +'<div style="font-size:.66rem;opacity:.65">'+escAttr(tak)+' - '+(k.para||0)+' SL</div>'
+        +(catisma ? '<div style="font-size:.64rem;color:#f59e0b">⚠️ Bu takimin zaten onayli bir sahibi var</div>' : '')
+      +'</div>'
+      +'<button class="btn '+(onayli?'':'bgh')+'" style="min-height:30px;padding:.35rem .6rem" '
+        +'onclick="kullaniciOnayDegistir(\''+uid+'\','+(!onayli)+')">'
+        +(onayli ? '✅ Onayli' : 'Onayla')+'</button>'
+    +'</div></div>';
+  }).join('');
+}
+function kullaniciOnayDegistir(uid, onayla){
+  firebase.database().ref('kullanicilar/'+uid+'/durum').set(onayla ? 'onayli' : 'bekliyor')
+    .then(function(){ toast(onayla ? '✅ Onaylandi' : '⏸ Onay kaldirildi'); })
+    .catch(function(){ toast('❌ Islem basarisiz','er'); });
+}
+
 function cyclePlStatus(section,idx){
   var t=S.teams[_kadroTid];if(!t||!t.squad)return;
   var arr=t.squad[section];if(!arr||!arr[idx])return;
