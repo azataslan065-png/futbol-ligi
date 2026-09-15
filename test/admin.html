@@ -461,6 +461,10 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
       <p class="hint">Kullanici takimini kendi secer; onaylanana kadar maca giremez.
         Ayni takimi iki kisi secerse yalnizca birini onaylayin.</p>
       <div id="onayListe"></div>
+      <div style="margin-top:.7rem;padding-top:.6rem;border-top:1px solid var(--br)">
+        <div style="font-size:.62rem;opacity:.6;margin-bottom:.3rem">BAGLANTI DURUMU</div>
+        <div id="transferTeshis"><span style="font-size:.66rem;opacity:.5">olculuyor...</span></div>
+      </div>
     </div>
   </div>
 
@@ -1791,7 +1795,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-14-X';
+window.APP_BUILD='2026-09-14-Y';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6452,16 +6456,46 @@ var EKONOMI_VARSAYILAN = { galibiyet:50, beraberlik:10, maglubiyet:0 };
     });
   }catch(e){}
 })();
+// TESHIS PANELI: Uc turdur tahminle ilerliyoruz. Artik her asama EKRANDA gorunur:
+// dinleyici kuruldu mu, okuma basarili mi, kac kayit geldi, hata varsa ne.
+// Sessiz basarisizlik yerine gorunur durum - tahmin turlarini bitirmek icin.
+var _tDurum = { dinleyici:'kurulmadi', havuz:'-', kullanici:'-', hata:'' };
+function transferTeshisCiz(){
+  try{
+    var k = qs('transferTeshis'); if(!k) return;
+    k.innerHTML = '<div style="font-size:.66rem;line-height:1.7;font-family:monospace">'
+      + 'dinleyici : ' + _tDurum.dinleyici + '<br>'
+      + 'oyuncuHavuzu : ' + _tDurum.havuz + '<br>'
+      + 'kullanicilar : ' + _tDurum.kullanici + '<br>'
+      + 'uid : ' + ((firebase.auth().currentUser||{}).uid || 'yok') + '<br>'
+      + (_tDurum.hata ? '<span style="color:#dc2626">hata : ' + _tDurum.hata + '</span>' : '')
+      + '</div>';
+  }catch(e){}
+}
 function transferDinle(){
+  _tDurum.dinleyici = 'kuruldu';
+  transferTeshisCiz();
   try{
     var db = firebase.database();
     db.ref('oyuncuHavuzu').on('value', function(snap){
       _havuz = snap.val() || {};
+      _tDurum.havuz = Object.keys(_havuz).length + ' kayit';
+      transferTeshisCiz();
       havuzCiz();
+    }, function(err){
+      _tDurum.havuz = 'REDDEDILDI';
+      _tDurum.hata = (err && err.message) || 'okuma hatasi';
+      transferTeshisCiz();
     });
     db.ref('kullanicilar').on('value', function(snap){
       _kullanicilar = snap.val() || {};
+      _tDurum.kullanici = Object.keys(_kullanicilar).length + ' kayit';
+      transferTeshisCiz();
       onayCiz();
+    }, function(err){
+      _tDurum.kullanici = 'REDDEDILDI';
+      _tDurum.hata = (err && err.message) || 'okuma hatasi';
+      transferTeshisCiz();
     });
     db.ref('globalAdminSettings/ekonomi').on('value', function(snap){
       var e = snap.val() || EKONOMI_VARSAYILAN;
