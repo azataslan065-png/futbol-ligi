@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol v1.0</title>
+<title>SAHA — 3D Futbol v1.1</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -197,6 +197,27 @@
            maca girme ayni akista olmali, kullaniciyi baska ekrana gondermek kopukluk yaratir. -->
       <div id="hesapDurum" style="margin-top:.6rem;font-size:12px;text-align:center;opacity:.85">
         Baglaniliyor...</div>
+      <!-- TAKIM KURMA: Onceki surumde kayit tek dokunusla yapiliyordu ve kullanici
+           takimina ad/renk veremiyordu - kendi takimi gibi hissettirmiyordu.
+           Logo icin GORSEL YUKLEME degil, hazir amblem secimi kullanildi: dosya yukleme
+           depolama alani ve boyut denetimi gerektirir, bu asamada gereksiz karmasiklik. -->
+      <div id="kayitKutu" style="display:none;margin-top:.5rem;background:rgba(0,0,0,.22);
+        border:1px solid var(--line);border-radius:4px;padding:10px 12px;font-size:12px">
+        <div style="opacity:.7;margin-bottom:.5em">Takımını kur</div>
+        <input id="kyTakimAd" placeholder="Takım adı" maxlength="22"
+          style="width:100%;box-sizing:border-box;margin-bottom:.5em;padding:.45em .6em;
+          background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:3px;
+          color:var(--text);font-size:13px">
+        <input id="kyKisaAd" placeholder="Kısa kod (3 harf, örn. AZT)" maxlength="4"
+          style="width:100%;box-sizing:border-box;margin-bottom:.5em;padding:.45em .6em;
+          background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:3px;
+          color:var(--text);font-size:13px;text-transform:uppercase">
+        <div style="opacity:.6;margin-bottom:.3em">Amblem</div>
+        <div id="kyAmblem" style="display:flex;gap:.3em;flex-wrap:wrap;margin-bottom:.6em"></div>
+        <div style="opacity:.6;margin-bottom:.3em">Forma rengi</div>
+        <div id="kyRenk" style="display:flex;gap:.3em;flex-wrap:wrap;margin-bottom:.7em"></div>
+        <button class="btn" id="b-kayit-tamam" style="width:100%">Takımı kur</button>
+      </div>
       <button class="btn alt" id="b-magaza-ac" style="margin-top:.4rem">🛒 Mağaza</button>
       <div id="magazaKutu" style="display:none;margin-top:.5rem;max-height:34vh;overflow-y:auto;
         background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:4px;padding:8px 10px">
@@ -682,6 +703,10 @@ const FB = { apiKey:"AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY",
   projectId:"superlig-208e3", storageBucket:"superlig-208e3.firebasestorage.app",
   messagingSenderId:"879221404148", appId:"1:879221404148:web:daae84d7187311400209a1" };
 let fbHazir = false, fbDb = null, benimUid = null;
+// BAGLANTI TESHISI: Kullanici "magaza bos" gordugunde sebebini bilemiyordu - internet mi
+// yok, giris mi basarisiz, kural mi engelliyor? Her asama burada kayda gecer ve ekranda
+// gosterilir. Sessiz basarisizlik en kotu hata turudur.
+let fbDurum = 'baslamadi';
 let benimKayit = null;      // kullanicilar/{uid}
 let magazaHavuz = {};       // oyuncuHavuzu tumu
 try{
@@ -695,8 +720,15 @@ try{
   });
   // Anonim oturum: kullanicidan e-posta/sifre istemek, oyuna girmeden once bir engel
   // koyardi. Kimlik yine de benzersiz - satin alimlar ve kadro bu uid'ye bagli.
+  fbDurum = 'giris-deneniyor';
   firebase.auth().signInAnonymously().catch(function(e){
-    try{ console.warn('anonim giris basarisiz', e.message); }catch(_){}
+    // EN SIK SEBEP: Firebase konsolunda Anonim giris ETKIN DEGIL.
+    // Authentication > Sign-in method > Anonymous > Etkinlestir
+    var k = String(e && e.code || '');
+    fbDurum = (k.indexOf('operation-not-allowed') >= 0)
+      ? 'anonim-giris-kapali'
+      : ('giris-hatasi: ' + (e && e.message || k));
+    hesapDurumCiz();
   });
 }catch(e){ fbHazir = false; }
 
@@ -708,20 +740,29 @@ function hesabiDinle(){
   });
   fbDb.ref('oyuncuHavuzu').on('value', function(sn){
     magazaHavuz = sn.val() || {};
+    fbDurum = 'bagli';
     magazaCiz();
+  }, function(err){
+    // Okuma reddedildi: kurallar 'auth != null' istiyor ve giris yapilmamis olabilir,
+    // ya da oyuncuHavuzu dali kurallarda hic tanimli degil.
+    fbDurum = 'okuma-reddedildi';
+    hesapDurumCiz(); magazaCiz();
   });
 }
 
 // Kullanici kaydi: takimi KENDI secer, yonetici onaylar (tasarim.md 2.4).
 // Baslangic kadrosu burada uretilir - 30-40 guc araliginda, hepsi baslangic:true.
-function hesapOlustur(takimKod, kullaniciAd){
+function hesapOlustur(takimKod, kullaniciAd, amblem, renk){
   if(!fbHazir || !benimUid){ mesaj('', 'Baglanti yok', 1600); return; }
   const kadro = KADROLAR[takimKod] || [];
   const guncel = {};
   const yeni = [];
   // 11 ilk 11 + 7 yedek = 18 kisilik baslangic kadrosu.
+  // Isimler hazir kadro listesinden alinir; kullanicinin 18 isim yazmasini beklemek
+  // kayit adimini kullanilmaz hale getirirdi. Oyuncular sonradan transferle degisir.
+  const yedekAdlar = KADROLAR['\u015eM\u015e'] || [];
   for(let i=0; i<18; i++){
-    const ad = kadro[i] || ('Oyuncu '+(i+1));
+    const ad = kadro[i] || yedekAdlar[i] || ('Oyuncu '+(i+1));
     const guc = 30 + Math.floor(Math.random()*11);        // 30-40 (kullanici karari)
     const c = 0.80 + (guc/99)*0.45;
     const ref = fbDb.ref('oyuncuHavuzu').push();
@@ -735,7 +776,8 @@ function hesapOlustur(takimKod, kullaniciAd){
   }
   guncel['kullanicilar/'+benimUid] = {
     ad: (kullaniciAd||'Oyuncu').trim() || 'Oyuncu',
-    takimKod: takimKod, durum: 'bekliyor', para: 0,
+    takimKod: takimKod, amblem: (amblem||'\u26bd'), renk: (renk||0xd8443a),
+    durum: 'bekliyor', para: 0,
     kadro: { ilk11: yeni.slice(0,11), yedek: yeni.slice(11,18) },
     kayitTs: Date.now()
   };
@@ -769,7 +811,24 @@ function hesapDurumCiz(){
   try{
     const k = document.getElementById('hesapDurum');
     if(!k) return;
-    if(!fbHazir){ k.innerHTML = '<span style="opacity:.6">Cevrimdisi - magaza kapali</span>'; return; }
+    if(!fbHazir){ k.innerHTML = '<span style="opacity:.6">Baglanti kurulamadi - magaza kapali</span>'; return; }
+    if(fbDurum === 'anonim-giris-kapali'){
+      k.innerHTML = '<span style="color:#e4b23c">Anonim giris kapali</span>'
+        +'<div style="font-size:11px;opacity:.6;line-height:1.4;margin-top:.2em">'
+        +'Firebase konsolu &rsaquo; Authentication &rsaquo; Sign-in method &rsaquo; Anonymous &rsaquo; Etkinlestir</div>';
+      return;
+    }
+    if(fbDurum === 'okuma-reddedildi'){
+      k.innerHTML = '<span style="color:#e4b23c">Veri okunamiyor</span>'
+        +'<div style="font-size:11px;opacity:.6;line-height:1.4;margin-top:.2em">'
+        +'Kurallarda oyuncuHavuzu ve kullanicilar dallari tanimli mi?</div>';
+      return;
+    }
+    if(String(fbDurum).indexOf('giris-hatasi') === 0){
+      k.innerHTML = '<span style="color:#d8443a">Giris hatasi</span>'
+        +'<div style="font-size:11px;opacity:.6;line-height:1.4;margin-top:.2em">'+fbDurum.slice(13)+'</div>';
+      return;
+    }
     if(!benimUid){ k.innerHTML = '<span style="opacity:.6">Baglaniliyor...</span>'; return; }
     if(!benimKayit){
       k.innerHTML = '<span style="opacity:.75">Henuz kaydin yok.</span> '
@@ -782,18 +841,57 @@ function hesapDurumCiz(){
   }catch(e){}
 }
 
+// Hazir amblem ve renk secenekleri. Gorsel yukleme yerine bunlar kullaniliyor (bkz. HTML notu).
+const AMBLEMLER = ['\u26bd','\ud83e\udd85','\ud83e\udd81','\ud83d\udc0e','\ud83d\udc2f','\ud83d\udc0d','\ud83d\udc3a','\ud83e\udd8a','\u2694\ufe0f','\u2b50','\ud83d\udd25','\u26a1'];
+const FORMA_RENKLERI = [0xd8443a,0x3d7fd4,0x2fae7a,0xe4b23c,0x8e44ad,0xe67e22,0x16a085,0xc0392b,0x2c3e50,0xecf0f1];
+let kyAmblemSecili = 0, kyRenkSecili = 0;
+
+function kayitSecenekleriCiz(){
+  try{
+    const a = document.getElementById('kyAmblem');
+    if(a) a.innerHTML = AMBLEMLER.map(function(em,i){
+      return '<button onclick="kyAmblemSec('+i+')" style="width:34px;height:34px;font-size:17px;'
+        +'border-radius:4px;cursor:pointer;background:'+(i===kyAmblemSecili?'rgba(255,255,255,.22)':'rgba(255,255,255,.06)')
+        +';border:1px solid '+(i===kyAmblemSecili?'var(--text)':'var(--line)')+'">'+em+'</button>';
+    }).join('');
+    const r = document.getElementById('kyRenk');
+    if(r) r.innerHTML = FORMA_RENKLERI.map(function(c,i){
+      return '<button onclick="kyRenkSec('+i+')" style="width:30px;height:30px;border-radius:4px;'
+        +'cursor:pointer;background:'+hx(c)+';border:2px solid '
+        +(i===kyRenkSecili?'var(--text)':'transparent')+'"></button>';
+    }).join('');
+  }catch(e){}
+}
+function kyAmblemSec(i){ kyAmblemSecili = i; kayitSecenekleriCiz(); }
+function kyRenkSec(i){ kyRenkSecili = i; kayitSecenekleriCiz(); }
+
 function kayitEkraniAc(){
-  const kod = (takA()||{}).kod;
-  // Secili takim giris ekranindaki takimdir - ayri bir secim ekrani acmak yerine
-  // kullanicinin zaten yaptigi secim kullanilir.
-  hesapOlustur(kod, (takA()||{}).ad);
+  const k = document.getElementById('kayitKutu');
+  if(!k) return;
+  k.style.display = 'block';
+  kayitSecenekleriCiz();
+  try{ document.getElementById('kyTakimAd').focus(); }catch(e){}
+}
+// Formdaki bilgilerle kaydi tamamlar.
+function kayitTamamla(){
+  const ad = (document.getElementById('kyTakimAd').value||'').trim();
+  let kod = (document.getElementById('kyKisaAd').value||'').trim().toLocaleUpperCase('tr');
+  if(ad.length < 2){ mesaj('', 'Takim adi en az 2 harf', 1600); return; }
+  // Kod bos birakilirsa addan uretilir - kullaniciyi zorunlu alanla yormamak icin.
+  if(!kod) kod = ad.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g,'').slice(0,3).toLocaleUpperCase('tr');
+  if(kod.length < 2) kod = 'TKM';
+  hesapOlustur(kod, ad, AMBLEMLER[kyAmblemSecili], FORMA_RENKLERI[kyRenkSecili]);
 }
 
 function magazaCiz(){
   try{
     const kutu = document.getElementById('magazaListe');
     if(!kutu) return;
-    if(!fbHazir){ kutu.innerHTML = '<div style="opacity:.5;font-size:12px">Baglanti yok.</div>'; return; }
+    if(!fbHazir || fbDurum !== 'bagli'){
+      kutu.innerHTML = '<div style="opacity:.5;font-size:12px;line-height:1.5">'
+        +'Magaza acilamadi.<br>Durum: '+fbDurum+'</div>';
+      return;
+    }
     const ids = Object.keys(magazaHavuz).filter(function(id){
       const o = magazaHavuz[id];
       return o && !o.sahip && o.satista;
@@ -821,7 +919,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-14-P';
+window.APP_BUILD = '2026-09-14-R';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -2448,6 +2546,7 @@ document.getElementById('ayarBtn').onclick      = ayarAc;
 document.getElementById('b-ayar-start').onclick = ayarAc;
 // Kadro onizlemesi ac/kapa. Her acilista YENIDEN cizilir - arada takim degistirilmis
 // olabilir; bir kez cizip birakmak eski kadroyu gosterirdi.
+document.getElementById('b-kayit-tamam').onclick = kayitTamamla;
 document.getElementById('b-magaza-ac').onclick = function(){
   const k = document.getElementById('magazaKutu');
   const acik = (k.style.display !== 'none');
