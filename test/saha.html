@@ -219,9 +219,6 @@
         <button class="btn" id="b-kayit-tamam" style="width:100%">Takımı kur</button>
       </div>
       <button class="btn alt" id="b-magaza-ac" style="margin-top:.4rem">🛒 Mağaza</button>
-      <!-- TESHIS: Baglanti asamalari ekranda. Sessiz basarisizlik yerine gorunur durum. -->
-      <div id="sahaTeshis" style="margin-top:.4rem;font-size:10px;font-family:monospace;
-        opacity:.55;line-height:1.6;text-align:left"></div>
       <div id="magazaKutu" style="display:none;margin-top:.5rem;max-height:34vh;overflow-y:auto;
         background:rgba(0,0,0,.22);border:1px solid var(--line);border-radius:4px;padding:8px 10px">
         <div id="magazaListe"></div>
@@ -715,27 +712,6 @@ let magazaHavuz = {};       // oyuncuHavuzu tumu
 try{
   firebase.initializeApp(FB);
   fbDb = firebase.database();
-  // ══════════════════════════════════════════════════════════════════════════════════════
-  // TEST ORTAMI - AYRI VERI KOKU
-  // KOK SEBEP (teshis: oyun 522 kayit gordu, panel 2): Puan Tablosu ve yonetici paneli,
-  // adres '/test/' iceriyorsa BUTUN veri yollarinin basina 'test/' onekini ekliyor.
-  // Oyunda bu mekanizma yoktu; oyun gercek koke, panel test kokune yaziyordu. Iki taraf
-  // ayni veritabanindaydi ama farkli dallarda calistigi icin birbirini hic gormedi.
-  // Cozum ayni yontemle: 'ref' bir kez sarilir, atlanan cagri yeri kalmaz.
-  // '.info/...' yollari KOKTEN ayridir, onek eklenirse Firebase "invalid path" der.
-  // ══════════════════════════════════════════════════════════════════════════════════════
-  try{
-    var _testMi = (location.pathname.indexOf('/test/') !== -1);
-    var _orjRef = fbDb.ref.bind(fbDb);
-    window._sahaTestOrtami = _testMi;
-    if(_testMi){
-      fbDb.ref = function(yol){
-        var y = (yol == null ? '' : String(yol)).replace(/^\/+/, '');
-        if(y.indexOf('.info/') === 0 || y === '.info') return _orjRef(y);
-        return _orjRef('test/' + y);
-      };
-    }
-  }catch(e){}
   fbHazir = true;
   firebase.auth().onAuthStateChanged(function(u){
     benimUid = u ? u.uid : null;
@@ -850,21 +826,7 @@ function oyuncuSatinAl(id){
     .catch(function(){ mesaj('', 'Islem basarisiz', 1600); });
 }
 
-// Baglanti asamalarini ekrana yazar. Uc turdur tahminle ilerledigimiz icin eklendi.
-function sahaTeshisCiz(){
-  try{
-    const k = document.getElementById('sahaTeshis'); if(!k) return;
-    const u = (fbHazir && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : 'yok';
-    k.innerHTML = 'sdk: ' + (fbHazir ? 'var' : 'YOK')
-      + ' &middot; kok: ' + (window._sahaTestOrtami ? 'test/' : 'gercek')
-      + ' &middot; durum: ' + fbDurum + '<br>'
-      + 'uid: ' + String(u).slice(0,12) + '<br>'
-      + 'havuz: ' + Object.keys(magazaHavuz).length + ' kayit'
-      + ' &middot; hesap: ' + (benimKayit ? 'var' : 'yok');
-  }catch(e){}
-}
 function hesapDurumCiz(){
-  try{ sahaTeshisCiz(); }catch(e){}
   try{
     const k = document.getElementById('hesapDurum');
     if(!k) return;
@@ -941,7 +903,6 @@ function kayitTamamla(){
 }
 
 function magazaCiz(){
-  try{ sahaTeshisCiz(); }catch(e){}
   try{
     const kutu = document.getElementById('magazaListe');
     if(!kutu) return;
@@ -991,7 +952,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-14-Z';
+window.APP_BUILD = '2026-09-14-X';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -2689,6 +2650,124 @@ yonleriUygula(); dizil(); kickoff(0); hud(); radar();
 camera.position.set(0, 21, 36);
 camera.lookAt(5, 1, 0);
 loop();
+
+/* ════════════════════════════════════════════════════════════
+   SAHA SENKRONIZASYON SİSTEMİ
+   3D oyun -> Admin Panel -> Puan Tablosu veri aktarımı
+   ════════════════════════════════════════════════════════════ */
+
+// Maç geçmişi
+window._matchHistory = window._matchHistory || [];
+window._lastSyncTime = 0;
+
+// Maç verilerini gönder
+function sendMatchDataToSync(){
+  let now = Date.now();
+  if (now - window._lastSyncTime < 5000) return; // 5 saniyede bir
+  window._lastSyncTime = now;
+
+  try {
+    // Mevcut maç verilerini topla
+    let currentMatchData = {
+      home: TAKIMLAR[AYAR.ta]?.name || 'Ev Sahibi',
+      away: TAKIMLAR[AYAR.tb]?.name || 'Deplasman',
+      scoreHome: skorA || 0,
+      scoreAway: skorB || 0,
+      period: devre || 1,
+      time: saat || 0,
+      date: new Date().toLocaleDateString('tr-TR')
+    };
+
+    // Toplam gol hesapla
+    let totalGoals = (window._matchHistory || []).reduce(function(sum, m){
+      return sum + (m.scoreHome || 0) + (m.scoreAway || 0);
+    }, 0) + currentMatchData.scoreHome + currentMatchData.scoreAway;
+
+    // Senkronizasyon paketi
+    let syncData = {
+      matches: window._matchHistory || [],
+      currentMatch: currentMatchData,
+      totalGoals: totalGoals,
+      stats: istat || {},
+      lastUpdate: new Date().toLocaleTimeString('tr-TR')
+    };
+
+    // localStorage'a kaydet
+    localStorage.setItem('sahaData', JSON.stringify(syncData));
+    console.log('✅ Saha verisi senkronize edildi');
+
+    // Admin panel ve Puan Tablosu'na bildir (iframe kontrolü ile)
+    try {
+      if (window.parent !== window) {
+        window.parent.postMessage({
+          type: 'SAHA_DATA_UPDATE',
+          payload: syncData
+        }, '*');
+      }
+    } catch(e) {}
+
+  } catch(err) {
+    console.error('Senkronizasyon hatası:', err);
+  }
+}
+
+// Maç bittiğinde verilerini kaydet
+function recordMatchEnd(){
+  try {
+    if(!window._matchHistory) window._matchHistory = [];
+    
+    let matchRecord = {
+      date: new Date().toLocaleDateString('tr-TR'),
+      home: TAKIMLAR[AYAR.ta]?.name || 'Ev Sahibi',
+      away: TAKIMLAR[AYAR.tb]?.name || 'Deplasman',
+      scoreHome: skorA || 0,
+      scoreAway: skorB || 0,
+      period: devre || 2,
+      duration: saat || 90
+    };
+
+    window._matchHistory.push(matchRecord);
+    sendMatchDataToSync();
+    console.log('✅ Maç kaydedildi:', matchRecord);
+  } catch(err) {
+    console.error('Maç kayıt hatası:', err);
+  }
+}
+
+// Düzenli olarak veri senkronize et (15 saniye)
+setInterval(function(){
+  try {
+    if (typeof running !== 'undefined' && running && !bitti) {
+      sendMatchDataToSync();
+    }
+  } catch(e) {}
+}, 15000);
+
+// Maç başında veri senkronizasyonu
+if (typeof window.basla !== 'undefined') {
+  let originalBasla = window.basla;
+  window.basla = function(yeniMod){
+    originalBasla.apply(this, arguments);
+    setTimeout(sendMatchDataToSync, 500);
+  };
+}
+
+// Sayfa kapatılmadan verileri kaydet
+window.addEventListener('beforeunload', function(){
+  if (window._matchHistory) {
+    localStorage.setItem('sahaData_backup', JSON.stringify(window._matchHistory));
+  }
+});
+
+// Başlangıçta kaydedilmiş verileri yükle
+(function(){
+  try {
+    let backup = localStorage.getItem('sahaData_backup');
+    if (backup) {
+      window._matchHistory = JSON.parse(backup);
+    }
+  } catch(e) {}
+})();
 </script>
 </body>
 </html>
