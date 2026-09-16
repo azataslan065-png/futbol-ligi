@@ -1027,10 +1027,14 @@ function maclarCiz(){
       const benHome = (m.homeId === benimKayit.takimId);
       const rakipId = benHome ? m.awayId : m.homeId;
       const rakip = sahaLigTakimlar[rakipId] || {};
+      // Canli yayin onayi bilgisi: admin onaylamadiysa mac yine oynanabilir ve sonucu
+      // ligde sayilir, ama Puan Tablosu'nda "CANLI" olarak akmaz (bkz. _sahaOnayliMi).
+      const onayli = !!m.canliOnay;
       return '<div class="row" style="display:block">'
         +'<div style="margin-bottom:.4em">'
           +'<b>'+(benHome?'EV SAHİBİ':'DEPLASMAN')+'</b> vs '+esc(rakip.name||'?')
-          +'<small>'+(m.week?(m.week+'. Hafta'):'')+(m.date?(' · '+m.date):'')+'</small>'
+          +'<small>'+(m.week?(m.week+'. Hafta'):'')+(m.date?(' · '+m.date):'')
+            +' · '+(onayli?'<span style="color:#e8564c">🔴 Canlı yayın onaylı</span>':'Canlı yayın onayı yok')+'</small>'
         +'</div>'
         +'<button onclick="fiksturMacinaBasla(\''+id+'\')" style="width:100%">▶ Maçı Oyna</button>'
       +'</div>';
@@ -1210,7 +1214,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-16-D';
+window.APP_BUILD = '2026-09-16-E';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -1516,11 +1520,84 @@ function _sahaMapEvents(events, benTarafHome){
     return ev;
   });
 }
+// ══════════════════════════════════════════════════════════════════════════════════════
+// KULLANICI TALEBİ (2026-09-16-E): "Sahada oynanan maçın süresi, oyun istatistikleri,
+// anlatım ve anlık puan tablosuna aktarılacak oyuncu isimleri dahil ... anlık Baskımetre
+// dahil ... maç oynanırken anlık aktarılsın." Eskiden sahaCanliYaz SADECE golde
+// çağrılıyordu (bkz. gol() içindeki tek çağrı) - süre dakikalarca donuk kalabiliyor,
+// istatistik/kadro/Baskımetre HİÇ gönderilmiyordu (sadece maç bitince sahaFiksturSonucuKaydet
+// ile). Şimdi: asağıdaki setInterval, maç oynanırken (running && !bitti) periyodik olarak
+// da çağırıyor; sahaCanliYaz içine istatistik, kadro (oyuncu isimleri) ve dakika dakika
+// Baskımetre değeri eklendi. "Sadece adminin onayladığı maçlar canlı olacaktır" talebi
+// _sahaOnayliMi() ile karşılanıyor: admin (admin.html > Saha sekmesi) o maça 'canliOnay'
+// vermediyse hiçbir canlı alan yazılmaz - nihai sonuç yine de sahaFiksturSonucuKaydet ile
+// (onaydan bağımsız) kaydedilir, çünkü o gerçek maç sonucudur, canlı YAYIN değildir.
+// ══════════════════════════════════════════════════════════════════════════════════════
+function _sahaOnayliMi(){
+  try{
+    var fk = window._sahaAktifFikstur; if(!fk) return false;
+    var m = sahaFikstur[fk.matchId];
+    return !!(m && m.canliOnay);
+  }catch(e){ return false; }
+}
+// Baskımetre (momentum): admin'in canlı maçta elle işaretlediği 'momentum' alanıyla AYNI
+// şema (dakika -> -N..N değer, pozitif = ev sahibi baskısı) - bkz. index.html
+// renderBaskimetre(). İki bileşenden oluşur: (1) son yazımdan bu yana top sahipliği
+// DENGESİ - kimin daha çok topa sahip olduğu gerçek baskının en somut göstergesi;
+// (2) o aralıktaki olayların ağırlığı (gol/kart/değişiklik) - Puan Tablosu'nun olay
+// yoğunluğu yedek görünümüyle AYNI ağırlık tablosu kullanılır ki iki görünüm arasında
+// tutarlılık olsun.
+var _baskiOnceki = { a:0, b:0, dk:0 };
+var sahaMomentum = {};
+const _BASKI_AGIRLIK = { goal:3, pen_goal:3, og:3, red:2, yellow2red:2, yellow:1, pen_awarded:2, pen_miss:1, sub:0.6 };
+function _sahaBaskiGuncelle(dk){
+  try{
+    const dA = Math.max(0, (istat.a.sahiplik||0) - _baskiOnceki.a);
+    const dB = Math.max(0, (istat.b.sahiplik||0) - _baskiOnceki.b);
+    const toplam = dA + dB;
+    let deger = toplam > 0.4 ? ((dA - dB) / toplam) * 2.4 : 0;   // sahiplik dengesi: -2.4..2.4
+    for(let d = _baskiOnceki.dk + 1; d <= dk; d++){
+      olaylar.forEach(function(e){
+        if(e.min !== d) return;
+        const w = _BASKI_AGIRLIK[e.type]; if(!w) return;
+        deger += (e.team === 'home' ? w : -w);
+      });
+    }
+    sahaMomentum[dk] = Math.max(-5, Math.min(5, Math.round(deger*10)/10));
+    _baskiOnceki.a = istat.a.sahiplik||0; _baskiOnceki.b = istat.b.sahiplik||0; _baskiOnceki.dk = dk;
+  }catch(e){}
+}
+// Sahadaki (kırmızı kart/dış değil) oyuncuların adları - Puan Tablosu'na "anlık kadro"
+// olarak gider. Sadece isim degil, forma no'su ve kaleci mi bilgisi de eklendi ki
+// gösterim tarafı ilk11'i istediği gibi sıralayabilsin.
+function _sahaKadroIsimleri(takim){
+  return (takim||[]).filter(function(p){ return !p.dis; }).map(function(p){
+    return { ad: p.ad||'', no: p.no||0, gk: !!p.gk };
+  });
+}
 function sahaCanliYaz(ilkYazim){
   try{
     var fk = window._sahaAktifFikstur; if(!fk || !fbHazir || !fbDb) return;
+    if(!_sahaOnayliMi()) return;   // admin onaylamadiysa hicbir canli alan yazilmaz
     var hG = fk.benTarafHome ? skorA : skorB;
     var aG = fk.benTarafHome ? skorB : skorA;
+    var dk = Math.max(0, Math.min(120, Math.round(macDakika()||0)));
+    _sahaBaskiGuncelle(dk);
+    const topT = (istat.a.sahiplik||0) + (istat.b.sahiplik||0);
+    const paA = topT < 1 ? 50 : Math.round(istat.a.sahiplik/topT*100);
+    const statA = Object.assign({}, istat.a, {sahiplik:paA});
+    const statB = Object.assign({}, istat.b, {sahiplik:100-paA});
+    const statHome = fk.benTarafHome ? statA : statB;
+    const statAway = fk.benTarafHome ? statB : statA;
+    const kadroHome = _sahaKadroIsimleri(fk.benTarafHome ? teamA : teamB);
+    const kadroAway = _sahaKadroIsimleri(fk.benTarafHome ? teamB : teamA);
+    // Momentum, oyun-içi A/B takımına göre hesaplanır (A=insan, bkz. yukarıdaki not);
+    // kullanıcı deplasmandaysa (benTarafHome false) fikstürdeki 'home' aslında B takımıdır,
+    // bu yüzden işaret ters çevrilir - aksi halde Baskımetre yanlış tarafı gösterirdi.
+    const momHome = {};
+    Object.keys(sahaMomentum).forEach(function(k){
+      momHome[k] = fk.benTarafHome ? sahaMomentum[k] : -sahaMomentum[k];
+    });
     var yol = 'leagues/'+fk.ligId+'/matches/'+fk.matchId;
     var g = {};
     g[yol+'/isLive'] = true;
@@ -1528,11 +1605,23 @@ function sahaCanliYaz(ilkYazim){
     g[yol+'/played'] = false;
     g[yol+'/homeGoals'] = hG;
     g[yol+'/awayGoals'] = aG;
-    g[yol+'/minute'] = Math.max(0, Math.min(120, Math.round(macDakika()||0)));
+    g[yol+'/minute'] = dk;
+    g[yol+'/devre'] = devre;
+    g[yol+'/uzatma'] = Math.round(uzatma||0);
     g[yol+'/events'] = _sahaMapEvents(olaylar, fk.benTarafHome);
+    g[yol+'/sahaStats'] = { home: statHome, away: statAway };
+    g[yol+'/momentum'] = momHome;
+    g[yol+'/lineups'] = { home: kadroHome, away: kadroAway };
     fbDb.ref().update(g).catch(function(e){ try{ console.error('[saha] canli yazim hatasi', e); }catch(_e){} });
   }catch(e){}
 }
+// PERİYODİK CANLI YAZIM: eskiden sahaCanliYaz sadece golde çağrılıyordu, süre/istatistik/
+// kadro/Baskımetre dakikalarca güncellenmeden kalabiliyordu. Artık maç oynanırken
+// (running && !bitti) her 5 saniyede bir de yazılıyor; gol/kart/değişiklik anındaki mevcut
+// anlık çağrılar (gol() içinde) o özel anı beklemeden hemen yansıtmaya devam eder.
+setInterval(function(){
+  try{ if(running && !bitti && window._sahaAktifFikstur) sahaCanliYaz(false); }catch(e){}
+}, 5000);
 function sahaFiksturSonucuKaydet(){
   try{
     var fk = window._sahaAktifFikstur; if(!fk || !fbHazir || !fbDb) return;
@@ -1541,6 +1630,9 @@ function sahaFiksturSonucuKaydet(){
     var aG = fk.benTarafHome ? sonuc.awayGoals : sonuc.homeGoals;
     var istatHome = fk.benTarafHome ? sonuc.stats.home : sonuc.stats.away;
     var istatAway = fk.benTarafHome ? sonuc.stats.away : sonuc.stats.home;
+    // NIHAI SONUC, canli yayin onayindan BAGIMSIZ yazilir - bu gercek mac sonucudur,
+    // "canli" degildir (bkz. sahaCanliYaz basindaki _sahaOnayliMi notu). Boylece
+    // admin onaylamamis olsa bile mac ligde sonuclanmis sayilir.
     var yol = 'leagues/'+fk.ligId+'/matches/'+fk.matchId;
     var g = {};
     g[yol+'/isLive'] = false;
@@ -1551,6 +1643,15 @@ function sahaFiksturSonucuKaydet(){
     g[yol+'/minute'] = 90;
     g[yol+'/events'] = _sahaMapEvents(sonuc.events, fk.benTarafHome);
     g[yol+'/sahaStats'] = { home: istatHome, away: istatAway };
+    // Baskimetre canli izlendiyse (onayliysa) nihai haliyle de birlikte kaydedilir - maç
+    // bitince Puan Tablosu, olay-yoğunluğu yedeğine değil GERÇEK baskı verisine düşer.
+    if(Object.keys(sahaMomentum||{}).length){
+      const momSon = {};
+      Object.keys(sahaMomentum).forEach(function(k){
+        momSon[k] = fk.benTarafHome ? sahaMomentum[k] : -sahaMomentum[k];
+      });
+      g[yol+'/momentum'] = momSon;
+    }
     fbDb.ref().update(g)
       .then(function(){ mesaj('KAYDEDILDI', 'Sonuc Puan Tablosuna islendi', 2200); })
       .catch(function(e){ mesaj('KAYIT HATASI', String((e&&e.message)||e).slice(0,90), 3000); });
@@ -2876,6 +2977,10 @@ function basla(yeniMod){
   // Yeni maç: olay listesi sıfırlanır. Temizlenmezse önceki maçın golleri yenisine
   // karışır ve Puan Tablosu'na yanlış veri gider.
   olaylar = [];
+  // Canli yayin takibi (Baskimetre + periyodik yazim) da yeni macla birlikte sifirlanir -
+  // aksi halde onceki macin sahiplik/dakika birikimi yeni maca sizardi.
+  sahaMomentum = {};
+  _baskiOnceki.a = 0; _baskiOnceki.b = 0; _baskiOnceki.dk = 0;
   sonPasOyuncu = null; sonPasTakim = -1;
   yedekleriKur();          // her mac 3 hak ve dolu yedek kulubesiyle baslar
   olaylar.push({ type:'match_start', min:1, player:'', player2:'', team:'home' });
