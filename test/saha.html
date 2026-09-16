@@ -282,7 +282,7 @@
            yerde gosterilmiyordu - kaydin dogru calistigini gorebilecek tek yer burasi. -->
       <div id="end-ozet" style="margin:.2rem 0 .6rem"></div>
     <table class="ist" id="end-ist"></table>
-    <button class="btn" id="b-again">Giriş ekranına dön</button>
+    <button class="btn" id="b-again">Yeniden oyna</button>
   </div>
 </div>
 
@@ -725,11 +725,6 @@ const FB = { apiKey:"AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY",
   projectId:"superlig-208e3", storageBucket:"superlig-208e3.firebasestorage.app",
   messagingSenderId:"879221404148", appId:"1:879221404148:web:daae84d7187311400209a1" };
 let fbHazir = false, fbDb = null, benimUid = null;
-// KULLANICI TALEBİ (2026-09-16-E): "Puan tablosunda hangi takımı favorilediyse, saha
-// uygulamasında da o takım kontrol edilen takım olacak." Puan Tablosu'ndaki
-// userProfiles/{uid}.favTeam alani, saha'nin kendi admin-atamali 'kullanicilar/{uid}/
-// takimId' alanindan ONCELIKLIDIR - bkz. benimEtkinTakimId(). Girişte doldurulur.
-let benimFavTakim = null;
 // BAGLANTI TESHISI: Kullanici "magaza bos" gordugunde sebebini bilemiyordu - internet mi
 // yok, giris mi basarisiz, kural mi engelliyor? Her asama burada kayda gecer ve ekranda
 // gosterilir. Sessiz basarisizlik en kotu hata turudur.
@@ -973,7 +968,6 @@ function girisYap(){
     girisMesaj('');
     try{ localStorage.setItem('saha_girisIsim', isim); }catch(e){}
     benimUid = visitorId;
-    benimFavTakim = v.favTeam || null;
     hesabiDinle();
     hesapDurumCiz();
     menuGoster();
@@ -982,14 +976,9 @@ function girisYap(){
   });
 }
 function cikisYap(){
-  benimKayit = null; benimUid = null; benimFavTakim = null;
+  benimKayit = null; benimUid = null;
   try{ localStorage.removeItem('saha_girisIsim'); }catch(e){}
   menuGoster();
-}
-// Kontrol edilen takim: Puan Tablosu'ndaki favori takim ONCELIKLI, yoksa (eski
-// hesaplarla uyum icin) yoneticinin sahadan atadigi takimId'ye dusulur.
-function benimEtkinTakimId(){
-  return benimFavTakim || (benimKayit && benimKayit.takimId) || null;
 }
 // Giris yapilmissa menu, yapilmamissa giris formu gorunur.
 function menuGoster(){
@@ -1015,17 +1004,16 @@ function maclarCiz(){
         +'Hesabin yonetici onayi bekliyor.<br>Onaylandiktan sonra maclarin burada gorunur.</div>';
       return;
     }
-    const etkinTakimId = benimEtkinTakimId();
-    if(!etkinTakimId){
+    if(!benimKayit.takimId){
       k.innerHTML = '<div style="opacity:.6;font-size:12px;line-height:1.6">'
-        +'Puan Tablosu\'nda henüz bir favori takım seçmedin.<br>Favori takımını seçtikten sonra maçların burada görünür.</div>';
+        +'Yonetici seni henuz ligdeki bir takima atamadi.<br>Atandiktan sonra maclarin burada gorunur.</div>';
       return;
     }
-    const benimTakim = sahaLigTakimlar[etkinTakimId];
+    const benimTakim = sahaLigTakimlar[benimKayit.takimId];
     const macIdler = Object.keys(sahaFikstur).filter(function(id){
       const m = sahaFikstur[id];
       return m && !m.played && !m.isLive
-        && (m.homeId === etkinTakimId || m.awayId === etkinTakimId);
+        && (m.homeId === benimKayit.takimId || m.awayId === benimKayit.takimId);
     }).sort(function(a,b){ return (sahaFikstur[a].week||0) - (sahaFikstur[b].week||0); });
     if(!macIdler.length){
       k.innerHTML = '<div style="opacity:.6;font-size:12px;line-height:1.6">'
@@ -1036,7 +1024,7 @@ function maclarCiz(){
     k.innerHTML = (benimTakim ? '<div style="font-size:11px;opacity:.6;margin-bottom:.5em">Takimin: <b>'+esc(benimTakim.name||'')+'</b></div>' : '')
       + macIdler.map(function(id){
       const m = sahaFikstur[id];
-      const benHome = (m.homeId === etkinTakimId);
+      const benHome = (m.homeId === benimKayit.takimId);
       const rakipId = benHome ? m.awayId : m.homeId;
       const rakip = sahaLigTakimlar[rakipId] || {};
       // Canli yayin onayi bilgisi: admin onaylamadiysa mac yine oynanabilir ve sonucu
@@ -1062,15 +1050,11 @@ function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g, function(c){
 // oynar - sonuc bitince, hangi tarafin FIKSTURDE gercekten ev sahibi oldugu asagida
 // dogru eslenir (bkz. _sahaMapEvents / fiksturSonucuKaydet).
 function fiksturMacinaBasla(matchId){
-  // GIRIS ZORUNLU (kullanici talebi): kimliksiz/takimsiz mac baslatilamaz.
-  if(!benimUid){ mesaj('', 'Once giris yap', 1600); return; }
-  const etkinTakimId = benimEtkinTakimId();
-  if(!etkinTakimId){ mesaj('', 'Once favori takimini sec', 1600); return; }
   const m = sahaFikstur[matchId];
   if(!m || !sahaLigId){ mesaj('', 'Mac bulunamadi', 1600); return; }
   window._sahaAktifFikstur = {
     ligId: sahaLigId, matchId: matchId,
-    benTarafHome: (m.homeId === etkinTakimId)
+    benTarafHome: (m.homeId === benimKayit.takimId)
   };
   try{ document.getElementById('maclarKutu').style.display = 'none'; }catch(e){}
   baslatDugme('mac')();
@@ -1230,7 +1214,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-16-L';
+window.APP_BUILD = '2026-09-16-E';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3005,9 +2989,6 @@ function basla(yeniMod){
   OYN.forEach(o => { o.c = 0; o.ch = false; o.st = 100; o.mc = 0; });
   players.forEach(p => { p.dis = false; p.sari = 0; p.kos = false; p.kayma = 0; p.toparlan = 0;
                          p.dalisT = 0; p.obj.rotation.x = 0; p.obj.visible = true; p.golge.visible = true; });
-  // KULLANICI TALEBİ: top her zaman görünür olmalı - maç başında/yeniden başlarken
-  // savunma amaçlı açıkça garanti edilir (oyuncular gibi top da görünürlüğü kaybetmemeli).
-  ball.visible = true; topGolge.visible = true;
   dizilisUygula(0, AYAR.diz); dizilisUygula(1, AYAR.dizB);
   TAKTIK.a.ileri = AYAR.agirlik; TAKTIK.a.baski = AYAR.baski;
   // RAKIP HUCUM DAVRANISI: 'ileri' artik sabit 0 degil, topa kimin sahip oldugu
@@ -3046,10 +3027,7 @@ function baslatDugme(m){
 // Kullanicinin takimi hesabinda belli, rakibi fikstur belirliyor; secim sunmak olmayan
 // bir ozgurluk vaat etmek olurdu.
 // ══════════════════════════════════════════════════════════════════════════════════════
-// Mac bittiginde "Yeniden oyna" KALDIRILDI: giris zorunlu oldugu icin (bkz. girisYap)
-// mac sonrasi dogrudan yeni maca donmek yerine oturum kapatilip giris ekranina donuluyor -
-// boylece her mac basi kimlik (isim+sifre) yeniden doğrulanmis olur.
-document.getElementById('b-again').onclick = () => { panelKapat(); cikisYap(); };
+document.getElementById('b-again').onclick = () => { panelKapat(); menuGoster(); };
 document.getElementById('ayarBtn').onclick      = ayarAc;
 document.getElementById('b-ayar-start').onclick = ayarAc;
 document.getElementById('b-kayit-tamam').onclick = kayitTamamla;
