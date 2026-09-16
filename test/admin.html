@@ -6719,17 +6719,15 @@ function renderSahaAtama(){
       +'</div></div>';
   }).join('') || '<p class="hint">Önce Transfer sekmesinden kullanıcı onaylayın.</p>';
 }
-// KULLANICI TALEBİ (2026-09-16-E): "Sadece adminin onayladığı maçlar canlı olacaktır."
-// Onceden saha.html'de bir kullanici fikstur macina bastigi anda mac otomatik olarak
-// isLive:true yaziyordu - admin'in haberi/onayi olmadan Puan Tablosu'na "CANLI" dusebiliyordu.
-// Simdi saha.html tarafi (_sahaOnayliMi) bu 'canliOnay' alanini kontrol ediyor: admin
-// asagidaki dugmeyle acikca onaylamadikca hicbir canli veri (sure/skor/istatistik/
-// Baskimetre/kadro) yazilmiyor. Onay, HENUZ OYNANMAMIS maclarda gosterilir - oynanan bir
-// macin canli onayini degistirmenin bir anlami yok.
-function sahaCanliOnayDegistir(matchId, onayla){
-  db.ref('leagues/'+_curLeagueId+'/matches/'+matchId+'/canliOnay').set(!!onayla)
-    .then(function(){ toast(onayla ? '✅ Canlı yayına onay verildi' : '⏸ Canlı yayın onayı kaldırıldı'); })
-    .catch(function(){ toast('❌ İşlem başarısız'); });
+// SAHA ONAYI: kullanici kendi fiksturundeki HERHANGI bir maci istedigi an baslatip
+// canli yayina alabiliyordu - yonetici bunun UZERINDE hicbir kontrole sahip degildi.
+// 'sahaOnayli' bayragi eklendi: saha.html artik yalnizca bu bayrak true olan maclari
+// "Maci Oyna" listesinde gosterir (bkz. saha.html - maclarCiz). Burada acip kapatiliyor.
+function sahaMacOnayDegistir(matchId, onayla){
+  if(!_curLeagueId) return;
+  db.ref('leagues/'+_curLeagueId+'/matches/'+matchId+'/sahaOnayli').set(!!onayla)
+    .then(function(){ toast(onayla ? '✅ Maç onaylandı - artık canlı oynanabilir' : '⏸ Onay kaldırıldı'); try{renderSaha();}catch(e){} })
+    .catch(function(){ toast('İşlem başarısız','er'); });
 }
 function renderSahaMaclar(){
   var kutu = qs('sahaMacListe'); if(!kutu) return;
@@ -6745,17 +6743,14 @@ function renderSahaMaclar(){
   kutu.innerHTML = maclar.map(function(m){
     var h = S.teams[m.homeId]||{}, a = S.teams[m.awayId]||{};
     var hOwner = sahibi(m.homeId), aOwner = sahibi(m.awayId);
+    var bitmedi = !m.played && !m.isLive;
     var durum = m.isLive
       ? '<span style="color:#dc2626;font-weight:800">🔴 CANLI '+(m.minute||0)+'\''+(m.sahaMode?' · 🎮 Saha':'')+'</span>'
       : (m.played ? '<span style="opacity:.75">✅ Bitti'+(m.sahaMode?' · 🎮 Saha':'')+'</span>' : '<span style="opacity:.6">⏳ Bekliyor</span>');
     var skor = (m.played||m.isLive) ? (m.homeGoals||0)+' - '+(m.awayGoals||0) : 'vs';
-    var onayli = !!m.canliOnay;
-    // Onay dugmesi sadece henuz oynanmamis (ve su an canli olmayan) maclarda anlamli.
-    var onayBtn = (!m.played && !m.isLive)
-      ? '<button class="btn '+(onayli?'':'bgh')+'" style="min-height:26px;padding:.2rem .55rem;font-size:.62rem;margin-top:.35rem" '
-        +'onclick="sahaCanliOnayDegistir(\''+m.id+'\','+(!onayli)+')">'
-        +(onayli?'✅ Canlı Yayına Onaylı':'🔴 Canlı Yayına Onay Ver')+'</button>'
-      : (m.isLive ? '<span style="font-size:.6rem;opacity:.6">'+(onayli?'canlı yayın onaylı':'⚠️ onaysız - Puan Tablosuna canlı yansımıyor')+'</span>' : '');
+    var onayBtn = bitmedi ? ('<button onclick="sahaMacOnayDegistir(\''+m.id+'\','+(!m.sahaOnayli)+')" style="width:100%;margin-top:.35rem;padding:.3rem .5rem;font-size:.66rem;font-weight:800;border-radius:8px;border:1px solid '
+        +(m.sahaOnayli?'rgba(34,197,94,.4)':'var(--br)')+';background:'+(m.sahaOnayli?'rgba(34,197,94,.15)':'var(--s3)')+';color:'+(m.sahaOnayli?'#22c55e':'var(--tx)')+';cursor:pointer">'
+        +(m.sahaOnayli ? '✅ Canlıya onaylı - kaldır' : '▶️ Canlı oynamaya onayla')+'</button>') : '';
     return '<div class="scard"><div style="font-size:.7rem;opacity:.6;margin-bottom:.25rem">'+(m.week||0)+'. Hafta'+(m.date?' · '+m.date:'')+'</div>'
       +'<div style="display:flex;align-items:center;justify-content:space-between;gap:.5rem">'
       +'<div style="flex:1;min-width:0"><b>'+escHtml(h.name||'?')+'</b>'+(hOwner?'<div style="font-size:.62rem;opacity:.6">🎮 '+escHtml(hOwner.ad||'')+'</div>':'')+'</div>'
