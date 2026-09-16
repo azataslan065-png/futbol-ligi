@@ -2479,7 +2479,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-16-J';
+window.APP_BUILD='2026-09-16-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -11568,7 +11568,16 @@ function renderMatchDetailContent(){
       <button class="md-tab ${_mdTab==='standings'?'active':''}" onclick="switchMdTab('standings')">Puan Durumu</button>
       <button class="md-tab ${_mdTab==='istatistik'?'active':''}" onclick="switchMdTab('istatistik')">İstatistik</button>
       <button class="md-tab ${_mdTab==='karsi'?'active':''}" onclick="switchMdTab('karsi')">Karşılaşma</button>
-    </div>`;
+    </div>
+    <!-- KULLANICI TALEBİ (2026-09-16-K): "Canlı Görsel Anlatım" düğmesi - sekme çubuğu ile
+         Baskımetre arasına, yalnızca maç CANLI iken (gerçek zamanlı veri şart). -->
+    ${m.isLive?`<div style="padding:.6rem .9rem 0">
+      <button onclick="openCanliGorselAnlatim('${id}')" style="width:100%;display:flex;align-items:center;justify-content:center;gap:.45rem;background:linear-gradient(135deg,#dc2626,#7f1d1d);border:none;border-radius:12px;padding:.7rem;color:#fff;font-weight:800;font-size:.8rem;cursor:pointer;font-family:var(--font-family,Outfit),sans-serif">
+        🎥 Canlı Görsel Anlatım
+        <span style="background:#fff;color:#dc2626;border-radius:20px;padding:.1rem .5rem;font-size:.6rem;font-weight:900">CANLI</span>
+      </button>
+    </div>`:''}
+  `;
 
   let body='';
   // Tema değişmiş olabilir; sekme ve başlık renkleri her çizimde yeniden hesaplanır.
@@ -11875,6 +11884,164 @@ function renderSahaKadro(m){
         </div>
       </div>`;
   }catch(e){DiagSil('renderSahaKadro',e);return '';}
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════
+   CANLI GÖRSEL ANLATIM  ·  KULLANICI TALEBİ (2026-09-16-K)
+   "kadro, maç akışı ve anlatım gibi seçeneklerin bulunduğu çubuk ile Baskımetre butonunun
+   arasına 'Canlı Görsel Anlatım' butonu ekleyin; tıklandığında saha uygulamasındaki maçın
+   2D görünümlü, canlı, anlık ve doğru verilerle işlenen bir animasyonunun ... açılmasını
+   sağlayın."
+   Uydurma bir animasyon DEĞİL: her kare, o an D.matches[id] içindeki GERÇEK veriden
+   (m.events, m.momentum, m.minute, m.lineups) üretilir. Yeni bir olay/dakika Firebase'den
+   geldiğinde bir sonraki kare otomatik günceller - admin ne girdiyse o görünür.
+   AYNI görüntüleyici TV sekmesindeki "Canlı Maçlar" kartından da açılır (bkz.
+   renderVideoScreenList) - hiçbir maç KONTROL düğmesi (gol/kart girme vb.) içermez, sadece
+   izleme amaçlıdır; bu da TV tarafındaki "kontrol butonları olmasın" isteğini otomatik
+   karşılar. */
+window._cgaTimer=null;
+window._cgaMatchId=null;
+function _cgaOyuncuFoto(ad,teamId){
+  try{
+    if(!ad)return '';
+    const team=D.teams[teamId]; if(!team||!team.squad)return '';
+    const tumu=(team.squad.starting||[]).concat(team.squad.bench||[]);
+    const k=tumu.find(p=>p&&p.name===ad);
+    return (k&&k.photo)||'';
+  }catch(e){return '';}
+}
+function _cgaSonOlay(m){
+  try{
+    const evs=(m.events||[]).filter(e=>e&&['goal','pen_goal','og','yellow','red','yellow2red','pen_awarded','pen_miss','sub'].includes(e.type));
+    if(!evs.length)return null;
+    const simdi=m.minute||0;
+    let son=null;
+    evs.forEach(e=>{ if((e.min||0)<=simdi&&(!son||(e.min||0)>=(son.min||0)))son=e; });
+    return son;
+  }catch(e){return null;}
+}
+function _cgaDurum(m,h,a){
+  const son=_cgaSonOlay(m);
+  const simdi=m.minute||0;
+  const TAZE=son&&(simdi-(son.min||0))<=2;
+  let baslik='Tehlikeli Hücum',takim=null,oyuncuAd='',oyuncuFoto='',renk='#3b82f6';
+  if(!m.isLive){
+    baslik=m.played?'Maç Sona Erdi':'Maç Başlamadı';
+  }else if(TAZE){
+    const HARITA={goal:['⚽ GOOOL!','#22c55e'],pen_goal:['⚽ GOOOL! (Penaltı)','#22c55e'],og:['⚽ Kendi Kalesine Gol','#22c55e'],
+      yellow:['🟨 Sarı Kart','#facc15'],red:['🟥 Kırmızı Kart','#ef4444'],yellow2red:['🟥 2. Sarı - Kırmızı','#ef4444'],
+      pen_awarded:['🎯 Penaltı Kazanıldı','#f97316'],pen_miss:['❌ Penaltı Kaçtı','#94a3b8'],sub:['🔄 Oyuncu Değişikliği','#38bdf8']};
+    const eş=HARITA[son.type]||['Tehlikeli Hücum','#3b82f6'];
+    baslik=eş[0];renk=eş[1];
+    takim=son.team==='home'?h:a;
+    oyuncuAd=son.player||'';
+    oyuncuFoto=_cgaOyuncuFoto(oyuncuAd,son.team==='home'?m.homeId:m.awayId);
+  }else{
+    // Taze olay yok: baskı/momentum verisine göre hangi takımın hücumda olduğunu tahmin et.
+    const mom=m.momentum||{};
+    let deger=0;
+    if(mom&&Object.keys(mom).length){
+      const dks=Object.keys(mom).map(Number).filter(k=>k<=simdi);
+      if(dks.length)deger=Number(mom[Math.max(...dks)])||0;
+    }
+    takim=deger>0?h:(deger<0?a:null);
+    baslik=deger?'Tehlikeli Hücum':'Orta Alan Mücadelesi';
+    renk=deger>0?'#3b82f6':(deger<0?'#ef4444':'#94a3b8');
+  }
+  return {baslik,takim,oyuncuAd,oyuncuFoto,renk};
+}
+function _cgaPitchSvg(){
+  return `<svg viewBox="0 0 1000 560" style="position:absolute;inset:0;width:100%;height:100%" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <linearGradient id="cgaCim" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#1e8f3e"/><stop offset="100%" stop-color="#166534"/>
+      </linearGradient>
+    </defs>
+    <polygon points="60,40 940,40 1000,520 0,520" fill="url(#cgaCim)"/>
+    ${Array.from({length:9}).map((_,i)=>{
+      const x1=60+(940-60)*i/9, x1b=60+(940-60)*(i+1)/9;
+      const x2=0+(1000-0)*i/9, x2b=0+(1000-0)*(i+1)/9;
+      return i%2===0?`<polygon points="${x1},40 ${x1b},40 ${x2b},520 ${x2},520" fill="#ffffff" opacity=".05"/>`:'';
+    }).join('')}
+    <polygon points="60,40 940,40 1000,520 0,520" fill="none" stroke="#fff" stroke-width="3" opacity=".85"/>
+    <line x1="500" y1="40" x2="500" y2="520" stroke="#fff" stroke-width="2.5" opacity=".8"/>
+    <ellipse cx="500" cy="280" rx="70" ry="58" fill="none" stroke="#fff" stroke-width="2.5" opacity=".8"/>
+    <circle cx="500" cy="280" r="4" fill="#fff" opacity=".8"/>
+    <polygon points="60,40 220,40 190,180 90,180" fill="none" stroke="#fff" stroke-width="2.5" opacity=".8"/>
+    <polygon points="940,40 780,40 810,180 910,180" fill="none" stroke="#fff" stroke-width="2.5" opacity=".8"/>
+    <polygon points="0,520 1000,520 850,380 150,380" fill="none" stroke="#fff" stroke-width="2.5" opacity=".8"/>
+  </svg>`;
+}
+function renderCgaFrame(id){
+  try{
+    const overlay=document.getElementById('cgaOverlay'); if(!overlay)return;
+    const m=D.matches[id];
+    if(!m){ closeCanliGorselAnlatim(); return; }
+    const h=D.teams[m.homeId]||{},a=D.teams[m.awayId]||{};
+    const st=_cgaDurum(m,h,a);
+    const topEv=st.takim?(st.takim===h?'home':'away'):null;
+    const topX=topEv==='home'?'32%':(topEv==='away'?'68%':'50%');
+    const stage=document.getElementById('cgaStage');
+    if(!stage)return;
+    stage.innerHTML=`
+      ${_cgaPitchSvg()}
+      <div style="position:absolute;top:.7rem;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.65);color:#fff;font-weight:900;font-size:1rem;padding:.35rem .9rem;border-radius:10px;letter-spacing:.02em">${m.isLive?(m.minute||0)+"'":(m.played?'MS':'—')}</div>
+      <div style="position:absolute;top:.7rem;left:.7rem;display:flex;align-items:center;gap:.4rem;background:rgba(0,0,0,.5);border-radius:10px;padding:.3rem .6rem">
+        ${h.logo?`<img src="${h.logo}" style="width:20px;height:20px;object-fit:contain"/>`:''}
+        <b style="color:#fff;font-size:.78rem">${m.homeGoals??0} - ${m.awayGoals??0}</b>
+        ${a.logo?`<img src="${a.logo}" style="width:20px;height:20px;object-fit:contain"/>`:''}
+      </div>
+      <div style="position:absolute;top:.7rem;right:.7rem;display:flex;gap:.4rem">
+        <button onclick="_cgaFullscreen()" style="background:rgba(0,0,0,.55);border:none;color:#fff;width:34px;height:34px;border-radius:9px;font-size:1rem;cursor:pointer">⛶</button>
+        <button onclick="closeCanliGorselAnlatim()" style="background:rgba(0,0,0,.55);border:none;color:#fff;width:34px;height:34px;border-radius:9px;font-size:1rem;cursor:pointer">✕</button>
+      </div>
+      <div style="position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);text-align:center;transition:left .8s ease">
+        <div style="background:rgba(0,0,0,.55);border-radius:12px;padding:.5rem 1rem;display:inline-block">
+          <div style="color:#fff;font-weight:900;font-size:1.05rem">${st.baslik}</div>
+          ${st.takim?`<div style="color:${st.renk};font-weight:800;font-size:.78rem;margin-top:.15rem;display:flex;align-items:center;gap:.3rem;justify-content:center">
+            ${st.takim.logo?`<img src="${st.takim.logo}" style="width:16px;height:16px;object-fit:contain"/>`:''}${st.takim.name||''}
+          </div>`:''}
+        </div>
+      </div>
+      <div style="position:absolute;left:${topX};bottom:16%;transform:translateX(-50%);width:26px;height:26px;font-size:1.4rem;transition:left .8s ease">⚽</div>
+      ${st.oyuncuAd?`<div style="position:absolute;left:50%;bottom:6%;transform:translateX(-50%);display:flex;align-items:center;gap:.5rem;background:#fff;border-radius:30px;padding:.25rem .8rem .25rem .25rem;box-shadow:0 4px 14px rgba(0,0,0,.35)">
+        ${st.oyuncuFoto?`<img src="${st.oyuncuFoto}" style="width:36px;height:36px;border-radius:50%;object-fit:cover"/>`:`<div style="width:36px;height:36px;border-radius:50%;background:#e2e8f0;display:flex;align-items:center;justify-content:center;font-size:1rem">👤</div>`}
+        <b style="color:#111;font-size:.8rem;white-space:nowrap">${st.oyuncuAd}</b>
+      </div>`:''}
+      <div style="position:absolute;bottom:0;left:0;right:0;text-align:center;color:rgba(255,255,255,.5);font-size:.6rem;padding:.3rem">🎥 Canlı Görsel Anlatım · gerçek maç verisiyle güncellenir</div>
+    `;
+  }catch(e){DiagSil('renderCgaFrame',e);}
+}
+function _cgaFullscreen(){
+  try{
+    const ov=document.getElementById('cgaOverlay'); if(!ov)return;
+    if(!document.fullscreenElement)ov.requestFullscreen&&ov.requestFullscreen().catch(()=>{});
+    else document.exitFullscreen&&document.exitFullscreen().catch(()=>{});
+  }catch(e){}
+}
+function openCanliGorselAnlatim(id){
+  try{
+    const m=D.matches[id]; if(!m)return;
+    closeCanliGorselAnlatim();
+    window._cgaMatchId=id;
+    const div=document.createElement('div');
+    div.id='cgaOverlay';
+    div.style.cssText='position:fixed;inset:0;z-index:99999;background:#050508;display:flex;flex-direction:column';
+    div.innerHTML='<div id="cgaStage" style="position:relative;flex:1;min-height:0"></div>';
+    document.body.appendChild(div);
+    document.body.style.overflow='hidden';
+    renderCgaFrame(id);
+    window._cgaTimer=setInterval(()=>renderCgaFrame(id),3000);
+  }catch(e){DiagSil('openCanliGorselAnlatim',e);}
+}
+function closeCanliGorselAnlatim(){
+  try{
+    if(window._cgaTimer){clearInterval(window._cgaTimer);window._cgaTimer=null;}
+    window._cgaMatchId=null;
+    const ov=document.getElementById('cgaOverlay'); if(ov)ov.remove();
+    document.body.style.overflow='';
+    if(document.fullscreenElement)document.exitFullscreen&&document.exitFullscreen().catch(()=>{});
+  }catch(e){}
 }
 
 function renderMdDetay(id,m,h,a,ntInfo){
@@ -21536,8 +21703,39 @@ function renderVideoScreenList(){
     </div>`:'');
   // KULLANICI TALEBİ: Sıralama düzenleme aç/kapa - yalnızca 2+ öğe varken anlamlı.
   const reorderBtnHtml=toplamSayi>1?`<button onclick="toggleVideoScreenReorder()" style="width:100%;margin-bottom:.6rem;padding:.5rem;border-radius:10px;border:1.5px solid ${reordering?'var(--ac)':'var(--br)'};background:${reordering?'var(--ac)':'var(--s2)'};color:${reordering?'#fff':'var(--mu)'};font-size:.72rem;font-weight:700;cursor:pointer">${reordering?'✅ Sıralamayı Bitir':'🔀 Sırayı Düzenle'}</button>`:'';
+  // KULLANICI TALEBİ (2026-09-16-K): "TV sekmesine, ilgili maç başladığında diğer
+  // kullanıcıların izlemesini sağlayacak bir sistem geliştirin ancak maçtaki kontrol
+  // butonları olmasın." Gerçek bir video kaynağı YOK - bu yüzden izleyici, Canlı Görsel
+  // Anlatım'ı (2D, gerçek veriyle çizilen animasyon) açar. Bu görüntüleyicide sadece
+  // kapat/tam-ekran vardır; gol/kart/dakika GİRME gibi hiçbir MAÇ KONTROL düğmesi yoktur -
+  // admin panelindeki maç yönetim araçlarından tamamen ayrı, salt-izleme bir ekrandır.
+  // Kart, TV sekmesi her yeniden çizildiğinde D.matches üzerinden GÜNCEL canlı maçları
+  // tarar; bir maç başladığı/bittiği anda liste otomatik güncellenir.
+  let canliMacKartlariHtml='';
+  if(tab==='tv'){
+    const canliMaclar=Object.keys(D.matches||{}).filter(mid=>D.matches[mid]&&D.matches[mid].isLive);
+    if(canliMaclar.length){
+      canliMacKartlariHtml=`<div style="margin-bottom:.8rem">
+        <div style="font-size:.68rem;font-weight:800;color:var(--mu);text-transform:uppercase;margin-bottom:.4rem">🔴 Şu An Canlı - İzlemek İçin Dokun</div>
+        ${canliMaclar.map(mid=>{
+          const mm=D.matches[mid],hh=D.teams[mm.homeId]||{},aa=D.teams[mm.awayId]||{};
+          return `<div onclick="openCanliGorselAnlatim('${mid}')" style="display:flex;align-items:center;gap:.55rem;background:linear-gradient(135deg,rgba(220,38,38,.16),rgba(127,29,29,.05));border:1.5px solid rgba(220,38,38,.4);border-radius:14px;padding:.6rem .8rem;margin-bottom:.5rem;cursor:pointer">
+            <div style="flex:1;min-width:0;display:flex;align-items:center;gap:.35rem;overflow:hidden">
+              ${hh.logo?`<img src="${escAttr(hh.logo)}" style="width:24px;height:24px;object-fit:contain;flex-shrink:0"/>`:''}
+              <span style="font-size:.72rem;font-weight:800;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escAttr(hh.name||'?')}</span>
+              <span style="font-size:.68rem;color:var(--mu);flex-shrink:0">${mm.homeGoals??0}-${mm.awayGoals??0}</span>
+              <span style="font-size:.72rem;font-weight:800;color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escAttr(aa.name||'?')}</span>
+              ${aa.logo?`<img src="${escAttr(aa.logo)}" style="width:24px;height:24px;object-fit:contain;flex-shrink:0"/>`:''}
+            </div>
+            <span style="flex-shrink:0;background:#dc2626;color:#fff;border-radius:20px;padding:.22rem .6rem;font-size:.6rem;font-weight:800;white-space:nowrap">🔴 ${mm.minute||0}' İZLE</span>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+  }
   const html=`<div class="sheet-handle"></div>
     <div style="font-size:.92rem;font-weight:900;margin-bottom:.7rem">📺 Video / Canlı Yayın</div>
+    ${canliMacKartlariHtml}
     <div id="videoScreenRemoteBanner" style="display:none;align-items:center;gap:.5rem;background:rgba(124,58,237,.18);border:1px solid var(--ac,#7c3aed);border-radius:10px;padding:.55rem .65rem;margin-bottom:.7rem">
       <span class="rmb-txt" style="flex:1;font-size:.7rem;line-height:1.4"></span>
       <button class="rmb-btn" style="flex-shrink:0;background:var(--ac,#7c3aed);border:none;border-radius:8px;padding:.4rem .6rem;color:#fff;font-size:.68rem;font-weight:700;cursor:pointer">📱 Kumanda Yap</button>
