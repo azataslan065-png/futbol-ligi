@@ -184,17 +184,19 @@
     <!-- 1) GIRIS - hesabi olmayan buradan gecer -->
     <div id="girisBolum">
       <p style="margin-bottom:.8em">Devam etmek için giriş yap.<br>
-        <span style="opacity:.6;font-size:12px">Puan Tablosu hesabınla aynı bilgiler.</span></p>
-      <input id="gsEposta" type="email" placeholder="E-posta" autocomplete="username"
+        <span style="opacity:.6;font-size:12px">Puan Tablosu hesabınla AYNI isim ve şifre.</span></p>
+      <input id="gsIsim" type="text" placeholder="İsim" autocomplete="username" maxlength="30"
         style="width:100%;box-sizing:border-box;margin-bottom:.5em;padding:.55em .7em;
         background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:3px;
         color:var(--text);font-size:14px">
-      <input id="gsSifre" type="password" placeholder="Şifre" autocomplete="current-password"
+      <input id="gsSifre" type="password" placeholder="Şifre (varsa)" autocomplete="current-password"
         style="width:100%;box-sizing:border-box;margin-bottom:.7em;padding:.55em .7em;
         background:rgba(255,255,255,.08);border:1px solid var(--line);border-radius:3px;
         color:var(--text);font-size:14px">
       <button class="btn" id="b-giris">Giriş yap</button>
-      <button class="btn alt" id="b-kayitol" style="margin-top:.35rem">Hesap oluştur</button>
+      <div style="margin-top:.5em;font-size:11px;opacity:.55;line-height:1.5">
+        Hesabın yok mu? Önce Puan Tablosu'na o isimle giriş yap, sonra buraya dön.
+      </div>
       <div id="girisMesaj" style="margin-top:.5em;font-size:12px;min-height:1.2em"></div>
     </div>
 
@@ -754,14 +756,15 @@ try{
     }
   }catch(e){}
   fbHazir = true;
+  // NOT: Kimlik artik bu anonim/otomatik Firebase Auth oturumundan GELMIYOR (bkz. girisYap) -
+  // bu dinleyici sadece baglanti durumunu (hesapDurumCiz/magazaCiz) tazeler, benimUid'e
+  // DOKUNMAZ. Boylece isim+sifre ile girilen hesap, sayfa arka planda anonim oturum acsa/
+  // kapatsa bile SABIT kalir.
   firebase.auth().onAuthStateChanged(function(u){
-    benimUid = u ? u.uid : null;
-    if(benimUid) hesabiDinle();
     hesapDurumCiz();
     magazaCiz();
   });
-  // Anonim oturum: kullanicidan e-posta/sifre istemek, oyuna girmeden once bir engel
-  // koyardi. Kimlik yine de benzersiz - satin alimlar ve kadro bu uid'ye bagli.
+  // Anonim oturum: sadece baglanti/okuma icin - kimlik bilgisi degil (bkz. yukaridaki not).
   fbDurum = 'giris-deneniyor';
   firebase.auth().signInAnonymously().catch(function(e){
     // EN SIK SEBEP: Firebase konsolunda Anonim giris ETKIN DEGIL.
@@ -772,6 +775,17 @@ try{
       : ('giris-hatasi: ' + (e && e.message || k));
     hesapDurumCiz();
   });
+  // Daha once bu isimle giris yapilmissa, isim alanini doldur ve otomatik dene - sifre
+  // gerekiyorsa kullanici yine de sifreyi girip tekrar basmali (sifre hic saklanmaz).
+  try{
+    var _hatirlananIsim = localStorage.getItem('saha_girisIsim');
+    if(_hatirlananIsim){
+      setTimeout(function(){
+        var isimEl = document.getElementById('gsIsim');
+        if(isimEl && !isimEl.value){ isimEl.value = _hatirlananIsim; girisYap(); }
+      }, 300);
+    }
+  }catch(e){}
 }catch(e){ fbHazir = false; }
 
 /* ══════════════════════════════════════════════════════════════════════════════════════
@@ -915,48 +929,55 @@ function sahaTeshisCiz(){
 // GIRIS / CIKIS
 // Anonim oturum KALDIRILDI: maclar, para ve transferler hesaba bagli. Anonim kimlik
 // tarayici verisi silinince kaybolur ve kullanici takimini geri alamaz.
-// Puan Tablosu ile ayni Firebase projesi kullanildigi icin oradaki e-posta/sifre
-// burada da gecerli - ayri hesap acmak gerekmez.
+// Puan Tablosu ile AYNI kimlik sistemi kullanilir: isim + (varsa) sifre, Firebase
+// Realtime Database'deki 'userProfiles/{visitorId}' kaydina karsi dogrulanir - AYRI bir
+// e-posta/sifre hesabi YOK. 'kullanicilar/{uid}' kaydindaki uid de bu YUZDEN artik
+// Firebase Auth uid'si degil, Puan Tablosu'ndaki AYNI visitorId - boylece iki uygulama
+// tam olarak AYNI kisiyi/hesabi temsil eder (farkli cihazdan da ayni hesaba girilebilir).
+function turkishToLowerSaha(str){
+  return String(str||'').replace(/İ/g,'i').replace(/I/g,'ı').toLowerCase();
+}
+function visitorIdFromNameSaha(name){
+  return 'v_'+turkishToLowerSaha(name).replace(/[^a-z0-9çğıöşü]/g,'_');
+}
 function girisMesaj(m, hataMi){
   try{
     const k = document.getElementById('girisMesaj');
     if(k) k.innerHTML = '<span style="color:'+(hataMi?'#d8443a':'#2fae7a')+'">'+m+'</span>';
   }catch(e){}
 }
-function girisHatasiTR(e){
-  const k = String((e && e.code) || '');
-  if(k.indexOf('invalid-credential')>=0 || k.indexOf('wrong-password')>=0
-     || k.indexOf('user-not-found')>=0) return 'E-posta veya sifre hatali.';
-  if(k.indexOf('invalid-email')>=0) return 'E-posta adresi gecersiz.';
-  if(k.indexOf('email-already-in-use')>=0) return 'Bu e-posta zaten kayitli. Giris yapin.';
-  if(k.indexOf('weak-password')>=0) return 'Sifre en az 6 karakter olmali.';
-  if(k.indexOf('network')>=0) return 'Baglanti yok.';
-  if(k.indexOf('operation-not-allowed')>=0) return 'E-posta girisi Firebase konsolunda kapali.';
-  return (e && e.message) || 'Giris basarisiz.';
-}
 function girisYap(){
-  if(!fbHazir){ girisMesaj('Baglanti yok.', true); return; }
-  const e = (document.getElementById('gsEposta').value||'').trim();
-  const p = document.getElementById('gsSifre').value||'';
-  if(!e || !p){ girisMesaj('E-posta ve sifre gerekli.', true); return; }
+  if(!fbHazir || !fbDb){ girisMesaj('Baglanti yok.', true); return; }
+  const isim = (document.getElementById('gsIsim').value||'').trim();
+  const sifre = document.getElementById('gsSifre').value||'';
+  if(!isim){ girisMesaj('Isim gerekli.', true); return; }
   girisMesaj('Giris yapiliyor...');
-  firebase.auth().signInWithEmailAndPassword(e,p)
-    .then(function(){ girisMesaj(''); })
-    .catch(function(err){ girisMesaj(girisHatasiTR(err), true); });
-}
-function hesapAc(){
-  if(!fbHazir){ girisMesaj('Baglanti yok.', true); return; }
-  const e = (document.getElementById('gsEposta').value||'').trim();
-  const p = document.getElementById('gsSifre').value||'';
-  if(!e || p.length < 6){ girisMesaj('E-posta girin, sifre en az 6 karakter.', true); return; }
-  girisMesaj('Hesap olusturuluyor...');
-  firebase.auth().createUserWithEmailAndPassword(e,p)
-    .then(function(){ girisMesaj(''); })
-    .catch(function(err){ girisMesaj(girisHatasiTR(err), true); });
+  const visitorId = visitorIdFromNameSaha(isim);
+  fbDb.ref('userProfiles/'+visitorId).once('value').then(function(sn){
+    const v = sn.val();
+    if(!v){
+      girisMesaj('Bu isimde bir Puan Tablosu hesabı bulunamadı. Önce Puan Tablosu\'na o isimle giriş yap.', true);
+      return;
+    }
+    const gercekSifre = v.password || '';
+    const gecici = v.tempPassword || '';
+    if(gercekSifre && sifre !== gercekSifre && !(gecici && sifre === gecici)){
+      girisMesaj('İsim veya şifre hatalı.', true);
+      return;
+    }
+    girisMesaj('');
+    try{ localStorage.setItem('saha_girisIsim', isim); }catch(e){}
+    benimUid = visitorId;
+    hesabiDinle();
+    hesapDurumCiz();
+    menuGoster();
+  }).catch(function(err){
+    girisMesaj('Bağlantı hatası: '+((err&&err.message)||''), true);
+  });
 }
 function cikisYap(){
-  try{ firebase.auth().signOut(); }catch(e){}
   benimKayit = null; benimUid = null;
+  try{ localStorage.removeItem('saha_girisIsim'); }catch(e){}
   menuGoster();
 }
 // Giris yapilmissa menu, yapilmamissa giris formu gorunur.
@@ -972,8 +993,8 @@ function menuGoster(){
     if(girisli && !benimKayit) kayitSecenekleriCiz();
   }catch(e){}
 }
-// Maclarim: fikstur baglantisi henuz yok (tasarim.md adim 4). Bos liste yerine ne
-// beklendigini soyluyoruz - "hic mac yok" demek, hata mi ozellik mi belirsiz birakirdi.
+// Maclarim: kullanicinin (kullanicilar/{uid}/takimId ile atandigi) takimina ait,
+// fiksturdeki oynanmamis maclari listeler - bkz. FIKSTUR BAGLANTISI blogu (Adim 4).
 function maclarCiz(){
   try{
     const k = document.getElementById('maclarListe'); if(!k) return;
@@ -1189,7 +1210,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-14-Z';
+window.APP_BUILD = '2026-09-16-A';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -2902,7 +2923,8 @@ document.getElementById('b-kadrom').onclick = function(){
   bolumAcKapa('kadroKutu','b-kadrom','👕 Kadroyu gizle','👕 Kadrom', kadromCiz);
 };
 document.getElementById('b-giris').onclick   = girisYap;
-document.getElementById('b-kayitol').onclick = hesapAc;
+document.getElementById('gsIsim').addEventListener('keydown', function(e){ if(e.key==='Enter') girisYap(); });
+document.getElementById('gsSifre').addEventListener('keydown', function(e){ if(e.key==='Enter') girisYap(); });
 document.getElementById('b-cikis').onclick   = cikisYap;
 document.getElementById('b-ayar-kapa').onclick  = ayarKapa;
 document.getElementById('sw-radar').onclick  = () => { AYAR.radar = !AYAR.radar; ayarKaydet(); ayarUygula(); if (AYAR.radar) radar(); };
