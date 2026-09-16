@@ -2479,7 +2479,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-16-C';
+window.APP_BUILD='2026-09-16-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -15422,24 +15422,42 @@ function renderCommentsList(matchId){
 function renderMdIstatistik(id,m,h,a){
   if(!m.played&&!m.isLive)return '<div style="text-align:center;color:var(--mu);padding:2.5rem 1rem;font-size:.82rem">Maç henüz oynanmadı</div>';
   const evs=m.events||[];
-  const hGoals=evs.filter(e=>e.team==='home'&&e.type==='goal').length;
-  const aGoals=evs.filter(e=>e.team==='away'&&e.type==='goal').length;
+  // Gol sayimi: SADECE 'goal' turunu sayiyordu; penaltiyla atilan ('pen_goal') ve
+  // rakibin kendi kalesine attigi gol ('og') sayilmiyordu - bu iki tur sikca
+  // yasandiginda istatistik sekmesindeki gol sayisi asil skorla uyusmuyordu.
+  const hGoals=evs.filter(e=>(e.team==='home'&&(e.type==='goal'||e.type==='pen_goal'))||(e.team==='away'&&e.type==='og')).length;
+  const aGoals=evs.filter(e=>(e.team==='away'&&(e.type==='goal'||e.type==='pen_goal'))||(e.team==='home'&&e.type==='og')).length;
   const hYel=evs.filter(e=>e.team==='home'&&e.type==='yellow').length;
   const aYel=evs.filter(e=>e.team==='away'&&e.type==='yellow').length;
-  const hRed=evs.filter(e=>e.team==='home'&&e.type==='red').length;
-  const aRed=evs.filter(e=>e.team==='away'&&e.type==='red').length;
-  function bar(label,hv,av){
+  const hRed=evs.filter(e=>e.team==='home'&&(e.type==='red'||e.type==='yellow2red')).length;
+  const aRed=evs.filter(e=>e.team==='away'&&(e.type==='red'||e.type==='yellow2red')).length;
+  function bar(label,hv,av,yuzde){
     const max=Math.max(hv,av,1);
+    const hvTxt=yuzde?Math.round(hv)+'%':hv, avTxt=yuzde?Math.round(av)+'%':av;
     return `<div style="margin-bottom:.65rem">
-      <div style="display:flex;justify-content:space-between;font-size:.74rem;font-weight:800;margin-bottom:.25rem"><span>${hv}</span><span style="color:var(--mu);font-weight:600;font-size:.66rem">${label}</span><span>${av}</span></div>
+      <div style="display:flex;justify-content:space-between;font-size:.74rem;font-weight:800;margin-bottom:.25rem"><span>${hvTxt}</span><span style="color:var(--mu);font-weight:600;font-size:.66rem">${label}</span><span>${avTxt}</span></div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
         <div style="height:6px;background:var(--s3);border-radius:3px;overflow:hidden;direction:rtl"><div style="height:100%;width:${Math.round(hv/max*100)}%;background:var(--ac)"></div></div>
         <div style="height:6px;background:var(--s3);border-radius:3px;overflow:hidden"><div style="height:100%;width:${Math.round(av/max*100)}%;background:var(--ac2)"></div></div>
       </div>
     </div>`;
   }
+  // SAHA MODU: 3D mac motoru (saha.html) sut, isabet, korner, faul, sahiplik ve
+  // ofsayt sayaclarini zaten tutuyor ve mac bitince 'sahaStats' altinda Firebase'e
+  // yaziyordu - ama bu sekme o alani hic okumuyordu, sadece gol/kart gosteriyordu.
+  // Veri zaten vardi, sadece ekrana hic cikmiyordu.
+  const ss=m.sahaStats;
+  const detay=(ss&&ss.home&&ss.away) ? `
+    ${bar('🎯 Şut',ss.home.sut||0,ss.away.sut||0)}
+    ${bar('🎯 İsabetli Şut',ss.home.isabet||0,ss.away.isabet||0)}
+    ${bar('🚩 Korner',ss.home.korner||0,ss.away.korner||0)}
+    ${bar('⚠️ Faul',ss.home.faul||0,ss.away.faul||0)}
+    ${bar('🚫 Ofsayt',ss.home.ofsayt||0,ss.away.ofsayt||0)}
+    ${bar('⏱️ Topa Sahip Olma',ss.home.sahiplik||0,ss.away.sahiplik||0,true)}
+  ` : '';
   return `<div style="padding:.85rem .9rem">
     ${bar('⚽ Gol',hGoals,aGoals)}
+    ${detay}
     ${bar('🟨 Sarı Kart',hYel,aYel)}
     ${bar('🟥 Kırmızı Kart',hRed,aRed)}
   </div>`;

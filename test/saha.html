@@ -1210,7 +1210,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-16-C';
+window.APP_BUILD = '2026-09-16-D';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -1480,13 +1480,19 @@ function olayEkle(type, p, ek){
 }
 // Puan Tablosu'na verilecek nihai paket. Maç bitince hazır olur.
 function macSonucu(){
+  // 'sahiplik' oyun icinde SANIYE olarak birikir (bkz. istatTablo). Puan Tablosu
+  // bunu dogrudan yuzde gibi gosterecegi icin burada donusturup gonderiyoruz -
+  // aksi halde "topa sahip olma %620" gibi anlamsiz bir sayi cikardi.
+  const topT = (istat.a.sahiplik||0) + (istat.b.sahiplik||0);
+  const paA = topT < 1 ? 50 : Math.round(istat.a.sahiplik/topT*100);
+  const paB = topT < 1 ? 50 : (100 - paA);
   return {
     homeTeam: takA().ad, awayTeam: takB().ad,
     homeGoals: skorA, awayGoals: skorB,
     played: true,
     events: olaylar.slice(),
     // İstatistikler Puan Tablosu'nun maç detayında gösterilebilir.
-    stats: { home: Object.assign({}, istat.a), away: Object.assign({}, istat.b) }
+    stats: { home: Object.assign({}, istat.a, {sahiplik:paA}), away: Object.assign({}, istat.b, {sahiplik:paB}) }
   };
 }
 function bosIstat(){ return { sut:0, isabet:0, korner:0, faul:0, sari:0, kirmizi:0, sahiplik:0, ofsayt:0 }; }
@@ -1587,6 +1593,9 @@ const BASKI    = [ {k:0,  ad:'Düşük'}, {k:7,  ad:'Orta'}, {k:13, ad:'Yüksek'
 const AGIRLIK  = [ {k:-6, ad:'Savunma'}, {k:0, ad:'Dengeli'}, {k:7, ad:'Hücum'} ];
 const DIZ_AD   = ['4-4-2','4-3-3','5-3-2'];
 const TAKTIK = { a:{ ileri:0, baski:7 }, b:{ ileri:0, baski:7 } };
+// Rakibin (B) hucuma cikma egilimi artik sabit degil; her karede topu kimin
+// tuttuguna gore yumusakca (bIleriSmooth ile) hedefe yaklastirilir - bkz. bTaktikGuncelle().
+let bIleriSmooth = 0;
 let bSpin = 0, topKilit = 0;
 const AYAR = { radar:true, tip:!isTouch, sure:150, zor:1.0, ses:true, tekrar:true, grafik:2,
                ta:0, tb:1, diz:'4-4-2', dizB:'4-4-2', baski:7, agirlik:0, hata:false,
@@ -1968,7 +1977,10 @@ function mudahale(o){
 function aiHedef(p, kovalayan){
   if (duran && duran.duvar && duran.duvar.indexOf(p) >= 0 && p.duvarHedef) return p.duvarHedef.clone();
   if (p.gk && !(duran && p === duran.alici)){
-    const z = p.dalisT > 0 ? p.dalis : Math.max(-7, Math.min(7, ball.position.z*0.55));
+    // GOL BASITLESTIRME: kaleci eskiden kale genisliginin (3.66) neredeyse iki kati
+    // (+-7) bir alanda topu takip ediyordu - kanatlardan gelen her sutu da kapatiyordu.
+    // Simdi kapsama araligi daraltildi, direk diplerinde bosluk birakir.
+    const z = p.dalisT > 0 ? p.dalis : Math.max(-5.2, Math.min(5.2, ball.position.z*0.48));
     return new THREE.Vector3(-p.dir*(HLX-2.2), 0, z);
   }
   if (duran){
@@ -2525,6 +2537,15 @@ function update(dt){
     pw.firstElementChild.style.width = (OYN[o].c*100) + '%';
   }
 
+  // RAKIP HUCUM DAVRANISI: topu son B takimi oyuncusu tuttuysa hedef ileri (hucum),
+  // aksi halde geri (savunma). bIleriSmooth bu hedefe ~1 saniyede yaklasir; aninda
+  // ziplamaz, takim bir blok halinde ileri/geri kayiyormus gibi gorunur. Sonuc:
+  // rakip topu kazaninca sahaya yayilir ve hucuma katilir, eskiden hep 0'da (notr)
+  // kalip yalnizca topa en yakin 1-2 kisi hareket ediyordu.
+  const bHedefIleri = (sonDokunan === 1) ? 7 : -3;
+  bIleriSmooth += (bHedefIleri - bIleriSmooth) * Math.min(1, dt*0.8);
+  TAKTIK.b.ileri = bIleriSmooth;
+
   /* --- oyuncular --- */
   const kovA = enYakin(teamA), kovB = enYakin(teamB);
   players.forEach(p => {
@@ -2679,7 +2700,10 @@ function update(dt){
     /* kaleci kurtarışı */
     players.forEach(gk => {
       if (!gk.gk || gk.dis || gk.cd > 0) return;
-      if (gk.obj.position.distanceTo(ball.position) < 2.3 && ball.position.y < 2.6){
+      // GOL BASITLESTIRME: 2.3 birimlik tutus yaricapi kale agzinin buyuk kismini
+      // kapsiyordu (kale genisligi 7.32); 1.7'ye indirildi ki koseye yakin, iyi
+      // yerlestirilmis sutlar kaleciyi gercekten gecebilsin.
+      if (gk.obj.position.distanceTo(ball.position) < 1.7 && ball.position.y < 2.6){
         const hizli = Math.hypot(bVel.x, bVel.z) > 12;
         bVel.set(0,0,0);
         ball.position.set(gk.obj.position.x + gk.dir*0.6, R_BALL, gk.obj.position.z);
@@ -2862,7 +2886,13 @@ function basla(yeniMod){
                          p.dalisT = 0; p.obj.rotation.x = 0; p.obj.visible = true; p.golge.visible = true; });
   dizilisUygula(0, AYAR.diz); dizilisUygula(1, AYAR.dizB);
   TAKTIK.a.ileri = AYAR.agirlik; TAKTIK.a.baski = AYAR.baski;
-  TAKTIK.b.ileri = 0;            TAKTIK.b.baski = 7;
+  // RAKIP HUCUM DAVRANISI: 'ileri' artik sabit 0 degil, topa kimin sahip oldugu
+  // izlenerek her karede guncelleniyor (bkz. update() icindeki bTaktikGuncelle).
+  // Baski da 7'den 9'a cikarildi - eskiden topun 7 birim yakinindaki oyuncu bile
+  // gitmiyor, geri kalan 8 kisi sabit duruyordu; bu da "3 kisiyle oynuyor" hissini
+  // veriyordu. bIleriSmooth sifirdan baslar ki mac basinda ani bir zipla olmasin.
+  TAKTIK.b.ileri = 0;            TAKTIK.b.baski = 9;
+  bIleriSmooth = 0;
   bSpin = 0;
   if (mod === 'antrenman'){
     teamB.forEach(p => { if (!p.gk){ p.dis = true; p.obj.visible = false; p.golge.visible = false; } });
