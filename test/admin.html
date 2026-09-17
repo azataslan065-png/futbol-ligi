@@ -4953,6 +4953,27 @@ function autoFixture(){
   var tur=Number(qs('fixTur').value)||2, sd=qs('fixDate').value, gap=Number(qs('fixGap').value)||7;
   dlg('⚡','Fikstür Oluştur',teams.length+' takım, '+tur+' tur. Oynanmamış maçlar silinecek!','Oluştur','dop').then(function(ok){
     if(!ok)return;
+    // KULLANICI BİLDİRDİ: "Fikstür oluşturulduğunda öncekiler silinmiyor." KÖK SEBEP:
+    // eski maçlar SADECE yerel S.matches nesnesinden delete ediliyordu; Firebase'e giden
+    // asıl silme, save() içindeki genel update() çağrısının 'matches' alanını TAMAMEN
+    // DEĞİŞTİRMESİNE güveniyordu - bu SADECE yerel S.matches, Firebase'in O ANKİ GERÇEK
+    // haliyle birebir aynıysa işe yarar. Yerel kopya bir şekilde bayatlamışsa (başka bir
+    // sekme/cihaz araya maç eklemiş/silmişse) ya da o sırada saha.html'de AKTİF oynanan
+    // bir maç varsa (saha.html birkaç saniyede bir kendi maçının alanlarını Firebase'e
+    // YAZMAYA devam eder - bu yazım, silinmiş bir maç düğümünü SESSİZCE YENİDEN
+    // OLUŞTURABİLİR), silme etkisiz kalabiliyordu. ÇÖZÜM: eski maçlar artık ÖNCE
+    // Firebase'in TAZE halinden okunup AÇIKÇA ve TEK TEK null'a set edilerek siliniyor
+    // (update ile) - bu adım save()'in genel birleştirme mantığından TAMAMEN BAĞIMSIZ,
+    // garantili bir silme. Yeni fikstür ANCAK bu silme onaylandıktan SONRA yazılır.
+    db.ref('leagues/'+_curLeagueId+'/matches').once('value').then(function(freshSnap){
+      var freshMatches=freshSnap.val()||{};
+      var silinecek={};
+      Object.keys(freshMatches).forEach(function(id){
+        if(!freshMatches[id].played)silinecek['leagues/'+_curLeagueId+'/matches/'+id]=null;
+      });
+      var silmeSayisi=Object.keys(silinecek).length;
+      return (silmeSayisi?db.ref().update(silinecek):Promise.resolve()).then(function(){return silmeSayisi;});
+    }).then(function(silinenSayisi){
     // Hakem/spiker/yorumcu havuzunu çek - fikstür oluşturulurken her maça dönüşümlü otomatik atama yapılır.
     db.ref('referees').once('value').then(function(refSnap){
       var refs=refSnap.val()||{};
@@ -4966,6 +4987,8 @@ function autoFixture(){
         return refs[pool[index%pool.length]].name;
       }
 
+      // Yerel S.matches kopyası da temizlenir - Firebase'deki GERÇEK silme yukarıda
+      // zaten garanti edildi, bu satır sadece yerel/görsel tutarlılık içindir.
       Object.keys(S.matches||{}).forEach(function(id){if(!S.matches[id].played)delete S.matches[id];});
       S.byeWeeks={}; // Önceki fikstürden kalan eski BAY kayıtları temizlenir, karışıklık önlenir.
       var list=teams.slice(); var hasBye=list.length%2!==0; if(hasBye)list.push(null);
@@ -5014,7 +5037,9 @@ function autoFixture(){
       // veri Firebase'e HİÇ ULAŞMAMIŞ olabiliyordu. Artık save() başarılı görünse bile,
       // Firebase'den TEKRAR OKUNARAK verinin GERÇEKTEN orada olduğu doğrulanıyor - eğer
       // beklenen maç sayısı yoksa, admin AÇIKÇA ve NET bir hata uyarısı görüyor (sessiz
-      // başarısızlık artık mümkün değil).
+      // başarısızlık artık mümkün değil). Ayrıca sayı BEKLENENDEN FAZLAYSA (eski maçlardan
+      // silinemeyen kaldıysa) da artık ayrı bir uyarı gösterilir - önceden bu durum "başarılı"
+      // sanılıyordu (bkz. yukarıdaki kök sebep notu).
       save().then(function(){
         return db.ref('leagues/'+_curLeagueId+'/matches').once('value');
       }).then(function(verifySnap){
@@ -5022,12 +5047,17 @@ function autoFixture(){
         renderMatches();
         if(savedCount<expectedMatchCount){
           toast('❌ Fikstür Firebase\'e TAM kaydedilemedi ('+savedCount+'/'+expectedMatchCount+' maç) - lütfen tekrar deneyin veya bağlantınızı kontrol edin','er');
+        }else if(savedCount>expectedMatchCount){
+          toast('⚠️ Fikstür oluşturuldu ama '+(savedCount-expectedMatchCount)+' eski maç hâlâ duruyor - lütfen tekrar deneyin','er');
         }else{
-          toast('✅ '+(week-1)+' hafta fikstür oluşturuldu ve kaydedildi'+(refIds.length?' (hakem/yayın havuzundan otomatik atandı)':''));
+          toast('✅ '+(week-1)+' hafta fikstür oluşturuldu ve kaydedildi'+(refIds.length?' (hakem/yayın havuzundan otomatik atandı)':'')+(silinenSayisi?' · '+silinenSayisi+' eski maç silindi':''));
         }
       }).catch(function(e){
         toast('❌ Fikstür kaydedilemedi: '+(e&&e.message?e.message:'bilinmeyen hata')+' - lütfen tekrar deneyin','er');
       });
+    });
+    }).catch(function(e){
+      toast('❌ Eski fikstür silinemedi: '+(e&&e.message?e.message:'bilinmeyen hata')+' - lütfen tekrar deneyin','er');
     });
   });
 }
@@ -6740,6 +6770,22 @@ function sahaFiksturSifirlaVeOlustur(){
     'fikstür oluşturulacak (bugünden başlayarak, haftada bir maç). Oynanmış maçlar '+
     'korunur. Bu işlem geri alınamaz.','Sil ve Oluştur','dop').then(function(ok){
     if(!ok)return;
+    // KULLANICI BİLDİRDİ: "Fikstür oluşturulduğunda öncekiler silinmiyor." KÖK SEBEP VE
+    // ÇÖZÜM: bkz. autoFixture() içindeki AYNI başlıklı not - eski maçlar artık ÖNCE
+    // Firebase'in TAZE halinden okunup AÇIKÇA ve TEK TEK null'a set edilerek siliniyor,
+    // yerel S.matches'in Firebase ile senkron olduğuna güvenmek YERİNE. Bu adım özellikle
+    // Saha modunda önemli: saha.html'de o sırada AKTİF oynanan bir maç varsa, oyun kendi
+    // maçının alanlarını birkaç saniyede bir Firebase'e yazmaya devam eder - eski silme
+    // yöntemi bu YAZIMLA yarışıp kaybedebiliyordu (maç düğümü sessizce yeniden oluşuyordu).
+    db.ref('leagues/'+_curLeagueId+'/matches').once('value').then(function(freshSnap){
+      var freshMatches=freshSnap.val()||{};
+      var silinecek={};
+      Object.keys(freshMatches).forEach(function(id){
+        if(!freshMatches[id].played)silinecek['leagues/'+_curLeagueId+'/matches/'+id]=null;
+      });
+      var silmeSayisi=Object.keys(silinecek).length;
+      return (silmeSayisi?db.ref().update(silinecek):Promise.resolve()).then(function(){return silmeSayisi;});
+    }).then(function(silinenSayisi){
     db.ref('referees').once('value').then(function(refSnap){
       var refs=refSnap.val()||{};
       var refIds=Object.keys(refs);
@@ -6748,6 +6794,8 @@ function sahaFiksturSifirlaVeOlustur(){
       var spikers=refIds.filter(function(id){return refs[id].role==='spiker';});
       var yorumcus=refIds.filter(function(id){return refs[id].role==='yorumcu';});
       function pickFromPool(pool,index){ if(!pool.length)return ''; return refs[pool[index%pool.length]].name; }
+      // Yerel S.matches kopyası da temizlenir - Firebase'deki GERÇEK silme yukarıda
+      // zaten garanti edildi, bu satır sadece yerel/görsel tutarlılık içindir.
       Object.keys(S.matches||{}).forEach(function(id){if(!S.matches[id].played)delete S.matches[id];});
       S.byeWeeks={};
       var tur=2, gap=7;
@@ -6784,7 +6832,8 @@ function sahaFiksturSifirlaVeOlustur(){
       }
       var expectedMatchCount=Object.keys(S.matches||{}).length;
       // Aynı doğrulama deseni (autoFixture ile aynı gerekçe): save() "başarılı" görünse
-      // bile Firebase'e tam ulaşmamış olabilir - geri okuyup sayıyı doğrula.
+      // bile Firebase'e tam ulaşmamış olabilir - geri okuyup sayıyı doğrula. Sayı
+      // beklenenden FAZLAYSA da (silinemeyen eski maç kaldıysa) artık ayrı uyarılıyor.
       save().then(function(){
         return db.ref('leagues/'+_curLeagueId+'/matches').once('value');
       }).then(function(verifySnap){
@@ -6793,12 +6842,17 @@ function sahaFiksturSifirlaVeOlustur(){
         try{if(typeof renderMatches==='function')renderMatches();}catch(e){}
         if(savedCount<expectedMatchCount){
           toast('❌ Fikstür Firebase\'e TAM kaydedilemedi ('+savedCount+'/'+expectedMatchCount+' maç) - lütfen tekrar deneyin','er');
+        }else if(savedCount>expectedMatchCount){
+          toast('⚠️ Fikstür oluşturuldu ama '+(savedCount-expectedMatchCount)+' eski maç hâlâ duruyor - lütfen tekrar deneyin','er');
         }else{
-          toast('✅ '+(week-1)+' hafta yeni fikstür oluşturuldu ve kaydedildi');
+          toast('✅ '+(week-1)+' hafta yeni fikstür oluşturuldu ve kaydedildi'+(silinenSayisi?' · '+silinenSayisi+' eski maç silindi':''));
         }
       }).catch(function(e){
         toast('❌ Fikstür kaydedilemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');
       });
+    });
+    }).catch(function(e){
+      toast('❌ Eski fikstür silinemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');
     });
   });
 }
