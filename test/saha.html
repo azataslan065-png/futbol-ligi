@@ -1619,6 +1619,29 @@ function _sahaMapEvents(events, benTarafHome){
     return ev;
   });
 }
+// ── CANLI TOP KONUMU (Puan Tablosu'ndaki mini saha görseli için) ──────────────────────
+// Puan Tablosu tarafı "home" (ev sahibi) perspektifinden çizim yapacağı için burada da
+// HER ŞEY home perspektifine çevrilerek gönderilir - devre arası dirA döndüğünde veya
+// A takımı deplasmanken bile Puan Tablosu ek hesap yapmadan doğrudan kullanabilsin.
+//   ballX: -1..1, home takımın hücum yönü POZİTİF (home kaleye yaklaşırsa negatife gider)
+//   ballZ: -1..1, sahanın eninde konum (yön sabit, devre arası etkilemez)
+//   attack: o an topa en son dokunan taraf - 'home' | 'away'
+function _sahaTopKonumu(fk){
+  try{
+    // ball.position.x, dirA'ya göre A takımının hücum yönünde büyür; bunu iptal edip
+    // "A takımı ileri gidiyorsa pozitif" sabit çerçevesine indirgiyoruz, sonra home/away'e çeviriyoruz.
+    var aIleri = (ball.position.x * dirA) / HLX;              // -1..1, A'nın ileri yönü sabit
+    var homeX = fk.benTarafHome ? aIleri : -aIleri;            // home perspektifine çevir
+    var homeZ = ball.position.z / HWZ;                          // en (sağ/sol) - dirA'dan etkilenmez
+    var dokunanA = (sonDokunan === 0);                          // topa son dokunan A takımı mı
+    var dokunanHome = fk.benTarafHome ? dokunanA : !dokunanA;
+    return {
+      x: Math.max(-1, Math.min(1, homeX)),
+      z: Math.max(-1, Math.min(1, homeZ)),
+      attack: dokunanHome ? 'home' : 'away'
+    };
+  }catch(e){ return null; }
+}
 function sahaCanliYaz(ilkYazim){
   try{
     var fk = window._sahaAktifFikstur; if(!fk || !fbHazir || !fbDb) return;
@@ -1633,9 +1656,34 @@ function sahaCanliYaz(ilkYazim){
     g[yol+'/awayGoals'] = aG;
     g[yol+'/minute'] = Math.max(0, Math.min(120, Math.round(macDakika()||0)));
     g[yol+'/events'] = _sahaMapEvents(olaylar, fk.benTarafHome);
+    var top = _sahaTopKonumu(fk);
+    if(top){
+      // Ondalıkları 2 haneye yuvarla - Firebase'e her 4 saniyede gidecek küçük bir
+      // sayı olsun diye (gereksiz hassasiyet bant genişliğini büyütür).
+      g[yol+'/ballX'] = Math.round(top.x*100)/100;
+      g[yol+'/ballZ'] = Math.round(top.z*100)/100;
+      g[yol+'/ballAttack'] = top.attack;
+      g[yol+'/ballTs'] = (typeof firebase!=='undefined' && firebase.database && firebase.database.ServerValue)
+        ? firebase.database.ServerValue.TIMESTAMP : Date.now();
+    }
     fbDb.ref().update(g).catch(function(e){ try{ console.error('[saha] canli yazim hatasi', e); }catch(_e){} });
   }catch(e){}
 }
+// ── PERİYODİK CANLI YAZIM ───────────────────────────────────────────────────────────
+// KULLANICI TALEBİ: "Puan tablosu tarafında canlı görsel anlatım (top nerede, kim
+// hücumda) görünsün." Eskiden sahaCanliYaz SADECE maç başında ve gollerde çağrılıyordu;
+// bu da top konumunun dakikalarca donuk kalmasına yol açardı. Burada 4 saniyede bir
+// (Firebase yazım sıklığını makul tutmak için - her karede yazmak gereksiz trafik
+// yaratır, 4sn top konumunun "canlı" hissetmesi için yeterli) ek bir yazım eklendi.
+// running/bitti kontrolü fonksiyon İÇİNDE değil burada yapılıyor ki maç duraklatılmışken
+// (frozen, ara vb.) veya bitmişken boşuna Firebase'e istek atılmasın.
+setInterval(function(){
+  try{
+    if(window._sahaAktifFikstur && typeof running!=='undefined' && running && !bitti){
+      sahaCanliYaz(false);
+    }
+  }catch(e){}
+}, 4000);
 function sahaFiksturSonucuKaydet(){
   try{
     var fk = window._sahaAktifFikstur; if(!fk || !fbHazir || !fbDb) return;

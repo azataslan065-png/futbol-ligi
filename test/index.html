@@ -11766,6 +11766,102 @@ function gorevliDetay(ad,rol){
   }
   openSheet('🧑‍⚖️ Görevli',html,'gorevliDetay');
 }
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   CANLI SAHA GÖRÜNÜMÜ (Maç Detayı → Detay sekmesi, Baskımetre'nin hemen üstü)
+   KULLANICI TALEBİ: "Saha uygulamasında maç oynanıyor, o maçı Puan Tablosu tarafında
+   ilgili takımların canlı maç kartlarına canlı görsel anlatım olarak ekle" - referans
+   görsel: mini bir saha üzerinde topun konumu + hangi takımın hücumda olduğu.
+   VERİ KAYNAĞI: saha.html'deki 3D maç motoru artık her 4 saniyede bir gerçek top
+   konumunu (ballX/ballZ, -1..1 aralığında, HOME takımın hücum yönü perspektifinden
+   normalize edilmiş) ve son dokunan tarafı (ballAttack: 'home'|'away') Firebase'e
+   yazıyor (bkz. saha.html içindeki sahaCanliYaz/_sahaTopKonumu). Bu fonksiyon SADECE
+   o veri varsa (m.sahaMode && m.ballX bir sayı) çizilir; admin'in elle canlıya aldığı,
+   top konumu bilinmeyen maçlarda hiçbir şey döndürmeyip sessizce atlanır - olmayan bir
+   veriyi uydurmak yanıltıcı olurdu.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+// Önceki top konumu, maç id'sine göre bellekte tutulur - sadece kısa bir "iz/pas çizgisi"
+// çizebilmek için (ekran yenilense de kaybolmasın diye window üzerinde, sayfa oturumu
+// boyunca kalıcı olması yeterli; Firebase'e yazılan kalıcı bir veri DEĞİL).
+window._sahaPitchPrev=window._sahaPitchPrev||{};
+function renderSahaPitch(m,h,a){
+  try{
+    if(!m||!m.isLive||!m.sahaMode)return '';
+    if(typeof m.ballX!=='number'||typeof m.ballZ!=='number')return '';
+    const x=Math.max(-1,Math.min(1,m.ballX));
+    const z=Math.max(-1,Math.min(1,m.ballZ));
+    const attackHome=m.ballAttack!=='away';
+    const attackTeam=attackHome?h:a;
+    const attackColor=attackHome?'#3b82f6':'#ef4444';
+
+    // Saha koordinatları (SVG viewBox 0 0 300 190, kenar boşluğu 4px)
+    const PX0=4,PY0=4,PW=292,PH=182;
+    const px=PX0+((x+1)/2)*PW, py=PY0+((z+1)/2)*PH;
+
+    // Önceki konumla aradaki çizgi (kısa "hareket izi" - referans görseldeki pas
+    // çizgisine benzer bir dokunuş). Maç değiştiyse veya ilk çizimse iz gösterilmez.
+    const prevKey=m.id||(m.homeId+'-'+m.awayId);
+    const prev=window._sahaPitchPrev[prevKey];
+    let trailHtml='';
+    if(prev&&(Math.abs(prev.x-px)>1||Math.abs(prev.y-py)>1)){
+      trailHtml=`<line x1="${prev.x.toFixed(1)}" y1="${prev.y.toFixed(1)}" x2="${px.toFixed(1)}" y2="${py.toFixed(1)}"
+          stroke="#fff" stroke-width="1.4" stroke-opacity=".75"/>
+        <circle cx="${prev.x.toFixed(1)}" cy="${prev.y.toFixed(1)}" r="3.2" fill="#2b2b33" stroke="#fff" stroke-width="1"/>`;
+    }
+    window._sahaPitchPrev[prevKey]={x:px,y:py};
+
+    const dk=Math.max(0,Math.min(120,Math.round(m.minute||0)));
+    const dkGoster=dk>90?('90+'+(dk-90)):dk;
+
+    const logoHtml=(t)=>t&&t.logo
+      ?`<img src="${t.logo}" style="width:18px;height:18px;object-fit:contain;border-radius:50%;background:#fff" onload="_processLogoImg&&_processLogoImg(this)" onerror="this.style.display='none'"/>`
+      :`<div style="width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font-size:.6rem">⚽</div>`;
+
+    return `<div class="md-section-head">🎮 Canlı Saha Görünümü</div>
+      <div class="mi-card" style="padding:.6rem;overflow:hidden">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem;padding:0 .2rem">
+          <div style="display:flex;align-items:center;gap:.35rem;font-size:.68rem;font-weight:800;color:${attackColor}">
+            <span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${attackColor};animation:lp 1.2s infinite"></span>
+            HÜCUM · ${(attackTeam&&attackTeam.name||'?').toUpperCase()}
+          </div>
+          <div style="background:#111;color:#fff;font-size:.66rem;font-weight:800;border-radius:5px;padding:.15rem .5rem;font-variant-numeric:tabular-nums">🔴 ${dkGoster}'</div>
+        </div>
+        <div style="position:relative;border-radius:8px;overflow:hidden;box-shadow:0 0 0 1px var(--br)">
+          <svg viewBox="0 0 300 190" style="display:block;width:100%;height:auto;background:
+              repeating-linear-gradient(90deg,#2f7d3c 0,#2f7d3c 36.5px,#3a8f47 36.5px,#3a8f47 73px)">
+            <!-- dış çizgiler -->
+            <rect x="4" y="4" width="292" height="182" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.6"/>
+            <line x1="150" y1="4" x2="150" y2="186" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.6"/>
+            <circle cx="150" cy="95" r="27" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.6"/>
+            <circle cx="150" cy="95" r="2" fill="#eaffea" fill-opacity=".85"/>
+            <!-- ev sahibi ceza sahası (sol) -->
+            <rect x="4" y="45" width="54" height="100" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.6"/>
+            <rect x="4" y="70" width="20" height="50" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.6"/>
+            <rect x="-3" y="80" width="7" height="30" fill="#eaffea" fill-opacity=".9"/>
+            <!-- deplasman ceza sahası (sağ) -->
+            <rect x="242" y="45" width="54" height="100" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.6"/>
+            <rect x="276" y="70" width="20" height="50" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.6"/>
+            <rect x="296" y="80" width="7" height="30" fill="#eaffea" fill-opacity=".9"/>
+            <!-- korner yayları -->
+            <path d="M4,14 A10,10 0 0 0 14,4" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.4"/>
+            <path d="M4,176 A10,10 0 0 1 14,186" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.4"/>
+            <path d="M296,14 A10,10 0 0 1 286,4" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.4"/>
+            <path d="M296,176 A10,10 0 0 0 286,186" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.4"/>
+            ${trailHtml}
+            <!-- top -->
+            <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="5.5" fill="#0b0b0e" fill-opacity=".25"/>
+            <circle cx="${px.toFixed(1)}" cy="${(py-1.5).toFixed(1)}" r="5.5" fill="#fff" stroke="#111" stroke-width="1"/>
+          </svg>
+          <div style="position:absolute;left:6px;top:6px;display:flex;align-items:center;gap:.3rem;background:rgba(0,0,0,.45);border-radius:20px;padding:.15rem .4rem .15rem .15rem">
+            ${logoHtml(h)}<span style="font-size:.58rem;font-weight:800;color:#fff">${(h.name||'EV').toUpperCase()}</span>
+          </div>
+          <div style="position:absolute;right:6px;top:6px;display:flex;align-items:center;gap:.3rem;background:rgba(0,0,0,.45);border-radius:20px;padding:.15rem .15rem .15rem .4rem">
+            <span style="font-size:.58rem;font-weight:800;color:#fff">${(a.name||'DEP').toUpperCase()}</span>${logoHtml(a)}
+          </div>
+        </div>
+        <div style="font-size:.58rem;color:var(--mu);margin-top:.4rem;line-height:1.45">Top konumu, Saha uygulamasındaki canlı maçtan birebir aktarılır (≈4 sn'de bir güncellenir).</div>
+      </div>`;
+  }catch(e){ try{DiagSil('renderSahaPitch',e);}catch(_e){} return ''; }
+}
 function renderBaskimetre(m){
   try{
     /* ── BASKIMETRE / OLAY YOĞUNLUĞU ─────────────────────────────────────────────────
@@ -11877,6 +11973,7 @@ function renderMdDetay(id,m,h,a,ntInfo){
     <!-- KULLANICI BİLDİRDİ: "Baskımetre puan tablosu tarafında görünmüyor."
          KÖK SEBEP: Fonksiyon duruyordu ama ÇAĞRISI, maç bilgisi ekranı yeniden
          tasarlanırken (2026-08-09-O) yanlışlıkla silinmişti. Geri kondu. -->
+    ${m.isLive?renderSahaPitch(m,h,a):''}
     ${(m.played||m.isLive)?renderBaskimetre(m):''}
     <div class="md-section-head">Maç Bilgisi</div>
     <div class="mi-card">
