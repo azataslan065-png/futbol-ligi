@@ -1658,8 +1658,8 @@ function sahaCanliYaz(ilkYazim){
     g[yol+'/events'] = _sahaMapEvents(olaylar, fk.benTarafHome);
     var top = _sahaTopKonumu(fk);
     if(top){
-      // Ondalıkları 2 haneye yuvarla - Firebase'e her 4 saniyede gidecek küçük bir
-      // sayı olsun diye (gereksiz hassasiyet bant genişliğini büyütür).
+      // Ondalıkları 2 haneye yuvarla - sık yazılacak küçük bir sayı olsun diye
+      // (gereksiz hassasiyet bant genişliğini büyütür).
       g[yol+'/ballX'] = Math.round(top.x*100)/100;
       g[yol+'/ballZ'] = Math.round(top.z*100)/100;
       g[yol+'/ballAttack'] = top.attack;
@@ -1671,30 +1671,45 @@ function sahaCanliYaz(ilkYazim){
 }
 // ── PERİYODİK CANLI YAZIM ───────────────────────────────────────────────────────────
 // KULLANICI TALEBİ: "Puan tablosu tarafında canlı görsel anlatım (top nerede, kim
-// hücumda) görünsün." Eskiden sahaCanliYaz SADECE maç başında ve gollerde çağrılıyordu;
-// bu da top konumunun dakikalarca donuk kalmasına yol açardı. Burada 4 saniyede bir
-// (Firebase yazım sıklığını makul tutmak için - her karede yazmak gereksiz trafik
-// yaratır, 4sn top konumunun "canlı" hissetmesi için yeterli) ek bir yazım eklendi.
-// running/bitti kontrolü fonksiyon İÇİNDE değil burada yapılıyor ki maç duraklatılmışken
-// (frozen, ara vb.) veya bitmişken boşuna Firebase'e istek atılmasın.
+// hücumda) görünsün" - ardından "4 saniyede bir değil, anlık güncellenmeli."
+// ÇÖZÜM: Kontrol artık çok sık (150ms - saniyede ~6-7 kez, gözle görülür gecikme
+// bırakmayacak kadar sık) yapılıyor, AMA Firebase'e her kontrolde YAZILMIYOR - sadece
+// top konumu/hücum tarafı/dakika GERÇEKTEN değiştiğinde hemen yazılır (bu da "anlık"
+// hissi verir), top duruyorsa (taç/faul/gol kutlaması vb.) 2 saniyede bir "nabız" yazımı
+// yapılır ki dakika sayacı donuk kalmasın. Bu, "her karede yaz" (saniyede 60 istek,
+// gereksiz trafik/maliyet) ile "sabit 4 saniye" (gözle görülür gecikme) arasında bir
+// orta yol: kullanıcı gerçekte ANINDA güncellenen bir top görür, ama sahada hareket
+// yokken Firebase'e boşuna istek atılmaz.
+var _sahaSonYazim=null; // {x,z,attack,min,ts}
 setInterval(function(){
   try{
-    if(window._sahaAktifFikstur && typeof running!=='undefined' && running && !bitti){
-      // GÜVENLİK AĞI: Yönetici bu maçı fikstürden sildiyse (örn. fikstürü sıfırlayıp
-      // yeniden oluşturduysa), bu maçın düğümü artık sahaFikstur'da (canlı Firebase
-      // senkronu) YOK demektir - periyodik yazım burada DURDURULMAZSA, her 4 saniyede
-      // bir gönderilen update() SİLİNEN maçı SESSİZCE YENİDEN OLUŞTURURDU (Firebase'de
-      // bir yol altına yazmak, o yol yoksa onu yaratır). O yüzden önce varlığı kontrol edilir.
-      var fk=window._sahaAktifFikstur;
-      if(fk && sahaFikstur && !sahaFikstur[fk.matchId]){
-        window._sahaAktifFikstur=null;
-        try{ mesaj('MAÇ İPTAL', 'Bu fikstür maçı yönetici tarafından silindi', 3000); }catch(e){}
-      }else{
-        sahaCanliYaz(false);
-      }
+    if(!(window._sahaAktifFikstur && typeof running!=='undefined' && running && !bitti))return;
+    var fk=window._sahaAktifFikstur;
+    // GÜVENLİK AĞI: Yönetici bu maçı fikstürden sildiyse (örn. fikstürü sıfırlayıp
+    // yeniden oluşturduysa), bu maçın düğümü artık sahaFikstur'da (canlı Firebase
+    // senkronu) YOK demektir - periyodik yazım burada DURDURULMAZSA, gönderilen
+    // update() SİLİNEN maçı SESSİZCE YENİDEN OLUŞTURURDU (Firebase'de bir yol altına
+    // yazmak, o yol yoksa onu yaratır). O yüzden önce varlığı kontrol edilir.
+    if(fk && sahaFikstur && !sahaFikstur[fk.matchId]){
+      window._sahaAktifFikstur=null;
+      try{ mesaj('MAÇ İPTAL', 'Bu fikstür maçı yönetici tarafından silindi', 3000); }catch(e){}
+      return;
+    }
+    var top=_sahaTopKonumu(fk); if(!top)return;
+    var dk=Math.round(macDakika()||0);
+    var now=Date.now();
+    var son=_sahaSonYazim;
+    var degisti=!son
+      || Math.abs(son.x-top.x)>0.02 || Math.abs(son.z-top.z)>0.02   // top gözle görülür şekilde oynadı
+      || son.attack!==top.attack                                     // hücum eden taraf değişti
+      || son.min!==dk;                                                // dakika ilerledi
+    var nabizZamani=!son || (now-son.ts)>2000;                        // top dursa bile 2sn'de bir "canlı" imzası
+    if(degisti||nabizZamani){
+      sahaCanliYaz(false);
+      _sahaSonYazim={x:top.x,z:top.z,attack:top.attack,min:dk,ts:now};
     }
   }catch(e){}
-}, 4000);
+}, 150);
 function sahaFiksturSonucuKaydet(){
   try{
     var fk = window._sahaAktifFikstur; if(!fk || !fbHazir || !fbDb) return;
