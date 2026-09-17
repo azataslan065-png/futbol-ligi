@@ -494,6 +494,14 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
         güncel durumları (bekliyor / canlı / bitti).</p>
       <div id="sahaMacListe"></div>
     </div>
+    <div class="card">
+      <h2>🗑️ Varsayılan Fikstürü Sıfırla</h2>
+      <p class="hint">Oynanmamış TÜM fikstür maçlarını siler ve 2 turlu (iç saha/deplasman)
+        yepyeni bir fikstür oluşturur - bugünden başlayıp haftada bir maç. Oynanmış maçlara
+        ve mevcut takımlara dokunulmaz. Bu, Fikstür sekmesindeki "Otomatik Oluştur" ile
+        AYNI mekanizmadır; sadece Saha ekranından tek tıkla erişim sağlar.</p>
+      <button onclick="sahaFiksturSifirlaVeOlustur()" style="background:#dc2626;color:#fff">🗑️ Fikstürü Sil ve Yeniden Oluştur</button>
+    </div>
   </div>
 
   <!-- TAKIMLAR -->
@@ -1823,7 +1831,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-16-E';
+window.APP_BUILD='2026-09-16-F';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6718,6 +6726,81 @@ function renderSahaAtama(){
       +'<select onchange="sahaTakimAta(\''+uid+'\', this.value)" style="max-width:180px">'+opts+'</select>'
       +'</div></div>';
   }).join('') || '<p class="hint">Önce Transfer sekmesinden kullanıcı onaylayın.</p>';
+}
+// KULLANICI TALEBİ: Admin, saha uygulaması için varsayılan fikstürü Saha sekmesinden
+// silip yeniden oluşturabilmeli. autoFixture() (Fikstür sekmesi) zaten bu işi yapıyor
+// ama tarih/tur/aralık girmek için o sekmenin form alanlarına ihtiyaç duyuyor - burada
+// aynı üretim mantığı, makul varsayılanlarla (2 tur, bugünden başlayarak, haftada bir)
+// tekrarlanır ki Saha ekranından tek tıkla çalışsın.
+function sahaFiksturSifirlaVeOlustur(){
+  var teams=Object.values(S.teams||{});
+  if(teams.length<2){toast('En az 2 takım gerekli','er');return;}
+  dlg('🗑️','Varsayılan Fikstürü Sıfırla',
+    'Oynanmamış TÜM fikstür maçları silinip '+teams.length+' takım için 2 turlu yeni bir '+
+    'fikstür oluşturulacak (bugünden başlayarak, haftada bir maç). Oynanmış maçlar '+
+    'korunur. Bu işlem geri alınamaz.','Sil ve Oluştur','dop').then(function(ok){
+    if(!ok)return;
+    db.ref('referees').once('value').then(function(refSnap){
+      var refs=refSnap.val()||{};
+      var refIds=Object.keys(refs);
+      var mains=refIds.filter(function(id){return refs[id].role==='main';});
+      var assists=refIds.filter(function(id){return refs[id].role==='assist';});
+      var spikers=refIds.filter(function(id){return refs[id].role==='spiker';});
+      var yorumcus=refIds.filter(function(id){return refs[id].role==='yorumcu';});
+      function pickFromPool(pool,index){ if(!pool.length)return ''; return refs[pool[index%pool.length]].name; }
+      Object.keys(S.matches||{}).forEach(function(id){if(!S.matches[id].played)delete S.matches[id];});
+      S.byeWeeks={};
+      var tur=2, gap=7;
+      var list=teams.slice(); var hasBye=list.length%2!==0; if(hasBye)list.push(null);
+      var n=list.length, rounds=n-1, half=n/2, week=1, dms=Date.now();
+      function toDs(ms){if(!ms)return'';return new Date(ms).toISOString().split('T')[0];}
+      var pairHomeHistory={};
+      function pairKey(id1,id2){return id1<id2?id1+'_'+id2:id2+'_'+id1;}
+      var matchCounter=0;
+      for(var t=0;t<tur;t++){
+        var sh=t===0?list.slice():list.slice().reverse();
+        for(var r=0;r<rounds;r++){
+          for(var i=0;i<half;i++){
+            var h=sh[i],a=sh[n-1-i];
+            if(h&&a){
+              var id=uid();
+              var pk=pairKey(h.id,a.id);
+              var homeId,awayId;
+              if(pairHomeHistory[pk]===undefined){ homeId=h.id;awayId=a.id; pairHomeHistory[pk]=homeId; }
+              else{ var prevHome=pairHomeHistory[pk]; homeId=(prevHome===h.id)?a.id:h.id; awayId=(homeId===h.id)?a.id:h.id; pairHomeHistory[pk]=homeId; }
+              var homeT=S.teams[homeId];
+              S.matches[id]={id:id,homeId:homeId,awayId:awayId,week:week,date:toDs(dms),time:'20:00',stadium:(homeT&&homeT.stadium)||'',
+                referee:pickFromPool(mains,matchCounter),assistRef1:pickFromPool(assists,matchCounter*2),assistRef2:pickFromPool(assists,matchCounter*2+1),
+                spiker:pickFromPool(spikers,matchCounter),yorumcu:pickFromPool(yorumcus,matchCounter)};
+              matchCounter++;
+            }else if(hasBye&&(h||a)){
+              var byeTeam=h||a;
+              if(!S.byeWeeks)S.byeWeeks={};
+              S.byeWeeks[byeTeam.id+'_w'+week]={tid:byeTeam.id,week:week};
+            }
+          }
+          week++; dms+=gap*86400000; var last=sh.pop(); sh.splice(1,0,last);
+        }
+      }
+      var expectedMatchCount=Object.keys(S.matches||{}).length;
+      // Aynı doğrulama deseni (autoFixture ile aynı gerekçe): save() "başarılı" görünse
+      // bile Firebase'e tam ulaşmamış olabilir - geri okuyup sayıyı doğrula.
+      save().then(function(){
+        return db.ref('leagues/'+_curLeagueId+'/matches').once('value');
+      }).then(function(verifySnap){
+        var savedCount=Object.keys(verifySnap.val()||{}).length;
+        try{renderSaha();}catch(e){}
+        try{if(typeof renderMatches==='function')renderMatches();}catch(e){}
+        if(savedCount<expectedMatchCount){
+          toast('❌ Fikstür Firebase\'e TAM kaydedilemedi ('+savedCount+'/'+expectedMatchCount+' maç) - lütfen tekrar deneyin','er');
+        }else{
+          toast('✅ '+(week-1)+' hafta yeni fikstür oluşturuldu ve kaydedildi');
+        }
+      }).catch(function(e){
+        toast('❌ Fikstür kaydedilemedi: '+(e&&e.message?e.message:'bilinmeyen hata'),'er');
+      });
+    });
+  });
 }
 // SAHA ONAYI: kullanici kendi fiksturundeki HERHANGI bir maci istedigi an baslatip
 // canli yayina alabiliyordu - yonetici bunun UZERINDE hicbir kontrole sahip degildi.

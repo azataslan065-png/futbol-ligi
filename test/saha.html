@@ -224,6 +224,10 @@
       </div>
 
       <button class="btn" id="b-maclarim">⚽ Maçlarım</button>
+      <button class="btn alt" id="b-arkadas" style="margin-top:.35rem">🎮 Arkadaşınla Oyna</button>
+      <div style="font-size:10px;opacity:.55;margin:.15rem 0 0;text-align:center;line-height:1.4">
+        Aynı klavyeden iki kişi: 1. oyuncu WASD + Boşluk, 2. oyuncu Ok tuşları + Numpad 0
+      </div>
       <button class="btn alt" id="b-magaza-ac" style="margin-top:.35rem">🛒 Mağaza</button>
       <button class="btn alt" id="b-kadrom" style="margin-top:.35rem">👕 Kadrom</button>
       <button class="btn alt" id="b-ayar-start" style="margin-top:.35rem">⚙️ Ayarlar</button>
@@ -1220,7 +1224,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-16-E';
+window.APP_BUILD = '2026-09-16-F';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -1503,6 +1507,7 @@ function degisiklikYap(o){
 // ALAN ADLARI PUAN TABLOSU İLE BİREBİR AYNI TUTULDU: type, min, player, player2, team.
 // Farklı isimlendirip sonradan çevirmek, aradaki her yeni alanda tekrar iş çıkarırdı.
 //   type   : goal | pen_goal | pen_miss | og | yellow | red | yellow2red | sub |
+//            foul | pen_awarded | offside | corner | throwin | flow |
 //            match_start | half_time | extra_time | match_end
 //   team   : 'home' (A takımı) | 'away' (B takımı)
 //   player : gol/kart sahibi   player2: asist yapan ya da oyundan çıkan
@@ -1511,6 +1516,41 @@ function degisiklikYap(o){
 // 90 dakikalık ölçek bekliyor. Çevrim burada TEK BİR YERDE yapılır; her çağrı yerinde ayrı
 // hesaplamak, biri unutulduğunda sessiz bir tutarsızlık bırakırdı.
 let olaylar = [];
+// AKIŞ ÖZETİ: gol/kart gibi "olay" olmayan ama maç akışını anlatan şeyler (topa sahip
+// olma, şut, korner sayısı) daha önce hiç anlatıma yazılmıyordu - anlatım yalnızca
+// gollerden ibaret kalıyordu. Belirli dakika işaretlerinde bir "flow" (akış) olayı
+// eklenir; anlatım sekmesi bunu "45. dakika: X topa daha çok sahip, Y şut çekti" gibi
+// bir cümleye çevirir (bkz. index.html ptAnlatimCumlesi, tip:'flow').
+let _akisIsaretler = null;
+function akisKontrol(){
+  try{
+    if (!_akisIsaretler) return;
+    const dk = macDakika();
+    [15, 30, 60, 75].forEach(function(esik){
+      if (dk >= esik && !_akisIsaretler.has(esik)){
+        _akisIsaretler.add(esik);
+        const t = (istat.a.sahiplik||0) + (istat.b.sahiplik||0);
+        const pA = t < 1 ? 50 : Math.round(istat.a.sahiplik/t*100);
+        // A/B oyun-ici taraflardir (t=0 her zaman insan, t=1 rakip); GERCEK fikstürde
+        // bunlardan hangisinin ev sahibi olduğu benTarafHome'a göre değişir.
+        // _sahaMapEvents (bkz. asagida) YALNIZCA 'team' alanini cevirir - bu yuzden
+        // ev/deplasman istatistikleri BURADA, dogrudan home/away adlarıyla hesaplanır;
+        // geriye çevrilmesi gereken ayrı bir alan bırakılmaz.
+        const fk = window._sahaAktifFikstur;
+        const aEvSahibi = !fk || fk.benTarafHome !== false;  // fikstür yoksa (alıştırma) A=ev sayılır
+        const home = aEvSahibi ? istat.a : istat.b, away = aEvSahibi ? istat.b : istat.a;
+        const pHome = aEvSahibi ? pA : (100 - pA);
+        olayEkle('flow', null, {
+          team: 'home',
+          pHome: pHome, pAway: 100 - pHome,
+          sutHome: home.sut, sutAway: away.sut,
+          kornerHome: home.korner, kornerAway: away.korner,
+          faulHome: home.faul, faulAway: away.faul
+        });
+      }
+    });
+  }catch(e){}
+}
 function macDakika(){
   try{
     // DİKKAT - iki tuzak var, ikisi de sınamada yakalandı:
@@ -1879,6 +1919,7 @@ function ofsaytTemizle(){ ofsaytAday = []; ofsaytTakim = -1; }
 function ofsaytCal(p){
   bayrakKaldir(); sesDuduk(false);
   (p.team === 0 ? istat.a : istat.b).ofsayt++;
+  olayEkle('offside', p);
   mesaj('OFSAYT', '', 1500);
   const rakip = p.team === 0 ? 1 : 0;
   ofsaytTemizle();
@@ -2066,7 +2107,24 @@ function aiHedef(p, kovalayan){
     t.z = Math.max(-HWZ+2, Math.min(HWZ-2, t.z));
     return t;
   }
-  if (p === kovalayan) return ball.position.clone().setY(0);
+  // KULLANICI BİLDİRDİ: "top sürme ve hücum yapabilmeli" - kök sebep: topu tutan
+  // oyuncunun hareket hedefi HER ZAMAN "topun bulunduğu yer" idi. Top zaten oyuncunun
+  // ayağının altında taşındığı (bkz. topKontrol sürüş mekaniği) için bu hedef pratikte
+  // oyuncunun KENDİ konumuna eşitti - ileri gitmesi için hiçbir itici güç yoktu; YZ topu
+  // kapınca olduğu yerde kalıp hemen pas/şut kararına geçiyordu. Artık top GERÇEKTEN bu
+  // oyuncunun ayağındaysa (kovalayıp yakaladıysa) hedef kaleye doğru boş alan olur -
+  // oyuncu topu sürerek ilerler; henüz topa ulaşmadıysa (sadece en yakın kovalayan
+  // sayıldıysa) eskisi gibi topun kendisine koşar.
+  if (p === kovalayan){
+    const dSahip = p.obj.position.distanceTo(ball.position);
+    if (dSahip < 1.7 && !p.gk){
+      const hedefX = Math.max(-HLX+4, Math.min(HLX-4, p.obj.position.x + p.dir*14));
+      const zSap = ((Math.abs(p.no||0) % 5) - 2) * 3.2;   // her surusun ayni cizgide olmamasi icin
+      const hedefZ = Math.max(-HWZ+4, Math.min(HWZ-4, ball.position.z + zSap));
+      return new THREE.Vector3(hedefX, 0, hedefZ);
+    }
+    return ball.position.clone().setY(0);
+  }
   const tk = p.team === 0 ? TAKTIK.a : TAKTIK.b;
   if (tk.baski > 0 && p.obj.position.distanceTo(ball.position) < tk.baski){
     return ball.position.clone().setY(0);                 // baskı: yakındaki de gider
@@ -2100,9 +2158,26 @@ function aiVurus(p){
     sesVurus(0.5); ofsaytTemizle();
     return;
   }
+  // KULLANICI BİLDİRDİ: "sürekli paslı oynuyor; top sürme ve hücum yapabilmeli."
+  // Kök sebep: sut sansi sabit %80'di VE baska secenek YOKTU - top ayagina her
+  // dokunduğunda oyuncu ya hemen sut cekiyor ya da hemen pas veriyordu, hic surme
+  // (dribbling) secenegi yoktu. Simdi en yakin rakibe olan mesafeye (baski) gore karar
+  // degisiyor: baski altinda degilse oyuncu sansa gore TOPU SURMEYI secebilir (asagida,
+  // hicbir sey yapmadan devam eder - aiHedef zaten kaleye dogru hedef veriyor, carry
+  // mekanigi topu ayaginin onunde tasir). Sut sansi da mesafeye gore kademeli, sabit
+  // %80 degil - baski altindaysa daha cabuk elden cikarir, degilse daha temkinli secer.
+  const rakipTakimi = p.team === 0 ? teamB : teamA;
+  let enYakinRakip = 999;
+  rakipTakimi.forEach(function(r){
+    if (r.dis) return;
+    const d = r.obj.position.distanceTo(p.obj.position);
+    if (d < enYakinRakip) enYakinRakip = d;
+  });
+  const baskiAltinda = enYakinRakip < 3.2;
   const kale = new THREE.Vector3(p.dir*HLX, 0, (Math.random()-0.5)*GOAL_HW*sapma);
   const uzak = p.obj.position.distanceTo(kale);
-  if (uzak < 27 && Math.random() < 0.8){
+  const sutSansi = baskiAltinda ? (uzak < 16 ? 0.6 : 0.3) : (uzak < 14 ? 0.5 : uzak < 24 ? 0.28 : 0.1);
+  if (uzak < 27 && Math.random() < sutSansi){
     const d = kale.sub(ball.position).setY(0).normalize();
     bVel.set(d.x*(26 + Math.random()*6), 2.6, d.z*(26 + Math.random()*6));
     topKilit = 0.3;
@@ -2110,6 +2185,13 @@ function aiVurus(p){
     sonDokunan = p.team; sonDokunanOyuncu = p;
     (p.team === 0 ? istat.a : istat.b).sut++;
     sesVurus(0.8); ofsaytHesapla(p.team);
+    return;
+  }
+  // BASKI YOKSA TOPU SÜR: hiçbir şey yapmadan devam et - aiHedef() bu oyuncuyu zaten
+  // kaleye doğru yönlendiriyor, birkaç adım sonra tekrar değerlendirilecek. Bu, "hep
+  // pas" hissi yerine gerçek bir hücum/sürme hissi yaratır.
+  if (!baskiAltinda && Math.random() < 0.5){
+    p.cd = 0.45 + Math.random()*0.35;
     return;
   }
   if (!pasVer(p, p.team)){
@@ -2247,10 +2329,27 @@ function duranCalistir(){
   sonDokunan = duran.takim; sonDokunanOyuncu = p;
   duran = null;
 }
-function tacAt(z, takim){ duranBaslat('tac', takim, ball.position.x, Math.sign(z || 1)*(HWZ - 0.4)); }
+// TAÇ / KORNER: puan tablosunun akış/anlatım sekmesi golleri ve kartları zaten
+// gösteriyordu, ama sahadaki bu "küçük" duran toplar hiç kayda geçmiyordu - maç akışı
+// yalnızca gollerden ibaretmiş gibi görünüyordu. Belirli bir oyuncuya bağlı olmadıkları
+// için 'player' boş bırakılır, yalnızca hangi tarafın kazandığı yazılır.
+// TAÇ ÇOK SIK GERÇEKLEŞİR - hepsini yazmak hem olay listesini şişirir hem anlatımı
+// boğardı. Bu yüzden ORAN SINIRLAMASI KAYNAKTA yapılır (dakikada en fazla ~1 taç
+// olayı); anlatım tarafında filtreleyip boş cümle döndürmek YANLIŞ yaklaşımdı çünkü
+// index.html her boş cümleyi "anlatımda karşılığı olmayan olay türü" diye tanı
+// sistemine sahte uyarı olarak düşürüyordu.
+let _sonTacDk = -999;
+function tacAt(z, takim){
+  if (macDakika() - _sonTacDk >= 6){
+    _sonTacDk = macDakika();
+    olayEkle('throwin', null, { team: takim===1?'away':'home' });
+  }
+  duranBaslat('tac', takim, ball.position.x, Math.sign(z || 1)*(HWZ - 0.4));
+}
 function kaleVurusu(side, takim){ duranBaslat('kale', takim, side*(HLX - 5.5), 0); }
 function korner(side, z, takim){
   (takim === 0 ? istat.a : istat.b).korner++;
+  olayEkle('corner', null, { team: takim===1?'away':'home' });
   duranBaslat('korner', takim, side*(HLX - 0.6), Math.sign(z || 1)*(HWZ - 0.6));
 }
 
@@ -2290,10 +2389,16 @@ function faul(magdur, ihlalci, agir){
   faulCd = 8;
   const ist = (magdur.team === 0 ? istat.b : istat.a);   // faul rakibin hanesine
   ist.faul++;
+  const x = magdur.obj.position.x, z = magdur.obj.position.z, d = magdur.dir;
+  const penaltiBolgesi = (x*d > HLX - 16.5 && Math.abs(z) < 20.15);
+  // Faul olayi ONCE, kart SONRA yazilir - aksi halde anlatim "sari kart gördü" deyip
+  // ARDINDAN "faul yaptı" derdi; gercek sirayla (once faul, sonra ceza) ters duserdi.
+  // ihlalci bazen belirsiz olabilir (ör. avantajdan donen otomatik duduk) - o durumda
+  // olay yazilmaz, ceza/serbest vurus yine de normal isler.
+  if (ihlalci) olayEkle(penaltiBolgesi ? 'pen_awarded' : 'foul', ihlalci, { player2: magdur.ad||'' });
   if (ihlalci) kartVer(ihlalci, agir);
   sesDuduk(false);
-  const x = magdur.obj.position.x, z = magdur.obj.position.z, d = magdur.dir;
-  if (x*d > HLX - 16.5 && Math.abs(z) < 20.15){
+  if (penaltiBolgesi){
     mesaj('PENALTI', 'Hakem noktayı gösterdi', 1900);
     duranBaslat('penalti', magdur.team, d*(HLX-11), 0);
   } else {
@@ -2575,16 +2680,26 @@ function update(dt){
   OYN[1].mc = Math.max(0, OYN[1].mc - dt);
 
   if (frozen <= 0 && !duran){
+    // KULLANICI BİLDİRDİ: "top birine gittiğinde kendisi pas veriyor - topa sahip olan
+    // ve en yakınındaki kişi her zaman kontrol altında olmalı." Kök sebep: kontrol
+    // yalnızca aradaki fark 6 birimi AŞARSA değişiyordu - bu eşik ÇOK YÜKSEKTİ. Bir pas
+    // az uzaktaki bir takım arkadaşına ulaştığında (ör. eski oyuncudan 8, yeni oyuncudan
+    // 5 birim - fark sadece 3) kontrol DEĞİŞMİYOR, top gerçekte kimde olduğu insan
+    // kontrolünde olmuyor, o oyuncu hâlâ YZ sayılıp kendi kendine pas/şut kararı veriyordu.
+    // Artık: top FİİLEN bir oyuncunun ayağındaysa (dar yarıçap) kontrol ANINDA ona geçer;
+    // uzakta yalnızca "biraz daha yakın" farkları için eski 6 birimlik titreme-önleme eşiği korunur.
     const yA = enYakin(teamA);
     if (yA && ctrl !== yA){
-      const dc = ctrl ? ctrl.obj.position.distanceTo(ball.position) : 99;
-      if (dc - yA.obj.position.distanceTo(ball.position) > 6) ctrl = yA;
+      const dYeni = yA.obj.position.distanceTo(ball.position);
+      const dEski = ctrl ? ctrl.obj.position.distanceTo(ball.position) : 99;
+      if (dYeni < 2.4 || dEski - dYeni > 3) ctrl = yA;
     }
     if (mod === 'iki'){
       const yB = enYakin(teamB);
       if (yB && ctrl2 !== yB){
-        const dc2 = ctrl2 ? ctrl2.obj.position.distanceTo(ball.position) : 99;
-        if (dc2 - yB.obj.position.distanceTo(ball.position) > 6) ctrl2 = yB;
+        const dYeni2 = yB.obj.position.distanceTo(ball.position);
+        const dEski2 = ctrl2 ? ctrl2.obj.position.distanceTo(ball.position) : 99;
+        if (dYeni2 < 2.4 || dEski2 - dYeni2 > 3) ctrl2 = yB;
       }
     }
   }
@@ -2801,10 +2916,23 @@ function update(dt){
   }
 
   /* --- kamera --- */
+  // TOP KADRAJIN DIŞINDA KALIYORDU (kullanıcı bildirdi): sahanın genişlik ekseninde (Z)
+  // kamera topu yalnızca KISMEN takip ediyordu (0.25 / 0.3 katsayı) - top uzak taca
+  // yakınken kamera hâlâ orta sahaya bakıyordu, top ekran dışında kalıyordu.
+  // 1) Katsayılar büyük ölçüde güçlendirildi (0.25→0.62, 0.3→0.8).
+  // 2) Ayrıca her karede topun GERÇEKTEN kadrajın içinde kalıp kalmadığı kameraya
+  //    projekte edilerek denetleniyor; kenara çok yaklaştıysa o kare için lerp
+  //    beklenmeden ANINDA topa kilitleniyor - hızlı kontratak/orta gibi ani
+  //    hareketlerde bile top asla uzun süre kadraj dışında kalmaz.
   const cx = Math.max(-HLX+16, Math.min(HLX-16, ball.position.x));
-  camHedef.set(cx, 21, ball.position.z*0.25 + 36*dirA);
-  camera.position.lerp(camHedef, Math.min(1, dt*3.0));
-  bakHedef.set(cx + 5*dirA, 1.0, ball.position.z*0.3);
+  let _acilKilit = false;
+  try{
+    const _bp = ball.position.clone().project(camera);
+    if (!isFinite(_bp.x) || !isFinite(_bp.y) || Math.abs(_bp.x) > 0.78 || Math.abs(_bp.y) > 0.78) _acilKilit = true;
+  }catch(e){}
+  camHedef.set(cx, 21, ball.position.z*0.62 + 36*dirA);
+  camera.position.lerp(camHedef, _acilKilit ? 1 : Math.min(1, dt*3.0));
+  bakHedef.set(cx + 5*dirA, 1.0, _acilKilit ? ball.position.z : ball.position.z*0.8);
   camera.lookAt(bakHedef);
 
   if (ctrl) ring.position.set(ctrl.obj.position.x, 0.04, ctrl.obj.position.z);
@@ -2812,6 +2940,7 @@ function update(dt){
   if (ring2.visible) ring2.position.set(ctrl2.obj.position.x, 0.04, ctrl2.obj.position.z);
   hataGuncelle(); hataPanel(dt);
   radar();
+  akisKontrol();
 
   /* tekrar için konum kaydı (30 Hz) */
   kayitSayac += dt;
@@ -2939,6 +3068,8 @@ function basla(yeniMod){
   // Yeni maç: olay listesi sıfırlanır. Temizlenmezse önceki maçın golleri yenisine
   // karışır ve Puan Tablosu'na yanlış veri gider.
   olaylar = [];
+  _akisIsaretler = new Set();
+  _sonTacDk = -999;
   sonPasOyuncu = null; sonPasTakim = -1;
   yedekleriKur();          // her mac 3 hak ve dolu yedek kulubesiyle baslar
   olaylar.push({ type:'match_start', min:1, player:'', player2:'', team:'home' });
@@ -2989,6 +3120,17 @@ document.getElementById('b-again').onclick = () => { panelKapat(); menuGoster();
 document.getElementById('ayarBtn').onclick      = ayarAc;
 document.getElementById('b-ayar-start').onclick = ayarAc;
 document.getElementById('b-kayit-tamam').onclick = kayitTamamla;
+// ARKADAŞ MODU (kullanıcı talebi - yeniden eklendi): aynı cihazda iki kişi karşılıklı
+// oynayabilir. Bu, gerçek fikstür maçı DEĞİL - salt eğlence amaçlı, yerel bir
+// karşılaşma; bu yüzden window._sahaAktifFikstur AYARLANMAZ, sonuç Firebase'e yazılmaz
+// ve yönetici onayı gerekmez (gerçek fikstür maçları hâlâ sadece admin onayıyla oynanır,
+// bkz. fiksturMacinaBasla). Motor 'iki' modunu zaten tam destekliyordu (2. oyuncunun
+// kontrolü, güç çubuğu, halka göstergesi) - önceki menü sadeleştirmesinde yalnızca
+// menüden erişim kaldırılmıştı, oyun mantığına dokunulmamıştı.
+document.getElementById('b-arkadas').onclick = () => {
+  window._sahaAktifFikstur = null;
+  baslatDugme('iki')();
+};
 
 // Acilir bolumler tek bir yardimciyla yonetilir - her biri icin ayri kod yazmak,
 // birini kapatmayi unutup iki bolumun ust uste acilmasina yol acardi.
