@@ -3173,7 +3173,13 @@ function loop(){
   const ham = Math.min(clock.getDelta(), 0.25);
   fpsSay++; fpsSure += ham;
   if (fpsSure >= 0.5){ fps = fpsSay / fpsSure; fpsSay = 0; fpsSure = 0; }
-  if (!duraklat){
+  if (window._sahaIzleModu){
+    // Seyirci modunda normal fizik/AI (update()) HİÇ çalışmaz - sadece Firebase'den
+    // gelen konumlar yumuşak geçişle uygulanır (bkz. _sahaIzleKareAdimla tanımı, dosya
+    // sonunda). running zaten hiçbir zaman true olmadığı için aşağıdaki normal dal da
+    // doğal olarak devre dışı kalırdı; açıkça ayrı tutmak niyeti nettleştiriyor.
+    try{ _sahaIzleKareAdimla(ham); }catch(e){}
+  } else if (!duraklat){
     if (tekrar){
       tekrarOynat(ham);
     } else if (running && !bitti){
@@ -3347,6 +3353,155 @@ yonleriUygula(); dizil(); kickoff(0); hud(); radar();
 // kamerasıyla AYNI alçak/tribün yüksekliğinde - açılışta bile tepeden görünmesin diye.
 camera.position.set(0, 12, 26);
 camera.lookAt(5, 1, 0);
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   CANLI SEYİRCİ MODU (TV sekmesi → maç kartı) - "canlı yayın linki eklemedim, doğrudan
+   saha uygulamasından çek" talebi.
+   NASIL ÇALIŞIR: Bu, admin'in elle eklediği harici bir video linkini OYNATMAZ. Bunun
+   yerine, maçı FİİLEN OYNAYAN kullanıcının tarayıcısı zaten saniyede birkaç kez topun ve
+   sahadaki TÜM oyuncuların konumunu (home perspektifinden -1..1 normalize) Firebase'e
+   yazıyor (bkz. yukarıdaki sahaCanliYaz/_sahaTopKonumu/_sahaOyuncuKonumlari - Puan
+   Tablosu'ndaki 2D mini-saha görseli de AYNI bu veriyi kullanıyor, bkz. index.html/
+   renderSahaPitch). Burada YENİ olan: aynı veri, bu sayfanın kendi 3D motoruyla,
+   GERÇEK BİR OYUNCU/GİRİŞ GEREKMEDEN, salt-okunur "seyirci" sahnesi olarak render edilir.
+   Yani izleyici, oyuncunun ekranındakiyle BİREBİR AYNI (top + 22 oyuncu konumu + skor +
+   dakika) sahneyi 3D olarak canlı izler - dıştan link/video YOK, hepsi bu motorun kendi
+   sahnesi üzerinden.
+   URL: saha.html?izle=1&lig=<ligId>&mac=<matchId> (bkz. index.html/openSahaCanliIzle).
+   GÜVENLİK/İZOLASYON: running hiçbir zaman true olmaz (basla() hiç çağrılmaz) - bu yüzden
+   loop() içindeki normal fizik/AI güncellemesi (update()) spectator modunda ASLA çalışmaz;
+   sadece top/oyuncu nesnelerinin konumu doğrudan Firebase verisine göre (yumuşak geçişle)
+   set edilir. Tuş/dokunma kontrolleri zaten `if (!running) return;` ile korunuyor (bkz.
+   yukarıdaki keydown/touch işleyicileri) - o yüzden burada ekstra bir engelleme gerekmedi.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+window._sahaIzleModu = null;      // {ligId, matchId} - seyirci modu aktifse dolu
+window._sahaIzleHedef = null;     // Firebase'den gelen en son ham anlık görüntü
+function _sahaIzleUrlOku(){
+  try{
+    var p = new URLSearchParams(location.search);
+    if(p.get('izle') === '1' && p.get('lig') && p.get('mac')){
+      return { ligId: p.get('lig'), matchId: p.get('mac') };
+    }
+  }catch(e){}
+  return null;
+}
+function _sahaIzleUIHazirla(){
+  // Giriş/menü ekranı hiç gösterilmez - seyirci hesap açmaya/giriş yapmaya gerek duymaz.
+  try{ document.getElementById('p-start').classList.remove('on'); }catch(e){}
+  try{ document.getElementById('p-end').classList.remove('on'); }catch(e){}
+  // Kontrol edilen tek bir oyuncuya özgü HUD parçaları (kondisyon, değişiklik hakkı,
+  // radar, tuş ipucu, güç çubukları, dokunmatik kontroller) seyircide ANLAMSIZ - gizlenir.
+  ['kondKutu','radar','msg','kart','tekrarEt','power','power2','hata','tip','touch','ayarBtn','dikey']
+    .forEach(function(id){ var el=document.getElementById(id); if(el)el.style.display='none'; });
+  // Sırt numarası/isim etiketleri KADRO verisine dayanır (seyircide bilinmiyor) - eski/
+  // varsayılan menü değerlerini göstermemek için tamamen gizlenir, sade renkli figürler kalır.
+  try{
+    players.forEach(function(p){
+      var u = p.obj && p.obj.userData;
+      if(u && u.isimSprite) u.isimSprite.visible = false;
+      if(u && u.numaraMesh) u.numaraMesh.visible = false;
+    });
+  }catch(e){}
+  // "Canlı izleniyor" rozeti + geri dönüş düğmesi - sayfanın geri kalanına dokunmadan,
+  // dinamik olarak eklenir.
+  try{
+    var st = document.createElement('style');
+    st.textContent = '@keyframes sahaIzlePulse{0%,100%{opacity:1}50%{opacity:.25}}';
+    document.head.appendChild(st);
+    var banner = document.createElement('div');
+    banner.id = 'sahaIzleBanner';
+    banner.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:60;'
+      +'display:flex;align-items:center;gap:.5rem;background:rgba(12,12,16,.82);backdrop-filter:blur(6px);'
+      +'border:1px solid rgba(255,255,255,.14);border-radius:999px;padding:.42rem .85rem;'
+      +'font:700 12px/1 Arial,sans-serif;color:#fff;letter-spacing:.02em;pointer-events:none';
+    banner.innerHTML = '<span style="width:8px;height:8px;border-radius:50%;background:#dc2626;'
+      +'animation:sahaIzlePulse 1.2s infinite;flex-shrink:0"></span><span>CANLI İZLENİYOR</span>';
+    document.body.appendChild(banner);
+    var geri = document.createElement('button');
+    geri.textContent = '✕';
+    geri.title = 'Geri dön';
+    geri.style.cssText = 'position:fixed;top:10px;right:10px;z-index:60;width:34px;height:34px;'
+      +'border-radius:50%;border:1px solid rgba(255,255,255,.18);background:rgba(12,12,16,.82);'
+      +'color:#fff;font-size:15px;line-height:1;cursor:pointer';
+    geri.onclick = function(){ location.href = 'index.html'; };
+    document.body.appendChild(geri);
+  }catch(e){}
+}
+// Firebase'den gelen ham anlık görüntüyü, HUD'a ve _sahaIzleHedef'e işler.
+function _sahaIzleVeriUygula(m){
+  if(!m){ window._sahaIzleHedef = null; return; }
+  window._sahaIzleHedef = {
+    top: (typeof m.ballX === 'number' && typeof m.ballZ === 'number') ? { x:m.ballX, z:m.ballZ } : null,
+    home: Array.isArray(m.homePlayers) ? m.homePlayers : [],
+    away: Array.isArray(m.awayPlayers) ? m.awayPlayers : [],
+    isLive: !!m.isLive, played: !!m.played
+  };
+  try{
+    var dk = Math.max(0, Math.min(120, Math.round(m.minute||0)));
+    document.getElementById('sa').textContent = m.homeGoals||0;
+    document.getElementById('sb').textContent = m.awayGoals||0;
+    document.getElementById('devre').textContent = dk>45?'2.':'1.';
+    document.getElementById('sure').textContent = (dk>90?('90+'+(dk-90)):dk)+"'";
+  }catch(e){}
+  if((!window._sahaIzleHedef.isLive || window._sahaIzleHedef.played) && !window._sahaIzleBittiGosterildi){
+    window._sahaIzleBittiGosterildi = true;
+    try{ var b=document.getElementById('sahaIzleBanner'); if(b)b.innerHTML='<span>🏁 MAÇ SONA ERDİ</span>'; }catch(e){}
+  }
+}
+function _sahaIzleFirebaseDinle(mod){
+  if(!fbHazir){ setTimeout(function(){ _sahaIzleFirebaseDinle(mod); }, 200); return; }
+  try{
+    fbDb.ref('leagues/'+mod.ligId+'/matches/'+mod.matchId).on('value', function(sn){
+      _sahaIzleVeriUygula(sn.val());
+    });
+  }catch(e){}
+}
+// Havuzdaki (teamA/teamB - GK dahil 11'er nesne, sahaCanliYaz'daki SIRAYLA aynı) 3D
+// nesnelerin konumunu, Firebase'den gelen [[x,z],...] dizisine göre yumuşak geçişle set
+// eder. Dizide karşılığı olmayan (kırmızı kart/sahada değil) nesneler gizlenir.
+function _sahaIzleTakimUygula(pool, arr, lerp){
+  for(var i=0;i<pool.length;i++){
+    var p = pool[i];
+    var pt = arr[i];
+    if(pt && typeof pt[0]==='number' && typeof pt[1]==='number'){
+      var wx = pt[0]*HLX, wz = pt[1]*HWZ;
+      p.obj.visible = true; p.golge.visible = true;
+      p.obj.position.x += (wx - p.obj.position.x)*lerp;
+      p.obj.position.z += (wz - p.obj.position.z)*lerp;
+      p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
+    } else {
+      p.obj.visible = false; p.golge.visible = false;
+    }
+  }
+}
+// loop() içinden HER KAREDE çağrılır (bkz. aşağıdaki loop() değişikliği).
+function _sahaIzleKareAdimla(dt){
+  var h = window._sahaIzleHedef; if(!h)return;
+  var lerp = Math.min(1, dt*6);
+  if(h.top){
+    var bx = h.top.x*HLX, bz = h.top.z*HWZ;
+    ball.position.x += (bx-ball.position.x)*lerp;
+    ball.position.z += (bz-ball.position.z)*lerp;
+    ball.position.y += (0.22-ball.position.y)*lerp;
+  }
+  _sahaIzleTakimUygula(teamB, h.home, lerp);   // ev sahibi - mavi (2D mini-saha ile aynı renk kuralı)
+  _sahaIzleTakimUygula(teamA, h.away, lerp);   // deplasman - kırmızı
+  // Yayın kamerası: topu yumuşak biçimde takip eden sabit-yükseklik kamera.
+  var camLerp = Math.min(1, dt*2);
+  var camX = ball.position.x*0.55, camZ = 28 + ball.position.z*0.35;
+  camera.position.x += (camX-camera.position.x)*camLerp;
+  camera.position.y += (13-camera.position.y)*camLerp;
+  camera.position.z += (camZ-camera.position.z)*camLerp;
+  camera.lookAt(ball.position.x, 0.6, ball.position.z);
+}
+(function(){
+  var mod = _sahaIzleUrlOku();
+  if(!mod)return;
+  window._sahaIzleModu = mod;
+  _sahaIzleUIHazirla();
+  _sahaIzleFirebaseDinle(mod);
+})();
+
 loop();
 </script>
 </body>

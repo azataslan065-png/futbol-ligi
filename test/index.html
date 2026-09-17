@@ -21615,27 +21615,25 @@ window.openChannelLockedSheet=function(videoId){
 // veri modelinde/admin panelinde yeni bir alan gerekmedi.
 // ══════════════════════════════════════════════════════════════════════════════════════
 // KULLANICI TALEBİ ("canlı maç oynandığında TV sekmesinde ilgili maç kartı olsun, tıklanınca
-// maç canlı izlenebilsin - bunu 2D canlı görsel anlatımla (saha.html) karıştırma"):
-// Puan Tablosu'nun canlı skor/olay akışını sürdüren fikstür maçları (D.matches, m.isLive)
-// ile admin'in TV sekmesine elle eklediği kanallar (D.videoLinks) ŞİMDİYE KADAR birbirinden
-// tamamen bağımsızdı. Bu iki fonksiyon, admin'in canlı bir maça bağladığı YAYIN LİNKİNİ
-// (m.streamUrl - bkz. admin.html/buildLivePanel) D.videoLinks ile AYNI ŞEKİLDE kullanılabilen
-// "sanal" bir kanal kaydına çevirir. Böylece TV sekmesinin listesi, oynatıcısı, kumandası vb.
-// TÜM mevcut altyapısı hiç değiştirilmeden bu sanal kayıtları da kabul eder - id'si her zaman
-// 'match_'+fikstürId biçiminde olduğu için normal bir video kaydıyla asla çakışmaz.
-// Bu, saha.html'deki 3D/2D animasyonlu maç SİMÜLASYONUNUN YERİNE GEÇMEZ - o, kullanıcının
-// kendi oynadığı/izlediği ayrı bir motor. Buradaki kart GERÇEK bir yayın linkini (admin'in
-// girdiği m3u8/YouTube/iframe vb.) oynatır.
+// maç canlı izlenebilsin - bunu 2D canlı görsel anlatımla karıştırma; DIŞARIDAN yayın linki
+// eklemek YOK, doğrudan saha uygulamasından çek"):
+// Bir fikstür maçı saha.html'de FİİLEN OYNANDIĞINDA (m.sahaMode:true, bkz. saha.html/
+// sahaCanliYaz), oyuncunun tarayıcısı zaten topun ve sahadaki TÜM oyuncuların konumunu
+// saniyede birkaç kez Firebase'e yazıyor - Puan Tablosu'ndaki 2D mini-saha görseli
+// (renderSahaPitch) de AYNI bu veriyi kullanıyor. Burada ek admin işlemi (link ekleme vb.)
+// YOK: maç canlıya geçtiği anda kart kendiliğinden belirir. Tıklanınca AÇILAN ŞEY bir video
+// linki değil, saha.html'in kendi 3D motorunun "seyirci modu"dur (bkz. openSahaCanliIzle) -
+// oyuncunun ekranındaki sahneyi birebir aynı verilerle (top+22 oyuncu konumu, skor, dakika)
+// canlı olarak yeniden çizer.
 window._ptCanliMacKanallari=function(){
   try{
     var teams=(window.D&&D.teams)||{};
     var matches=(window.D&&D.matches)||{};
-    return Object.values(matches).filter(function(m){return m&&m.isLive&&m.streamUrl;}).map(function(m){
+    return Object.values(matches).filter(function(m){return m&&m.isLive&&m.sahaMode;}).map(function(m){
       var h=teams[m.homeId]||{},a=teams[m.awayId]||{};
       return {
         id:'match_'+m.id,
         title:(h.name||'?')+' '+(m.homeGoals||0)+' - '+(m.awayGoals||0)+' '+(a.name||'?'),
-        url:m.streamUrl,
         isLive:true,
         isMatchCard:true,
         matchId:m.id,
@@ -21649,6 +21647,22 @@ window._ptCanliMacKanallari=function(){
 // isLive=true tarafı (TV sekmesi) için kullanılır; Video sekmesi bundan etkilenmez.
 window.ptTumKanallar=function(){
   return (window._ptCanliMacKanallari()).concat((window.D&&D.videoLinks)||[]);
+};
+// Maç kartına tıklanınca çağrılır - video oynatıcı pipeline'ına HİÇ girmez, doğrudan
+// saha.html'i "seyirci modunda" açar (bkz. saha.html'deki _sahaIzleModu bloğu).
+window.openSahaCanliIzle=function(matchId){
+  try{if(window.ptGecmiseEkle)ptGecmiseEkle('match_'+matchId);}catch(e){}
+  if(!window._curLeagueId){showToast('❌ Bağlantı bekleniyor, birazdan tekrar dene','er');return;}
+  location.href='saha.html?izle=1&lig='+encodeURIComponent(window._curLeagueId)+'&mac='+encodeURIComponent(matchId);
+};
+// TV listesindeki bir karta tıklandığında çağrılan tek giriş noktası: canlı maç kartıysa
+// (id 'match_' ile başlar) saha.html'e yönlendirir, değilse (admin'in eklediği normal
+// TV/Video kaydı) mevcut video oynatıcıyı açar. Liste/oynatıcı HTML'i bu tek fonksiyonu
+// çağıracak şekilde güncellendi (bkz. renderVideoScreenList içindeki onclick'ler).
+window.ptKanalAc=function(id){
+  var s=String(id||'');
+  if(s.indexOf('match_')===0){openSahaCanliIzle(s.slice(6));return;}
+  openVideoWatch(id);
 };
 window._videoScreenTab=window._videoScreenTab||'tv';
 window.openVideoScreen=function(tab){
@@ -21899,7 +21913,7 @@ function renderVideoScreenList(){
       }
       const _logoIsaret=v.logo?` data-logo-kart="${escAttr(v.logo)}"`:'';
       if(_videoGorunum==='izgara'&&!reordering){
-        return `<div onclick="openVideoWatch('${v.id}')"${_logoIsaret} style="cursor:pointer;background:${_kartArka};border:1px solid var(--br);border-radius:14px;padding:.5rem .4rem;text-align:center;position:relative">
+        return `<div onclick="ptKanalAc('${v.id}')"${_logoIsaret} style="cursor:pointer;background:${_kartArka};border:1px solid var(--br);border-radius:14px;padding:.5rem .4rem;text-align:center;position:relative">
           <div style="position:relative;width:100%;aspect-ratio:1;border-radius:11px;background:var(--s2);display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:.35rem">
             ${logoInner}
             ${kilitli?'<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55);font-size:1.1rem">🔒</div>':''}
@@ -21909,7 +21923,7 @@ function renderVideoScreenList(){
           <button onclick="ptFavToggle(event,'${escAttr(v.id)}')" title="Favori" style="position:absolute;top:.25rem;right:.25rem;background:rgba(0,0,0,.35);border:none;border-radius:7px;padding:.1rem .25rem;font-size:.7rem;cursor:pointer;line-height:1">${ptFavMi(v.id)?'⭐':'☆'}</button>
         </div>`;
       }
-      return `<div ${reordering?'':`onclick="openVideoWatch('${v.id}')"`}${_logoIsaret} style="background:${_kartArka};display:flex;align-items:center;gap:.7rem;padding:.65rem .2rem;border-bottom:1px solid var(--br);${reordering?'':'cursor:pointer'}">
+      return `<div ${reordering?'':`onclick="ptKanalAc('${v.id}')"`}${_logoIsaret} style="background:${_kartArka};display:flex;align-items:center;gap:.7rem;padding:.65rem .2rem;border-bottom:1px solid var(--br);${reordering?'':'cursor:pointer'}">
         <div style="width:22px;flex-shrink:0;text-align:center;font-size:.68rem;font-weight:700;color:var(--mu)">${channelNoMap.get(v.id)||'?'}</div>
         <div style="position:relative;width:52px;height:52px;flex-shrink:0">
           <div style="width:52px;height:52px;border-radius:13px;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:1.3rem;font-weight:900;color:var(--tx);overflow:hidden;${kilitli?'filter:grayscale(.6) brightness(.6)':''}">${logoInner}</div>
