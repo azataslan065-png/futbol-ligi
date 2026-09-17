@@ -2479,7 +2479,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-16-F';
+window.APP_BUILD='2026-09-16-G';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5498,6 +5498,25 @@ function pickDefaultLeagueId(meta){
   var active=ids.filter(function(id){return meta[id]&&meta[id].status!=='finished';});
   return (active.length?active:ids).sort().reverse()[0];
 }
+// HATA DÜZELTMESİ (bkz. listenToLeague içindeki sheetOpen bloğu - "buton/logo gidip
+// gelmesi" düzeltmesi): Bir maçın top/oyuncu konumu HARİCİNDEKİ ("çekirdek") verisinin
+// bir önceki kontrolden bu yana GERÇEKTEN değişip değişmediğini tespit eder. Değişmediyse
+// (yani bu senkronda değişen TEK ŞEY top/oyuncu konumuysa) true döner - bu durumda çağıran
+// taraf tüm maç detayını yeniden çizmek yerine sadece mini saha widget'ını günceller.
+// Maç başına en son görülen "çekirdek" imzası window üzerinde saklanır ki oturum boyunca
+// (sayfa yenilenmeden) kalıcı olsun.
+window._sahaCoreSnapshots=window._sahaCoreSnapshots||{};
+function _sahaSadeceCanliAlanDegisti(matchId,m){
+  try{
+    const core=Object.assign({},m);
+    delete core.ballX;delete core.ballZ;delete core.ballAttack;delete core.ballTs;
+    delete core.homePlayers;delete core.awayPlayers;
+    const json=JSON.stringify(core);
+    const prev=window._sahaCoreSnapshots[matchId];
+    window._sahaCoreSnapshots[matchId]=json;
+    return prev!==undefined&&prev===json;
+  }catch(e){ return false; }
+}
 function listenToLeague(leagueId){
   if(!leagueId)return;
   _lastDataSnapshot=null; // ÖNEMLİ: lig değişiminde önceki ligin snapshot'ı temizlenir,
@@ -5822,7 +5841,34 @@ function listenToLeague(leagueId){
       // video kırpma/yükleme sürerken (window._ptActiveUploads>0) de render TAMAMEN atlanır -
       // video gönderildiğinde zaten kendi senkronu gelip ekranı doğru şekilde günceller.
       const activeMediaOp=window._ptActiveUploads>0;
-      if(!hadFocus&&!activeMediaOp)renderMatchDetailContent();
+      if(!hadFocus&&!activeMediaOp){
+        // HATA DÜZELTMESİ (kullanıcı bildirdi: "Canlı görsel anlatım anlık güncelleniyor,
+        // bunu koru ama bazı butonların ve logoların gidip gelmesini önle, sabit
+        // durmalılar"): KÖK SEBEP - Saha uygulaması top/oyuncu konumunu saniyede birkaç
+        // kez Firebase'e yazıyor; bu ANA dinleyici her tetiklendiğinde (yani saniyede
+        // birkaç kez) renderMatchDetailContent()'i çağırıp maç detayının TAMAMINI (takım
+        // logoları, sekme butonları dahil) SIFIRDAN yeniden çiziyordu. <img> etiketleri
+        // yeniden oluşturulunca kısa bir an görünmez oluyor/yeniden yükleniyor, düğme DOM
+        // node'ları da yeniden yaratıldığı için gözle görülür bir "titreme/gidip gelme"
+        // oluşuyordu. ÇÖZÜM: bu maç canlı bir Saha maçıysa ve şu an "Detay" sekmesi
+        // açıksa, değişen şeyin GERÇEKTEN sadece top/oyuncu konumu olup olmadığı kontrol
+        // edilir (bkz. _sahaSadeceCanliAlanDegisti) - öyleyse tüm ekran DEĞİL, SADECE mini
+        // saha widget'ının içi güncellenir; logo/buton DOM node'larına hiç dokunulmaz,
+        // yerlerinde sabit kalırlar. Skor/kart/değişiklik gibi GERÇEK bir olay olduğunda
+        // (yani sadece top/oyuncu konumu değil, başka bir şey de değiştiğinde) her zamanki
+        // gibi tam yeniden çizim yapılmaya devam eder.
+        const _mSaha=D.matches[_mdMatchId];
+        const _pitchBox=_mSaha&&_mSaha.sahaMode&&_mdTab==='detay'
+          ?document.getElementById('sahaPitchLive_'+_mdMatchId):null;
+        if(_pitchBox&&_sahaSadeceCanliAlanDegisti(_mdMatchId,_mSaha)){
+          try{
+            const _h=D.teams[_mSaha.homeId]||{},_a=D.teams[_mSaha.awayId]||{};
+            _pitchBox.innerHTML=_mSaha.isLive?renderSahaPitch(_mSaha,_h,_a):'';
+          }catch(e){DiagSil('sahaPitchLiveGuncelle',e);renderMatchDetailContent();}
+        }else{
+          renderMatchDetailContent();
+        }
+      }
     }
     // HATA DÜZELTMESİ (kritik, kullanıcı bildirdi: "sohbet anlık değil, mesaj yazıldığında
     // sohbetten çıkış giriş yapınca görünüyor"): Yukarıdaki blok SADECE maç detayı sheet'i
@@ -11809,6 +11855,25 @@ function renderSahaPitch(m,h,a){
     }
     window._sahaPitchPrev[prevKey]={x:px,y:py};
 
+    // HATA DÜZELTMESİ (kullanıcı bildirdi: "Canlı görsel anlatımda sadece top ve kontrol
+    // eden oyuncu görünüyor, sahadaki bütün oyuncular (hakem hariç) görünmeli"): Saha
+    // uygulaması artık topla BİREBİR AYNI normalize yöntemiyle (home perspektifinden
+    // -1..1) TÜM sahadaki oyuncuların konumunu da yazıyor (bkz. saha.html:
+    // _sahaOyuncuKonumlari/sahaCanliYaz). Burada bu konumlar, ev sahibi MAVİ / deplasman
+    // KIRMIZI noktalar olarak top ile aynı SVG koordinat dönüşümü kullanılarak çizilir.
+    // Eski maçlarda (henüz bu alanlar hiç yazılmamışsa) diziler basitçe boş/tanımsız
+    // olur ve hiçbir nokta çizilmez - sadece top gösterimine sessizce geri dönülür,
+    // hiçbir hata oluşmaz.
+    const oyuncuNoktasi=(pt,renk)=>{
+      if(!pt||typeof pt[0]!=='number'||typeof pt[1]!=='number')return '';
+      const ox=Math.max(-1,Math.min(1,pt[0])), oz=Math.max(-1,Math.min(1,pt[1]));
+      const opx=PX0+((ox+1)/2)*PW, opy=PY0+((oz+1)/2)*PH;
+      return `<circle cx="${opx.toFixed(1)}" cy="${opy.toFixed(1)}" r="3.6" fill="${renk}" stroke="#0b0b0e" stroke-width=".8" stroke-opacity=".55"/>`;
+    };
+    let playersHtml='';
+    if(Array.isArray(m.homePlayers))playersHtml+=m.homePlayers.map(pt=>oyuncuNoktasi(pt,'#3b82f6')).join('');
+    if(Array.isArray(m.awayPlayers))playersHtml+=m.awayPlayers.map(pt=>oyuncuNoktasi(pt,'#ef4444')).join('');
+
     const dk=Math.max(0,Math.min(120,Math.round(m.minute||0)));
     const dkGoster=dk>90?('90+'+(dk-90)):dk;
 
@@ -11846,6 +11911,8 @@ function renderSahaPitch(m,h,a){
             <path d="M4,176 A10,10 0 0 1 14,186" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.4"/>
             <path d="M296,14 A10,10 0 0 1 286,4" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.4"/>
             <path d="M296,176 A10,10 0 0 0 286,186" fill="none" stroke="#eaffea" stroke-opacity=".85" stroke-width="1.4"/>
+            <!-- oyuncular (ev sahibi mavi, deplasman kırmızı) -->
+            ${playersHtml}
             ${trailHtml}
             <!-- top -->
             <circle cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="5.5" fill="#0b0b0e" fill-opacity=".25"/>
@@ -11858,7 +11925,7 @@ function renderSahaPitch(m,h,a){
             <span style="font-size:.58rem;font-weight:800;color:#fff">${(a.name||'DEP').toUpperCase()}</span>${logoHtml(a)}
           </div>
         </div>
-        <div style="font-size:.58rem;color:var(--mu);margin-top:.4rem;line-height:1.45">Top konumu, Saha uygulamasındaki canlı maçtan birebir ve anlık olarak aktarılır.</div>
+        <div style="font-size:.58rem;color:var(--mu);margin-top:.4rem;line-height:1.45">Top ve oyuncu konumları, Saha uygulamasındaki canlı maçtan birebir ve anlık olarak aktarılır.</div>
       </div>`;
   }catch(e){ try{DiagSil('renderSahaPitch',e);}catch(_e){} return ''; }
 }
@@ -11973,7 +12040,7 @@ function renderMdDetay(id,m,h,a,ntInfo){
     <!-- KULLANICI BİLDİRDİ: "Baskımetre puan tablosu tarafında görünmüyor."
          KÖK SEBEP: Fonksiyon duruyordu ama ÇAĞRISI, maç bilgisi ekranı yeniden
          tasarlanırken (2026-08-09-O) yanlışlıkla silinmişti. Geri kondu. -->
-    ${m.isLive?renderSahaPitch(m,h,a):''}
+    ${m.isLive?`<div id="sahaPitchLive_${id}">${renderSahaPitch(m,h,a)}</div>`:''}
     ${(m.played||m.isLive)?renderBaskimetre(m):''}
     <div class="md-section-head">Maç Bilgisi</div>
     <div class="mi-card">

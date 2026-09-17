@@ -1224,7 +1224,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-16-F';
+window.APP_BUILD = '2026-09-16-G';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -1642,6 +1642,35 @@ function _sahaTopKonumu(fk){
     };
   }catch(e){ return null; }
 }
+// ── CANLI OYUNCU KONUMLARI (Puan Tablosu'ndaki mini saha görseli için) ────────────────
+// HATA DÜZELTMESİ (kullanıcı bildirdi: "Canlı görsel anlatımda sadece top ve kontrol
+// eden oyuncu görünüyor, sahadaki bütün oyuncular görünmeli"): Önceden sadece topun
+// konumu Firebase'e yazılıyordu. Artık sahadaki (hakem/yan hakemler HARİÇ - onlar zaten
+// `players` dizisinde yok) TÜM oyuncuların konumu da, topla BİREBİR AYNI normalize
+// yöntemiyle (home perspektifinden -1..1) ayrıca yazılıyor. Kırmızı kartla oyundan
+// çıkarılmış (p.dis===true) oyuncular haricinde SAHADAKİ herkes dahil edilir - onbir
+// oyuncu birebir aynı formülle hesaplanır, kaleci de dahildir (o da bir oyuncudur).
+function _sahaOyuncuKonumu(p, benTarafHome){
+  var aIleri = (p.obj.position.x * dirA) / HLX;
+  var homeX = benTarafHome ? aIleri : -aIleri;
+  var homeZ = p.obj.position.z / HWZ;
+  return [
+    Math.round(Math.max(-1, Math.min(1, homeX)) * 100) / 100,
+    Math.round(Math.max(-1, Math.min(1, homeZ)) * 100) / 100
+  ];
+}
+function _sahaOyuncuKonumlari(fk){
+  try{
+    // Oyun-içi takım A HER ZAMAN insan oyuncudur; fikstürde ev sahibi olup olmadığı
+    // fk.benTarafHome'a göre değişir - skor yazımıyla (hG/aG) AYNI eşleme kullanılır.
+    var evTakim = fk.benTarafHome ? teamA : teamB;
+    var depTakim = fk.benTarafHome ? teamB : teamA;
+    return {
+      home: evTakim.filter(sahada).map(function(p){ return _sahaOyuncuKonumu(p, fk.benTarafHome); }),
+      away: depTakim.filter(sahada).map(function(p){ return _sahaOyuncuKonumu(p, fk.benTarafHome); })
+    };
+  }catch(e){ return null; }
+}
 function sahaCanliYaz(ilkYazim){
   try{
     var fk = window._sahaAktifFikstur; if(!fk || !fbHazir || !fbDb) return;
@@ -1665,6 +1694,11 @@ function sahaCanliYaz(ilkYazim){
       g[yol+'/ballAttack'] = top.attack;
       g[yol+'/ballTs'] = (typeof firebase!=='undefined' && firebase.database && firebase.database.ServerValue)
         ? firebase.database.ServerValue.TIMESTAMP : Date.now();
+      var konum = _sahaOyuncuKonumlari(fk);
+      if(konum){
+        g[yol+'/homePlayers'] = konum.home;
+        g[yol+'/awayPlayers'] = konum.away;
+      }
     }
     fbDb.ref().update(g).catch(function(e){ try{ console.error('[saha] canli yazim hatasi', e); }catch(_e){} });
   }catch(e){}
@@ -2998,13 +3032,20 @@ function update(dt){
   //    projekte edilerek denetleniyor; kenara çok yaklaştıysa o kare için lerp
   //    beklenmeden ANINDA topa kilitleniyor - hızlı kontratak/orta gibi ani
   //    hareketlerde bile top asla uzun süre kadraj dışında kalmaz.
+  // HATA DÜZELTMESİ (kullanıcı bildirdi: "Maç kamerası saha dışından yayın veriyor"):
+  // Kamera önceden dokunma çizgisinin ~2 birim ÖTESİNE (sabit 36*dirA ofsetiyle, HWZ=34
+  // sınırının dışına) yerleştiriliyordu - gerçek bir tribün kamerası gibi ama istenen bu
+  // değildi. Artık kamera Z ekseninde HER ZAMAN saha sınırlarının (±HWZ) içinde kalacak
+  // şekilde kelepçeleniyor ve topu doğrudan takip ediyor; böylece top sahanın neresine
+  // giderse gitsin (köşeler dahil) yayın hep saha İÇİNDEN, net bir açıyla veriliyor.
   const cx = Math.max(-HLX+16, Math.min(HLX-16, ball.position.x));
+  const cz = Math.max(-HWZ+6, Math.min(HWZ-6, ball.position.z*0.85));
   let _acilKilit = false;
   try{
     const _bp = ball.position.clone().project(camera);
     if (!isFinite(_bp.x) || !isFinite(_bp.y) || Math.abs(_bp.x) > 0.78 || Math.abs(_bp.y) > 0.78) _acilKilit = true;
   }catch(e){}
-  camHedef.set(cx, 21, ball.position.z*0.62 + 36*dirA);
+  camHedef.set(cx, 19, cz);
   camera.position.lerp(camHedef, _acilKilit ? 1 : Math.min(1, dt*3.0));
   bakHedef.set(cx + 5*dirA, 1.0, _acilKilit ? ball.position.z : ball.position.z*0.8);
   camera.lookAt(bakHedef);
@@ -3291,7 +3332,7 @@ addEventListener('resize', () => {
 
 ayarUygula();
 yonleriUygula(); dizil(); kickoff(0); hud(); radar();
-camera.position.set(0, 21, 36);
+camera.position.set(0, 19, 26);
 camera.lookAt(5, 1, 0);
 loop();
 </script>
