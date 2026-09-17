@@ -5947,6 +5947,23 @@ function listenToLeague(leagueId){
     } else {
       if(_clockTick){clearInterval(_clockTick);_clockTick=null;}
     }
+    // KULLANICI TALEBİ: TV sekmesi (kanal listesi) açıkken bir maç canlıya geçtiğinde/canlı
+    // maçın skoru değiştiğinde/yayın bittiğinde, kullanıcı ekranı elle kapatıp açmadan
+    // otomatik maç kartı anında belirsin/güncellensin/kaybolsun. SADECE o an GERÇEKTEN
+    // görünen menü video listesiyse (PTSheetNav.currentKey()==='videoList') tetiklenir -
+    // aksi halde _videoScreenTab'ın eski değeri yüzünden BAŞKA açık bir sheet'in (maç
+    // detayı, sohbet vb.) üzerine yanlışlıkla video listesi yazılabilirdi.
+    try{
+      var _pnKey=window.PTSheetNav&&PTSheetNav.currentKey?PTSheetNav.currentKey():null;
+      if(_pnKey==='videoList'&&(window._videoScreenTab||'tv')==='tv'){
+        var _sw=document.getElementById('sheetWrap');
+        var _vsi=document.getElementById('videoScreenSearchInp');
+        var _focused=_vsi&&document.activeElement===_vsi;
+        if(_sw&&_sw.classList.contains('open')&&!_focused&&typeof renderVideoScreenList==='function'){
+          renderVideoScreenList();
+        }
+      }
+    }catch(err){}
    }catch(err){
     // KULLANICI TALEBİ: "Hata yakalama kodu ekle, sorunu görelim." - Bu ana veri
     // dinleyicisi içinde SESSİZCE oluşan herhangi bir hata artık burada YAKALANIYOR ve
@@ -16501,7 +16518,11 @@ window.PTSheetNav=(function(){
       if(sc&&sc.style.display!=='none')sc.querySelectorAll('.sheet-back-btn').forEach(function(b){b.remove();});
       if(cc&&cc.style.display!=='none')cc.querySelectorAll('.sheet-back-btn').forEach(function(b){b.remove();});
     },
-    _depth:function(){return stack.length;}
+    _depth:function(){return stack.length;},
+    // KULLANICI TALEBİ: TV sekmesindeki canlı maç kartlarının otomatik güncellenmesi için
+    // (bkz. _leagueDataListener'daki kanca) o an GERÇEKTEN görünen menünün anahtarını
+    // okumak gerekiyor - iç 'current' değişkenine dışarıdan salt-okunur bir erişim.
+    currentKey:function(){return current?current.key:null;}
   };
 })();
 
@@ -21592,6 +21613,43 @@ window.openChannelLockedSheet=function(videoId){
 // zaten var olan v.isLive alanı kullanılıyor - admin panelinde "canlı yayın" işaretli
 // linkler 📡 TV sekmesinde, işaretsiz olanlar 🎬 Video sekmesinde listelenir. Bu sayede
 // veri modelinde/admin panelinde yeni bir alan gerekmedi.
+// ══════════════════════════════════════════════════════════════════════════════════════
+// KULLANICI TALEBİ ("canlı maç oynandığında TV sekmesinde ilgili maç kartı olsun, tıklanınca
+// maç canlı izlenebilsin - bunu 2D canlı görsel anlatımla (saha.html) karıştırma"):
+// Puan Tablosu'nun canlı skor/olay akışını sürdüren fikstür maçları (D.matches, m.isLive)
+// ile admin'in TV sekmesine elle eklediği kanallar (D.videoLinks) ŞİMDİYE KADAR birbirinden
+// tamamen bağımsızdı. Bu iki fonksiyon, admin'in canlı bir maça bağladığı YAYIN LİNKİNİ
+// (m.streamUrl - bkz. admin.html/buildLivePanel) D.videoLinks ile AYNI ŞEKİLDE kullanılabilen
+// "sanal" bir kanal kaydına çevirir. Böylece TV sekmesinin listesi, oynatıcısı, kumandası vb.
+// TÜM mevcut altyapısı hiç değiştirilmeden bu sanal kayıtları da kabul eder - id'si her zaman
+// 'match_'+fikstürId biçiminde olduğu için normal bir video kaydıyla asla çakışmaz.
+// Bu, saha.html'deki 3D/2D animasyonlu maç SİMÜLASYONUNUN YERİNE GEÇMEZ - o, kullanıcının
+// kendi oynadığı/izlediği ayrı bir motor. Buradaki kart GERÇEK bir yayın linkini (admin'in
+// girdiği m3u8/YouTube/iframe vb.) oynatır.
+window._ptCanliMacKanallari=function(){
+  try{
+    var teams=(window.D&&D.teams)||{};
+    var matches=(window.D&&D.matches)||{};
+    return Object.values(matches).filter(function(m){return m&&m.isLive&&m.streamUrl;}).map(function(m){
+      var h=teams[m.homeId]||{},a=teams[m.awayId]||{};
+      return {
+        id:'match_'+m.id,
+        title:(h.name||'?')+' '+(m.homeGoals||0)+' - '+(m.awayGoals||0)+' '+(a.name||'?'),
+        url:m.streamUrl,
+        isLive:true,
+        isMatchCard:true,
+        matchId:m.id,
+        logo:h.logo||a.logo||'',
+        category:'⚽ Canlı Maç'
+      };
+    });
+  }catch(e){return [];}
+};
+// TV sekmesi için "sanal maç kanalları" + admin'in eklediği GERÇEK kanallar birleşik listesi.
+// isLive=true tarafı (TV sekmesi) için kullanılır; Video sekmesi bundan etkilenmez.
+window.ptTumKanallar=function(){
+  return (window._ptCanliMacKanallari()).concat((window.D&&D.videoLinks)||[]);
+};
 window._videoScreenTab=window._videoScreenTab||'tv';
 window.openVideoScreen=function(tab){
   // ══════════════════════════════════════════════════════════════════════════════════════
@@ -21666,7 +21724,9 @@ window.ptVideoGorunumDegis=function(k){
 function renderVideoScreenList(){
   const tab=window._videoScreenTab||'tv';
   const q=(window._videoScreenQuery||'').trim().toLocaleLowerCase('tr');
-  const all=D.videoLinks||[];
+  // KULLANICI TALEBİ: TV sekmesinde, admin'in elle eklediği kanallara EK olarak, o an canlı
+  // olup yayın linki tanımlanmış fikstür maçları da otomatik kart olarak listelenir.
+  const all=(tab==='tv')?ptTumKanallar():(D.videoLinks||[]);
   // KULLANICI TALEBİ ("bir kanalı geçici olarak yayından kaldırma - silmeden gizleme"):
   // 'gizli' işaretli kayıtlar kullanıcıya HİÇ gösterilmez. Kayıt silinmediği için ayarları,
   // aralıkları ve havuz bağlantısı korunur; yönetici tek dokunuşla geri açabilir.
@@ -21695,6 +21755,12 @@ function renderVideoScreenList(){
       const bi=orderIdx.has(b.id)?orderIdx.get(b.id):Infinity;
       return ai-bi;
     });
+  }
+  // KULLANICI TALEBİ: Canlı maç kartları, admin'in sıralamasından bağımsız olarak HER ZAMAN
+  // TV sekmesinin EN ÜSTÜNDE görünür - kullanıcı maç başladığında onu aramadan bulmalı.
+  // Array.sort kararlı (stable) olduğundan her grubun KENDİ İÇİNDEKİ sırası bozulmaz.
+  if(tab==='tv'){
+    baseList=baseList.slice().sort(function(a,b){return (b.isMatchCard?1:0)-(a.isMatchCard?1:0);});
   }
   const channelNoMap=new Map(baseList.map((v,i)=>[v.id,i+1]));
   let list=baseList;
@@ -21804,7 +21870,7 @@ function renderVideoScreenList(){
       // VE kullanıcının erişimi olmayan kanallar listede 🔒 rozetiyle işaretlenir - kullanıcı
       // tıklamadan önce bunun kilitli olduğunu görür.
       const kilitli=v.premium&&!hasPremiumAccess('ch_'+v.id);
-      const altSatir=[v.isLive?'🔴 Canlı':'🎬 Video',v.category?escAttr(v.category):null,kilitli?'🔒 Premium':null].filter(Boolean).join(' · ');
+      const altSatir=[v.isMatchCard?'🔴 Canlı Maç':(v.isLive?'🔴 Canlı':'🎬 Video'),(v.category&&!v.isMatchCard)?escAttr(v.category):null,kilitli?'🔒 Premium':null].filter(Boolean).join(' · ');
       // KULLANICI TALEBİ ("kullanıcı kendi sıralamasını düzenleyebilir"): Sıralama modunda
       // satıra tıklamak video AÇMAZ, yukarı/aşağı okları görünür - karışıklık olmasın diye
       // normal "izle" tıklaması bu modda devre dışı bırakılır.
@@ -22007,7 +22073,7 @@ window.toggleVideoScreenReorder=function(){
   renderVideoScreenList();
 };
 window.moveVideoScreenItem=function(tab,id,dir){
-  const all=D.videoLinks||[];
+  const all=(tab==='tv')?ptTumKanallar():(D.videoLinks||[]);
   let list=all.filter(function(v){return tab==='tv'?!!v.isLive:!v.isLive;});
   const activeCat=window._videoScreenCategory||'';
   if(activeCat)list=list.filter(function(v){return v.category===activeCat;});
@@ -22041,7 +22107,7 @@ window.moveVideoScreenItem=function(tab,id,dir){
 // erişilemiyor - bu yüzden AYNI sıralama mantığının (kişisel sürükle-bırak sırası varsa
 // onu, yoksa admin'in eklediği sırayı kullanan) bağımsız/global bir kopyası burada tutulur.
 function remoteCtrlPlaylist(isLive){
-  var all=(window.D&&D.videoLinks)||[];
+  var all=isLive?ptTumKanallar():((window.D&&D.videoLinks)||[]);
   var list=all.filter(function(x){return !!x.isLive===!!isLive;});
   try{
     var order=typeof getVideoScreenOrder==='function'?getVideoScreenOrder(isLive?'tv':'video'):[];
@@ -23830,8 +23896,8 @@ window.PTFrame=(function(){
   // yöneticinin belirlediği sıralamayı kullanır - yani kumandadaki kanal numaralarıyla
   // birebir aynı sırayı izler.
   function ptfListe(){
-    var all=(window.D&&D.videoLinks)||[];
     var canliMi=!!(A&&A.canli);
+    var all=canliMi?ptTumKanallar():((window.D&&D.videoLinks)||[]);
     var list=all.filter(function(x){return !!x.isLive===canliMi;});
     try{
       var order=typeof getVideoScreenOrder==='function'?getVideoScreenOrder(canliMi?'tv':'video'):[];
@@ -27540,7 +27606,7 @@ window.PTPlayer=(function(){
   }
   function playlist(canliMod){
     var canli=(canliMod===undefined)?chModu():!!canliMod;
-    var all=(window.D&&D.videoLinks)||[];
+    var all=canli?ptTumKanallar():((window.D&&D.videoLinks)||[]);
     // Gizli kanallar oynatıcının kanal listesinde de görünmez - liste ile ekran arasında
     // fark olursa kanal numaraları kayar ve kumandadan yanlış kanala geçilir.
     var list=all.filter(function(x){return x&&!x.gizli&&!!x.isLive===canli;});
@@ -28746,7 +28812,7 @@ window.PTPlayer=(function(){
     var host=document.getElementById(hostId);
     if(!host)return;
     var canli=!!opt.isLive;
-    var list=((window.D&&D.videoLinks)||[]).filter(function(x){return !!x.isLive===canli;});
+    var list=(canli?ptTumKanallar():((window.D&&D.videoLinks)||[])).filter(function(x){return !!x.isLive===canli;});
     var idx=list.findIndex(function(x){return x.id===opt.videoId;});
     var airplayVar=!!(window.WebKitPlaybackTargetAvailabilityEvent);
 
@@ -29969,8 +30035,10 @@ window.openVideoWatch=function(videoId,secenek){
   // İzleme geçmişine kaydet - video AÇILDIĞI anda. İzlenme süresine bakmıyoruz: kullanıcı
   // "neye baktım" diye arıyor, üç saniye mi otuz dakika mı izlediği ayrı bir soru.
   try{if(window.ptGecmiseEkle)ptGecmiseEkle(videoId);}catch(e){}
-  const v=(D.videoLinks||[]).find(function(x){return x.id===videoId;});
-  if(!v){showToast('❌ Video bulunamadı');return;}
+  // KULLANICI TALEBİ: videoId bir canlı maç kartıysa ('match_' öneki) D.videoLinks'te değil,
+  // ptTumKanallar()'ın ürettiği sanal kayıtlar arasında bulunur - bkz. yukarıdaki not.
+  const v=(String(videoId||'').indexOf('match_')===0?ptTumKanallar():(D.videoLinks||[])).find(function(x){return x.id===videoId;});
+  if(!v){showToast('❌ Video bulunamadı - maç artık canlı olmayabilir');return;}
   // KULLANICI TALEBİ ("yönetici istediği kanalları şifreli yapabilir... böyle bir sistem
   // zaten var, ekstra TV ekleyeceğiz"): Mevcut premium erişim kontrolü (yazı tipi/tema/tepki
   // paketiyle AYNI hasPremiumAccess mekanizması) burada da uygulanır - premium işaretli VE
@@ -30084,7 +30152,7 @@ window.openVideoWatch=function(videoId,secenek){
     if(oncekiRoot&&oncekiRoot.classList.contains('ptp-fs'))oncekiTamEkran=true;
     if(window.PTPlayer&&PTPlayer.isActive())oncekiGorselDurum=PTPlayer.getVisualState();
   }catch(e){}
-  const liveTag=v.isLive?'<span style="background:#dc2626;color:#fff;font-size:.6rem;font-weight:800;padding:.15rem .5rem;border-radius:7px;margin-left:.5rem;vertical-align:middle">🔴 CANLI</span>':'';
+  const liveTag=v.isMatchCard?'<span style="background:#dc2626;color:#fff;font-size:.6rem;font-weight:800;padding:.15rem .5rem;border-radius:7px;margin-left:.5rem;vertical-align:middle">🔴 CANLI MAÇ</span>':(v.isLive?'<span style="background:#dc2626;color:#fff;font-size:.6rem;font-weight:800;padding:.15rem .5rem;border-radius:7px;margin-left:.5rem;vertical-align:middle">🔴 CANLI</span>':'');
   // Admin ham link, gömme kodu veya protokolsüz adres girmiş olabilir - hepsi tek bir temiz
   // adrese indirgenir (bkz. ptExtractVideoUrl).
   const url=ptExtractVideoUrl(v.url||'');
