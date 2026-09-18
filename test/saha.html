@@ -3459,12 +3459,25 @@ function _sahaIzleUIHazirla(){
   try{
     var board = document.getElementById('board');
     if(board){
+      // KULLANICI TALEBİ (2026-09-18-E: "izleyici için skorbord görünmüyor, sol üste
+      // yerleştir"): position:absolute kuralı #hud (position:fixed) içinde zaten sol üste
+      // (12px/10px) oturuyordu, ama seyirci modunda team-kod/skor hiç GÜNCELLENMEDİĞİ
+      // (bkz. aşağıdaki _sahaIzleSkorbordGuncelle) hallerde varsayılan jenerik ŞMŞ/FRT
+      // rozetleriyle kalıyor, kafa karıştırıcı görünüyordu. Konum burada tekrar EXPLICIT
+      // olarak sol üste sabitleniyor (!important yerine doğrudan inline stil - hiçbir CSS
+      // kuralı üzerine binemez) ve z-index, rozet/geri-dönüş düğmesinden bile yüksek
+      // tutuluyor ki hiçbir zaman başka bir katmanın ALTINDA kalmasın.
+      board.style.position = 'fixed';
       board.style.left = '8px';
       board.style.top = '8px';
       board.style.right = 'auto';
+      board.style.bottom = 'auto';
+      board.style.display = 'flex';
+      board.style.opacity = '1';
+      board.style.visibility = 'visible';
       board.style.transform = 'scale(.95)';
       board.style.transformOrigin = 'left top';
-      board.style.zIndex = '60';
+      board.style.zIndex = '65';
     }
   }catch(e){}
   // Geri dönüş düğmesi - sayfanın geri kalanına dokunmadan dinamik olarak eklenir.
@@ -3498,7 +3511,23 @@ function _sahaIzleUIHazirla(){
 // ikisini de (ya da kendisini) görünmez kılabiliyordu. Artık rozetin dikey konumu, o köşede
 // zaten duran öğenin GERÇEK yüksekliği ölçülerek (getBoundingClientRect) hesaplanıyor - rozet
 // her zaman o öğenin HEMEN ALTINA iniyor, hiçbir şeyin üstüne binmiyor.
+// KAPSAM DEĞİŞİKLİĞİ (2026-09-18-E, kullanıcı talebi: "bunu kaldır; her maç için ayrı ayrı
+// girilmesin, bir admin bir kere girdiğinde otomatik olarak bütün maçlarda görünecek bir
+// sistem geliştir"): Rozet artık maça özgü (leagues/{lig}/matches/{mac}) DEĞİL, Firebase
+// KÖKÜNDEKİ tek bir global düğümden (canliRozetGlobal) okunuyor - herhangi bir admin panelinde
+// BİR KERE ayarladığında, TÜM ligler/TÜM canlı maçlarda otomatik görünür; her maçta ayrıca
+// girilmesi gerekmez (bkz. admin.html'deki karşılığı - canliRozetGlobal ile aynı düğüm).
 // ══════════════════════════════════════════════════════════════════════════════════════
+window._sahaIzleRozetGlobal = null;
+function _sahaIzleRozetGlobalDinle(){
+  try{
+    if(!fbHazir){ setTimeout(_sahaIzleRozetGlobalDinle, 200); return; }
+    fbDb.ref('canliRozetGlobal').on('value', function(sn){
+      window._sahaIzleRozetGlobal = sn.val() || null;
+      _sahaIzleRozetUygula();
+    });
+  }catch(e){}
+}
 function _sahaIzleRozetUstOfset(poz){
   try{
     var digerId = poz === 'sag' ? null : 'board';    // sağ köşede sabit-boyutlu ✕ düğmesi var, ölçmeye gerek yok
@@ -3514,11 +3543,12 @@ function _sahaIzleRozetUstOfset(poz){
   }catch(e){}
   return 10;
 }
-function _sahaIzleRozetUygula(m){
+function _sahaIzleRozetUygula(){
   try{
-    var poz = (m && m.canliRozetPoz === 'sag') ? 'sag' : 'sol';
-    var metin = (m && m.canliRozetMetin) ? String(m.canliRozetMetin).trim() : '';
-    var logo = (m && m.canliRozetLogo) ? String(m.canliRozetLogo).trim() : '';
+    var g = window._sahaIzleRozetGlobal;
+    var poz = (g && g.canliRozetPoz === 'sag') ? 'sag' : 'sol';
+    var metin = (g && g.canliRozetMetin) ? String(g.canliRozetMetin).trim() : '';
+    var logo = (g && g.canliRozetLogo) ? String(g.canliRozetLogo).trim() : '';
     var el = document.getElementById('sahaIzleRozet');
     if(!metin && !logo){ if(el) el.style.display='none'; return; }
     if(!el){
@@ -3553,7 +3583,6 @@ function _sahaIzleVeriUygula(m){
     isLive: !!m.isLive, played: !!m.played,
     homeId: m.homeId || null, awayId: m.awayId || null
   };
-  _sahaIzleRozetUygula(m);
   _sahaIzleKadroUygula();
   try{
     var dk = Math.max(0, Math.min(120, Math.round(m.minute||0)));
@@ -3638,6 +3667,27 @@ function _sahaIzleKadroUygula(){
     // deplasman (away) → teamA (kırmızı).
     _sahaIzleKadroAta(teamB, _sahaIzleGercekIlk11(h.homeId));
     _sahaIzleKadroAta(teamA, _sahaIzleGercekIlk11(h.awayId));
+    _sahaIzleSkorbordTakimlariUygula(h.homeId, h.awayId);
+  }catch(e){}
+}
+// KULLANICI TALEBİ (2026-09-18-E: "izleyici için skorbord görünmüyor"): Skorbordun kendisi
+// (#board) her zaman ekranda duruyordu ama takım rozetleri (kod + forma rengi) HİÇ
+// GÜNCELLENMİYORDU - jenerik "ŞMŞ"/"FRT" varsayılanında donup kalıyordu, bu da gerçek maçta
+// skorbordun "çalışmadığı" izlenimi veriyordu. Burada GERÇEK ev/deplasman takımının adından
+// (kisaKod ile) ve saha uygulamasının kendi takım renk paletinden (TAKIMLAR[0]/[1] - forma
+// rengi olarak zaten oyunda kullanılıyor) kısa kod ve renk üretilip #board'a yazılıyor.
+function _sahaIzleSkorbordTakimlariUygula(homeId, awayId){
+  try{
+    var takimlar = window._sahaIzleTakimlar || {};
+    var h = takimlar[homeId] || {}, a = takimlar[awayId] || {};
+    var ka = document.querySelector('#board .kod.a'), kb = document.querySelector('#board .kod.b');
+    // Skor alanı sol=sa=homeGoals, sağ=sb=awayGoals şeklinde yazılıyor (bkz.
+    // _sahaIzleVeriUygula) - rozet kodları da AYNI sıraya (sol=ev, sağ=deplasman) uyumlu
+    // olmalı. Renkler, oyuncuların sahada GERÇEKTEN giydiği forma rengiyle TUTARLI: ev sahibi
+    // teamB havuzunda (mavi) render ediliyor, deplasman teamA havuzunda (kırmızı) - bkz.
+    // yukarıdaki _sahaIzleTakimUygula çağrıları.
+    if(ka){ ka.textContent = h.name ? kisaKod(h.name) : 'EV'; ka.style.background = hx(takB().jer); }
+    if(kb){ kb.textContent = a.name ? kisaKod(a.name) : 'DEP'; kb.style.background = hx(takA().jer); }
   }catch(e){}
 }
 /* ══════════════════════════════════════════════════════════════════════════════════════
@@ -3693,16 +3743,45 @@ function _sahaIzlePTKoprusu(){
 // Havuzdaki (teamA/teamB - GK dahil 11'er nesne, sahaCanliYaz'daki SIRAYLA aynı) 3D
 // nesnelerin konumunu, Firebase'den gelen [[x,z],...] dizisine göre yumuşak geçişle set
 // eder. Dizide karşılığı olmayan (kırmızı kart/sahada değil) nesneler gizlenir.
-function _sahaIzleTakimUygula(pool, arr, lerp){
+// KULLANICI TALEBİ (2026-09-18-E: "izleyici için top dönmüyor ve oyuncu koşu animasyonu
+// çalışmıyor"): KÖK SEBEP - bu fonksiyon yalnızca konumu (x/z) set ediyordu; bacak/kol
+// sallanışı ve dönüş açısı NORMALDE ana oyun döngüsündeki update()'te GERÇEK hız vektöründen
+// hesaplanıyor (bkz. dosyanın üstündeki oyuncu güncelleme bloğu), ama update() seyirci
+// modunda HİÇ ÇALIŞMAZ (yalnızca gerçek oyuncu tarafında çalışır) ve Firebase'e ham hız değil
+// sadece konum yazılıyor. Çözüm: kare başına konum DEĞİŞİMİNDEN (dt'ye bölünerek) yaklaşık bir
+// hız türetilip, ANA OYUNDAKİYLE AYNI animasyon formülü (phase/sw/rotation.y) buna uygulanıyor -
+// gerçek hız yayınlanmasa da görsel olarak ayırt edilemeyecek kadar yakın bir koşu animasyonu
+// ve dönüş elde ediliyor.
+function _sahaIzleTakimUygula(pool, arr, lerp, dt){
   for(var i=0;i<pool.length;i++){
     var p = pool[i];
     var pt = arr[i];
     if(pt && typeof pt[0]==='number' && typeof pt[1]==='number'){
       var wx = pt[0]*HLX, wz = pt[1]*HWZ;
       p.obj.visible = true; p.golge.visible = true;
+      var oncekiX = p.obj.position.x, oncekiZ = p.obj.position.z;
       p.obj.position.x += (wx - p.obj.position.x)*lerp;
       p.obj.position.z += (wz - p.obj.position.z)*lerp;
       p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
+      if(dt > 0){
+        var dx = (p.obj.position.x - oncekiX) / dt, dz = (p.obj.position.z - oncekiZ) / dt;
+        var sp = Math.hypot(dx, dz);
+        if(sp > 0.3){
+          var hedefAci = Math.atan2(dx, dz);
+          var diff = hedefAci - p.obj.rotation.y;
+          while (diff >  Math.PI) diff -= Math.PI*2;
+          while (diff < -Math.PI) diff += Math.PI*2;
+          p.obj.rotation.y += diff * Math.min(1, dt*9);
+        }
+        var ud = p.obj.userData;
+        if(ud && ud.legL && ud.legR){
+          ud.phase = (ud.phase||0) + dt * (sp*1.4 + 1);
+          var sw = Math.sin(ud.phase) * Math.min(0.8, sp*0.1);
+          ud.legL.rotation.x = sw; ud.legR.rotation.x = -sw;
+          if(ud.armL) ud.armL.rotation.x = -sw*0.7;
+          if(ud.armR) ud.armR.rotation.x = sw*0.7;
+        }
+      }
     } else {
       p.obj.visible = false; p.golge.visible = false;
     }
@@ -3714,9 +3793,21 @@ function _sahaIzleKareAdimla(dt){
   var lerp = Math.min(1, dt*6);
   if(h.top){
     var bx = h.top.x*HLX, bz = h.top.z*HWZ;
+    var oncekiBX = ball.position.x, oncekiBZ = ball.position.z;
     ball.position.x += (bx-ball.position.x)*lerp;
     ball.position.z += (bz-ball.position.z)*lerp;
     ball.position.y += (0.22-ball.position.y)*lerp;
+    // TOP DÖNÜŞÜ - bkz. yukarıdaki _sahaIzleTakimUygula notu: gerçek hız verisi
+    // yayınlanmadığından kare başına konum değişiminden türetiliyor, ana oyundaki
+    // ball.rotateOnWorldAxis formülüyle AYNI şekilde uygulanıyor.
+    if(dt > 0){
+      var bdx = (ball.position.x - oncekiBX) / dt, bdz = (ball.position.z - oncekiBZ) / dt;
+      var bspb = Math.hypot(bdx, bdz);
+      if(bspb > 0.05){
+        var ax = new THREE.Vector3(bdz, 0, -bdx).normalize();
+        ball.rotateOnWorldAxis(ax, (bspb*dt)/R_BALL);
+      }
+    }
   }
   // KULLANICI TALEBİ (2026-09-18-D, "admin eklediği zaman her canlı maçta görünmeli"): Rozet/
   // skorbord artık sahaMode ile SINIRLI DEĞİL - saha 3D motoruyla FİİLEN OYNANMAYAN (yani konum
@@ -3726,15 +3817,28 @@ function _sahaIzleKareAdimla(dt){
   // tamamen boşsa (gerçek bir konum akışı hiç yoksa) dokunulmuyor - oyuncular sayfa açılışındaki
   // varsayılan diziliş konumunda (dizil()) görünmeye devam ediyor; yalnızca GERÇEK bir konum
   // akışı geldiğinde (dizi doluysa) canlı takip devreye giriyor.
-  if(h.home && h.home.length) _sahaIzleTakimUygula(teamB, h.home, lerp);   // ev sahibi - mavi (2D mini-saha ile aynı renk kuralı)
-  if(h.away && h.away.length) _sahaIzleTakimUygula(teamA, h.away, lerp);   // deplasman - kırmızı
-  // Yayın kamerası: topu yumuşak biçimde takip eden sabit-yükseklik kamera.
-  var camLerp = Math.min(1, dt*2);
-  var camX = ball.position.x*0.55, camZ = 28 + ball.position.z*0.35;
-  camera.position.x += (camX-camera.position.x)*camLerp;
-  camera.position.y += (13-camera.position.y)*camLerp;
-  camera.position.z += (camZ-camera.position.z)*camLerp;
-  camera.lookAt(ball.position.x, 0.6, ball.position.z);
+  if(h.home && h.home.length) _sahaIzleTakimUygula(teamB, h.home, lerp, dt);   // ev sahibi - mavi (2D mini-saha ile aynı renk kuralı)
+  if(h.away && h.away.length) _sahaIzleTakimUygula(teamA, h.away, lerp, dt);   // deplasman - kırmızı
+  // KULLANICI TALEBİ (2026-09-18-E, ekran görüntüsü ile: "kamera açısını böyle yap ama topu
+  // takip etsin"): Seyirci kamerası önceden KENDİ (daha zayıf, 0.55/0.35 katsayılı) bir
+  // formülle çalışıyordu ve top sık sık kadraj dışında kalıyordu. Artık asıl OYUN kamerasıyla
+  // (bkz. yukarıdaki update() içindeki "kamera" bölümü) BİREBİR AYNI mantık kullanılıyor:
+  // sabit bir kenar çizgisine yakın, alçak (tribün/yayın) açılı, topu X/Z'de güçlü katsayıyla
+  // takip eden ve top kadraj dışına çıkarsa ANINDA kilitlenen kamera. Ekran görüntüsündeki gibi
+  // düşük açılı, sahayı çapraz gören, oyuncu isimlerinin okunduğu bir görünüm elde edilir.
+  const KAMERA_YUKSEKLIK = 12;
+  const KAMERA_KENAR_Z = (HWZ - 5) * dirA;
+  const cx = Math.max(-HLX+16, Math.min(HLX-16, ball.position.x));
+  const cz = Math.max(-HWZ+6, Math.min(HWZ-6, KAMERA_KENAR_Z + ball.position.z*0.22));
+  let _acilKilit = false;
+  try{
+    const _bp = ball.position.clone().project(camera);
+    if (!isFinite(_bp.x) || !isFinite(_bp.y) || Math.abs(_bp.x) > 0.78 || Math.abs(_bp.y) > 0.78) _acilKilit = true;
+  }catch(e){}
+  camHedef.set(cx, KAMERA_YUKSEKLIK, cz);
+  camera.position.lerp(camHedef, _acilKilit ? 1 : Math.min(1, dt*3.0));
+  bakHedef.set(cx + 5*dirA, 1.0, _acilKilit ? ball.position.z : ball.position.z*0.8);
+  camera.lookAt(bakHedef);
 }
 (function(){
   var mod = _sahaIzleUrlOku();
@@ -3743,6 +3847,7 @@ function _sahaIzleKareAdimla(dt){
   _sahaIzleUIHazirla();
   _sahaIzlePTKoprusu();
   _sahaIzleFirebaseDinle(mod);
+  _sahaIzleRozetGlobalDinle();
 })();
 
 loop();

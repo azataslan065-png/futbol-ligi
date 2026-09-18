@@ -589,6 +589,13 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
   <div id="pg-live" class="pg">
     <div id="liveMatchPicker"></div>
     <div id="liveInfo"></div>
+    <!-- KULLANICI TALEBİ (2026-09-18-E: "yayın rozetini kaldır, her maç için ayrı ayrı
+         girilmesin, bir admin bir kere girdiğinde otomatik olarak bütün maçlarda görünecek
+         bir sistem geliştir"): Rozet artık TEK bir global ayar - hangi maç canlı olursa
+         olsun (hatta hiç maç canlı değilken bile) her zaman burada görünür ve düzenlenebilir;
+         Firebase kökündeki canliRozetGlobal düğümüne yazılır, TÜM canlı maçlarda otomatik
+         uygulanır (bkz. saha.html/_sahaIzleRozetGlobalDinle). -->
+    <div id="canliRozetGlobalBox"></div>
   </div>
 
   <!-- LİG -->
@@ -5279,6 +5286,7 @@ function saveBulk(){
 function renderLive(){
   fillSelects();
   renderLivePicker();
+  renderCanliRozetGlobal();
   var live=getManagedLiveMatch();
   var el=qs('liveInfo');
   if(!live){el.innerHTML='';return;}
@@ -5644,7 +5652,6 @@ function buildLivePanel(live){
     +'<button class="btn br_" onclick="endMatch()" style="font-size:.76rem">⏹ Bitir</button>'
     +'</div>'
     +'<button class="btn bgh" onclick="openManualExtraTime()" style="width:100%;font-size:.72rem;margin-top:.35rem">⏱️ Uzatma Süresi Gir (isteğe bağlı)</button>'
-    +(canliRozetPanelHtml(live))
     +'<button class="btn bgh" onclick="openAdminSymbolLegend()" style="width:100%;font-size:.72rem;margin-top:.35rem">ℹ️ Sembol Rehberi</button>'
     +'</div>';
 
@@ -5669,21 +5676,42 @@ function buildLivePanel(live){
 // ══════════════════════════════════════════════════════════════════════════════════════
 // YAYIN ROZETİ (KULLANICI TALEBİ 2026-09-18-A, kapsam 2026-09-18-D'de genişletildi): "admin,
 // bu yayınlanan canlı maça tercihine bağlı olarak sağ üst veya sol üste yazı ya da logo
-// ekleyebilsin" - "her canlı maçta görünmeli, sahaMode şartı olmasın". Önceden yalnızca
-// saha.html'in 3D motoruyla oynanan (m.sahaMode:true) maçlarda gösteriliyordu; artık HER
-// canlı maçta gösteriliyor. saha.html'in "seyirci modu" (?izle=1, bkz. saha.html/
-// _sahaIzleRozetUygula) sahaMode'dan bağımsız olarak her maçı açabildiği için (konum akışı
-// yoksa oyuncular varsayılan dizilişte durur, skor/dakika/rozet yine de doğru gösterilir)
-// rozet de aynı şekilde her canlı maça uygulanabiliyor. Burada sadece leagues/{lig}/
-// matches/{mac} altına canliRozetPoz/canliRozetMetin/canliRozetLogo alanlarını yazan küçük
-// bir denetim paneli var.
-function canliRozetPanelHtml(live){
-  var poz=live.canliRozetPoz==='sag'?'sag':'sol';
-  var metin=live.canliRozetMetin||'';
-  var logo=live.canliRozetLogo||'';
+// ekleyebilsin" - "her canlı maçta görünmeli, sahaMode şartı olmasın".
+// KAPSAM DEĞİŞİKLİĞİ (2026-09-18-E, kullanıcı talebi: "bunu kaldır; her maç için ayrı ayrı
+// girilmesin, farklı bir admin bir kere girdiğinde otomatik olarak bütün maçlarda görünecek
+// bir sistem geliştir"): Rozet artık leagues/{lig}/matches/{mac} altına maça özgü YAZILMIYOR -
+// Firebase KÖKÜNDEKİ tek bir "canliRozetGlobal" düğümünde tutuluyor (appBranding ile AYNI
+// mimari - bkz. saveAppBranding/loadAppBranding). Herhangi bir admin panelinde, herhangi bir
+// ligde BİR KERE ayarlandığında, TÜM liglerdeki TÜM canlı maçlarda otomatik görünür - maç
+// bazında tekrar girmeye gerek yok. Panel artık "🔴 Canlı" sekmesinde, canlı maç olup
+// olmamasından bağımsız, her zaman görünen bir ayar kartı (bkz. #canliRozetGlobalBox /
+// renderLive). saha.html tarafındaki karşılığı için bkz. _sahaIzleRozetGlobalDinle.
+// ══════════════════════════════════════════════════════════════════════════════════════
+var _canliRozetGlobalVeri = {canliRozetPoz:'sol',canliRozetMetin:'',canliRozetLogo:''};
+var _canliRozetGlobalYuklendi = false;
+function renderCanliRozetGlobal(){
+  var box=qs('canliRozetGlobalBox'); if(!box)return;
+  if(!_canliRozetGlobalYuklendi){
+    box.innerHTML='<div class="card" style="margin-top:.4rem;padding:.6rem .7rem"><div style="font-size:.65rem;color:var(--mu)">⏳ Yükleniyor...</div></div>';
+    db.ref('canliRozetGlobal').once('value').then(function(snap){
+      _canliRozetGlobalVeri = snap.val() || {canliRozetPoz:'sol',canliRozetMetin:'',canliRozetLogo:''};
+      _canliRozetGlobalYuklendi = true;
+      renderCanliRozetGlobal();
+    }).catch(function(){
+      _canliRozetGlobalYuklendi = true;
+      renderCanliRozetGlobal();
+    });
+    return;
+  }
+  box.innerHTML = canliRozetPanelHtml();
+}
+function canliRozetPanelHtml(){
+  var poz=_canliRozetGlobalVeri.canliRozetPoz==='sag'?'sag':'sol';
+  var metin=_canliRozetGlobalVeri.canliRozetMetin||'';
+  var logo=_canliRozetGlobalVeri.canliRozetLogo||'';
   return '<div class="card" style="margin-top:.4rem;padding:.6rem .7rem">'
-    +'<div style="font-size:.65rem;font-weight:800;color:var(--mu);margin-bottom:.35rem">📡 YAYIN ROZETİ</div>'
-    +'<div style="font-size:.6rem;color:var(--mu);margin-bottom:.45rem;line-height:1.5">Bu maç saha uygulamasından 3D canlı izlenirken üst köşeye isteğe bağlı bir metin ve/veya logo eklenir. Skorbord zaten üst sol köşede otomatik gösterilir; rozet ona/geri dönüş düğmesine binmeyecek şekilde konumlanır.</div>'
+    +'<div style="font-size:.65rem;font-weight:800;color:var(--mu);margin-bottom:.35rem">📡 YAYIN ROZETİ (GENEL AYAR)</div>'
+    +'<div style="font-size:.6rem;color:var(--mu);margin-bottom:.45rem;line-height:1.5">Burada bir kez ayarlarsınız - herhangi bir maç saha uygulamasından 3D canlı izlenirken üst köşeye AYNI metin ve/veya logo otomatik eklenir, her maç için ayrıca girmenize gerek yoktur. Skorbord zaten üst sol köşede otomatik gösterilir; rozet ona/geri dönüş düğmesine binmeyecek şekilde konumlanır.</div>'
     +'<div class="g2" style="margin-bottom:.32rem">'
       +'<button id="crPozSol" onclick="setCanliRozetPoz(\'sol\')" style="padding:.3rem;border-radius:8px;font-size:.68rem;font-weight:700;border:1.5px solid '+(poz==='sol'?'var(--ac)':'var(--br)')+';background:'+(poz==='sol'?'rgba(124,58,237,.15)':'transparent')+';color:'+(poz==='sol'?'var(--ac3)':'var(--mu)')+';cursor:pointer">◤ Sol Üst</button>'
       +'<button id="crPozSag" onclick="setCanliRozetPoz(\'sag\')" style="padding:.3rem;border-radius:8px;font-size:.68rem;font-weight:700;border:1.5px solid '+(poz==='sag'?'var(--ac)':'var(--br)')+';background:'+(poz==='sag'?'rgba(124,58,237,.15)':'transparent')+';color:'+(poz==='sag'?'var(--ac3)':'var(--mu)')+';cursor:pointer">Sağ Üst ◥</button>'
@@ -5697,9 +5725,8 @@ function canliRozetPanelHtml(live){
     +'</div>';
 }
 function setCanliRozetPoz(poz){
-  var live=getManagedLiveMatch();if(!live)return;
-  live.canliRozetPoz=(poz==='sag')?'sag':'sol';
-  buildLivePanel(live);
+  _canliRozetGlobalVeri.canliRozetPoz=(poz==='sag')?'sag':'sol';
+  renderCanliRozetGlobal();
 }
 function triggerCanliRozetLogoUpload(){
   var inp=document.createElement('input');
@@ -5710,29 +5737,33 @@ function triggerCanliRozetLogoUpload(){
     var file=inp.files&&inp.files[0];
     document.body.removeChild(inp);
     if(!file)return;
-    var live=getManagedLiveMatch();if(!live)return;
     var box=qs('canliRozetLogoBox');
     if(box)box.innerHTML='<div style="font-size:.6rem;color:var(--mu)">⏳ Logo yükleniyor...</div>';
     compressLogoImage(file,function(publicUrl){
-      var lv=getManagedLiveMatch();if(!lv)return;
-      lv.canliRozetLogo=publicUrl;
-      safeSetMatch(lv.id,lv,function(){toast('✅ Logo kaydedildi');buildLivePanel(lv);},function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');buildLivePanel(lv);});
+      _canliRozetGlobalVeri.canliRozetLogo=publicUrl;
+      db.ref('canliRozetGlobal').update(_canliRozetGlobalVeri).then(function(){
+        toast('✅ Logo kaydedildi');renderCanliRozetGlobal();
+      }).catch(function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');renderCanliRozetGlobal();});
     },160,function(){if(box)box.innerHTML='';});
   };
   document.body.appendChild(inp);
   inp.click();
 }
 function removeCanliRozetLogo(){
-  var live=getManagedLiveMatch();if(!live)return;
-  live.canliRozetLogo='';
-  safeSetMatch(live.id,live,function(){toast('🗑️ Logo kaldırıldı');buildLivePanel(live);},function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
+  _canliRozetGlobalVeri.canliRozetLogo='';
+  db.ref('canliRozetGlobal').update(_canliRozetGlobalVeri).then(function(){
+    toast('🗑️ Logo kaldırıldı');renderCanliRozetGlobal();
+  }).catch(function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
 }
 function saveCanliRozet(){
-  var live=getManagedLiveMatch();if(!live)return;
   var metinEl=qs('canliRozetMetinInp');
-  live.canliRozetMetin=metinEl?metinEl.value.trim():(live.canliRozetMetin||'');
-  live.canliRozetPoz=live.canliRozetPoz==='sag'?'sag':'sol';
-  safeSetMatch(live.id,live,function(){toast('✅ Yayın rozeti kaydedildi');buildLivePanel(live);},function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
+  _canliRozetGlobalVeri.canliRozetMetin=metinEl?metinEl.value.trim():(_canliRozetGlobalVeri.canliRozetMetin||'');
+  _canliRozetGlobalVeri.canliRozetPoz=_canliRozetGlobalVeri.canliRozetPoz==='sag'?'sag':'sol';
+  db.ref('canliRozetGlobal').update(_canliRozetGlobalVeri).then(function(){
+    toast('✅ Yayın rozeti kaydedildi - tüm canlı maçlarda otomatik görünecek');
+    logAction('📡 Genel yayın rozeti güncellendi');
+    renderCanliRozetGlobal();
+  }).catch(function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
 }
 function setEvType(t){
   _et=t;setEvTypeUI(t);
