@@ -1831,7 +1831,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-K';
+window.APP_BUILD='2026-09-18-A';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5644,6 +5644,7 @@ function buildLivePanel(live){
     +'<button class="btn br_" onclick="endMatch()" style="font-size:.76rem">⏹ Bitir</button>'
     +'</div>'
     +'<button class="btn bgh" onclick="openManualExtraTime()" style="width:100%;font-size:.72rem;margin-top:.35rem">⏱️ Uzatma Süresi Gir (isteğe bağlı)</button>'
+    +(live.sahaMode?canliRozetPanelHtml(live):'')
     +'<button class="btn bgh" onclick="openAdminSymbolLegend()" style="width:100%;font-size:.72rem;margin-top:.35rem">ℹ️ Sembol Rehberi</button>'
     +'</div>';
 
@@ -5665,6 +5666,70 @@ function buildLivePanel(live){
   },60000);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════════════
+// YAYIN ROZETİ (KULLANICI TALEBİ 2026-09-18-A): "admin, bu yayınlanan canlı maça tercihine
+// bağlı olarak sağ üst veya sol üste yazı ya da logo ekleyebilsin". Sadece saha.html'in 3D
+// motoruyla oynanan (m.sahaMode:true) maçlarda anlamlı - o maç saha.html'in "seyirci modu"
+// (?izle=1, bkz. saha.html/_sahaIzleRozetUygula) ile canlı izlenebiliyor ve rozet ORADA
+// çiziliyor. Burada sadece leagues/{lig}/matches/{mac} altına canliRozetPoz/canliRozetMetin/
+// canliRozetLogo alanlarını yazan küçük bir denetim paneli var.
+function canliRozetPanelHtml(live){
+  var poz=live.canliRozetPoz==='sag'?'sag':'sol';
+  var metin=live.canliRozetMetin||'';
+  var logo=live.canliRozetLogo||'';
+  return '<div class="card" style="margin-top:.4rem;padding:.6rem .7rem">'
+    +'<div style="font-size:.65rem;font-weight:800;color:var(--mu);margin-bottom:.35rem">📡 YAYIN ROZETİ (saha 3D canlı yayın)</div>'
+    +'<div style="font-size:.6rem;color:var(--mu);margin-bottom:.45rem;line-height:1.5">Bu maç saha uygulamasından 3D canlı izlenirken üst köşeye isteğe bağlı bir metin ve/veya logo eklenir. Skorbord zaten üst ortada otomatik gösterilir.</div>'
+    +'<div class="g2" style="margin-bottom:.32rem">'
+      +'<button id="crPozSol" onclick="setCanliRozetPoz(\'sol\')" style="padding:.3rem;border-radius:8px;font-size:.68rem;font-weight:700;border:1.5px solid '+(poz==='sol'?'var(--ac)':'var(--br)')+';background:'+(poz==='sol'?'rgba(124,58,237,.15)':'transparent')+';color:'+(poz==='sol'?'var(--ac3)':'var(--mu)')+';cursor:pointer">◤ Sol Üst</button>'
+      +'<button id="crPozSag" onclick="setCanliRozetPoz(\'sag\')" style="padding:.3rem;border-radius:8px;font-size:.68rem;font-weight:700;border:1.5px solid '+(poz==='sag'?'var(--ac)':'var(--br)')+';background:'+(poz==='sag'?'rgba(124,58,237,.15)':'transparent')+';color:'+(poz==='sag'?'var(--ac3)':'var(--mu)')+';cursor:pointer">Sağ Üst ◥</button>'
+    +'</div>'
+    +'<input id="canliRozetMetinInp" placeholder="Rozet metni (ör. sponsor adı) - boş bırakılabilir" value="'+escHtml(metin)+'" style="font-size:.76rem;margin-bottom:.32rem"/>'
+    +'<div id="canliRozetLogoBox" style="margin-bottom:.32rem">'+(logo?('<div style="display:flex;align-items:center;gap:.4rem"><img src="'+escHtml(logo)+'" style="width:28px;height:28px;object-fit:contain;border-radius:6px;background:var(--s3)"/><span style="font-size:.6rem;color:#15803d;flex:1">✅ Logo eklendi</span><button onclick="removeCanliRozetLogo()" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:5px;font-size:.6rem;padding:.15rem .4rem;cursor:pointer">Kaldır</button></div>'):'')+'</div>'
+    +'<div class="g2">'
+      +'<button class="btn bgh" onclick="triggerCanliRozetLogoUpload()" style="font-size:.7rem">🖼️ '+(logo?'Logo Değiştir':'Logo Yükle')+'</button>'
+      +'<button class="btn bp" onclick="saveCanliRozet()" style="font-size:.7rem">💾 Rozeti Kaydet</button>'
+    +'</div>'
+    +'</div>';
+}
+function setCanliRozetPoz(poz){
+  var live=getManagedLiveMatch();if(!live)return;
+  live.canliRozetPoz=(poz==='sag')?'sag':'sol';
+  buildLivePanel(live);
+}
+function triggerCanliRozetLogoUpload(){
+  var inp=document.createElement('input');
+  inp.type='file';inp.accept='image/*,.heic,.heif';
+  inp.style.cssText='position:fixed;left:-9999px';
+  document.body.appendChild(inp);
+  inp.onchange=function(){
+    var file=inp.files&&inp.files[0];
+    document.body.removeChild(inp);
+    if(!file)return;
+    var live=getManagedLiveMatch();if(!live)return;
+    var box=qs('canliRozetLogoBox');
+    if(box)box.innerHTML='<div style="font-size:.6rem;color:var(--mu)">⏳ Logo yükleniyor...</div>';
+    compressLogoImage(file,function(publicUrl){
+      var lv=getManagedLiveMatch();if(!lv)return;
+      lv.canliRozetLogo=publicUrl;
+      safeSetMatch(lv.id,lv,function(){toast('✅ Logo kaydedildi');buildLivePanel(lv);},function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');buildLivePanel(lv);});
+    },160,function(){if(box)box.innerHTML='';});
+  };
+  document.body.appendChild(inp);
+  inp.click();
+}
+function removeCanliRozetLogo(){
+  var live=getManagedLiveMatch();if(!live)return;
+  live.canliRozetLogo='';
+  safeSetMatch(live.id,live,function(){toast('🗑️ Logo kaldırıldı');buildLivePanel(live);},function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
+}
+function saveCanliRozet(){
+  var live=getManagedLiveMatch();if(!live)return;
+  var metinEl=qs('canliRozetMetinInp');
+  live.canliRozetMetin=metinEl?metinEl.value.trim():(live.canliRozetMetin||'');
+  live.canliRozetPoz=live.canliRozetPoz==='sag'?'sag':'sol';
+  safeSetMatch(live.id,live,function(){toast('✅ Yayın rozeti kaydedildi');buildLivePanel(live);},function(e){toast('❌ Kaydedilemedi: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
+}
 function setEvType(t){
   _et=t;setEvTypeUI(t);
   var pl1=qs('evPl'),pl2=qs('evPl2');
