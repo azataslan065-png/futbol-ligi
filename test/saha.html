@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vH</title>
+<title>SAHA — 3D Futbol vL</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -849,7 +849,92 @@ try{
    ══════════════════════════════════════════════════════════════════════════════════════ */
 var sahaLigId = null, sahaLigTakimlar = {}, sahaFikstur = {};
 window._sahaAktifFikstur = null; // {ligId, matchId, benTarafHome} - oynanmakta olan fikstur maci varsa dolu
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// BAKIM MODU (kullanici talebi: "yonetici bakim modunu actiginda saha da bakima girsin")
+// Puan Tablosu ile AYNI dugumu ('leagues/{lig}/maintenance') okur ve AYNI karari verir -
+// kural kopyalanmadi, birebir tasindi. Iki taraf farkli yorumlarsa yonetici bakimi acar,
+// oyun oynanmaya devam eder; maclar yarim kalir.
+// IZIN LISTESI: Yonetici bakim sirasinda bazi kullanicilara izin verebilir. Oyun tarafinda
+// kimlik e-posta oldugu icin eslesme e-postaya gore yapilir.
+var _sahaBakim = null;
+function _sahaBakimAktifMi(mt){
+  if(!mt) return false;
+  var d = mt.manualState;
+  if(d !== 'on' && d !== 'off') d = (mt.enabled === true && d === undefined) ? 'on' : 'auto';
+  if(d === 'on') return true;
+  if(d === 'off') return false;
+  if(!mt.startAt && !mt.endAt) return false;
+  var now = Date.now();
+  if(mt.startAt && now < mt.startAt) return false;
+  if(mt.endAt && now > mt.endAt) return false;
+  return true;
+}
+function _sahaBakimIzinliMi(mt){
+  try{
+    if(!mt) return false;
+    var u = (firebase.auth().currentUser || {});
+    var ad = String(u.email || '').trim().toLocaleLowerCase('tr');
+    if(!ad) return false;
+    return (mt.allowedUsers || []).some(function(x){
+      return String(x || '').trim().toLocaleLowerCase('tr') === ad;
+    });
+  }catch(e){ return false; }
+}
+function _sahaBakimUygula(){
+  try{
+    var aktif = _sahaBakimAktifMi(_sahaBakim) && !_sahaBakimIzinliMi(_sahaBakim);
+    var el = document.getElementById('sahaBakimEkran');
+    if(!aktif){ if(el) el.style.display = 'none'; return; }
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'sahaBakimEkran';
+      // z-index en ust: bakim ekrani her seyin onunde olmali, yoksa kullanici
+      // arkadaki menuye dokunup maca girebilir.
+      el.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:flex;'
+        + 'flex-direction:column;align-items:center;justify-content:center;text-align:center;'
+        + 'background:#0b1410;color:#eef2ee;padding:2rem 1.4rem;font-family:inherit';
+      document.body.appendChild(el);
+    }
+    var mesaj = (_sahaBakim && _sahaBakim.message) || 'SAHA su an bakimda.';
+    var zaman = '';
+    try{
+      if(_sahaBakim && _sahaBakim.endAt){
+        var d = new Date(_sahaBakim.endAt);
+        zaman = 'Tahmini bitis: ' + d.toLocaleString('tr-TR');
+      }
+    }catch(e){}
+    el.innerHTML = '<div style="font-size:3.2rem;margin-bottom:1rem">🚧</div>'
+      + '<div style="font-size:1.05rem;font-weight:900;margin-bottom:.6rem">Bakım Çalışması</div>'
+      + '<div style="font-size:.86rem;opacity:.75;max-width:340px;line-height:1.6">'
+        + String(mesaj).replace(/</g,'&lt;') + '</div>'
+      + (zaman ? '<div style="font-size:.76rem;color:#8fd0b0;font-weight:700;margin-top:.7rem">'
+        + zaman + '</div>' : '');
+    el.style.display = 'flex';
+    // Bakim sirasinda devam eden mac varsa durdurulur: yarim mac sonucu Puan Tablosuna
+    // yanlis veri yazar.
+    try{ if(typeof running !== 'undefined' && running && typeof duraklat !== 'undefined') duraklat = true; }catch(e){}
+  }catch(e){}
+}
+function _sahaBakimDinle(){
+  try{
+    if(!fbHazir || !sahaLigId) return;
+    fbDb.ref('leagues/' + sahaLigId + '/maintenance').on('value', function(sn){
+      _sahaBakim = sn.val() || null;
+      _sahaBakimUygula();
+    }, function(err){
+      // Okuma reddedilirse bakim durumu BILINMIYOR demektir. Oyunu kapatmiyoruz -
+      // yanlis alarmla herkesi disari atmak, bakimi kacirmaktan daha kotu.
+      try{ if(window.DiagSaha) DiagSaha('bakimOkuma', err, {
+        anlami:'Bakim durumu okunamadi; oyun acik kaldi.',
+        oneri:'leagues/{lig}/maintenance okuma kurallarini denetleyin.'}); }catch(e){}
+    });
+    // 'auto' modunda karar SAATE bagli; dugum degismese bile zaman gecince durum
+    // degisir. Bu yuzden dakikada bir yeniden degerlendirilir.
+    if(!window._sahaBakimT) window._sahaBakimT = setInterval(_sahaBakimUygula, 60000);
+  }catch(e){}
+}
 function _sahaFiksturDinle(){
+  try{ _sahaBakimDinle(); }catch(e){}
   if(!fbHazir) return;
   fbDb.ref('leagues/'+sahaLigId+'/teams').on('value', function(sn){
     sahaLigTakimlar = sn.val() || {};
@@ -959,7 +1044,13 @@ function oyuncuSatinAl(id){
   g['kullanicilar/'+benimUid+'/para'] = (benimKayit.para||0) - (o.fiyat||0);
   fbDb.ref().update(g)
     .then(function(){ mesaj('SATIN ALINDI', o.ad, 1800); })
-    .catch(function(){ mesaj('', 'Islem basarisiz', 1600); });
+    .catch(function(err){
+      // SENSOR: Satin alma basarisiz oldugunda kullanici "para gitti mi" diye bilemiyordu.
+      DiagSaha('satinAlma', err, {oyuncu:(o&&o.ad)||'', fiyat:(o&&o.fiyat)||0,
+        anlami:'Oyuncu satin alma islemi reddedildi; para dusmedi.',
+        oneri:'oyuncuHavuzu ve kullanicilar yazma kurallarini denetleyin.'});
+      mesaj('', 'Islem basarisiz', 1600);
+    });
 }
 
 // Baglanti asamalarini ekrana yazar. Uc turdur tahminle ilerledigimiz icin eklendi.
@@ -1267,10 +1358,87 @@ function magazaCiz(){
   }catch(e){}
 }
 
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   HATA YAKALAMA (kullanici talebi: "sensor olmayan yerlere ekle")
+   Oyunda hicbir hata yakalama yoktu: bir istisna olustugunda oyun sessizce donuyor,
+   kullanici "kasiyor" diyor, sebep hicbir yere yazilmiyordu.
+   Kayitlar Puan Tablosu'nun kullandigi AYNI dugume ('diagnostics/logs') gider; yonetici
+   ayri bir yere bakmak zorunda kalmasin. Modul adi 'saha_oyun'.
+   TASARIM: Kayit YAZMA denemesi bile hata verebilir (kural, ag). O yuzden butun govde
+   try icinde; teshis sisteminin kendisi oyunu dusuremez.
+   ELEME: Ayni hata saniyede onlarca kez tekrarlayabilir (cizim dongusu). Ayni imza 30
+   saniye icinde bir kez yazilir - aksi halde veritabani tek bir hatayla dolar.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+var _diagSonYazim = {};
+function DiagSaha(alan, hata, ek){
+  try{
+    var imza = String(alan) + '|' + String((hata && (hata.message || hata.code)) || hata || '');
+    var now = Date.now();
+    if(_diagSonYazim[imza] && (now - _diagSonYazim[imza]) < 30000) return;
+    _diagSonYazim[imza] = now;
+    try{ console.warn('[saha]', alan, hata); }catch(e){}
+    if(!window.firebase || !firebase.database) return;
+    var kayit = {
+      modul: 'saha_oyun',
+      alan: String(alan || ''),
+      mesaj: String((hata && (hata.message || hata.code)) || hata || ''),
+      yigin: String((hata && hata.stack) || '').slice(0, 900),
+      surum: (window.APP_BUILD || ''),
+      cihaz: String(navigator.userAgent || '').slice(0, 180),
+      uid: (function(){ try{ return (firebase.auth().currentUser||{}).uid || ''; }catch(e){ return ''; } })(),
+      ts: now
+    };
+    if(ek) for(var k in ek) if(Object.prototype.hasOwnProperty.call(ek,k)) kayit[k] = ek[k];
+    firebase.database().ref('diagnostics/logs').push(kayit).catch(function(){});
+  }catch(e){}
+}
+// YAKALANMAMIS HATALAR: Bir istisna cizim dongusunu koparirsa oyun donar. Bu iki
+// dinleyici o ani yakalar; kullanicinin "oyun kilitlendi" demesi yerine sebep kayda gecer.
+try{
+  window.addEventListener('error', function(e){
+    DiagSaha('yakalanmamisHata', (e && e.error) || (e && e.message), {
+      dosya: String((e && e.filename) || '').slice(-60),
+      satir: (e && e.lineno) || 0,
+      anlami: 'Yakalanmamis bir istisna olustu; cizim dongusu kopmus olabilir.'
+    });
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    DiagSaha('yakalanmamisSoz', (e && e.reason), {
+      anlami: 'Bir soz (promise) reddedildi ve hicbir yerde ele alinmadi.',
+      oneri: 'Cogunlukla Firebase yazma/okuma reddi ya da ag hatasidir.'
+    });
+  });
+}catch(e){}
+// CIZIM DONGUSU SENSORU: Kare suresi surekli yuksekse oyun takiliyor demektir.
+// Tek bir yavas kare normaldir (sekme arka plana alinir); 30 karelik ortalama bakilir.
+var _kareOlcum = [], _kareSonUyari = 0;
+function sahaKareOlc(dt){
+  try{
+    if(!isFinite(dt) || dt <= 0) return;
+    _kareOlcum.push(dt);
+    if(_kareOlcum.length < 30) return;
+    var top = 0;
+    for(var i = 0; i < _kareOlcum.length; i++) top += _kareOlcum[i];
+    var ort = top / _kareOlcum.length;
+    _kareOlcum.length = 0;
+    // 1/15 sn = 66ms: bu esigin altinda oyun akici sayilir. Ustunde surekli kalmak
+    // kullanicinin "kasiyor" dedigi durumdur.
+    if(ort > 0.066 && (Date.now() - _kareSonUyari) > 60000){
+      _kareSonUyari = Date.now();
+      DiagSaha('dusukKareHizi', new Error('Ortalama kare suresi ' + Math.round(ort*1000) + 'ms'), {
+        tur: 'uyari',
+        fps: Math.round(1/ort),
+        anlami: 'Oyun 15 kare/saniyenin altinda calisiyor; gozle takilma olarak hissedilir.',
+        oneri: 'Grafik ayarini dusurun ya da acik sekme sayisini azaltin.'
+      });
+    }
+  }catch(e){}
+}
+
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-H';
+window.APP_BUILD = '2026-09-18-L';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3249,6 +3417,8 @@ function bitir(){
 function loop(){
   requestAnimationFrame(loop);
   const ham = Math.min(clock.getDelta(), 0.25);
+  // Kare hizi sensoru: surekli dusuk hiz kayda gecer (bkz. sahaKareOlc).
+  try{ sahaKareOlc(ham); }catch(e){}
   fpsSay++; fpsSure += ham;
   if (fpsSure >= 0.5){ fps = fpsSay / fpsSure; fpsSay = 0; fpsSure = 0; }
   if (window._sahaIzleModu){
@@ -3643,8 +3813,60 @@ function _sahaIzleFormaUygula(homeJer, awayJer){
   }catch(e){}
 }
 // Firebase'den gelen ham anlık görüntüyü, HUD'a ve _sahaIzleHedef'e işler.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// IZLEYICI SESI (kullanici: "izleyiciye ses gitmiyor")
+// KOK SEBEP: Izleyici bir VIDEO izlemiyor - 3D sahne Firebase'den gelen konumlarla
+// yeniden ciziliyor. Yani aktarilan bir ses kanali HIC YOK; oynayanin duydugu sesler
+// onun cihazinda uretiliyor ve kimseye gitmiyor.
+// COZUM: Ses AKTARILMAZ, izleyicinin cihazinda YENIDEN URETILIR. Skor ve dakika zaten
+// geliyor; degisimlerden hangi olayin oldugu cikarilip ayni ses calinir.
+// Neden aktarim degil: ses akisi WebRTC ya da sunucu tarafi karisim ister - her izleyici
+// icin ayri baglanti demek. Yeniden uretim bedava ve gecikmesiz.
+// SINIR: Yalnizca skor ve devre degisiminden cikarilabilen olaylar seslendirilir
+// (gol, devre, bitis). Pas ve sut sesleri konum akisinda yok; onlar icin olay akisinin
+// da aktarilmasi gerekir - simdilik kapsam disi.
+var _izleSonSkor = null, _izleSonDevre = null, _izleSesAcik = false;
+function _sahaIzleSesTetikle(m){
+  try{
+    if(!_izleSesAcik) return;
+    var hg = Number(m.homeGoals)||0, ag = Number(m.awayGoals)||0;
+    var dk = Math.max(0, Math.round(m.minute||0));
+    if(_izleSonSkor){
+      // GOL: skor arttiysa. Hangi takim attigi onemli degil - tribun ayni tepki verir.
+      if(hg > _izleSonSkor.h || ag > _izleSonSkor.a){
+        try{ sesDuduk(false); }catch(e){}
+        try{ sesTribun(0.30, 3.2); }catch(e){}
+        setTimeout(function(){ try{ sesTribun(0.05, 2.0); }catch(e){} }, 3400);
+      }
+    }
+    // DEVRE ARASI ve MAC SONU: uzun duduk.
+    var devre = dk > 45 ? 2 : 1;
+    if(_izleSonDevre != null && devre !== _izleSonDevre){ try{ sesDuduk(true); }catch(e){} }
+    if(m.played && !window._izleBitisCalindi){
+      window._izleBitisCalindi = true;
+      try{ sesDuduk(true); }catch(e){}
+    }
+    _izleSonSkor = { h:hg, a:ag };
+    _izleSonDevre = devre;
+  }catch(e){}
+}
+// Tarayici kurali: ses ancak kullanici dokunusundan SONRA acilabilir. Izleyici zaten
+// maci acmak icin dokunuyor; o an yakalanir ve tribun ortam sesi baslar.
+try{
+  var _izleSesAc = function(){
+    try{
+      if(typeof sesBaslat === 'function') sesBaslat();
+      _izleSesAcik = true;
+      if(window._sahaIzleModu){ try{ sesTribun(0.05, 1.5); }catch(e){} }
+    }catch(e){}
+    document.removeEventListener('pointerdown', _izleSesAc, true);
+  };
+  document.addEventListener('pointerdown', _izleSesAc, true);
+}catch(e){}
+
 function _sahaIzleVeriUygula(m){
   if(!m){ window._sahaIzleHedef = null; return; }
+  try{ _sahaIzleSesTetikle(m); }catch(e){}
   window._sahaIzleHedef = {
     top: (typeof m.ballX === 'number' && typeof m.ballZ === 'number') ? { x:m.ballX, z:m.ballZ } : null,
     home: Array.isArray(m.homePlayers) ? m.homePlayers : [],
