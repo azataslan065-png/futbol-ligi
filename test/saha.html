@@ -523,14 +523,21 @@ function makePlayer(m){
   numaraMesh.rotation.y = -Math.PI/2;
   g.add(numaraMesh);
 
+  // OKUNABİLİRLİK DÜZELTMESİ (2026-09-18-D, kullanıcı bildirdi: "bu yazı fontu okunamıyor"):
+  // Doku 256x64 iken üzerine 30px yazı basılıyordu; oyuncu kameradan uzaklaştığında (geniş
+  // açılı/uzak çekimlerde) bu piksel yoğunluğu yazıyı bulanıklaştırıyordu. Doku çözünürlüğü
+  // ve yazı tipi büyütüldü, ayrıca okunurluğu artırmak için isim etiketinin ARKASINA yarı
+  // saydam bir şerit eklendi (önceden yalnızca ince siyah kontur vardı - açık renkli çim/gökyüzü
+  // önünde yetersiz kalıyordu). Sprite dünya ölçeği de büyütülerek sahnede daha büyük görünmesi
+  // sağlandı.
   const isimTuval = document.createElement('canvas');
-  isimTuval.width = 256; isimTuval.height = 64;
+  isimTuval.width = 384; isimTuval.height = 96;
   const isimDoku = new THREE.CanvasTexture(isimTuval);
   const isimSprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map:isimDoku, transparent:true, depthWrite:false })
   );
-  isimSprite.scale.set(1.9, 0.48, 1);
-  isimSprite.position.y = 2.06;
+  isimSprite.scale.set(2.3, 0.58, 1);
+  isimSprite.position.y = 2.1;
   g.add(isimSprite);
 
   g.userData = { legL, legR, armL, armR, phase:Math.random()*6,
@@ -555,14 +562,29 @@ function etiketYaz(p){
     }
     if(u.yaziliAd !== p.ad){
       const c = u.isimTuval.getContext('2d');
-      c.clearRect(0,0,256,64);
+      c.clearRect(0,0,384,96);
       // Soyad yeterli: tam ad kucuk olcekte okunmaz, uzun adlar tasar.
       const kisa = String(p.ad||'').trim().split(/\s+/).pop() || '';
-      c.font = 'bold 30px Arial'; c.textAlign='center'; c.textBaseline='middle';
-      c.lineWidth = 6; c.strokeStyle = 'rgba(0,0,0,.6)';
-      c.strokeText(kisa, 128, 34);
-      c.fillStyle = '#eef2ee';
-      c.fillText(kisa, 128, 34);
+      // Kontrast şeridi: açık çim/gök zemininde ince konturlu yazı kayboluyordu - arkaya
+      // yarı saydam koyu bir kapsül eklenip yazı bunun üzerine basılıyor.
+      c.font = 'bold 46px Arial'; c.textAlign='center'; c.textBaseline='middle';
+      // NOT: c.roundRect() bazı eski WebView sürümlerinde desteklenmiyor - taşınabilirlik
+      // için köşeler elle (arc ile) çiziliyor.
+      const genislik = Math.min(376, c.measureText(kisa).width + 36);
+      const rx = 192 - genislik/2, ry = 24, rw = genislik, rh = 48, rr = 22;
+      c.fillStyle = 'rgba(0,0,0,.55)';
+      c.beginPath();
+      c.moveTo(rx+rr, ry);
+      c.arcTo(rx+rw, ry, rx+rw, ry+rh, rr);
+      c.arcTo(rx+rw, ry+rh, rx, ry+rh, rr);
+      c.arcTo(rx, ry+rh, rx, ry, rr);
+      c.arcTo(rx, ry, rx+rw, ry, rr);
+      c.closePath();
+      c.fill();
+      c.lineWidth = 7; c.strokeStyle = 'rgba(0,0,0,.7)';
+      c.strokeText(kisa, 192, 50);
+      c.fillStyle = '#ffffff';
+      c.fillText(kisa, 192, 50);
       u.isimDoku.needsUpdate = true; u.yaziliAd = p.ad;
     }
   }catch(e){}
@@ -1224,7 +1246,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-C';
+window.APP_BUILD = '2026-09-18-D';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3411,22 +3433,23 @@ function _sahaIzleUIHazirla(){
   // konumu ve paylaşılan CSS'i DEĞİŞTİRİLMEDİ, bkz. #board kuralı üstteki <style>). Üst-sol ve
   // üst-sağ köşeler böylece BOŞ kalıyor - admin'in bu yayına ekleyebileceği isteğe bağlı
   // metin/logo rozeti (bkz. _sahaIzleRozetUygula) için ayrılmış.
-  // KULLANICI TALEBİ (2026-09-18-C): Skorbord küçük ekranlı (dar) gömülü önizlemede
-  // ORTALANMIŞ ve tam boyutlu durduğu için genişliği konteynerden taşabiliyor, body'deki
-  // overflow:hidden (bkz. yukarıdaki genel kural) taşan kısmı KIRPIYOR - küçük ekranda
-  // skorbord eksik/kısıtlı görünüyordu, oysa geniş (tam ekran) görünümde aynı ortalanmış
-  // konum sorun çıkarmıyordu. ÇÖZÜM: skorbord SOLA sabitlenip (taşma riski ortadan kalkar,
-  // hiçbir kenardan taşmaz) transform:scale ile KÜÇÜLTÜLÜYOR - scale, içeriği ORANTILI
-  // küçülttüğü için (tek tek font-size'ları ayrı ayrı ayarlamaktan farklı olarak) skorbord
-  // küçük ekranda da tam ekrandaki ile BİREBİR AYNI, eksiksiz görünüme sahip oluyor.
+  // DÜZELTME (2026-09-18-D): 2026-09-18-C'de skorbord sol üst köşeye taşınmıştı, ama üst-sol
+  // (ve üst-sağ) köşeler ZATEN admin'in yayına ekleyebileceği isteğe bağlı rozet için ayrılmış
+  // alan (bkz. hemen aşağıdaki _sahaIzleRozetUygula - #sahaIzleRozet, poz='sol' iken TAM OLARAK
+  // aynı top:10px/left:10px köşesine, aynı z-index:60 değeriyle, board'dan SONRA DOM'a ekleniyor).
+  // Admin sol köşeye bir rozet koyduğunda bu rozet skorbordun TAM ÜSTÜNE opak arka planla
+  // biniyor ve skorbordu tamamen görünmez kılıyordu - "skorbord hiç görünmüyor" şikayeti buydu.
+  // Ayrıca %22 küçültme (scale(.78)) gereğinden fazlaydı. ÇÖZÜM: skorbord köşeye değil, rozet
+  // alanlarıyla hiç çakışmayan ORTALANMIŞ konumuna (üst-orta) geri alınıyor, yalnızca istenen
+  // %5 oranında küçültülüyor.
   try{
     var board = document.getElementById('board');
     if(board){
-      board.style.left = '8px';
-      board.style.top = '8px';
+      board.style.left = '50%';
+      board.style.top = '10px';
       board.style.right = 'auto';
-      board.style.transform = 'scale(.78)';
-      board.style.transformOrigin = 'left top';
+      board.style.transform = 'translateX(-50%) scale(.95)';
+      board.style.transformOrigin = 'center top';
       board.style.zIndex = '60';
     }
   }catch(e){}
