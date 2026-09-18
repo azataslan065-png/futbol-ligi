@@ -324,7 +324,25 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0e1a16);
 scene.fog = new THREE.Fog(0x0e1a16, 110, 240);
-const camera = new THREE.PerspectiveCamera(46, innerWidth/innerHeight, 0.5, 500);
+// GÖRÜŞ AÇISI DÜZELTMESİ (2026-09-18-D, kullanıcı bildirdi: "küçük ekranda sahanın her
+// tarafı görünmüyor"): Kamera SABİT bir DİKEY görüş açısıyla (46°) kuruluyordu ve resize'da
+// yalnızca 'aspect' güncelleniyordu - three.js'te 'fov' DİKEY açıdır, YATAY açı ise
+// aspect*fov'dan türetilir. Sonuç: dar/uzun (dikey/portre telefon) ekranlarda aspect küçük
+// olduğu için YATAY görüş açısı ÇOK daralıyordu - sahanın SOL/SAĞ kenarları (taç çizgileri)
+// ekrana sığmıyordu. Geniş (masaüstü/yatay) ekranda bu sorun hiç yaşanmıyordu çünkü o
+// oranlarda yatay açı zaten genişti. ÇÖZÜM: 46°'lik dikey açı yalnızca REFERANS 16:9 oranı
+// İÇİN geçerli kabul edilip, daha dar oranlarda YATAY açı SABİT TUTULACAK şekilde dikey açı
+// otomatik büyütülüyor (bkz. _kameraFovHesapla) - böylece saha genişliği ekran şekli ne
+// olursa olsun (dar telefon dahil) her zaman tam görünür.
+const _KAMERA_TABAN_FOV = 46, _KAMERA_TABAN_ORAN = 16/9;
+function _kameraFovHesapla(aspect){
+  if(!aspect || aspect >= _KAMERA_TABAN_ORAN) return _KAMERA_TABAN_FOV;
+  var v0rad = _KAMERA_TABAN_FOV*Math.PI/180;
+  var tanYeniYari = Math.tan(v0rad/2) * _KAMERA_TABAN_ORAN / aspect;
+  var vDeg = 2*Math.atan(tanYeniYari)*180/Math.PI;
+  return Math.min(120, vDeg);   // aşırı dar ekranlarda (ör. bölünmüş ekran) çılgın bozulmayı önler
+}
+const camera = new THREE.PerspectiveCamera(_kameraFovHesapla(innerWidth/innerHeight), innerWidth/innerHeight, 0.5, 500);
 
 const gokIsik = new THREE.HemisphereLight(0xe4eef6, 0x35452f, 0.85);
 scene.add(gokIsik);
@@ -3365,6 +3383,7 @@ addEventListener('keydown', e => {
 });
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight;
+  camera.fov = _kameraFovHesapla(camera.aspect);
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
@@ -3433,23 +3452,18 @@ function _sahaIzleUIHazirla(){
   // konumu ve paylaşılan CSS'i DEĞİŞTİRİLMEDİ, bkz. #board kuralı üstteki <style>). Üst-sol ve
   // üst-sağ köşeler böylece BOŞ kalıyor - admin'in bu yayına ekleyebileceği isteğe bağlı
   // metin/logo rozeti (bkz. _sahaIzleRozetUygula) için ayrılmış.
-  // DÜZELTME (2026-09-18-D): 2026-09-18-C'de skorbord sol üst köşeye taşınmıştı, ama üst-sol
-  // (ve üst-sağ) köşeler ZATEN admin'in yayına ekleyebileceği isteğe bağlı rozet için ayrılmış
-  // alan (bkz. hemen aşağıdaki _sahaIzleRozetUygula - #sahaIzleRozet, poz='sol' iken TAM OLARAK
-  // aynı top:10px/left:10px köşesine, aynı z-index:60 değeriyle, board'dan SONRA DOM'a ekleniyor).
-  // Admin sol köşeye bir rozet koyduğunda bu rozet skorbordun TAM ÜSTÜNE opak arka planla
-  // biniyor ve skorbordu tamamen görünmez kılıyordu - "skorbord hiç görünmüyor" şikayeti buydu.
-  // Ayrıca %22 küçültme (scale(.78)) gereğinden fazlaydı. ÇÖZÜM: skorbord köşeye değil, rozet
-  // alanlarıyla hiç çakışmayan ORTALANMIŞ konumuna (üst-orta) geri alınıyor, yalnızca istenen
-  // %5 oranında küçültülüyor.
+  // KULLANICI TALEBİ (2026-09-18-D): Skorbord tekrar SOLA alınıyor. Önceki turda ortaya
+  // alınmasının sebebi, sol üst köşenin admin yayın rozetiyle (_sahaIzleRozetUygula, poz='sol')
+  // ÇAKIŞMASIYDI - o çakışma artık AŞAĞIDA rozet fonksiyonunda ayrıca çözüldü (rozet artık
+  // skorbordun altına iniyor, üstüne binmiyor) - bu yüzden skorbord güvenle sola dönebiliyor.
   try{
     var board = document.getElementById('board');
     if(board){
-      board.style.left = '50%';
-      board.style.top = '10px';
+      board.style.left = '8px';
+      board.style.top = '8px';
       board.style.right = 'auto';
-      board.style.transform = 'translateX(-50%) scale(.95)';
-      board.style.transformOrigin = 'center top';
+      board.style.transform = 'scale(.95)';
+      board.style.transformOrigin = 'left top';
       board.style.zIndex = '60';
     }
   }catch(e){}
@@ -3479,7 +3493,27 @@ function _sahaIzleUIHazirla(){
 // logo ekleyebilsin". Admin panelindeki Canlı Panel'de (bkz. admin.html/buildLivePanel)
 // girilen leagues/{lig}/matches/{mac} altındaki canliRozetPoz ('sol'|'sag'), canliRozetMetin
 // ve canliRozetLogo alanlarından okunur - üçü de boşsa hiçbir şey çizilmez.
+// DÜZELTME (2026-09-18-D): Sol üst köşede artık skorbord (#board), sağ üst köşede geri dönüş
+// (✕) düğmesi duruyor - rozet AYNI köşeye sabit top:10px ile konursa bunların ÜSTÜNE binip
+// ikisini de (ya da kendisini) görünmez kılabiliyordu. Artık rozetin dikey konumu, o köşede
+// zaten duran öğenin GERÇEK yüksekliği ölçülerek (getBoundingClientRect) hesaplanıyor - rozet
+// her zaman o öğenin HEMEN ALTINA iniyor, hiçbir şeyin üstüne binmiyor.
 // ══════════════════════════════════════════════════════════════════════════════════════
+function _sahaIzleRozetUstOfset(poz){
+  try{
+    var digerId = poz === 'sag' ? null : 'board';    // sağ köşede sabit-boyutlu ✕ düğmesi var, ölçmeye gerek yok
+    if(digerId){
+      var digerEl = document.getElementById(digerId);
+      if(digerEl){
+        var r = digerEl.getBoundingClientRect();
+        if(r && r.height) return Math.ceil(r.top + r.height + 8);
+      }
+    } else {
+      return 52; // ✕ geri dönüş düğmesi: top:10px + 34px yükseklik + boşluk
+    }
+  }catch(e){}
+  return 10;
+}
 function _sahaIzleRozetUygula(m){
   try{
     var poz = (m && m.canliRozetPoz === 'sag') ? 'sag' : 'sol';
@@ -3490,7 +3524,7 @@ function _sahaIzleRozetUygula(m){
     if(!el){
       el = document.createElement('div');
       el.id = 'sahaIzleRozet';
-      el.style.cssText = 'position:fixed;top:10px;z-index:60;display:flex;align-items:center;'
+      el.style.cssText = 'position:fixed;z-index:60;display:flex;align-items:center;'
         +'gap:.4rem;background:rgba(12,12,16,.78);backdrop-filter:blur(6px);'
         +'border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:.32rem .7rem;'
         +'font:700 12px/1 Arial,sans-serif;color:#fff;letter-spacing:.02em;pointer-events:none;'
@@ -3498,6 +3532,7 @@ function _sahaIzleRozetUygula(m){
       document.body.appendChild(el);
     }
     el.style.display = 'flex';
+    el.style.top = _sahaIzleRozetUstOfset(poz) + 'px';
     el.style.left = poz === 'sol' ? '10px' : 'auto';
     el.style.right = poz === 'sag' ? '10px' : 'auto';
     var html = '';
@@ -3683,8 +3718,16 @@ function _sahaIzleKareAdimla(dt){
     ball.position.z += (bz-ball.position.z)*lerp;
     ball.position.y += (0.22-ball.position.y)*lerp;
   }
-  _sahaIzleTakimUygula(teamB, h.home, lerp);   // ev sahibi - mavi (2D mini-saha ile aynı renk kuralı)
-  _sahaIzleTakimUygula(teamA, h.away, lerp);   // deplasman - kırmızı
+  // KULLANICI TALEBİ (2026-09-18-D, "admin eklediği zaman her canlı maçta görünmeli"): Rozet/
+  // skorbord artık sahaMode ile SINIRLI DEĞİL - saha 3D motoruyla FİİLEN OYNANMAYAN (yani konum
+  // akışı hiç yazılmamış) bir maç da izle sayfasında açılabiliyor. Böyle bir maçta h.home/h.away
+  // dizileri hep BOŞ gelir - önceden bu durumda _sahaIzleTakimUygula her oyuncuyu TEK TEK
+  // "karşılığı yok" sayıp GİZLİYORDU, sahne tamamen boş (oyuncusuz) kalıyordu. Artık dizi
+  // tamamen boşsa (gerçek bir konum akışı hiç yoksa) dokunulmuyor - oyuncular sayfa açılışındaki
+  // varsayılan diziliş konumunda (dizil()) görünmeye devam ediyor; yalnızca GERÇEK bir konum
+  // akışı geldiğinde (dizi doluysa) canlı takip devreye giriyor.
+  if(h.home && h.home.length) _sahaIzleTakimUygula(teamB, h.home, lerp);   // ev sahibi - mavi (2D mini-saha ile aynı renk kuralı)
+  if(h.away && h.away.length) _sahaIzleTakimUygula(teamA, h.away, lerp);   // deplasman - kırmızı
   // Yayın kamerası: topu yumuşak biçimde takip eden sabit-yükseklik kamera.
   var camLerp = Math.min(1, dt*2);
   var camX = ball.position.x*0.55, camZ = 28 + ball.position.z*0.35;
