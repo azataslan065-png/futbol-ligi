@@ -1079,10 +1079,17 @@ iframe.ptp-video{pointer-events:none}
    oranindan bagimsiz. Yayin dunyasinda da ayni yontem kullanilir.
    Ayrica olcek ekran genisligine gore clamp ile kuculuyor; dar ekranda tasmiyor.
    ══════════════════════════════════════════════════════════════════════════════════════ */
-.ptp-skor{position:absolute;left:3%;top:calc(3% + 2.6rem);z-index:75;display:flex;align-items:stretch;
+/* KULLANICI TALEBİ (2026-09-18-I): "Saha uygulamasındaki maç skorbordunu ve puan tablosunu,
+   TV sekmesindeki izleyici skorbordunu yüzde 10 küçültüp ekranın sol üst köşesine tam
+   yerleştir" - önceki %3 kenar boşluğu + üst bar payı (calc(3% + 2.6rem)) kaldırıldı, skorbord
+   artık TAM köşede (0,0) duruyor ve transform:scale(.9) ile saha.html'deki #board'la (bkz. o
+   dosyadaki aynı düzeltme) BİREBİR AYNI oranda (%10) küçültülüyor. transform-origin:left top
+   sayesinde küçülme köşeden dışarı taşmadan, köşeye yaslanarak gerçekleşiyor. */
+.ptp-skor{position:absolute;left:0;top:0;z-index:75;display:flex;align-items:stretch;
   background:rgba(8,13,11,.8);border:1px solid rgba(255,255,255,.16);border-radius:4px;
   overflow:hidden;font-weight:700;letter-spacing:.06em;pointer-events:none;
-  font-size:clamp(8px,2.2vw,12.35px);line-height:1;max-width:94%}
+  font-size:clamp(8px,2.2vw,12.35px);line-height:1;max-width:94%;
+  transform:scale(.9);transform-origin:left top}
 .ptp-skor .kod{padding:6.65px 9.5px;white-space:nowrap}
 .ptp-skor .kod.a{background:rgba(216,68,58,.9);color:#fff}
 .ptp-skor .kod.b{background:rgba(61,127,212,.9);color:#fff}
@@ -25024,6 +25031,26 @@ window.PTPlayer=(function(){
 // OYNATICIDAN BAGIMSIZ: rozet position:fixed ile SAYFAYA baglanir, oynaticinin sahnesine
 // degil. Boylece oynatici kapali olsa da, video orani ne olursa olsun gorunur kalir -
 // kullanici talebi tam olarak buydu.
+// KULLANICI TALEBİ (2026-09-18-I, "bu puan tablosu TV sekmesi açıklamalarda belirtilenin
+// aksine, isteğe bağlı olarak ekranın sağ veya sol üst köşesine yerleştirilebilir"): KÖK
+// SEBEP - rozet burada (index.html tarafında) yanlışlıkla ekranın ALTINA (bottom) sabit
+// konuluyordu. Oysa hem admin panelindeki alan adı/açıklaması (canliRozetPoz: 'sol'|'sag')
+// hem de saha.html'deki KENDİ karşılığı (_sahaIzleRozetUygula) rozeti ÜST-sol/ÜST-sağ köşeye
+// yerleştiriyor - iki taraf tutarsızdı. Artık burada da rozet ÜST köşeye konuyor. 'sol'
+// seçiliyken, aynı köşede duran skorbordun (.ptp-skor, bkz. yukarıdaki CSS kuralı - artık tam
+// köşede) ÜSTÜNE binmemesi için dikey konum, skorbordun GERÇEK yüksekliği ölçülerek
+// (getBoundingClientRect) hesaplanıyor - saha.html'deki _sahaIzleRozetUstOfset ile AYNI yöntem.
+function ptCanliRozetUstOfset(poz){
+  try{
+    if(poz === 'sag') return 10;    // sağ üst köşede skorbordla çakışma yok, sabit boşluk yeter
+    var sk = document.getElementById('ptpSkor');
+    if(sk && sk.style.display !== 'none'){
+      var r = sk.getBoundingClientRect();
+      if(r && r.height) return Math.ceil(r.top + r.height + 8);
+    }
+  }catch(e){}
+  return 10;
+}
 window._ptCanliRozet = null;
 function ptCanliRozetDinle(){
   try{
@@ -25060,14 +25087,12 @@ function ptCanliRozetUygula(){
     // appendChild altta) tam ekran köküyle eş zamanlı var olsa bile HER ZAMAN üstte kalması
     // garanti ediliyor.
     document.body.appendChild(el);
-    // Ust bar ve skorboardla cakismasin diye asagidan konumlanir; guvenli alan mantigi
-    // (kenardan %3) burada da gecerli.
     el.style.cssText = 'position:fixed;z-index:2147483647;display:flex;align-items:center;'
       + 'gap:.4rem;background:rgba(12,12,16,.78);backdrop-filter:blur(6px);'
       + 'border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:.32rem .7rem;'
       + 'font:700 12px/1 Arial,sans-serif;color:#fff;letter-spacing:.02em;pointer-events:none;'
-      + 'max-width:46vw;bottom:calc(env(safe-area-inset-bottom,0px) + 14px);'
-      + (poz === 'sag' ? 'right:3%;' : 'left:3%;');
+      + 'max-width:46vw;top:' + ptCanliRozetUstOfset(poz) + 'px;'
+      + (poz === 'sag' ? 'right:10px;' : 'left:10px;');
     el.innerHTML = (logo
         ? '<img src="' + escAttr(logo) + '" alt="" style="height:18px;width:auto;'
           + 'max-width:64px;object-fit:contain;display:block" onerror="this.style.display=\'none\'"/>'
@@ -25122,6 +25147,10 @@ function ptpYayinBindirmeGuncelle(){
         + (dk ? '<div class="sr">' + dk + (uz ? '<span class="uz">' + uz + '</span>' : '') + '</div>' : '');
       sk.style.display = 'flex';
     }
+
+    // Skorbord görünürlüğü/boyutu değişmiş olabilir (canlı maç başladı/bitti) - yayın rozeti
+    // (varsa) konumunu buna göre yeniden hesaplar (bkz. ptCanliRozetUstOfset).
+    try{ if(window._ptCanliRozet) ptCanliRozetUygula(); }catch(e){}
 
     // Yonetici tarafindan kanala eklenen logo ve alt yazi.
     if(lg){
