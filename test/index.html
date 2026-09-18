@@ -1079,14 +1079,14 @@ iframe.ptp-video{pointer-events:none}
    oranindan bagimsiz. Yayin dunyasinda da ayni yontem kullanilir.
    Ayrica olcek ekran genisligine gore clamp ile kuculuyor; dar ekranda tasmiyor.
    ══════════════════════════════════════════════════════════════════════════════════════ */
-/* KULLANICI TALEBİ (2026-09-18-J): "Skorbordu %5 aşağı ve sağa kaydırabilirsin" - tam köşe
-   (0,0) yerine köşeden %5 içeride duruyor artık; ölçek (%10 küçültme) ve köşeye yaslı küçülme
-   davranışı (transform-origin:left top) AYNEN korunuyor. */
-.ptp-skor{position:absolute;left:5%;top:5%;z-index:75;display:flex;align-items:stretch;
+/* KULLANICI TALEBİ (2026-09-18-L): "Skorbordu %5 küçült, %1 yukarı, %2 sola taşı" - önceki
+   ölçek (.9) üzerine %5 daha küçültme uygulandı (.9*.95=.855), konum da köşeden %5/%5 iken
+   %1 yukarı (top:4%) ve %2 sola (left:3%) kaydırıldı. transform-origin:left top korunuyor. */
+.ptp-skor{position:absolute;left:3%;top:4%;z-index:75;display:flex;align-items:stretch;
   background:rgba(8,13,11,.8);border:1px solid rgba(255,255,255,.16);border-radius:4px;
   overflow:hidden;font-weight:700;letter-spacing:.06em;pointer-events:none;
   font-size:clamp(8px,2.2vw,12.35px);line-height:1;max-width:94%;
-  transform:scale(.9);transform-origin:left top}
+  transform:scale(.855);transform-origin:left top}
 .ptp-skor .kod{padding:6.65px 9.5px;white-space:nowrap}
 .ptp-skor .kod.a{background:rgba(216,68,58,.9);color:#fff}
 .ptp-skor .kod.b{background:rgba(61,127,212,.9);color:#fff}
@@ -25071,8 +25071,14 @@ function ptCanliRozetUygula(){
     // oynatıcı (TV) ekranı AÇIKKEN görünmeli. #videoPlayerBox yalnızca oynatıcı ekranı
     // mount() edildiğinde DOM'a girer (bkz. mount() fonksiyonu) - bu yüzden onun varlığı
     // "TV ekranı açık mı" sorusunun güvenilir bir göstergesi.
+    // KULLANICI TALEBİ (2026-09-18-L): "Yayın rozeti sadece TV sekmesindeki canlı yayınlanan
+    // maçlarda çıkacak" - oynatıcının açık olması TEK BAŞINA yetmez (izlenen içerik arşiv bir
+    // video/VOD ya da canlı olmayan bir kanal olabilir); window._ptCanliMacIzleniyor (bkz.
+    // ptpYayinBindirmeGuncelle) o an izlenen kanala bağlı GERÇEKTEN canlı bir maç olup
+    // olmadığını tutar - rozet İKİSİ de doğruyken gösterilir.
     var oynaticiAcik = !!document.getElementById('videoPlayerBox');
-    if(!metin && !logo || !oynaticiAcik){ if(el) el.style.display='none'; return; }
+    var canliMacVar = !!window._ptCanliMacIzleniyor;
+    if(!metin && !logo || !oynaticiAcik || !canliMacVar){ if(el) el.style.display='none'; return; }
     if(!el){
       el = document.createElement('div');
       el.id = 'ptCanliRozet';
@@ -25127,7 +25133,12 @@ function ptpYayinBindirmeGuncelle(){
     var sk = document.getElementById('ptpSkor');
     var lg = document.getElementById('ptpYayinLogo');
     var yz = document.getElementById('ptpYayinYazi');
-    if(!sk) return;
+    // KULLANICI TALEBİ (2026-09-18-L): "Yayın rozeti sadece TV sekmesindeki canlı yayınlanan
+    // maçlarda çıkacak" - rozetin görünürlüğü artık yalnızca oynatıcının AÇIK olmasına değil
+    // (bkz. window._ptCanliMacIzleniyor), o an İZLENEN kanala bağlı GERÇEKTEN CANLI bir maç
+    // olup olmadığına da bağlı - aşağıda 'm' hesaplanır hesaplanmaz güncellenir.
+    window._ptCanliMacIzleniyor = false;
+    if(!sk){ try{ ptCanliRozetUygula(); }catch(e){} return; }
 
     // Izlenen kanalin bagli oldugu canli mac. Yonetici kanala mac bagladiysa
     // (v.macId) o maci, baglamadiysa o an canli olan tek maci gosteririz.
@@ -25140,6 +25151,7 @@ function ptpYayinBindirmeGuncelle(){
       if(v && v.macId && D.matches[v.macId]) m = D.matches[v.macId];
       else if(hepsi.length === 1) m = hepsi[0];
     }catch(e){}
+    window._ptCanliMacIzleniyor = !!m;
 
     if(!m){ sk.style.display='none'; }
     else{
@@ -25157,8 +25169,9 @@ function ptpYayinBindirmeGuncelle(){
     }
 
     // Skorbord görünürlüğü/boyutu değişmiş olabilir (canlı maç başladı/bitti) - yayın rozeti
-    // (varsa) konumunu buna göre yeniden hesaplar (bkz. ptCanliRozetUstOfset).
-    try{ if(window._ptCanliRozet) ptCanliRozetUygula(); }catch(e){}
+    // (varsa) konumunu ve görünürlüğünü buna göre yeniden hesaplar (bkz. ptCanliRozetUstOfset
+    // ve ptCanliRozetUygula içindeki "canlıMacVar" kontrolü).
+    try{ ptCanliRozetUygula(); }catch(e){}
 
     // Yonetici tarafindan kanala eklenen logo ve alt yazi.
     if(lg){
