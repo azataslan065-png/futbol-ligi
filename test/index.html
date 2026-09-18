@@ -2479,7 +2479,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-B';
+window.APP_BUILD='2026-09-18-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21625,10 +21625,22 @@ window.openChannelLockedSheet=function(videoId){
 // linki değil, saha.html'in kendi 3D motorunun "seyirci modu"dur (bkz. openSahaCanliIzle) -
 // oyuncunun ekranındaki sahneyi birebir aynı verilerle (top+22 oyuncu konumu, skor, dakika)
 // canlı olarak yeniden çizer.
+// KULLANICI TALEBİ ("TV sekmesinde maç izlenirken site bilgileri görünüyor - diğer canlı
+// kanalların başka sitelere gömülü şekilde izlendiği gibi olsun"): Önceden bu kart tıklanınca
+// location.href ile TAM SAYFA yönlendirme yapılıyordu (saha.html'e geçiliyordu) - bu, admin'in
+// eklediği YouTube/Twitch/m3u8 kanallarının izlendiği gömülü (iframe) oynatıcı boru hattına
+// (bkz. openVideoWatch/PTPlayer) hiç girmiyordu, dolayısıyla o boru hattının ZATEN çözdüğü
+// "tam ekranda site bilgisi/adres çubuğu görünmesin" mekanizmasından (bkz. PTPlayer'daki
+// toggleFullscreen notu) da yararlanamıyordu. Artık maç kartı da diğer kanallar gibi bir
+// 'url' taşıyor - kendi sunucumuzdaki saha.html'in seyirci sayfası (?izle=1). Bu adres
+// isEmbeddableVideoUrl()'de (bkz. aşağıda) her zaman gömülebilir sayılır ve buildVideoEmbedHtml()
+// onu doğrudan bir <iframe>'e çevirir; böylece maç da AYNI PTPlayer kabuğuyla (üst çubuk, tam
+// ekran düğmesi, vs.) açılır - başka bir siteden gömülü bir TV kanalını izlemekten farksız.
 window._ptCanliMacKanallari=function(){
   try{
     var teams=(window.D&&D.teams)||{};
     var matches=(window.D&&D.matches)||{};
+    var lig=window._curLeagueId||'';
     return Object.values(matches).filter(function(m){return m&&m.isLive&&m.sahaMode;}).map(function(m){
       var h=teams[m.homeId]||{},a=teams[m.awayId]||{};
       return {
@@ -21638,7 +21650,8 @@ window._ptCanliMacKanallari=function(){
         isMatchCard:true,
         matchId:m.id,
         logo:h.logo||a.logo||'',
-        category:'⚽ Canlı Maç'
+        category:'⚽ Canlı Maç',
+        url:'saha.html?izle=1&lig='+encodeURIComponent(lig)+'&mac='+encodeURIComponent(m.id)
       };
     });
   }catch(e){return [];}
@@ -21648,20 +21661,12 @@ window._ptCanliMacKanallari=function(){
 window.ptTumKanallar=function(){
   return (window._ptCanliMacKanallari()).concat((window.D&&D.videoLinks)||[]);
 };
-// Maç kartına tıklanınca çağrılır - video oynatıcı pipeline'ına HİÇ girmez, doğrudan
-// saha.html'i "seyirci modunda" açar (bkz. saha.html'deki _sahaIzleModu bloğu).
-window.openSahaCanliIzle=function(matchId){
-  try{if(window.ptGecmiseEkle)ptGecmiseEkle('match_'+matchId);}catch(e){}
-  if(!window._curLeagueId){showToast('❌ Bağlantı bekleniyor, birazdan tekrar dene','er');return;}
-  location.href='saha.html?izle=1&lig='+encodeURIComponent(window._curLeagueId)+'&mac='+encodeURIComponent(matchId);
-};
-// TV listesindeki bir karta tıklandığında çağrılan tek giriş noktası: canlı maç kartıysa
-// (id 'match_' ile başlar) saha.html'e yönlendirir, değilse (admin'in eklediği normal
-// TV/Video kaydı) mevcut video oynatıcıyı açar. Liste/oynatıcı HTML'i bu tek fonksiyonu
-// çağıracak şekilde güncellendi (bkz. renderVideoScreenList içindeki onclick'ler).
+// TV listesindeki bir karta tıklandığında çağrılan tek giriş noktası. KULLANICI TALEBİ
+// üzerine artık canlı maç kartı da (id 'match_' ile başlar) admin'in eklediği normal TV/Video
+// kayıtlarıyla AYNI yoldan, openVideoWatch()/PTPlayer üzerinden açılır - openVideoWatch zaten
+// 'match_' önekini ptTumKanallar()'dan arayacak şekilde ayrılmıştı (bkz. oradaki not), tek
+// eksik buradaki ayrı yönlendirme daliydi; o kaldırıldı.
 window.ptKanalAc=function(id){
-  var s=String(id||'');
-  if(s.indexOf('match_')===0){openSahaCanliIzle(s.slice(6));return;}
   openVideoWatch(id);
 };
 window._videoScreenTab=window._videoScreenTab||'tv';
@@ -23157,6 +23162,12 @@ function ptIsStreamUrl(url){
 }
 function isEmbeddableVideoUrl(url){
   if(!url)return false;
+  // KULLANICI TALEBİ ("TV sekmesinde maç izlerken site bilgileri görünüyor, diğer canlı
+  // kanallar gibi gömülü olsun"): saha.html'in KENDİ seyirci sayfası (?izle=1 - bkz. oradaki
+  // _sahaIzleModu bloğu) her zaman gömülebilir sayılır. Bu, admin'in yapıştırdığı harici bir
+  // link DEĞİL - bizim ptKanalAc/_ptCanliMacKanallari'nin kendi ürettiği, sabit ve güvenli bir
+  // adrestir (bkz. yukarıdaki not), bu yüzden ana makine/whitelist denetimine hiç gerek yok.
+  if(/(^|\/)saha\.html\?/.test(url)&&/[?&]izle=1(&|$)/.test(url))return true;
   const host=getUrlHostname(url);
   if(isKnownVideoHost(host,['youtube.com','youtube-nocookie.com','youtu.be'])){
     // KALICI CANLI YAYIN GÖMME: youtube.com/embed/live_stream?channel=KANAL_ID adresi, o
@@ -23229,6 +23240,15 @@ function isEmbeddableVideoUrl(url){
 // yani iki yol da kapalı.
 function buildVideoEmbedHtml(url,basSn,bitSn){
   try{
+    // KULLANICI TALEBİ (devamı - bkz. isEmbeddableVideoUrl'deki not): saha.html'in seyirci
+    // sayfası doğrudan bir <iframe>'e verilir. YouTube/Twitch'te olduğu gibi kontrolleri
+    // kapatıp kendi arayüzümüzle sürmemiz gerekmiyor - sayfa zaten SADECE yayını gösterir
+    // (bkz. saha.html/_sahaIzleUIHazirla, giriş/menü ekranları orada kapatılıyor). allowfullscreen
+    // sayesinde PTPlayer'ın ⛶ düğmesi bu iframe üzerinden NATIVE tam ekranı isteyebilir - diğer
+    // gömülü kanallarla birebir aynı şekilde tarayıcının adres çubuğu/site bilgisi de gizlenir.
+    if(/(^|\/)saha\.html\?/.test(url)&&/[?&]izle=1(&|$)/.test(url)){
+      return `<iframe src="${url}" style="width:100%;aspect-ratio:16/9;border:none;border-radius:14px" allow="autoplay;fullscreen" allowfullscreen></iframe>`;
+    }
     const host=getUrlHostname(url);
     if(isKnownVideoHost(host,['youtube.com','youtube-nocookie.com','youtu.be'])){
       // Kanal kimliği verilmişse KALICI canlı yayın oynatıcısı kurulur (bkz.
