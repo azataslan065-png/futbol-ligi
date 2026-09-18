@@ -1069,6 +1069,36 @@ iframe.ptp-video{pointer-events:none}
    örtünün ALTINDA kalıyor ve görünmüyordu. Oysa örtünün olduğu anlar, kullanıcının oynatıcıya
    EN ÇOK ihtiyaç duyduğu anlar (devam ettirmek, sarmak, ayar açmak).
    Kontrol katmanı ve ona bağlı yüzeyler (kilit çubuğu, ayar paneli) örtünün ÜSTÜNE alındı. */
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   YAYIN SKORBOARDI - SAHA oyunundaki tasarimin aynisi, %5 kucultulmus.
+   KULLANICI BILDIRDI ("ekran orani geregi gorunmuyor"): Yayin bindirmeleri sahnenin
+   KOSESINE mutlak konumlandirilirsa, video 16/9 disinda bir orandaysa (dikey yayin,
+   4/3 kaynak) siyah bantlarin uzerine dusuyor ya da tasip kirpiliyordu.
+   COZUM: Bindirmeler artik VIDEONUN GORUNEN alanina gore degil, sahnenin kendisine
+   gore ama GUVENLI ALAN (safe area) icinde duruyor - kenardan %3 iceride, en/boy
+   oranindan bagimsiz. Yayin dunyasinda da ayni yontem kullanilir.
+   Ayrica olcek ekran genisligine gore clamp ile kuculuyor; dar ekranda tasmiyor.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+.ptp-skor{position:absolute;left:3%;top:3%;z-index:75;display:flex;align-items:stretch;
+  background:rgba(8,13,11,.8);border:1px solid rgba(255,255,255,.16);border-radius:4px;
+  overflow:hidden;font-weight:700;letter-spacing:.06em;pointer-events:none;
+  font-size:clamp(8px,2.2vw,12.35px);line-height:1;max-width:94%}
+.ptp-skor .kod{padding:6.65px 9.5px;white-space:nowrap}
+.ptp-skor .kod.a{background:rgba(216,68,58,.9);color:#fff}
+.ptp-skor .kod.b{background:rgba(61,127,212,.9);color:#fff}
+.ptp-skor .sk{padding:6.65px 11.4px;font-size:1.23em;background:rgba(255,255,255,.08);
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.ptp-skor .sr{padding:6.65px 10.45px;font-weight:600;font-size:.96em;opacity:.85;
+  border-left:1px solid rgba(255,255,255,.16);display:flex;align-items:center;
+  font-variant-numeric:tabular-nums;white-space:nowrap}
+.ptp-skor .uz{color:#f0c14b;margin-left:5px;font-size:.85em}
+/* Yayin logosu ve alt yazi - ayni guvenli alan mantigi. Sag ust kose skorboardla
+   cakismasin diye logo SAGDA, yazi ALTTA konumlanir. */
+.ptp-yayinLogo{position:absolute;right:3%;top:3%;z-index:75;pointer-events:none;
+  max-width:22%;max-height:14%;object-fit:contain;filter:drop-shadow(0 2px 6px rgba(0,0,0,.6))}
+.ptp-yayinYazi{position:absolute;left:3%;right:3%;bottom:9%;z-index:75;pointer-events:none;
+  text-align:center;font-size:clamp(9px,2.6vw,15px);font-weight:800;color:#fff;
+  text-shadow:0 2px 8px rgba(0,0,0,.85);line-height:1.35}
 .ptp-ov{z-index:70;position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;
   background:linear-gradient(to bottom,rgba(0,0,0,.55) 0%,rgba(0,0,0,0) 22%,rgba(0,0,0,0) 62%,rgba(0,0,0,.72) 100%);
   opacity:1;transition:opacity .25s ease}
@@ -2479,7 +2509,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-D';
+window.APP_BUILD='2026-09-18-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -24975,7 +25005,69 @@ window.PTPlayer=(function(){
     return [d.oynaticiCanliRozeti!==false,d.oynaticiKanalLogosu!==false,d.oynaticiKanalAdi!==false,
       (Array.isArray(d.oynaticiUstBarSira)?d.oynaticiUstBarSira.join(','):'')].join('|');
   }
-  function ptpUstBarParcalari(){
+  // ══════════════════════════════════════════════════════════════════════════════════════════
+// YAYIN BINDIRMELERI (skorboard + yayin logosu + alt yazi)
+// KULLANICI TALEBI: SAHA oyunundaki skorboardin aynisi, %5 kucuk.
+// KULLANICI BILDIRDI: Yoneticinin ekledigi logo/yazi "ekran orani geregi" gorunmuyordu.
+// KOK SEBEP: Bindirmeler sahnenin kosesine sabit piksel ile konumlaniyordu; video 16/9
+// disinda bir orandaysa siyah bantlarin uzerine dusuyor ya da tasip kirpiliyordu.
+// COZUM: Guvenli alan (kenardan %3 iceride) + clamp ile olceklenen yazi boyutu. Oran ne
+// olursa olsun bindirmeler gorunur alanda kalir.
+//
+// Skorboard YALNIZCA canli mac izlenirken gorunur; video/arsiv yayininda skor gostermek
+// yaniltici olurdu.
+function ptpYayinBindirmeGuncelle(){
+  try{
+    var sk = document.getElementById('ptpSkor');
+    var lg = document.getElementById('ptpYayinLogo');
+    var yz = document.getElementById('ptpYayinYazi');
+    if(!sk) return;
+
+    // Izlenen kanalin bagli oldugu canli mac. Yonetici kanala mac bagladiysa
+    // (v.macId) o maci, baglamadiysa o an canli olan tek maci gosteririz.
+    var v = (window.PTPlayer && PTPlayer.aktifVideo) ? PTPlayer.aktifVideo() : null;
+    var m = null;
+    try{
+      var hepsi = Object.values(D.matches||{}).filter(function(x){
+        return x && (x.isLive || x._realIsLive);
+      });
+      if(v && v.macId && D.matches[v.macId]) m = D.matches[v.macId];
+      else if(hepsi.length === 1) m = hepsi[0];
+    }catch(e){}
+
+    if(!m){ sk.style.display='none'; }
+    else{
+      var h = (D.teams[m.homeId]||{}), a = (D.teams[m.awayId]||{});
+      var kodH = (h.short || (h.name||'').slice(0,3) || 'EV').toLocaleUpperCase('tr');
+      var kodA = (a.short || (a.name||'').slice(0,3) || 'DEP').toLocaleUpperCase('tr');
+      var dk = (m.minute != null) ? (m.minute + "'") : '';
+      var uz = (m.extraMin) ? ('+' + m.extraMin) : '';
+      sk.innerHTML =
+        '<div class="kod a">' + escHtml(kodH) + '</div>'
+        + '<div class="sk">' + (Number(m.homeGoals)||0) + ' - ' + (Number(m.awayGoals)||0) + '</div>'
+        + '<div class="kod b">' + escHtml(kodA) + '</div>'
+        + (dk ? '<div class="sr">' + dk + (uz ? '<span class="uz">' + uz + '</span>' : '') + '</div>' : '');
+      sk.style.display = 'flex';
+    }
+
+    // Yonetici tarafindan kanala eklenen logo ve alt yazi.
+    if(lg){
+      if(v && v.yayinLogo){ lg.src = v.yayinLogo; lg.style.display='block'; }
+      else lg.style.display='none';
+    }
+    if(yz){
+      if(v && v.yayinYazi){ yz.innerHTML = escHtml(v.yayinYazi); yz.style.display='block'; }
+      else yz.style.display='none';
+    }
+  }catch(e){}
+}
+// Canli mac verisi degistikce tazelenir. Ayri bir zamanlayici yerine mevcut cizim
+// dongusune baglanmak daha ucuz olurdu ama oynatici bagimsiz calisiyor; 2 saniyelik
+// aralik skor gecikmesini fark edilmez kilar ve yuk yaratmaz.
+try{
+  if(!window._ptSkorT) window._ptSkorT = setInterval(ptpYayinBindirmeGuncelle, 2000);
+}catch(e){}
+function ptpUstBarParcalari(){
     var d=window.D||{};
     var varsayilan=['canli','logo','ad'];
     var sira=(Array.isArray(d.oynaticiUstBarSira)&&d.oynaticiUstBarSira.length)
@@ -28917,6 +29009,12 @@ window.PTPlayer=(function(){
           +'</div>'
         +'</div>'
         +'<div class="ptp-lockbar"><button class="ptp-btn" id="ptpLockBtn" title="Ekran kilidi">🔓</button></div>'
+        // YAYIN BINDIRMELERI: skorboard, yayin logosu ve alt yazi. ptp-ov DISINDA
+        // duruyorlar - o katman kontroller gizlenince soluyor, skorboard ise yayin
+        // boyunca gorunmeli.
+        +'<div class="ptp-skor" id="ptpSkor" style="display:none"></div>'
+        +'<img class="ptp-yayinLogo" id="ptpYayinLogo" style="display:none" alt=""/>'
+        +'<div class="ptp-yayinYazi" id="ptpYayinYazi" style="display:none"></div>'
         +'<div class="ptp-ov" id="ptpOv">'
           +'<div class="ptp-top">'
             // Üst bar İKİ bloğa ayrıldı: soldaki öğeler (rozet/logo/ad) ayar değiştiğinde
@@ -30063,7 +30161,7 @@ window.PTPlayer=(function(){
     if(!toplam){showToastMsg('❌ Önce bir süre girin (saat/dakika/saniye)');return;}
     seekBy(yon==='back'?-toplam:toplam);
   }
-  return {mount:mount,destroy:destroy,retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,switchSourceInPlace:switchSourceInPlace,isActive:function(){return !!S;},isEmbedded:function(){return !!(S&&S.gomulu);},
+  return {mount:mount,destroy:destroy,aktifVideo:function(){return (S&&S.video)||null;},retry:retry,openSource:openSource,playNextNow:playNextNow,cancelNext:cancelNext,cycleFit:cycleFit,openSettingsTo:openSettingsTo,openChannelList:openChannelListOverlay,enterFullscreen:enterFullscreenProgrammatic,getVisualState:getVisualState,applyVisualState:applyVisualState,liveSeek:liveSeekFromInputs,switchSourceInPlace:switchSourceInPlace,isActive:function(){return !!S;},isEmbedded:function(){return !!(S&&S.gomulu);},
     // KULLANICI BİLDİRDİ ("kumandadaki video orijinal süresini gösteriyor"): Ekrandaki
     // KUMANDA paneli AYRI bir modül (PTFrame) ve konumu doğrudan platformdan okuyor -
     // yöneticinin tanımladığı bölümlerden haberi yok. Oynatıcının kendi çubuğu ise bölüm

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vD</title>
+<title>SAHA — 3D Futbol vE</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -1264,7 +1264,7 @@ function magazaCiz(){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-D';
+window.APP_BUILD = '2026-09-18-E';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3091,14 +3091,33 @@ function update(dt){
   const KAMERA_KENAR_Z = (HWZ - 5) * dirA;     // saha sınırı İÇİNDE, sabit tek bir kenar çizgisine yakın
   const cx = Math.max(-HLX+16, Math.min(HLX-16, ball.position.x));
   const cz = Math.max(-HWZ+6, Math.min(HWZ-6, KAMERA_KENAR_Z + ball.position.z*0.22));
-  let _acilKilit = false;
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // KAMERA TITREMESI DUZELTMESI (kullanici: "top taca cikinca kamera kasiyor")
+  // KOK SEBEP: Acil kilit TEK bir esige (0.78) bagliydi ve ANLIK sicrama yapiyordu
+  // (lerp carpani 1). Top yan cizgiye gidince ekran kenarina dayaniyor ve esik her
+  // karede asilip birakiliyordu: bir kare aninda sicra, sonraki kare yumusak gec -
+  // gozle "kasma" olarak gorunen sey buydu.
+  // IKI DUZELTME:
+  //  1) HISTEREZIS - kilide GIRME esigi 0.82, CIKMA esigi 0.70. Aradaki olu bant
+  //     sinirda gidip gelmeyi imkansiz kilar.
+  //  2) ANLIK SICRAMA KALDIRILDI - kilitliyken de lerp kullanilir, sadece daha hizli.
+  //     Anlik atlamak kamerayi isinlar; hizli ama surekli hareket goz icin dogaldir.
+  // ══════════════════════════════════════════════════════════════════════════════════════
   try{
     const _bp = ball.position.clone().project(camera);
-    if (!isFinite(_bp.x) || !isFinite(_bp.y) || Math.abs(_bp.x) > 0.78 || Math.abs(_bp.y) > 0.78) _acilKilit = true;
-  }catch(e){}
+    const _gecersiz = (!isFinite(_bp.x) || !isFinite(_bp.y));
+    if (_gecersiz || Math.abs(_bp.x) > 0.82 || Math.abs(_bp.y) > 0.82) window._kamAcil = true;
+    else if (Math.abs(_bp.x) < 0.70 && Math.abs(_bp.y) < 0.70) window._kamAcil = false;
+  }catch(e){ window._kamAcil = false; }
+  const _acilKilit = !!window._kamAcil;
   camHedef.set(cx, KAMERA_YUKSEKLIK, cz);
-  camera.position.lerp(camHedef, _acilKilit ? 1 : Math.min(1, dt*3.0));
-  bakHedef.set(cx + 5*dirA, 1.0, _acilKilit ? ball.position.z : ball.position.z*0.8);
+  camera.position.lerp(camHedef, Math.min(1, dt * (_acilKilit ? 9.0 : 3.0)));
+  // Bakis hedefi de yumusatilir: onceden kilitliyken topun Z'sine ANINDA geciyordu,
+  // bu da aci kaymasi yaratiyordu. Ara degiskende tutulup lerp'lenir.
+  const _bakZ = _acilKilit ? ball.position.z : ball.position.z * 0.8;
+  if (window._bakZson == null) window._bakZson = _bakZ;
+  window._bakZson += (_bakZ - window._bakZson) * Math.min(1, dt * (_acilKilit ? 9.0 : 4.0));
+  bakHedef.set(cx + 5*dirA, 1.0, window._bakZson);
   camera.lookAt(bakHedef);
 
   if (ctrl) ring.position.set(ctrl.obj.position.x, 0.04, ctrl.obj.position.z);
