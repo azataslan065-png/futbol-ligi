@@ -15,9 +15,15 @@
   canvas{display:block}
   #hud{position:fixed;inset:0;pointer-events:none;z-index:10}
 
-  #board{position:absolute;left:12px;top:10px;display:flex;align-items:stretch;
+  /* KULLANICI TALEBİ (2026-09-18-G): "maç skorbordunu ... yüzde 10 küçültüp ekranın sol üst
+     köşesine tam yerleştir" - skorbord artık ekranın TAM köşesinde (0,0) duruyor (önceki
+     12px/10px boşluk kaldırıldı) ve transform:scale(.9) ile %10 küçültülüyor.
+     transform-origin:left top sayesinde küçülme köşeden dışarı doğru değil, köşeye
+     yaslanarak gerçekleşiyor - böylece köşeye tam oturması bozulmuyor. */
+  #board{position:absolute;left:0;top:0;display:flex;align-items:stretch;
     background:var(--ink);border:1px solid var(--line);border-radius:4px;overflow:hidden;
-    font-size:13px;font-weight:700;letter-spacing:.06em}
+    font-size:13px;font-weight:700;letter-spacing:.06em;
+    transform:scale(.9);transform-origin:left top}
   #board .kod{padding:7px 10px}
   #board .kod.a{background:rgba(216,68,58,.9);color:#fff}
   #board .kod.b{background:rgba(61,127,212,.9);color:#fff}
@@ -1723,6 +1729,19 @@ function sahaCanliYaz(ilkYazim){
     g[yol+'/played'] = false;
     g[yol+'/homeGoals'] = hG;
     g[yol+'/awayGoals'] = aG;
+    // KULLANICI TALEBİ (2026-09-18-F, "izleyiciye maç takımı mavi görünüyorken, maçı oynayan
+    // kişi farklı bir forma görüntüsü alıyor"): KÖK SEBEP - oyuncunun sahada GERÇEKTEN
+    // giydiği forma rengi (takA()/takB() - Ayarlar'daki takım seçimine göre değişebilir,
+    // varsayılan kırmızı/mavi olmak zorunda değil) hiçbir zaman Firebase'e yazılmıyordu.
+    // İzleyici sayfası kendi varsayılan AYAR.ta/tb (0/1 = kırmızı/mavi) değerleriyle açılıyor
+    // ve HER ZAMAN bunu gösteriyordu - oyuncu Ayarlar'dan farklı bir forma seçse bile. Çözüm:
+    // oynayan kişinin GERÇEKTEN kullandığı forma rengi (hex) her yazımda gönderiliyor,
+    // izleyici tarafı (bkz. _sahaIzleFormaUygula) bunu okuyup hem 3D forma materyaline hem
+    // skorbord rozetine uyguluyor - artık ikisi HER ZAMAN birebir aynı.
+    var _evForma = fk.benTarafHome ? takA().jer : takB().jer;
+    var _depForma = fk.benTarafHome ? takB().jer : takA().jer;
+    g[yol+'/homeJer'] = _evForma;
+    g[yol+'/awayJer'] = _depForma;
     g[yol+'/minute'] = Math.max(0, Math.min(120, Math.round(macDakika()||0)));
     g[yol+'/events'] = _sahaMapEvents(olaylar, fk.benTarafHome);
     var top = _sahaTopKonumu(fk);
@@ -3486,15 +3505,19 @@ function _sahaIzleUIHazirla(){
       // olarak sol üste sabitleniyor (!important yerine doğrudan inline stil - hiçbir CSS
       // kuralı üzerine binemez) ve z-index, rozet/geri-dönüş düğmesinden bile yüksek
       // tutuluyor ki hiçbir zaman başka bir katmanın ALTINDA kalmasın.
+      // KULLANICI TALEBİ (2026-09-18-G): "TV sekmesindeki izleyici skorbordunu yüzde 10
+      // küçültüp ekranın sol üst köşesine tam yerleştir" - 8px/8px boşluğu kaldırıldı
+      // (0,0 = tam köşe) ve ölçek .95'ten .9'a indirildi (normal oyundaki #board ile
+      // BİREBİR AYNI %10 küçültme oranı - iki skorbord artık tutarlı görünüyor).
       board.style.position = 'fixed';
-      board.style.left = '8px';
-      board.style.top = '8px';
+      board.style.left = '0px';
+      board.style.top = '0px';
       board.style.right = 'auto';
       board.style.bottom = 'auto';
       board.style.display = 'flex';
       board.style.opacity = '1';
       board.style.visibility = 'visible';
-      board.style.transform = 'scale(.95)';
+      board.style.transform = 'scale(.9)';
       board.style.transformOrigin = 'left top';
       board.style.zIndex = '65';
     }
@@ -3592,6 +3615,25 @@ function _sahaIzleRozetUygula(){
     el.innerHTML = html;
   }catch(e){}
 }
+// KULLANICI TALEBİ (2026-09-18-F): İzleyici sayfasının 3D forma materyallerini, oynayan
+// kişinin Firebase'e yazdığı GERÇEK forma rengiyle (homeJer/awayJer) eşitler - ev sahibi
+// teamB havuzunda (bkz. _sahaIzleTakimUygula eşlemesi), deplasman teamA havuzunda render
+// edildiğinden renkler de AYNI eşlemeyle uygulanır. Veri henüz gelmediyse (null) dokunulmaz,
+// sayfa açılışındaki jenerik varsayılan (kırmızı/mavi) görünmeye devam eder.
+var _sahaIzleSonForma = { home:null, away:null };
+function _sahaIzleFormaUygula(homeJer, awayJer){
+  try{
+    if(typeof MATS==='undefined') return;
+    if(homeJer!=null && homeJer!==_sahaIzleSonForma.home){
+      MATS.b.jer.color.setHex(homeJer);
+      _sahaIzleSonForma.home = homeJer;
+    }
+    if(awayJer!=null && awayJer!==_sahaIzleSonForma.away){
+      MATS.a.jer.color.setHex(awayJer);
+      _sahaIzleSonForma.away = awayJer;
+    }
+  }catch(e){}
+}
 // Firebase'den gelen ham anlık görüntüyü, HUD'a ve _sahaIzleHedef'e işler.
 function _sahaIzleVeriUygula(m){
   if(!m){ window._sahaIzleHedef = null; return; }
@@ -3600,8 +3642,11 @@ function _sahaIzleVeriUygula(m){
     home: Array.isArray(m.homePlayers) ? m.homePlayers : [],
     away: Array.isArray(m.awayPlayers) ? m.awayPlayers : [],
     isLive: !!m.isLive, played: !!m.played,
-    homeId: m.homeId || null, awayId: m.awayId || null
+    homeId: m.homeId || null, awayId: m.awayId || null,
+    homeJer: (typeof m.homeJer==='number') ? m.homeJer : null,
+    awayJer: (typeof m.awayJer==='number') ? m.awayJer : null
   };
+  _sahaIzleFormaUygula(window._sahaIzleHedef.homeJer, window._sahaIzleHedef.awayJer);
   _sahaIzleKadroUygula();
   try{
     var dk = Math.max(0, Math.min(120, Math.round(m.minute||0)));
@@ -3702,11 +3747,16 @@ function _sahaIzleSkorbordTakimlariUygula(homeId, awayId){
     var ka = document.querySelector('#board .kod.a'), kb = document.querySelector('#board .kod.b');
     // Skor alanı sol=sa=homeGoals, sağ=sb=awayGoals şeklinde yazılıyor (bkz.
     // _sahaIzleVeriUygula) - rozet kodları da AYNI sıraya (sol=ev, sağ=deplasman) uyumlu
-    // olmalı. Renkler, oyuncuların sahada GERÇEKTEN giydiği forma rengiyle TUTARLI: ev sahibi
-    // teamB havuzunda (mavi) render ediliyor, deplasman teamA havuzunda (kırmızı) - bkz.
-    // yukarıdaki _sahaIzleTakimUygula çağrıları.
-    if(ka){ ka.textContent = h.name ? kisaKod(h.name) : 'EV'; ka.style.background = hx(takB().jer); }
-    if(kb){ kb.textContent = a.name ? kisaKod(a.name) : 'DEP'; kb.style.background = hx(takA().jer); }
+    // olmalı. DÜZELTME (2026-09-18-F): Renk artık izleyicinin KENDİ yerel takA()/takB()
+    // (jenerik varsayılan kırmızı/mavi) değerinden DEĞİL, oynayan kişinin Firebase'e yazdığı
+    // GERÇEK forma renginden (window._sahaIzleHedef.homeJer/awayJer, bkz.
+    // _sahaIzleFormaUygula) okunuyor - 3D sahadaki forma ile skorbord rozeti artık HER ZAMAN
+    // birebir aynı rengi gösteriyor. Veri henüz gelmediyse jenerik varsayılana düşülür.
+    var _hedefF = window._sahaIzleHedef || {};
+    var _evJer = (typeof _hedefF.homeJer==='number') ? _hedefF.homeJer : takB().jer;
+    var _depJer = (typeof _hedefF.awayJer==='number') ? _hedefF.awayJer : takA().jer;
+    if(ka){ ka.textContent = h.name ? kisaKod(h.name) : 'EV'; ka.style.background = hx(_evJer); }
+    if(kb){ kb.textContent = a.name ? kisaKod(a.name) : 'DEP'; kb.style.background = hx(_depJer); }
   }catch(e){}
 }
 /* ══════════════════════════════════════════════════════════════════════════════════════
