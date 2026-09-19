@@ -1113,9 +1113,10 @@ iframe.ptp-video{pointer-events:none}
    .ptp tam ekrana geçtiğinde (.ptp-fs) aynı alt ağacın parçası olduğu için otomatik olarak
    birlikte tam ekrana taşınıyor; artık ayrı bir document.body z-index hilesine gerek yok. */
 .ptp-canliRozet{position:absolute;z-index:61;display:none;align-items:center;gap:.4rem;
-  background:rgba(12,12,16,.78);backdrop-filter:blur(6px);
-  border:1px solid rgba(255,255,255,.16);border-radius:999px;padding:.32rem .7rem;
-  font:700 12px/1 Arial,sans-serif;color:#fff;letter-spacing:.02em;pointer-events:none;
+  background:none;border:none;border-radius:0;padding:0;
+  font:800 13px/1 Arial,sans-serif;color:#fff;letter-spacing:.02em;pointer-events:none;
+  text-shadow:0 1px 4px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.6);
+  filter:drop-shadow(0 2px 5px rgba(0,0,0,.7));
   max-width:46%;box-shadow:0 2px 8px rgba(0,0,0,.2);font-variant-numeric:tabular-nums}
 .ptp-canliRozet img{height:18px;width:auto;max-width:64px;object-fit:contain;display:block;flex-shrink:0}
 .ptp-canliRozet span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -2538,7 +2539,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-M';
+window.APP_BUILD='2026-09-18-R';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5945,7 +5946,19 @@ function listenToLeague(leagueId){
         if(_pitchBox&&_sahaSadeceCanliAlanDegisti(_mdMatchId,_mSaha)){
           try{
             const _h=D.teams[_mSaha.homeId]||{},_a=D.teams[_mSaha.awayId]||{};
-            _pitchBox.innerHTML=_mSaha.isLive?renderSahaPitch(_mSaha,_h,_a):'';
+            // KASMA DUZELTMESI (kullanici: "canli izlede kasma ve donma oluyor"):
+        // Oyun top konumunu HER DEGISIMDE yaziyor - saniyede onlarca guncelleme gelebilir.
+        // Her birinde tum SVG'yi bastan kurmak (innerHTML) tarayiciyi bogar: eski dugumler
+        // atilir, yenileri ayristirilir, sayfa yeniden yerlesir. Gozle "donma" olarak
+        // gorunen sey budur.
+        // COZUM: Cizim saniyede en fazla 8 kez yapilir. Insan gozu icin akici, tarayici
+        // icin rahat. Aradaki guncellemeler atlanmaz - sonuncusu bir sonraki turda cizilir.
+        var _simdi = Date.now();
+        if(!window._sahaPitchSonCizim) window._sahaPitchSonCizim = 0;
+        if(_simdi - window._sahaPitchSonCizim >= 125){
+          window._sahaPitchSonCizim = _simdi;
+          _pitchBox.innerHTML=_mSaha.isLive?renderSahaPitch(_mSaha,_h,_a):'';
+        }
             // KULLANICI TALEBİ: "Olay yoğunluğu (Baskımetre) maç süresine göre anlık
             // gösterilsin" - önceden Baskımetre SADECE tam yeniden çizimde (gerçek bir
             // olay olduğunda) güncelleniyordu, dakikalar ilerlerken donuk kalıyordu.
@@ -11947,7 +11960,13 @@ function renderSahaPitch(m,h,a){
 
     // Saha koordinatları (SVG viewBox 0 0 300 190, kenar boşluğu 4px)
     const PX0=4,PY0=4,PW=292,PH=182;
-    const px=PX0+((x+1)/2)*PW, py=PY0+((z+1)/2)*PH;
+    // AYNA DUZELTMESI (kullanici: "sahada sagda olan top burada solda gorunuyor"):
+    // Oyun tarafinda ballX, HOME takimin HUCUM yonu pozitif olacak sekilde gonderiliyor.
+    // Mini sahada ise ev sahibi SOLDA duruyor ve soldan saga hucum ediyor - yani pozitif
+    // x ekranin SAGINA denk gelmeli. Onceki esleme bunu ters cevirmisti.
+    // Duzeltme SUNUM tarafinda yapildi: oyunun koordinat sozlesmesi dogru ve baska yerler
+    // (canli anlatim, olay kayitlari) ona dayaniyor; kaynagi degistirmek onlari bozardi.
+    const px=PX0+((1-x)/2)*PW, py=PY0+((z+1)/2)*PH;
 
     // Önceki konumla aradaki çizgi (kısa "hareket izi" - referans görseldeki pas
     // çizgisine benzer bir dokunuş). Maç değiştiyse veya ilk çizimse iz gösterilmez.
@@ -25108,7 +25127,12 @@ function ptCanliRozetUygula(){
     var g = window._ptCanliRozet;
     var metin = (g && g.canliRozetMetin) ? String(g.canliRozetMetin).trim() : '';
     var logo  = (g && g.canliRozetLogo)  ? String(g.canliRozetLogo).trim()  : '';
-    var poz   = (g && g.canliRozetPoz === 'sag') ? 'sag' : 'sol';
+    // KULLANICI TALEBI: Rozet dort koseden birine konabilsin, kenar boslugu ayarlanabilsin.
+    // Yonetici 'solust/sagust/sol/sag' secer; X/Y yuzdeleri ince ayar icin.
+    // Yuzde kullaniliyor cunku piksel deger farkli ekran oranlarinda kayar.
+    var poz = (g && g.canliRozetPoz) || 'sol';
+    var kx  = (g && g.rozetX != null) ? Math.max(0, Math.min(30, g.rozetX)) : 3;
+    var ky  = (g && g.rozetY != null) ? Math.max(0, Math.min(30, g.rozetY)) : 4;
     var el = document.getElementById('ptCanliRozet');
     // Element artık #ptpStage şablonunun BİR PARÇASI olarak doğuyor (bkz. mount()) - yalnızca
     // oynatıcı ekranı açıkken DOM'da bulunur, bu yüzden onun varlığı zaten "TV ekranı açık mı"
@@ -25120,9 +25144,21 @@ function ptCanliRozetUygula(){
     // olmadığını tutar - rozet İKİSİ de doğruyken gösterilir.
     var canliMacVar = !!window._ptCanliMacIzleniyor;
     if(!el || !metin && !logo || !canliMacVar){ if(el) el.style.display='none'; return; }
-    el.style.top = ptCanliRozetUstOfset(poz) + 'px';
-    if(poz === 'sag'){ el.style.right = '3%'; el.style.left = ''; }
-    else { el.style.left = '3%'; el.style.right = ''; }
+    // Dort kose + yuzde ince ayar. Ust koseler icin top, alt koseler icin bottom
+    // kullanilir; ikisini birden atamak tarayicida belirsiz sonuc verir, o yuzden
+    // kullanilmayan kenar her seferinde temizlenir.
+    var ustKose = (poz === 'solust' || poz === 'sagust');
+    var sagKose = (poz === 'sag' || poz === 'sagust');
+    if(ustKose){
+      // Ust barin altina inmesi icin mevcut ofset korunur, uzerine kullanici degeri eklenir.
+      el.style.top = 'calc(' + ptCanliRozetUstOfset(poz) + 'px + ' + ky + '%)';
+      el.style.bottom = '';
+    }else{
+      el.style.bottom = ky + '%';
+      el.style.top = '';
+    }
+    if(sagKose){ el.style.right = kx + '%'; el.style.left = ''; }
+    else { el.style.left = kx + '%'; el.style.right = ''; }
     el.innerHTML = (logo
         ? '<img src="' + escAttr(logo) + '" alt="" onerror="this.style.display=\'none\'"/>'
         : '')
@@ -25240,6 +25276,20 @@ function ptpYayinBindirmeGuncelle(){
         + '<div class="sk">' + (Number(m.homeGoals)||0) + ' - ' + (Number(m.awayGoals)||0) + '</div>'
         + '<div class="kod b">' + escHtml(kodA) + '</div>'
         + (dk ? '<div class="sr">' + dk + (uz ? '<span class="uz">' + uz + '</span>' : '') + '</div>' : '');
+      // KULLANICI TALEBI: Skorboard konumu da yonetici tarafindan secilebilsin.
+      // Ayni dugumden ('canliRozetGlobal.skorPoz') okunur; ayri bir ayar dali acmak
+      // yoneticiyi iki yerde ayar yapmaya zorlardi.
+      try{
+        var _g = window._ptCanliRozet || {};
+        var _sp = _g.skorPoz || 'solust';
+        var _ust = (_sp === 'solust' || _sp === 'sagust');
+        var _sag = (_sp === 'sag' || _sp === 'sagust');
+        // Ust koselerde ust barin altina inilir; alt koselerde kontrol seridinin ustunde kalir.
+        if(_ust){ sk.style.top = 'calc(4% + 2.6rem)'; sk.style.bottom = ''; }
+        else { sk.style.bottom = '12%'; sk.style.top = ''; }
+        if(_sag){ sk.style.right = '3%'; sk.style.left = ''; }
+        else { sk.style.left = '3%'; sk.style.right = ''; }
+      }catch(e){}
       sk.style.display = 'flex';
     }
 
