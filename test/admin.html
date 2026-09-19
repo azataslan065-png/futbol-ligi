@@ -1838,7 +1838,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-Y';
+window.APP_BUILD='2026-09-18-AA';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6931,9 +6931,9 @@ function sahaFiksturSifirlaVeOlustur(){
   var teams=Object.values(S.teams||{});
   if(teams.length<2){toast('En az 2 takım gerekli','er');return;}
   dlg('🗑️','Varsayılan Fikstürü Sıfırla',
-    'Oynanmamış TÜM fikstür maçları silinip '+teams.length+' takım için 2 turlu yeni bir '+
-    'fikstür oluşturulacak (bugünden başlayarak, haftada bir maç). Oynanmış maçlar '+
-    'korunur. Bu işlem geri alınamaz.','Sil ve Oluştur','dop').then(function(ok){
+    'TÜM fikstür maçları (oynanmış dahil) silinip '+teams.length+' takım için 2 turlu yeni bir '+
+    'fikstür oluşturulacak (bugünden başlayarak, haftada bir maç). Bu işlem geri alınamaz.',
+    'Sil ve Oluştur','dop').then(function(ok){
     if(!ok)return;
     // KULLANICI BİLDİRDİ: "Fikstür oluşturulduğunda öncekiler silinmiyor." KÖK SEBEP VE
     // ÇÖZÜM: bkz. autoFixture() içindeki AYNI başlıklı not - eski maçlar artık ÖNCE
@@ -6942,11 +6942,16 @@ function sahaFiksturSifirlaVeOlustur(){
     // Saha modunda önemli: saha.html'de o sırada AKTİF oynanan bir maç varsa, oyun kendi
     // maçının alanlarını birkaç saniyede bir Firebase'e yazmaya devam eder - eski silme
     // yöntemi bu YAZIMLA yarışıp kaybedebiliyordu (maç düğümü sessizce yeniden oluşuyordu).
+    // KULLANICI TALEBİ (devamı - test ortamı): önceden sadece OYNANMAMIŞ maçlar silinip
+    // oynanmışlar (sezon geçmişi olarak) korunuyordu. Kullanıcı açıkça oynanmışların da
+    // silinmesini istedi (test ortamında biriken eski sonuçlar temizlensin diye) - bu
+    // yüzden aşağıdaki filtre kaldırıldı, artık played/oynanmamış ayrımı yapılmadan
+    // TÜM maç düğümleri siliniyor.
     db.ref('leagues/'+_curLeagueId+'/matches').once('value').then(function(freshSnap){
       var freshMatches=freshSnap.val()||{};
       var silinecek={};
       Object.keys(freshMatches).forEach(function(id){
-        if(!freshMatches[id].played)silinecek['leagues/'+_curLeagueId+'/matches/'+id]=null;
+        silinecek['leagues/'+_curLeagueId+'/matches/'+id]=null;
       });
       var silmeSayisi=Object.keys(silinecek).length;
       return (silmeSayisi?db.ref().update(silinecek):Promise.resolve()).then(function(){return silmeSayisi;});
@@ -6960,8 +6965,9 @@ function sahaFiksturSifirlaVeOlustur(){
       var yorumcus=refIds.filter(function(id){return refs[id].role==='yorumcu';});
       function pickFromPool(pool,index){ if(!pool.length)return ''; return refs[pool[index%pool.length]].name; }
       // Yerel S.matches kopyası da temizlenir - Firebase'deki GERÇEK silme yukarıda
-      // zaten garanti edildi, bu satır sadece yerel/görsel tutarlılık içindir.
-      Object.keys(S.matches||{}).forEach(function(id){if(!S.matches[id].played)delete S.matches[id];});
+      // zaten garanti edildi, bu satır sadece yerel/görsel tutarlılık içindir. Artık
+      // played/oynanmamış ayrımı yapılmadan TÜMÜ siliniyor (yukarıdaki nota bakın).
+      S.matches={};
       S.byeWeeks={};
       var tur=2, gap=7;
       var list=teams.slice(); var hasBye=list.length%2!==0; if(hasBye)list.push(null);
