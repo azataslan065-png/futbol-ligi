@@ -750,7 +750,17 @@ function gurultu(sure, ses, frek){
   } catch(e){}
 }
 function sesDuduk(uzun){ ton(1500, 1350, uzun ? 0.6 : 0.22, 'square', 0.12); }
-function sesVurus(g){ gurultu(0.09, 0.16 + g*0.2, 700 + g*900); }
+// KULLANICI BİLDİRDİ ("varsayılan taraftar sesi geliyor sadece diğerleri gelmiyor" - devam):
+// Şut/pas/müdahale (vuruş) sesleri izleyiciye HİÇ ULAŞMIYORDU çünkü bu olaylar Firebase'e
+// hiç yazılmıyordu (bkz. IZLEYICI SESI notundaki "SINIR" - bilinçli kapsam dışı bırakma).
+// ÇÖZÜM: Ağır bir olay akışı taşımak yerine, TEK bir hafif sayaç eklendi - sesVurus() her
+// çağrıldığında (yani oyunda gerçek bir vuruş/müdahale sesi çaldığında) bir artar. Bu sayaç
+// zaten var olan periyodik canlı yazıma (bkz. sahaCanliYaz) eklenir; izleyici sayacın
+// arttığını gördüğünde KENDİ cihazında genel bir vuruş sesi üretir (bkz. _sahaIzleSesTetikle).
+// Not: update() seyirci modunda hiç çalışmadığı için (bkz. ilgili not), bu sayaç yalnızca
+// GERÇEKTEN OYNAYAN tarafta artar - izleyicinin kendi 3D animasyonu bunu tetiklemez.
+window._sahaVurusSayaci = 0;
+function sesVurus(g){ window._sahaVurusSayaci++; gurultu(0.09, 0.16 + g*0.2, 700 + g*900); }
 function sesTribun(seviye, sure){
   if (!ac || !tribunGain || !AYAR.ses) return;
   try {
@@ -1436,7 +1446,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-V';
+window.APP_BUILD = '2026-09-18-W';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -1910,6 +1920,8 @@ function sahaCanliYaz(ilkYazim){
     g[yol+'/awayJer'] = _depForma;
     g[yol+'/minute'] = Math.max(0, Math.min(120, Math.round(macDakika()||0)));
     g[yol+'/events'] = _sahaMapEvents(olaylar, fk.benTarafHome);
+    // İzleyici vuruş sesi senkronu için - bkz. sesVurus() üzerindeki not.
+    g[yol+'/vurus'] = window._sahaVurusSayaci||0;
     var top = _sahaTopKonumu(fk);
     if(top){
       // Ondalıkları 2 haneye yuvarla - sık yazılacak küçük bir sayı olsun diye
@@ -3824,6 +3836,18 @@ function _sahaIzleFormaUygula(homeJer, awayJer){
 // (gol, devre, bitis). Pas ve sut sesleri konum akisinda yok; onlar icin olay akisinin
 // da aktarilmasi gerekir - simdilik kapsam disi.
 var _izleSonSkor = null, _izleSonDevre = null, _izleSesAcik = false;
+// KULLANICI BİLDİRDİ ("varsayılan taraftar sesi geliyor sadece diğerleri gelmiyor"):
+// Gol dışındaki HİÇBİR olay (kart, faul, ofsayt) seslendirilmiyordu - oysa bu olaylar
+// zaten sahaCanliYaz() ile 'events' altında Firebase'e yazılıyordu (bkz. _sahaMapEvents),
+// izleyici tarafı bu diziyi hiç okumuyordu. Aşağıdaki _izleSonEvSayisi/_izleSonVurus,
+// 'events' dizisinin ve yeni eklenen 'vurus' sayacının SADECE YENİ (daha önce
+// görülmemiş) kısmını seslendirmek için kullanılır - ilk yüklemede geçmiş olaylar
+// toplu halde çalınmasın diye (aşağıdaki "ilk yükleme: gecmisi seslendirme" satırlarına
+// bakın) mevcut uzunluk/değer önce sadece KAYDEDİLİR, sesler bir SONRAKİ farktan başlar.
+var _izleSonEvSayisi = null, _izleSonVurus = null;
+// Hakem düdüğü gerektiren olay türleri - korner/taç/oyuncu değişikliği/akış olayları
+// (corner/throwin/sub/flow) gerçek maçta düdükle anons edilmediği için burada YOK.
+var _sahaIzleDudukOlaylari = { yellow:1, red:1, yellow2red:1, foul:1, pen_awarded:1, offside:1 };
 function _sahaIzleSesTetikle(m){
   try{
     if(!_izleSesAcik) return;
@@ -3846,6 +3870,31 @@ function _sahaIzleSesTetikle(m){
     }
     _izleSonSkor = { h:hg, a:ag };
     _izleSonDevre = devre;
+    // KART / FAUL / OFSAYT DÜDÜĞÜ - 'events' dizisi zaten geliyordu, artık okunuyor da.
+    if(Array.isArray(m.events)){
+      if(_izleSonEvSayisi == null){
+        _izleSonEvSayisi = m.events.length; // ilk yükleme: gecmisi seslendirme
+      } else if(m.events.length !== _izleSonEvSayisi){
+        if(m.events.length > _izleSonEvSayisi){
+          for(var i = _izleSonEvSayisi; i < m.events.length; i++){
+            var tip = m.events[i] && m.events[i].type;
+            if(_sahaIzleDudukOlaylari[tip]){ try{ sesDuduk(false); }catch(e){} }
+          }
+        }
+        _izleSonEvSayisi = m.events.length; // azaldiysa (yeni mac) da burada sifirlanir
+      }
+    }
+    // ŞUT / PAS / MÜDAHALE (VURUŞ) SESİ - bkz. sesVurus() üzerindeki not. Sayaç arttıkça
+    // (kaç arttığından bağımsız - arka arkaya makineli tüfek gibi çalmasın diye) TEK bir
+    // genel vuruş sesi üretilir.
+    if(typeof m.vurus === 'number'){
+      if(_izleSonVurus == null){
+        _izleSonVurus = m.vurus; // ilk yükleme: gecmisi seslendirme
+      } else if(m.vurus !== _izleSonVurus){
+        if(m.vurus > _izleSonVurus){ try{ gurultu(0.09, 0.22, 900); }catch(e){} }
+        _izleSonVurus = m.vurus;
+      }
+    }
   }catch(e){}
 }
 // Tarayici kurali: ses ancak kullanici dokunusundan SONRA acilabilir. Izleyici zaten
