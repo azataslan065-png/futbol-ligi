@@ -750,7 +750,17 @@ function gurultu(sure, ses, frek){
   } catch(e){}
 }
 function sesDuduk(uzun){ ton(1500, 1350, uzun ? 0.6 : 0.22, 'square', 0.12); }
-function sesVurus(g){ gurultu(0.09, 0.16 + g*0.2, 700 + g*900); }
+// KULLANICI BİLDİRDİ ("varsayılan taraftar sesi geliyor sadece diğerleri gelmiyor" - devam):
+// Şut/pas/müdahale (vuruş) sesleri izleyiciye HİÇ ULAŞMIYORDU çünkü bu olaylar Firebase'e
+// hiç yazılmıyordu (bkz. IZLEYICI SESI notundaki "SINIR" - bilinçli kapsam dışı bırakma).
+// ÇÖZÜM: Ağır bir olay akışı taşımak yerine, TEK bir hafif sayaç eklendi - sesVurus() her
+// çağrıldığında (yani oyunda gerçek bir vuruş/müdahale sesi çaldığında) bir artar. Bu sayaç
+// zaten var olan periyodik canlı yazıma (bkz. sahaCanliYaz) eklenir; izleyici sayacın
+// arttığını gördüğünde KENDİ cihazında genel bir vuruş sesi üretir (bkz. _sahaIzleSesTetikle).
+// Not: update() seyirci modunda hiç çalışmadığı için (bkz. ilgili not), bu sayaç yalnızca
+// GERÇEKTEN OYNAYAN tarafta artar - izleyicinin kendi 3D animasyonu bunu tetiklemez.
+window._sahaVurusSayaci = 0;
+function sesVurus(g){ window._sahaVurusSayaci++; gurultu(0.09, 0.16 + g*0.2, 700 + g*900); }
 function sesTribun(seviye, sure){
   if (!ac || !tribunGain || !AYAR.ses) return;
   try {
@@ -1436,7 +1446,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-U';
+window.APP_BUILD = '2026-09-18-Y';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -1910,6 +1920,8 @@ function sahaCanliYaz(ilkYazim){
     g[yol+'/awayJer'] = _depForma;
     g[yol+'/minute'] = Math.max(0, Math.min(120, Math.round(macDakika()||0)));
     g[yol+'/events'] = _sahaMapEvents(olaylar, fk.benTarafHome);
+    // İzleyici vuruş sesi senkronu için - bkz. sesVurus() üzerindeki not.
+    g[yol+'/vurus'] = window._sahaVurusSayaci||0;
     var top = _sahaTopKonumu(fk);
     if(top){
       // Ondalıkları 2 haneye yuvarla - sık yazılacak küçük bir sayı olsun diye
@@ -3824,6 +3836,18 @@ function _sahaIzleFormaUygula(homeJer, awayJer){
 // (gol, devre, bitis). Pas ve sut sesleri konum akisinda yok; onlar icin olay akisinin
 // da aktarilmasi gerekir - simdilik kapsam disi.
 var _izleSonSkor = null, _izleSonDevre = null, _izleSesAcik = false;
+// KULLANICI BİLDİRDİ ("varsayılan taraftar sesi geliyor sadece diğerleri gelmiyor"):
+// Gol dışındaki HİÇBİR olay (kart, faul, ofsayt) seslendirilmiyordu - oysa bu olaylar
+// zaten sahaCanliYaz() ile 'events' altında Firebase'e yazılıyordu (bkz. _sahaMapEvents),
+// izleyici tarafı bu diziyi hiç okumuyordu. Aşağıdaki _izleSonEvSayisi/_izleSonVurus,
+// 'events' dizisinin ve yeni eklenen 'vurus' sayacının SADECE YENİ (daha önce
+// görülmemiş) kısmını seslendirmek için kullanılır - ilk yüklemede geçmiş olaylar
+// toplu halde çalınmasın diye (aşağıdaki "ilk yükleme: gecmisi seslendirme" satırlarına
+// bakın) mevcut uzunluk/değer önce sadece KAYDEDİLİR, sesler bir SONRAKİ farktan başlar.
+var _izleSonEvSayisi = null, _izleSonVurus = null;
+// Hakem düdüğü gerektiren olay türleri - korner/taç/oyuncu değişikliği/akış olayları
+// (corner/throwin/sub/flow) gerçek maçta düdükle anons edilmediği için burada YOK.
+var _sahaIzleDudukOlaylari = { yellow:1, red:1, yellow2red:1, foul:1, pen_awarded:1, offside:1 };
 function _sahaIzleSesTetikle(m){
   try{
     if(!_izleSesAcik) return;
@@ -3846,7 +3870,33 @@ function _sahaIzleSesTetikle(m){
     }
     _izleSonSkor = { h:hg, a:ag };
     _izleSonDevre = devre;
-  }catch(e){}
+    // KART / FAUL / OFSAYT DÜDÜĞÜ - 'events' dizisi zaten geliyordu, artık okunuyor da.
+    if(Array.isArray(m.events)){
+      if(_izleSonEvSayisi == null){
+        _izleSonEvSayisi = m.events.length; // ilk yükleme: gecmisi seslendirme
+      } else if(m.events.length !== _izleSonEvSayisi){
+        if(m.events.length > _izleSonEvSayisi){
+          for(var i = _izleSonEvSayisi; i < m.events.length; i++){
+            var tip = m.events[i] && m.events[i].type;
+            if(_sahaIzleDudukOlaylari[tip]){ try{ sesDuduk(false); }catch(e){} }
+          }
+        }
+        _izleSonEvSayisi = m.events.length; // azaldiysa (yeni mac) da burada sifirlanir
+      }
+    }
+    // ŞUT / PAS / MÜDAHALE (VURUŞ) SESİ - bkz. sesVurus() üzerindeki not. Sayaç arttıkça
+    // (kaç arttığından bağımsız - arka arkaya makineli tüfek gibi çalmasın diye) TEK bir
+    // genel vuruş sesi üretilir.
+    if(typeof m.vurus === 'number'){
+      if(_izleSonVurus == null){
+        _izleSonVurus = m.vurus; // ilk yükleme: gecmisi seslendirme
+      } else if(m.vurus !== _izleSonVurus){
+        if(m.vurus > _izleSonVurus){ try{ gurultu(0.09, 0.22, 900); }catch(e){} }
+        _izleSonVurus = m.vurus;
+      }
+    }
+    window._sahaIzleSonHata = null; // buraya sorunsuz ulasildiysa onceki hata gecersiz
+  }catch(e){ window._sahaIzleSonHata = String((e&&e.message)||e); }
 }
 // Tarayici kurali: ses ancak kullanici dokunusundan SONRA acilabilir. Izleyici zaten
 // maci acmak icin dokunuyor; o an yakalanir ve tribun ortam sesi baslar.
@@ -3886,35 +3936,55 @@ try{
 // Izleyici "ses gelmiyor" diyor ama sebebi gorunmuyordu: AudioContext askida mi, ses
 // ayari kapali mi, cerceve icinde miyiz, dokunma yakalandi mi?
 // Hepsi ekrana yazilir. Sessiz basarisizlik yerine gorunur durum.
+// GORUNURLUK DUZELTMESI (kullanici ekran goruntusu: "Tam görünmüyor" - kutu, video
+// kutusunun alt kenarindan tasip kirpiliyordu, cunku satir sayisi arttikca kutunun
+// toplam yuksekligi, iframe'in gercekte gorunen (kirpilan) alanindan buyuk oluyordu).
+// COZUM: kutu artik USTTEN konumlandiriliyor (bottom yerine top - skor tablosunun
+// SAGINDA bos alan var), yazi tipi kuculdu, satirlar kisaltildi VE guvenlik icin
+// max-height + overflow:auto eklendi - kutu ne kadar uzun olursa olsun artik
+// gorunmeyen bir alana tasip sessizce kaybolmak yerine kendi icinde kirpilip
+// kaydirilabilir olacak (en azindan varligi ve ilk satirlari her zaman gorunur).
 function _sahaSesTeshisCiz(){
   try{
     var k = document.getElementById('sahaSesTeshis');
     if(!k){
       k = document.createElement('div');
       k.id = 'sahaSesTeshis';
-      k.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:2147483000;'
-        + 'font:10px/1.5 monospace;color:#9fe;background:rgba(0,0,0,.6);padding:5px 7px;'
-        + 'border-radius:4px;pointer-events:none;max-width:70vw';
+      k.style.cssText = 'position:fixed;right:6px;top:6px;z-index:2147483000;'
+        + 'font:9px/1.35 monospace;color:#9fe;background:rgba(0,0,0,.72);padding:4px 6px;'
+        + 'border-radius:4px;pointer-events:none;max-width:56vw;max-height:70vh;overflow:auto;'
+        + 'text-align:left;white-space:normal';
       document.body.appendChild(k);
     }
     var durum = 'yok';
     try{ durum = (typeof ac !== 'undefined' && ac) ? ac.state : 'olusturulmadi'; }catch(e){}
     var cerceve = 'hayir';
     try{ cerceve = (window.self !== window.top) ? 'EVET' : 'hayir'; }catch(e){ cerceve = 'EVET'; }
-    k.innerHTML = 'SES TESHIS<br>'
-      + 'AudioContext : ' + durum + '<br>'
-      + 'AYAR.ses     : ' + (typeof AYAR !== 'undefined' ? String(AYAR.ses) : '?') + '<br>'
-      + 'dokunma      : ' + (_izleSesAcik ? 'yakalandi' : 'BEKLENIYOR') + '<br>'
-      + 'izle modu    : ' + (window._sahaIzleModu ? 'evet' : 'hayir') + '<br>'
-      + 'cerceve ici  : ' + cerceve + '<br>'
-      + 'tribunGain   : ' + (typeof tribunGain !== 'undefined' && tribunGain ? 'var' : 'YOK');
+    var veri = window._sahaIzleSonVeri;
+    var veriSatiri = veri
+      ? ('gol:' + (veri.homeGoals||0) + '-' + (veri.awayGoals||0)
+         + ' dk:' + (veri.minute||0)
+         + ' ev:' + (Array.isArray(veri.events) ? veri.events.length : '-')
+         + ' vr:' + (typeof veri.vurus==='number' ? veri.vurus : '-'))
+      : 'VERI YOK';
+    var izlenenSatiri = 'skr:' + (_izleSonSkor ? (_izleSonSkor.h+'-'+_izleSonSkor.a) : '-')
+      + ' ev:' + (_izleSonEvSayisi==null?'-':_izleSonEvSayisi)
+      + ' vr:' + (_izleSonVurus==null?'-':_izleSonVurus);
+    k.innerHTML = '<b>SES TESHIS</b><br>'
+      + 'ac:' + durum + ' ses:' + (typeof AYAR !== 'undefined' ? String(AYAR.ses) : '?') + '<br>'
+      + 'dok:' + (_izleSesAcik ? 'yakalandi' : 'BEKLENIYOR') + ' izle:' + (window._sahaIzleModu ? 'e' : 'h') + '<br>'
+      + 'crv:' + cerceve + ' trb:' + (typeof tribunGain !== 'undefined' && tribunGain ? 'var' : 'YOK') + '<br>'
+      + 'gln:' + veriSatiri + '<br>'
+      + 'isl:' + izlenenSatiri + '<br>'
+      + 'hata:' + (window._sahaIzleSonHata || 'yok');
   }catch(e){}
 }
 try{ setInterval(_sahaSesTeshisCiz, 1000); }catch(e){}
 
 function _sahaIzleVeriUygula(m){
   if(!m){ window._sahaIzleHedef = null; return; }
-  try{ _sahaIzleSesTetikle(m); }catch(e){}
+  window._sahaIzleSonVeri = m; // TESHIS: ham gelen veri - bkz. _sahaSesTeshisCiz
+  try{ _sahaIzleSesTetikle(m); }catch(e){ window._sahaIzleSonHata = String((e&&e.message)||e); }
   window._sahaIzleHedef = {
     top: (typeof m.ballX === 'number' && typeof m.ballZ === 'number') ? { x:m.ballX, z:m.ballZ } : null,
     home: Array.isArray(m.homePlayers) ? m.homePlayers : [],
@@ -4084,7 +4154,26 @@ function _sahaIzlePTKoprusu(){
     if(!d || !d.event) return;
     if(d.event==='listening'){ kaynak = e.source; yayinaBasla(); return; }
     // 'command' (playVideo/pauseVideo/setVolume/vs.) - canlı seyirci akışında oynat/duraklat
-    // komutlarının bir karşılığı yok, sessizce yok sayılır (hata fırlatmaz).
+    // komutlarının kendi karşılığı yok, ama GELMİŞ OLMASI tek başına önemli bir sinyal:
+    // ══════════════════════════════════════════════════════════════════════════════════
+    // KOK SEBEP DUZELTMESI (kullanici: "TV sekmesinde canli macta ses gelmiyor" - devam):
+    // saha.html'in KENDI dokunus dinleyicileri (_izleSesAc: pointerdown/click/touchstart)
+    // asla tetiklenmiyordu. Sebep: bu sayfa PTPlayer kabuğunda bir <iframe> icinde acilir
+    // ve o iframe CSS'te 'pointer-events:none'dir (bkz. index.html #ptp-video / .ptp-gomulu-kap) -
+    // TUM dokunuslari, ustundeki kendi kontrol katmani (.ptp-ov / 'stage') yutuyor. Yani
+    // izleyici ekrana kac kere dokunursa dokunsun, o olay bu sayfanin kendi window/document/
+    // canvas'ina HICBIR ZAMAN ulasmiyordu - ses kilidi acmak icin beklenen tetik yapisal
+    // olarak imkansizdi (SES TESHIS kutusu bunu "dokunma: BEKLENIYOR" olarak surekli
+    // gosterirdi).
+    // COZUM: PTPlayer, kullanicinin GERCEK dokunusuyla (oynat/duraklat, ileri/geri sarma vb.)
+    // zaten bu sayfaya bir 'command' postMessage'i gonderiyor (bkz. index.html/ptpGomuluMedya
+    // -> komut()). Bu mesajin ulasmis olmasi, izleyicinin o an ekranla etkilesimde oldugunun
+    // kanitidir. O yuzden ilk 'command' mesajinda da, tipki gercek bir dokunustaymis gibi,
+    // ayni ses kilidi acma rutini (_izleSesAc) calistirilir.
+    if(d.event==='command'){
+      try{ if(typeof _izleSesAc==='function') _izleSesAc(); }catch(err){}
+      return;
+    }
   });
 }
 // Havuzdaki (teamA/teamB - GK dahil 11'er nesne, sahaCanliYaz'daki SIRAYLA aynı) 3D
