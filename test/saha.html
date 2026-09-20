@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vP</title>
+<title>SAHA — 3D Futbol vS</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -358,6 +358,151 @@ function _kameraFovHesapla(aspect){
 }
 const camera = new THREE.PerspectiveCamera(_kameraFovHesapla(innerWidth/innerHeight), innerWidth/innerHeight, 0.5, 500);
 
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ISIK DIREKLERI
+// Dort kosede yuksek direk + ust panel. Gece ve aksam havasinda statin karakterini
+// belirleyen oge bu; gunduz de siluet verir.
+// GERCEK ISIK KAYNAGI EKLENMEDI: Dort ek SpotLight golge hesabini dort kat artirir ve
+// telefonda kare dusurur. Panel KENDI ISIGINI YAYIYORMUS gibi gorunur (emissive benzeri
+// parlak malzeme) - uzaktan fark edilmez, maliyeti sifir.
+// Isik konisi de eklenmedi: saydam koni sahneyi sisli gosteriyor ve oyunu zorlastiriyor.
+(function isikDirekleri(){
+  try{
+    const direkMat = new THREE.MeshLambertMaterial({ color:0x3a4249 });
+    const panelSonuk = new THREE.MeshLambertMaterial({ color:0x9aa4ac });
+    // Gece/aksam icin parlak panel: emissive ile kendi isigini yayiyor gibi durur.
+    const panelParlak = new THREE.MeshLambertMaterial({ color:0xfff6d8, emissive:0xfff2c4 });
+    window._sahaIsikPanelleri = [];
+    const Y = 26;                                   // direk yuksekligi
+    [-1,1].forEach(sx => [-1,1].forEach(sz => {
+      const x = sx*(HLX+21), z = sz*(HWZ+20);
+      const direk = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.85,Y,8), direkMat);
+      direk.position.set(x, Y/2, z);
+      scene.add(direk);
+      // Panel sahaya DONUK olsun: merkeze bakacak sekilde dondurulur.
+      const panel = new THREE.Mesh(new THREE.BoxGeometry(7.5, 4.2, 0.6), panelSonuk);
+      panel.position.set(x, Y+1.6, z);
+      panel.lookAt(0, 8, 0);
+      scene.add(panel);
+      // Panel cercevesi - duz kutu fazla sade kaliyor
+      const cerceve = new THREE.Mesh(new THREE.BoxGeometry(8.1, 4.8, 0.3), direkMat);
+      cerceve.position.copy(panel.position);
+      cerceve.quaternion.copy(panel.quaternion);
+      cerceve.translateZ(-0.35);
+      scene.add(cerceve);
+      window._sahaIsikPanelleri.push({ mesh:panel, sonuk:panelSonuk, parlak:panelParlak });
+    }));
+  }catch(e){}
+})();
+// Hava durumuna gore panelleri yakar/sondurur. Gunduz yanmasi gereksiz ve gercekci degil.
+function isiklariAyarla(){
+  try{
+    const h = AYAR.hava;
+    // KULLANICI TALEBI: Projektorler YALNIZCA gece ve aksam ustu yanar. Yagmur ve sis
+    // gunduz havalaridir; orada projektor yanmasi gercekci olmaz.
+    const yansin = (h === 'gece' || h === 'aksam');
+    (window._sahaIsikPanelleri || []).forEach(function(p){
+      p.mesh.material = yansin ? p.parlak : p.sonuk;
+    });
+    // ── GOLGELER ISIK KAYNAGINA GORE ──────────────────────────────────────────────────
+    // Golge, isigin nereden geldigini anlatir. Ikisi celisirse sahne yanlis gorunur:
+    // gece projektor altinda GUNDUZ golgesi (tek yonlu, uzun, koyu) olmaz.
+    //  - GUNDUZ/AKSAM GUNESI: Tek kaynak yukaridan -> belirgin, koyu, hafif kayik golge.
+    //  - GECE PROJEKTOR: Dort kose aydinlatir -> golgeler birbirini soktugu icin
+    //    SOLUK ve oyuncunun TAM ALTINDA kalir. Gercek statta da boyledir.
+    //  - SISLI/YAGMURLU: Isik dagilir, golge neredeyse yok olur.
+    if(typeof golgeMat !== 'undefined' && golgeMat){
+      var ayar = { gunduz:{o:0.30, s:1.00}, aksam:{o:0.24, s:1.14},
+                   gece:{o:0.16, s:0.86}, sisli:{o:0.08, s:0.94}, yagmur:{o:0.10, s:0.96} };
+      var a2 = ayar[h] || ayar.gunduz;
+      golgeMat.opacity = a2.o;
+      golgeMat.needsUpdate = true;
+      window._sahaGolgeOlcek = a2.s;
+      // Mevcut golgelerin boyutu da guncellenir - yalnizca yeni kurulanlar degisirse
+      // sahadaki oyuncularla yedekler farkli golgeye sahip olurdu.
+      try{
+        (players || []).forEach(function(pl){
+          if(pl && pl.golge) pl.golge.scale.setScalar(a2.s);
+        });
+        (window._sahaHakemler || []).forEach(function(r){
+          if(r && r.golge) r.golge.scale.setScalar(a2.s);
+        });
+      }catch(e){}
+    }
+  }catch(e){}
+}
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// KENAR DETAYLARI: yedek kulubeleri, kose bayraklari, reklam panolari
+// Saha ile tribun arasindaki bosluk bos duruyordu. Bu ogeler statin "yasayan" kismi -
+// olmadiginda saha bir cim dikdortgeni gibi kaliyor.
+// Poligon maliyeti dusuk tutuldu: kulube 5 kutu, bayrak 2 parca, panolar tek seride
+// yerlestirilmis kutular.
+(function kenarDetaylari(){
+  try{
+    // ── YEDEK KULUBELERI ──
+    const kulubeDis = new THREE.MeshLambertMaterial({ color:0x2a3138 });
+    const kulubeCam = new THREE.MeshLambertMaterial({ color:0x9fd4e8, transparent:true, opacity:0.45 });
+    const bankMat  = new THREE.MeshLambertMaterial({ color:0x1b1f24 });
+    [-1,1].forEach(function(sx){
+      const z = -(HWZ + 4.2), x = sx * 12;
+      // Arka duvar + yan duvarlar + cati: kutuyu "icine bakilan" bir hacim yapar
+      const arka = new THREE.Mesh(new THREE.BoxGeometry(11, 2.2, 0.3), kulubeDis);
+      arka.position.set(x, 1.1, z - 1.4); scene.add(arka);
+      [-1,1].forEach(function(sy){
+        const yan = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2.2, 2.8), kulubeDis);
+        yan.position.set(x + sy*5.35, 1.1, z); scene.add(yan);
+      });
+      const cati = new THREE.Mesh(new THREE.BoxGeometry(11.4, 0.25, 3.2), kulubeDis);
+      cati.position.set(x, 2.3, z); scene.add(cati);
+      // On cam: saha tarafina bakan saydam bant
+      const cam = new THREE.Mesh(new THREE.BoxGeometry(11, 1.0, 0.12), kulubeCam);
+      cam.position.set(x, 1.7, z + 1.5); scene.add(cam);
+      // Oturma siralari
+      const bank = new THREE.Mesh(new THREE.BoxGeometry(10, 0.35, 0.7), bankMat);
+      bank.position.set(x, 0.45, z - 0.3); scene.add(bank);
+    });
+
+    // (Kose bayraklari ZATEN VAR - asagidaki kendi blogunda. Burada tekrar
+    //  eklemek ayni yere ust uste iki bayrak koyardi.)
+
+    // ── REKLAM PANOLARI ──
+    // Saha kenarina dizili kisa panolar. Yazilar canvas dokusuyla uretilir; harici
+    // gorsel gerekmez ve lig adi degistiginde tek yerden guncellenebilir.
+    function panoDoku(yazi, zeminRenk, yaziRenk){
+      const c = document.createElement('canvas');
+      c.width = 512; c.height = 64;
+      const x = c.getContext('2d');
+      x.fillStyle = zeminRenk; x.fillRect(0,0,512,64);
+      x.fillStyle = yaziRenk;
+      x.font = 'bold 40px Arial';
+      x.textAlign = 'center'; x.textBaseline = 'middle';
+      x.fillText(yazi, 256, 34);
+      const d = new THREE.CanvasTexture(c);
+      return new THREE.MeshLambertMaterial({ map:d });
+    }
+    const panoYazilari = [
+      panoDoku('SAHA', '#14202a', '#eaf2f6'),
+      panoDoku('SUPER LIG', '#7a1d1d', '#ffe9c9'),
+      panoDoku('FUTBOL', '#123a2a', '#d8f0e2'),
+      panoDoku('CANLI YAYIN', '#1d2a5a', '#e6ecff')
+    ];
+    const panoGeo = new THREE.BoxGeometry(9, 0.95, 0.18);
+    // Yalnizca UZUN kenarlar: kale arkasi panolari kamera acisindan zaten gorunmuyor,
+    // eklemek cizim cagrisi artirmaktan baska ise yaramazdi.
+    [-1,1].forEach(function(sz){
+      for(let i=0; i<10; i++){
+        const px = -HLX + 6 + i*10.4;
+        if(Math.abs(px) > HLX - 2) continue;
+        const m = new THREE.Mesh(panoGeo, panoYazilari[i % panoYazilari.length]);
+        m.position.set(px, 0.48, sz*(HWZ + 2.2));
+        if(sz > 0) m.rotation.y = Math.PI;     // yazi hep sahaya baksin
+        scene.add(m);
+      }
+    });
+  }catch(e){}
+})();
+
 const gokIsik = new THREE.HemisphereLight(0xe4eef6, 0x35452f, 0.85);
 scene.add(gokIsik);
 const sun = new THREE.DirectionalLight(0xfff4e2, 0.75);
@@ -385,6 +530,7 @@ function havaUygula(){
     gokIsik.intensity = h.gok;
     sun.intensity = h.gun;
     sun.color.setHex(h.gunRenk);
+    isiklariAyarla();          // direk panelleri havaya gore yanar/soner
   }catch(e){}
 }
 
@@ -436,9 +582,53 @@ scene.add(cevre);
 
 const tribunler = [];
 {
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // TRIBUNLER (kullanici: "stadyum icin oneri")
+  // ESKI HALI: Her kenarda tek bir dev kutu. Duz beton duvar gibi duruyordu - sahanin
+  // etrafi bos hissi veriyordu.
+  // YENI HALI:
+  //  1) KALABALIK DOKUSU - canvas'ta uretilen rastgele renkli noktalar. Harici dosya
+  //     GEREKMEZ (oyun tek dosya kalir) ve maliyeti tek bir doku. Bos beton yerine
+  //     dolu stat gorunumu, en buyuk farki bu yapiyor.
+  //  2) BASAMAKLI TRIBUN - tek kutu yerine dort kademe, her biri biraz daha yuksek ve
+  //     geride. Gercek statta tribun egimlidir; duz duvar gozu rahatsiz ediyordu.
+  //     Poligon maliyeti ihmal edilebilir (kutu basina 12 ucgen).
+  // Kademe sayisi 4: daha azi basamak hissi vermiyor, daha fazlasi uzaktan fark
+  // edilmeden cizim cagrisi artiriyor.
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  function kalabalikDoku(){
+    // Rastgele noktalar = uzaktan kalabalik. Yakindan bakildiginda soyut kalir ama
+    // kamera hep uzakta oldugu icin bu yeterli.
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 64;
+    const x = c.getContext('2d');
+    x.fillStyle = '#10171a'; x.fillRect(0,0,256,64);        // koyu tribun zemini
+    // Koltuk siralari: yatay ince cizgiler, kalabalik arasindan gorunur
+    x.fillStyle = 'rgba(255,255,255,.04)';
+    for(let y=4; y<64; y+=7) x.fillRect(0,y,256,1);
+    const renkler = ['#e8e8ea','#d8443a','#3d7fd4','#2fae7a','#e4b23c','#b06a3f',
+                     '#7a4a2a','#2a2119','#f0f2f4','#5a6472'];
+    for(let i=0; i<2600; i++){
+      x.fillStyle = renkler[(Math.random()*renkler.length)|0];
+      const px = Math.random()*256, py = Math.random()*64;
+      x.fillRect(px, py, 1.7, 2.4);                          // kisa dikey leke = oturan kisi
+    }
+    const d = new THREE.CanvasTexture(c);
+    d.wrapS = d.wrapT = THREE.RepeatWrapping;
+    return d;
+  }
+  const kalabalikD = kalabalikDoku();
   const pano = new THREE.MeshLambertMaterial({ color:0x1b3f7a });
   const trib = new THREE.MeshLambertMaterial({ color:0x18241f });
   const kal  = new THREE.MeshLambertMaterial({ color:0x2e3a42 });
+  // Kalabalik malzemesi: dokunun tekrar sayisi yuzeyin uzunluguna gore ayarlanir,
+  // yoksa uzun kenarda insanlar yayvan gorunur.
+  function kalabalikMat(tekrarX){
+    const d = kalabalikD.clone();
+    d.needsUpdate = true;
+    d.repeat.set(tekrarX, 1);
+    return new THREE.MeshLambertMaterial({ map:d });
+  }
   const add = (geo, mat, x,y,z, listeye) => {
     const m = new THREE.Mesh(geo, mat); m.position.set(x,y,z); scene.add(m);
     if (listeye) tribunler.push(m);
@@ -446,13 +636,29 @@ const tribunler = [];
   };
   const uzunPano = new THREE.BoxGeometry(HLX*2+8, 1.1, 0.4);
   const kisaPano = new THREE.BoxGeometry(0.4, 1.1, HWZ*2+6);
+  const KADEME = 4;
   [-1,1].forEach(s => {
     add(uzunPano, pano, 0, 0.55, s*(HWZ+7));
     add(kisaPano, pano, s*(HLX+9), 0.55, 0);
-    add(new THREE.BoxGeometry(HLX*2+30, 9, 14), trib, 0, 4.5, s*(HWZ+16), true);
-    add(new THREE.BoxGeometry(14, 9, HWZ*2+16), trib, s*(HLX+17), 4.5, 0, true);
-    add(new THREE.BoxGeometry(HLX*2+28, 5, 12), kal, 0, 6.2, s*(HWZ+15.4), true);
-    add(new THREE.BoxGeometry(12, 5, HWZ*2+14), kal, s*(HLX+16.4), 6.2, 0, true);
+    // Basamaklar: her kademe 2.4 birim yukselir ve 3 birim geriye kayar.
+    for(let k=0; k<KADEME; k++){
+      const y = 1.6 + k*2.4, geri = 10 + k*3, yuk = 2.4;
+      // Uzun kenarlar (yan tribunler)
+      const uzunlukU = HLX*2 + 30;
+      add(new THREE.BoxGeometry(uzunlukU, yuk, 3.2), kalabalikMat(uzunlukU/9),
+          0, y, s*(HWZ + geri), true);
+      // Kisa kenarlar (kale arkalari)
+      const uzunlukK = HWZ*2 + 16;
+      const mk = add(new THREE.BoxGeometry(3.2, yuk, uzunlukK), kalabalikMat(uzunlukK/9),
+          s*(HLX + geri + 1), y, 0, true);
+      mk.rotation.y = 0;
+    }
+    // En arkada koyu kapatici duvar: basamaklarin arkasindaki bosluk gorunmesin.
+    add(new THREE.BoxGeometry(HLX*2+32, 12, 1.2), trib, 0, 6, s*(HWZ+23), true);
+    add(new THREE.BoxGeometry(1.2, 12, HWZ*2+18), trib, s*(HLX+24), 6, 0, true);
+    // Ust kenar seridi (kal malzemesi) - basamaklari tepeden sinirlar
+    add(new THREE.BoxGeometry(HLX*2+32, 0.8, 4), kal, 0, 11.4, s*(HWZ+21.5), true);
+    add(new THREE.BoxGeometry(4, 0.8, HWZ*2+18), kal, s*(HLX+22.5), 11.4, 0, true);
   });
 }
 {
@@ -1733,7 +1939,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-P';
+window.APP_BUILD = '2026-09-18-S';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
