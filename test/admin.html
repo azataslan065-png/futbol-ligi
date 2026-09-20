@@ -1838,7 +1838,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-E';
+window.APP_BUILD='2026-09-18-G';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5772,9 +5772,27 @@ function canliRozetPanelHtml(){
           +'font:800 10px/1 Arial;color:#fff;text-shadow:0 1px 4px rgba(0,0,0,.9);'
           +'white-space:nowrap">'+(escHtml(_canliRozetGlobalVeri.canliRozetMetin||'ROZET'))+'</div>'
       +'</div>'
-      +'<div style="font-size:.58rem;color:var(--mu);margin-bottom:.4rem;line-height:1.5">'
+      +'<div style="font-size:.58rem;color:var(--mu);margin-bottom:.5rem;line-height:1.5">'
         +'Skorboard ve rozet bağımsız taşınır. Konumlar yüzde olarak saklandığı için '
         +'her ekran oranında aynı yerde görünür.</div>'
+      // ══════════════════════════════════════════════════════════════════════════════
+      // BOYUT AYARLARI (kullanici: "skorboard ayri, yazi ayri, logo ayri")
+      // Uc bagimsiz olcek. Tek bir "boyut" ayari yetmezdi: sponsor logosu buyuk ama
+      // yazi kucuk istenebilir, ya da tam tersi.
+      // Olcek CARPAN olarak saklaniyor (0.6 - 1.8), sabit piksel degil - boylece
+      // izleyicinin ekran boyu ne olursa olsun oran korunur.
+      // ══════════════════════════════════════════════════════════════════════════════
+      +['skorOlcek','yaziOlcek','logoOlcek'].map(function(alan){
+        var ad = {skorOlcek:'Skorboard', yaziOlcek:'Rozet yazısı', logoOlcek:'Rozet logosu'}[alan];
+        var d = (_canliRozetGlobalVeri[alan] != null) ? _canliRozetGlobalVeri[alan] : 1;
+        return '<div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.28rem">'
+          +'<span style="font-size:.6rem;color:var(--mu);min-width:5.2rem">'+ad+'</span>'
+          +'<input type="range" min="60" max="180" value="'+Math.round(d*100)+'" '
+            +'oninput="setOlcek(\''+alan+'\',this.value)" style="flex:1;accent-color:var(--ac)">'
+          +'<span id="'+alan+'Val" style="font-size:.62rem;width:2.6rem;text-align:right">'
+            +Math.round(d*100)+'%</span>'
+        +'</div>';
+      }).join('')
     +'<input id="canliRozetMetinInp" placeholder="Rozet metni (ör. sponsor adı) - boş bırakılabilir" value="'+escHtml(metin)+'" oninput="_canliRozetGlobalVeri.canliRozetMetin=this.value" style="font-size:.76rem;margin-bottom:.32rem"/>'
     +'<div id="canliRozetLogoBox" style="margin-bottom:.32rem">'+(logo?('<div style="display:flex;align-items:center;gap:.4rem"><img src="'+escHtml(logo)+'" style="width:28px;height:28px;object-fit:contain;border-radius:6px;background:var(--s3)"/><span style="font-size:.6rem;color:#15803d;flex:1">✅ Logo eklendi</span><button onclick="removeCanliRozetLogo()" style="background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);color:#f87171;border-radius:5px;font-size:.6rem;padding:.15rem .4rem;cursor:pointer">Kaldır</button></div>'):'')+'</div>'
     +'<div class="g2">'
@@ -5839,6 +5857,27 @@ function pozSuruklemeKur(){
   }catch(e){}
 }
 
+function setOlcek(alan, deger){
+  // Kaydiracin degeri yuzde; carpan olarak saklanir. Sinirlar 0.6-1.8: daha kucugu
+  // okunmuyor, daha buyugu goruntuyu kapatiyor.
+  var v = Math.max(60, Math.min(180, parseInt(deger, 10) || 100));
+  _canliRozetGlobalVeri[alan] = Math.round(v) / 100;
+  var et = qs(alan + 'Val');
+  if(et) et.textContent = v + '%';
+  // Onizlemedeki kutular da aninda olceklenir - yonetici sonucu gorerek ayarlasin.
+  try{
+    if(alan === 'skorOlcek'){
+      var sk = qs('pozSkor'); if(sk) sk.style.transform = 'scale(' + (v/100) + ')';
+      if(sk) sk.style.transformOrigin = 'top left';
+    }else{
+      var rz = qs('pozRozet');
+      if(rz){
+        rz.style.transform = 'scale(' + ((_canliRozetGlobalVeri.yaziOlcek||1)) + ')';
+        rz.style.transformOrigin = 'top left';
+      }
+    }
+  }catch(e){}
+}
 function setSkorPoz(k){
   // Skorboard kosesi. Rozetle AYNI dugumde tutulur; iki ayri ayar dali acmak
   // yoneticiyi iki yerde is yapmaya zorlardi.
@@ -5902,6 +5941,10 @@ function saveCanliRozet(){
   if(['solust','sagust','sol','sag'].indexOf(_canliRozetGlobalVeri.skorPoz) < 0)
     _canliRozetGlobalVeri.skorPoz = 'solust';
   // Serbest tasima degerleri. Varsayilanlar: skorboard sol ust, rozet sol alt.
+  // Olcek varsayilanlari: 1 = degisiklik yok.
+  if(_canliRozetGlobalVeri.skorOlcek == null) _canliRozetGlobalVeri.skorOlcek = 1;
+  if(_canliRozetGlobalVeri.yaziOlcek == null) _canliRozetGlobalVeri.yaziOlcek = 1;
+  if(_canliRozetGlobalVeri.logoOlcek == null) _canliRozetGlobalVeri.logoOlcek = 1;
   if(_canliRozetGlobalVeri.skorX == null) _canliRozetGlobalVeri.skorX = 3;
   if(_canliRozetGlobalVeri.skorY == null) _canliRozetGlobalVeri.skorY = 4;
   if(_canliRozetGlobalVeri.rozetX == null) _canliRozetGlobalVeri.rozetX = 3;
