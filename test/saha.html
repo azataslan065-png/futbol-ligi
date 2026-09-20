@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vH</title>
+<title>SAHA — 3D Futbol vJ</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -229,6 +229,8 @@
         <button class="btn" id="b-kayit-tamam" style="width:100%">Takımı kur</button>
       </div>
 
+      <!-- YARIM KALAN MAC: Kayit varsa gosterilir (bkz. devamDugmesiTazele). -->
+      <button class="btn" id="b-devam" style="display:none;margin-bottom:.35rem">▶ Maça devam et</button>
       <button class="btn" id="b-maclarim">⚽ Maçlarım</button>
       <button class="btn alt" id="b-arkadas" style="margin-top:.35rem">🎮 Arkadaşınla Oyna</button>
       <div style="font-size:10px;opacity:.55;margin:.15rem 0 0;text-align:center;line-height:1.4">
@@ -1107,7 +1109,22 @@ function cikisYap(){
   menuGoster();
 }
 // Giris yapilmissa menu, yapilmamissa giris formu gorunur.
+// Yarim mac kaydi varsa devam dugmesini gosterir.
+function devamDugmesiTazele(){
+  try{
+    var d = document.getElementById('b-devam');
+    if(!d) return;
+    var k = devamOku();
+    if(k){
+      d.style.display = 'block';
+      d.textContent = '\u25b6 Maça devam et (' + k.skorA + '-' + k.skorB + ')';
+    }else{
+      d.style.display = 'none';
+    }
+  }catch(e){}
+}
 function menuGoster(){
+  try{ devamDugmesiTazele(); }catch(e){}
   try{
     const g = document.getElementById('girisBolum'), m = document.getElementById('menuBolum');
     const girisli = !!benimUid;
@@ -1421,7 +1438,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-H';
+window.APP_BUILD = '2026-09-18-J';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3373,6 +3390,8 @@ function macOzetiCiz(){
   }catch(e){}
 }
 function bitir(){
+  // Mac bitti: yarim mac kaydi artik gecersiz, temizlenir.
+  try{ devamSil(); }catch(e){}
   // ── OLAY KAYDI ── Yine önce uzatma, sonra bitiş (bkz. devreArasi notu).
   try{
     const _ekDk = Math.max(0, Math.round((uzatma||0) / Math.max(1,HALF) * 45));
@@ -3426,6 +3445,76 @@ function loop(){
 }
 
 /* ---------- panel ---------- */
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// YARIM KALAN MACA DEVAM (kullanici: "maçtan cikarsa kaldigi yerden devam edebilsin")
+// Kullanici sekmeyi kapatir, telefonu kilitler ya da yanlislikla geri tusuna basarsa
+// mac kayboluyordu - fikstur maci ise sonuc da yazilmiyordu.
+// NEREDE SAKLANIR: Cihazda (localStorage). Firebase'e yazmak daha "dogru" gorunur ama
+// saniyede birkac kez yazmak gereksiz yuk; ustelik yarim mac BASKA cihazdan devam
+// ettirilmemeli - oynayan kisinin kendi cihazinda kaldigi yerden devam etmesi yeterli.
+// NE SAKLANIR: Skor, sure, devre, olaylar ve fikstur baglantisi. Oyuncu KONUMLARI
+// saklanmiyor - maci ortasindan devam ettirirken oyuncular baslangic dizilisine doner;
+// konumlari da saklamak kaydi buyutur ve kazanci sinirlidir.
+// NE ZAMAN SILINIR: Mac bitince ya da kullanici yeni mac baslatinca.
+const SAHA_DEVAM_ANAHTAR = 'saha-yarim-mac';
+function devamKaydet(){
+  try{
+    if(!running || bitti || mod === 'antrenman') return;
+    var k = {
+      skorA: skorA, skorB: skorB, saat: saat, devre: devre, uzatma: uzatma,
+      mod: mod, half: HALF,
+      olaylar: (olaylar || []).slice(),
+      fikstur: window._sahaAktifFikstur || null,
+      ts: Date.now()
+    };
+    localStorage.setItem(SAHA_DEVAM_ANAHTAR, JSON.stringify(k));
+  }catch(e){}
+}
+function devamOku(){
+  try{
+    var h = localStorage.getItem(SAHA_DEVAM_ANAHTAR);
+    if(!h) return null;
+    var k = JSON.parse(h);
+    // 6 saatten eski kayit kullanilmaz: kullanici muhtemelen o maci unutmustur ve
+    // fikstur durumu degismis olabilir.
+    if(!k || !k.ts || (Date.now() - k.ts) > 6*3600*1000) return null;
+    return k;
+  }catch(e){ return null; }
+}
+function devamSil(){
+  try{ localStorage.removeItem(SAHA_DEVAM_ANAHTAR); }catch(e){}
+}
+// Kayitli maci geri yukler ve oyunu o noktadan baslatir.
+function devamEt(){
+  var k = devamOku();
+  if(!k) return false;
+  try{
+    window._sahaAktifFikstur = k.fikstur || null;
+    basla(k.mod || 'mac');
+    // basla() her seyi sifirlar; kayitli degerler ONDAN SONRA geri yazilir.
+    HALF = k.half || HALF;
+    skorA = k.skorA || 0; skorB = k.skorB || 0;
+    saat = k.saat || 0; devre = k.devre || 1; uzatma = k.uzatma || 0;
+    dirA = (devre === 2) ? -1 : 1;
+    olaylar = (k.olaylar || []).slice();
+    try{ hud(); takimUygula(); }catch(e){}
+    mesaj('DEVAM', (skorA + ' - ' + skorB) + ' · ' + Math.round(saat/60) + '. dakika', 2200);
+    return true;
+  }catch(e){ return false; }
+}
+// Sayfa kapanirken/arka plana alinirken kaydet. 'visibilitychange' mobilde
+// 'beforeunload'dan daha guvenilir - telefon kilitlendiginde de tetiklenir.
+try{
+  addEventListener('beforeunload', devamKaydet);
+  addEventListener('pagehide', devamKaydet);
+  document.addEventListener('visibilitychange', function(){
+    if(document.hidden) devamKaydet();
+  });
+  // Ek guvence: oyun sirasinda 10 saniyede bir. Tarayici aniden kapanirsa (cokme,
+  // bellek temizligi) yukaridaki olaylar hic tetiklenmeyebilir.
+  setInterval(devamKaydet, 10000);
+}catch(e){}
+
 function basla(yeniMod){
   mod = yeniMod || 'mac';
   HALF = AYAR.sure;
@@ -3514,6 +3603,10 @@ function bolumAcKapa(kutuId, dugmeId, acikYazi, kapaliYazi, cizFn){
   if(acik){ k.style.display = 'none'; d.textContent = kapaliYazi; }
   else { try{ cizFn && cizFn(); }catch(e){} k.style.display = 'block'; d.textContent = acikYazi; }
 }
+document.getElementById('b-devam').onclick = function(){
+  // Devam basarisizsa (kayit bozuk/eski) kullaniciya sessiz kalmak yerine bilgi verilir.
+  if(!devamEt()){ mesaj('', 'Kayitli mac bulunamadi', 1600); devamSil(); devamDugmesiTazele(); }
+};
 document.getElementById('b-maclarim').onclick = function(){
   bolumAcKapa('maclarKutu','b-maclarim','⚽ Maçları gizle','⚽ Maçlarım', maclarCiz);
 };
@@ -3746,6 +3839,19 @@ function _sahaIzleRozetUstOfset(poz){
   return 10;
 }
 function _sahaIzleRozetUygula(){
+  // KOK SEBEP (kullanici: "rozet iki kere ciziliyor"): Izleyici, oyunu Puan Tablosu'nun
+  // oynaticisi icinde GOMULU CERCEVE olarak aciyor. Oyun kendi rozetini ciziyor, Puan
+  // Tablosu da cercevenin UZERINE kendi rozetini koyuyordu - iki rozet ust uste.
+  // COZUM: Cerceve icindeysek rozeti oyun CIZMEZ; barindiran sayfa zaten ciziyor ve
+  // oradaki surum oynatici kontrolleriyle dogru katmanda duruyor.
+  // Oyun tek basina (tam sayfa) acildiginda rozet yine gorunur.
+  try{
+    if(window.self !== window.top){
+      var _e = document.getElementById('sahaIzleRozet');
+      if(_e) _e.style.display = 'none';
+      return;
+    }
+  }catch(e){ return; }   // erisim hatasi = cerceve icindeyiz demektir
   try{
     var g = window._sahaIzleRozetGlobal;
     var metin = (g && g.canliRozetMetin) ? String(g.canliRozetMetin).trim() : '';
