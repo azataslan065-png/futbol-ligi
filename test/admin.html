@@ -1838,7 +1838,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-G';
+window.APP_BUILD='2026-09-18-H';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5715,6 +5715,14 @@ function renderCanliRozetGlobal(){
     });
     return;
   }
+  // KOK SEBEP (kullanici: "boyutlandirdigimda eski haline donuyor"): renderLive() her
+  // calistiginda (canli mac verisi her degistiginde) bu panel SIFIRDAN yeniden
+  // ciziliyordu. Kaydiraclar ve suruklenen kutular HTML'in parcasi oldugu icin
+  // kullanicinin henuz KAYDETMEDIGI ayarlar siliniyor, eski degerler geri geliyordu.
+  // COZUM: Panelde yapilmis kaydedilmemis degisiklik varsa yeniden cizim ATLANIR.
+  // Bayrak kaydetme ve logo yukleme sonrasi temizlenir; boylece disaridan gelen
+  // gercek guncellemeler yine gorunur.
+  if(window._canliRozetKirli && document.getElementById('pozOnizleme')) return;
   box.innerHTML = canliRozetPanelHtml();
   // Panel her yeniden cizildiginde dinleyiciler de kaybolur; kurulum burada tekrarlanir.
   // pozSuruklemeKur kendi icinde '_kuruldu' bayragiyla korunuyor, cift baglama olmaz.
@@ -5845,6 +5853,7 @@ function pozSuruklemeKur(){
       var tur = aktif.getAttribute('data-poz');
       if(tur === 'skor'){ _canliRozetGlobalVeri.skorX = yx; _canliRozetGlobalVeri.skorY = yy; }
       else { _canliRozetGlobalVeri.rozetX = yx; _canliRozetGlobalVeri.rozetY = yy; }
+      window._canliRozetKirli = true;
       e.preventDefault();
     }
     function bitir(){
@@ -5862,6 +5871,7 @@ function setOlcek(alan, deger){
   // okunmuyor, daha buyugu goruntuyu kapatiyor.
   var v = Math.max(60, Math.min(180, parseInt(deger, 10) || 100));
   _canliRozetGlobalVeri[alan] = Math.round(v) / 100;
+  window._canliRozetKirli = true;   // kaydedilmemis degisiklik var
   var et = qs(alan + 'Val');
   if(et) et.textContent = v + '%';
   // Onizlemedeki kutular da aninda olceklenir - yonetici sonucu gorerek ayarlasin.
@@ -5950,6 +5960,7 @@ function saveCanliRozet(){
   if(_canliRozetGlobalVeri.rozetX == null) _canliRozetGlobalVeri.rozetX = 3;
   if(_canliRozetGlobalVeri.rozetY == null) _canliRozetGlobalVeri.rozetY = 80;
   db.ref('canliRozetGlobal').update(_canliRozetGlobalVeri).then(function(){
+    window._canliRozetKirli = false;
     toast('✅ Yayın rozeti kaydedildi - tüm canlı maçlarda otomatik görünecek');
     logAction('📡 Genel yayın rozeti güncellendi');
     renderCanliRozetGlobal();
@@ -8549,15 +8560,25 @@ window.setKenarBuyutme=function(v){
   if(!isFinite(n))n=1.6;
   n=Math.max(0,Math.min(4,n));
   S.kenarBuyutme=Math.round(n*100)/100;
+  window._kbSonDegisim = Date.now();   // tazelemenin kaydiraci geri almasini engeller
   save().then(function(){
     kbEtiketTazele();
     toast(S.kenarBuyutme>0?('✂️ Kenar büyütme: %'+Math.round(S.kenarBuyutme*100)):'⛔ Kenar büyütme kapalı');
   });
 };
 function kbEtiketTazele(){
+  // KOK SEBEP (kullanici: "kenar buyutme eski haline donuyor"): Kaydiracin degeri
+  // S.kenarBuyutme'den yeniden yaziliyordu. Firebase dinleyicisi, kaydetme tamamlanmadan
+  // ESKI sunucu degerini S'e geri yazdiginda bu fonksiyon kaydiraci o eski degere
+  // dondururuyordu - kullanici ayari kaybediyordu.
+  // 'document.activeElement' korumasi dokunmatik ekranda yetmiyor: parmak kalkinca
+  // odak kaydiractan ayriliyor ve koruma devre disi kaliyor.
+  // COZUM: Son degisiklikten sonraki 3 saniye boyunca kaydiraca DOKUNULMAZ. Kaydetme
+  // bu sure icinde tamamlanir; sonrasinda disaridan gelen gercek guncellemeler yine gecer.
   var v=(S.kenarBuyutme===undefined||S.kenarBuyutme===null)?1.6:Number(S.kenarBuyutme);
   var kay=qs('kbRange'),et=qs('kbDeger');
-  if(kay&&document.activeElement!==kay)kay.value=String(v);
+  var yeniDegisti = window._kbSonDegisim && (Date.now() - window._kbSonDegisim < 3000);
+  if(kay && document.activeElement!==kay && !yeniDegisti) kay.value=String(v);
   if(et)et.textContent=(v>0?('%'+Math.round(v*100)):'kapalı');
 }
 window.setKesintisizGecis=function(v){
