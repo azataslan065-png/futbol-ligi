@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vK</title>
+<title>SAHA — 3D Futbol vL</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -517,18 +517,153 @@ function kitMats(jer, shr){
 }
 const MATS = { a:kitMats(0xd8443a,0x24242a), b:kitMats(0x3d7fd4,0xf0f2f4),
                ka:kitMats(0x2fae7a,0x1f2226), kb:kitMats(0xe4b23c,0x1f2226) };
+// Sac ve krampon: takimdan BAGIMSIZ, herkes icin ortak. Oyuncu basina ayri malzeme
+// uretmek 22 oyuncu x 2 malzeme = gereksiz GPU yuku; ortak malzeme tek cizim cagrisi.
+MATS.sac   = new THREE.MeshLambertMaterial({ color:0x2a2119 });
+MATS.kramp = new THREE.MeshLambertMaterial({ color:0x15161a });
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// YURUYUS / KOSU ANIMASYONU (kullanici: "hareketleri gercege yakin olsun")
+// ESKI HALI: Bacaklar ve kollar tek bir sinus ile one-arkaya salliniyordu. Uc sorun vardi:
+//   - Bacak KALCADAN degil ortasindan doniyordu (model duzeltildi)
+//   - DIZ hic bukulmuyordu; duz bacakla kosan figur robot gibi duruyor
+//   - Govde hep dik; gercek kosucu one egilir ve adimla hafifce zipla
+// YENI HALI:
+//   - Diz, bacak GERIYE giderken bukulur (kosuda belirgin, yuruyuste az)
+//   - Dirsek surekli hafif bukuk; kol sallanmasi bacaklarla TERS fazda
+//   - Govde hiza gore one egilir, her adimda hafif dikey salinim (zipla)
+//   - Adim frekansi hiza bagli: yuruyus yavas ve genis, kosu hizli ve kisa adim
+// Butun degerler tek yerde; uc ayri animasyon noktasi (saha oyuncusu, hakem, izleyici
+// modu) ayni islevi cagirir - eskiden ucu de kendi kopyasini tasiyordu ve biri
+// degistiginde digerleri geride kaliyordu.
+function insanAdim(ud, dt, hiz, egilebilir){
+  try{
+    if(!ud || !ud.bacakL) return;
+    var h = Math.max(0, Math.min(11, hiz || 0));
+    var kosuyor = h > 3.2;
+    // Adim frekansi: yuruyuste ~1.6 adim/sn, tam kosuda ~3.4
+    ud.phase += dt * (1.6 + h * 0.34);
+    var f = ud.phase;
+    // Salinim genligi hizla artar ama doyuma ulasir - bacak 90 dereceyi gecmemeli
+    var genlik = Math.min(0.95, 0.18 + h * 0.085);
+    var sw = Math.sin(f) * genlik;
+
+    // KALCA: iki bacak ters fazda
+    ud.bacakL.kalca.rotation.x = sw;
+    ud.bacakR.kalca.rotation.x = -sw;
+
+    // DIZ: yalnizca bacak GERIDEYKEN bukulur (ileri salinimda bacak duzdur).
+    // max(0,...) bunu saglar: negatif faz = one uzanan bacak = bukulme yok.
+    var dizGenlik = kosuyor ? 1.25 : 0.45;
+    ud.bacakL.diz.rotation.x = Math.max(0, -Math.sin(f)) * dizGenlik;
+    ud.bacakR.diz.rotation.x = Math.max(0,  Math.sin(f)) * dizGenlik;
+
+    // KOLLAR: bacaklarla ters fazda, genligi daha az (gercek kosuda kol daha kisa yay cizer)
+    var kolSw = -sw * (kosuyor ? 0.85 : 0.55);
+    ud.kolL.omuz.rotation.x = kolSw;
+    ud.kolR.omuz.rotation.x = -kolSw;
+    // DIRSEK: kosuda surekli bukuk (~90 derece), yuruyuste hafif
+    var dirsek = kosuyor ? 1.15 : 0.35;
+    ud.kolL.dirsek.rotation.x = -dirsek - Math.max(0, kolSw) * 0.4;
+    ud.kolR.dirsek.rotation.x = -dirsek - Math.max(0, -kolSw) * 0.4;
+    // Kollar kosarken govdeye yaklasir
+    ud.kolL.omuz.rotation.z = kosuyor ? 0.12 : 0.05;
+    ud.kolR.omuz.rotation.z = kosuyor ? -0.12 : -0.05;
+
+    if(egilebilir !== false && ud.govde){
+      // GOVDE EGIMI: hizlandikca one egilir. Kosucunun agirlik merkezi one kayar.
+      var egim = Math.min(0.30, h * 0.028);
+      ud.govde.rotation.x = egim;
+      if(ud.omuzParca) ud.omuzParca.rotation.x = egim;
+      if(ud.bas) ud.bas.rotation.x = -egim * 0.6;   // bas dik kalir, ileri bakar
+      // DIKEY SALINIM: her adimda govde hafif yukselir (frekans iki kat - her iki adimda bir).
+      // Sabit yukseklikte kayan figur "paten kayiyor" gibi gorunuyordu.
+      var zipla = Math.abs(Math.sin(f)) * Math.min(0.055, h * 0.006);
+      ud.govde.position.y = 1.30 + zipla;
+      if(ud.omuzParca) ud.omuzParca.position.y = 1.47 + zipla;
+      if(ud.bas) ud.bas.position.y = 1.74 + zipla;
+    }
+  }catch(e){}
+}
 function makePlayer(m){
+  // ══════════════════════════════════════════════════════════════════════════════════════
+  // OYUNCU MODELI (kullanici: "cok basit kaliyorlar, insana benzemiyorlar")
+  // ESKI HALI: Govde kutusu, kure kafa, iki bacak kutusu, iki kol kutusu. Uzuvlar
+  // MERKEZLERINDEN donuyordu - yani bacak kalcadan degil ORTASINDAN kiriliyordu, bu da
+  // yuruyusu "makas acilip kapaniyor" gibi gosteriyordu.
+  // YENI HALI - uc degisiklik:
+  //  1) EKLEM NOKTALARI: Her uzuv bir Group icine alindi; Group eklem yerinde duruyor,
+  //     mesh onun icinde asagi kaydirilmis. Artik bacak KALCADAN, kol OMUZDAN doner.
+  //     Gercekci hareketin tek sarti buydu; oran ve detay ikincil.
+  //  2) DIZ VE DIRSEK: Alt bacak ve on kol ayri parca. Kosuda diz bukulur - duz bacakla
+  //     kosan figur robot gibi gorunuyordu.
+  //  3) INSAN ORANI: Boyun, ayaklar, eller, omuz genisligi eklendi. Bas govdeye gore
+  //     kuculdu (0.20 -> 0.17): eski hali bebek proporsiyonu veriyordu.
+  // Kutu geometrisi korundu - dusuk poligon sayisi 22 oyuncu icin onemli; oranlar
+  // duzeltilince kutular da insan siluetine oturuyor.
+  // ══════════════════════════════════════════════════════════════════════════════════════
   const g = new THREE.Group();
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.58,0.68,0.32), m.jer);
-  torso.position.y = 1.16; g.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.2,10,8), m.skin);
-  head.position.y = 1.62; g.add(head);
-  const legGeo = new THREE.BoxGeometry(0.19,0.78,0.21);
-  const legL = new THREE.Mesh(legGeo, m.shr); legL.position.set(0,0.41,-0.15); g.add(legL);
-  const legR = new THREE.Mesh(legGeo, m.shr); legR.position.set(0,0.41, 0.15); g.add(legR);
-  const armGeo = new THREE.BoxGeometry(0.14,0.58,0.16);
-  const armL = new THREE.Mesh(armGeo, m.skin); armL.position.set(0,1.18,-0.38); g.add(armL);
-  const armR = new THREE.Mesh(armGeo, m.skin); armR.position.set(0,1.18, 0.38); g.add(armR);
+
+  // Govde: hafif konik gorunum icin ust ve alt ayri
+  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52,0.46,0.28), m.jer);
+  torso.position.y = 1.30; g.add(torso);
+  const bel = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.22,0.26), m.jer);
+  bel.position.y = 1.00; g.add(bel);
+  // Omuzlar: govdeyi genisletip insan siluetine yaklastirir
+  const omuz = new THREE.Mesh(new THREE.BoxGeometry(0.62,0.14,0.29), m.jer);
+  omuz.position.y = 1.47; g.add(omuz);
+  const boyun = new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.075,0.10,6), m.skin);
+  boyun.position.y = 1.58; g.add(boyun);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17,12,10), m.skin);
+  head.position.y = 1.74; g.add(head);
+  // Sac: basin ust yarisini orten ince kabuk - yuz yonu belli olur
+  const sac = new THREE.Mesh(new THREE.SphereGeometry(0.175,12,8,0,Math.PI*2,0,Math.PI*0.62), MATS.sac);
+  sac.position.y = 1.75; g.add(sac);
+
+  // ── BACAKLAR: kalca eklemi -> ust bacak -> diz eklemi -> alt bacak -> ayak ──
+  function bacakYap(z){
+    const kalca = new THREE.Group();
+    kalca.position.set(0, 0.92, z);              // eklem noktasi: kalca hizasi
+    const ust = new THREE.Mesh(new THREE.BoxGeometry(0.17,0.44,0.19), m.shr);
+    ust.position.y = -0.22;                       // mesh eklemden ASAGI sarkar
+    kalca.add(ust);
+    const diz = new THREE.Group();
+    diz.position.y = -0.44;
+    kalca.add(diz);
+    const alt = new THREE.Mesh(new THREE.BoxGeometry(0.15,0.42,0.17), m.skin);
+    alt.position.y = -0.21;
+    diz.add(alt);
+    const ayak = new THREE.Mesh(new THREE.BoxGeometry(0.16,0.09,0.27), MATS.kramp);
+    ayak.position.set(0,-0.44,0.05);
+    diz.add(ayak);
+    g.add(kalca);
+    return { kalca, diz };
+  }
+  const bacakL = bacakYap(-0.13), bacakR = bacakYap(0.13);
+
+  // ── KOLLAR: omuz eklemi -> ust kol -> dirsek -> on kol -> el ──
+  function kolYap(z){
+    const omuzEk = new THREE.Group();
+    omuzEk.position.set(0, 1.44, z);
+    const ust = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.32,0.13), m.jer);
+    ust.position.y = -0.16;
+    omuzEk.add(ust);
+    const dirsek = new THREE.Group();
+    dirsek.position.y = -0.32;
+    omuzEk.add(dirsek);
+    const on = new THREE.Mesh(new THREE.BoxGeometry(0.10,0.30,0.11), m.skin);
+    on.position.y = -0.15;
+    dirsek.add(on);
+    const el = new THREE.Mesh(new THREE.BoxGeometry(0.11,0.12,0.12), m.skin);
+    el.position.y = -0.34;
+    dirsek.add(el);
+    g.add(omuzEk);
+    return { omuz:omuzEk, dirsek };
+  }
+  const kolL = kolYap(-0.33), kolR = kolYap(0.33);
+
+  // Eski isimlerle uyum: animasyon kodu legL/armR gibi adlari kullaniyor.
+  const legL = bacakL.kalca, legR = bacakR.kalca;
+  const armL = kolL.omuz,   armR = kolR.omuz;
   // ── FORMA NUMARASI + ISIM ETIKETI ────────────────────────────────────────────────────
   // Kadro verisi eklendi ama sahada gorunmuyordu; kimin oynadigini bilmeden gol atan
   // oyuncuyu takip etmek imkansizdi.
@@ -565,6 +700,7 @@ function makePlayer(m){
   g.add(isimSprite);
 
   g.userData = { legL, legR, armL, armR, phase:Math.random()*6,
+                 bacakL, bacakR, kolL, kolR, govde:torso, omuzParca:omuz, bas:head,
                  numaraTuval, numaraDoku, isimTuval, isimDoku, isimSprite, numaraMesh,
                  yaziliNo:null, yaziliAd:null };
   return g;
@@ -681,11 +817,13 @@ function resmiHareket(r, hedef, hiz, dt, bakNoktasi){
   const bak = bakNoktasi.clone().sub(r.obj.position).setY(0);
   if (bak.lengthSq() > 0.01) r.obj.rotation.y = Math.atan2(bak.x, bak.z);
   const ud = r.obj.userData;
-  ud.phase += dt * (Math.min(uz,6)*1.2 + 1);
-  const sw = Math.sin(ud.phase) * Math.min(0.6, uz*0.09);
-  ud.legL.rotation.x = sw; ud.legR.rotation.x = -sw;
-  if (r.bayrak > 0){ r.bayrak -= dt; ud.armR.rotation.x = -2.7; ud.armL.rotation.x = 0; }
-  else { ud.armL.rotation.x = -sw*0.7; ud.armR.rotation.x = sw*0.7; }
+    // Hakem/yardimci: ayni yuruyus islevi. Bayrak kaldirma kol animasyonunu EZER -
+    // bayrak isareti oyunun akisini belirler, yuruyusten onceliklidir.
+    insanAdim(ud, dt, uz, true);
+    if (r.bayrak > 0){
+      r.bayrak -= dt;
+      if(ud.kolR){ ud.kolR.omuz.rotation.x = -2.7; ud.kolR.dirsek.rotation.x = -0.1; }
+    }
   r.golge.position.set(r.obj.position.x, 0.02, r.obj.position.z);
 }
 const hkHedef = new THREE.Vector3();
@@ -1438,7 +1576,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-K';
+window.APP_BUILD = '2026-09-18-L';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3128,10 +3266,7 @@ function update(dt){
     p.obj.position.z = Math.max(-HWZ-1.5, Math.min(HWZ+1.5, p.obj.position.z));
 
     const ud = p.obj.userData;
-    ud.phase += dt * (sp*1.4 + 1);
-    const sw = Math.sin(ud.phase) * Math.min(0.8, sp*0.1);
-    ud.legL.rotation.x = sw; ud.legR.rotation.x = -sw;
-    ud.armL.rotation.x = -sw*0.7; ud.armR.rotation.x = sw*0.7;
+    insanAdim(ud, dt, sp, true);
     p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
   });
 
@@ -4282,12 +4417,9 @@ function _sahaIzleTakimUygula(pool, arr, lerp, dt){
         }
         var ud = p.obj.userData;
         if(ud && ud.legL && ud.legR){
-          ud.phase = (ud.phase||0) + dt * (sp*1.4 + 1);
-          var sw = Math.sin(ud.phase) * Math.min(0.8, sp*0.1);
-          ud.legL.rotation.x = sw; ud.legR.rotation.x = -sw;
-          if(ud.armL) ud.armL.rotation.x = -sw*0.7;
-          if(ud.armR) ud.armR.rotation.x = sw*0.7;
-        }
+      // Izleyici modu: ayni insan adimi islevi (bkz. insanAdim).
+      insanAdim(ud, dt, sp, true);
+      }
       }
     } else {
       p.obj.visible = false; p.golge.visible = false;
