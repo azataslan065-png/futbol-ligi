@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vS</title>
+<title>SAHA — 3D Futbol vT</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -349,12 +349,23 @@ scene.fog = new THREE.Fog(0x0e1a16, 110, 240);
 // otomatik büyütülüyor (bkz. _kameraFovHesapla) - böylece saha genişliği ekran şekli ne
 // olursa olsun (dar telefon dahil) her zaman tam görünür.
 const _KAMERA_TABAN_FOV = 46, _KAMERA_TABAN_ORAN = 16/9;
+// KOK SEBEP (kullanici: "tam ekrandan kucuk ekrana gecince %10 daralma"):
+// Telafi yalnizca oran TABANDAN DARSA calisiyordu ('aspect >= TABAN' ise dokunmadan
+// donuyordu). Telefon yatay tam ekranda oran genelde 20:9 (2.22) - tabandan GENIS.
+// Orada dikey FOV sabit kaldigi icin YATAY gorus aciliyor (83 derece), kucuk ekranda
+// (16:9) 74 dereceye dusuyor. Aradaki fark ~%11: kullanicinin gordugu daralma buydu.
+// COZUM: Yatay gorus acisi HER ORANDA sabit tutulur. Dikey FOV ondan turetilir.
+// Boylece tam ekran ve kucuk ekranda AYNI genislikte alan gorunur; yalnizca ustte/altta
+// gorunen miktar degisir - dogru davranis budur.
+var _KAMERA_YATAY_FOV = 2*Math.atan(Math.tan(_KAMERA_TABAN_FOV*Math.PI/360) * _KAMERA_TABAN_ORAN)*180/Math.PI;
 function _kameraFovHesapla(aspect){
-  if(!aspect || aspect >= _KAMERA_TABAN_ORAN) return _KAMERA_TABAN_FOV;
-  var v0rad = _KAMERA_TABAN_FOV*Math.PI/180;
-  var tanYeniYari = Math.tan(v0rad/2) * _KAMERA_TABAN_ORAN / aspect;
-  var vDeg = 2*Math.atan(tanYeniYari)*180/Math.PI;
-  return Math.min(120, vDeg);   // aşırı dar ekranlarda (ör. bölünmüş ekran) çılgın bozulmayı önler
+  if(!aspect || !isFinite(aspect) || aspect <= 0) return _KAMERA_TABAN_FOV;
+  var yatayYari = _KAMERA_YATAY_FOV*Math.PI/360;
+  var tanDikeyYari = Math.tan(yatayYari) / aspect;
+  var vDeg = 2*Math.atan(tanDikeyYari)*180/Math.PI;
+  // Ust sinir: asiri dar ekranlarda (bolunmus ekran) perspektif bozulmasini engeller.
+  // Alt sinir: cok genis ekranlarda dikey gorus tamamen daralmasin.
+  return Math.max(28, Math.min(120, vDeg));
 }
 const camera = new THREE.PerspectiveCamera(_kameraFovHesapla(innerWidth/innerHeight), innerWidth/innerHeight, 0.5, 500);
 
@@ -1939,7 +1950,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-S';
+window.APP_BUILD = '2026-09-18-T';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -4408,8 +4419,23 @@ function _sahaIzleRozetUygula(){
       el.style.top = ekY + '%';
       // Yonetici onizlemesiyle AYNI model: konum sol-ust kose. Tasma max-width ile
       // engellenir, oge capa noktasindan kaydirilmaz (bkz. index.html'deki ayni not).
+      // KOK SEBEP (kullanici: "rozet konumu sag tarafta dogru hesaplanmiyor"):
+      // max-width ile tasma engelleniyordu ama bu ogeyi DARALTIYOR - sag tarafta rozet
+      // sikisip iki satira duşuyor, yonetici onizlemesindekiyle ayni gorunmuyordu.
+      // DOGRUSU: Oge dogal genisliginde kalsin, gerekirse SOLA kaydirilsin. Genislik
+      // ancak cizildikten sonra bilinir, bu yuzden olcum bir kare sonra yapilir.
       el.style.transform = '';
-      el.style.maxWidth = 'calc(' + (100 - ekX).toFixed(1) + '% - 4px)';
+      el.style.maxWidth = '';
+      requestAnimationFrame(function(){
+        try{
+          var g = el.getBoundingClientRect();
+          var tasma = (g.right + 6) - window.innerWidth;
+          // Yalnizca tasma varsa kaydir; yoksa capa noktasi aynen korunur.
+          el.style.marginLeft = (tasma > 0) ? (-tasma + 'px') : '0px';
+          var altTasma = (g.bottom + 6) - window.innerHeight;
+          el.style.marginTop = (altTasma > 0) ? (-altTasma + 'px') : '0px';
+        }catch(e){}
+      });
       el.style.right = 'auto';
       el.style.bottom = 'auto';
       // OLCEKLER: yazi ve logo BAGIMSIZ olceklenir.
