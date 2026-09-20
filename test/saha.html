@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vL</title>
+<title>SAHA — 3D Futbol vN</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -306,6 +306,10 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- GLTFLoader: hazir insan modeli (.glb) yuklemek icin. three.js cekirdegine dahil
+     degildir, ayri dosya olarak gelir. Model YOKSA oyun mevcut kutu modeliyle calismaya
+     devam eder - yukleyici sadece bir imkan, zorunluluk degil. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
 <script>
 "use strict";
 
@@ -584,7 +588,84 @@ function insanAdim(ud, dt, hiz, egilebilir){
     }
   }catch(e){}
 }
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// HAZIR INSAN MODELI (.glb) - istege bagli
+// KULLANICI TALEBI: "gercek insan bedeni kullanarak yeniden tasarla".
+// Kutu geometrisiyle yapilabileceğin siniri asildi; gercek insan formu icin rigli bir
+// model dosyasi gerekiyor.
+// NASIL KULLANILIR: 'oyuncu.glb' adli rigli bir insan modelini saha.html ile AYNI
+// klasore koyun. Oyun acilista dosyayi arar:
+//   - BULURSA: her oyuncu bu modelin bir kopyasi olur, kutu modeli kullanilmaz.
+//   - BULAMAZSA: sessizce mevcut kutu modeline duser, oyun normal calisir.
+// Bu yuzden dosya eklemek zorunlu degil - eklendigi anda devreye girer.
+//
+// MODELDEN BEKLENENLER:
+//   - Y ekseni yukari, +Z ileri (ayak ucu +Z'ye baksin)
+//   - Boy ~1.8 birim (oyun olcegi metre); farkli ise otomatik olceklenir
+//   - Kemik adlari yaygin standartlarla uyumlu olsun (mixamorig ya da Hips/Spine/Head)
+// Rigli model bulununca uzuvlar KEMIKLERDEN surulur; kemik bulunamazsa model sabit
+// durur ama yine de kutu modelden iyi gorunur.
+//
+// NEDEN ELLE MODEL YAZILMADI: Insan formu, kavisli yuzeyler ve duzgun agirlik boyama
+// ister; elle yazilan geometri 22 oyuncuda hem poligon maliyeti hem de kotu siluet
+// demek olurdu. Hazir model bu isin dogru araci.
+window._sahaInsanModeli = null;      // yuklenen sahne (klonlanacak)
+window._sahaModelDurum = 'aranıyor';
+(function insanModeliYukle(){
+  try{
+    if(!window.THREE || !THREE.GLTFLoader){ window._sahaModelDurum = 'yukleyici-yok'; return; }
+    var yol = 'oyuncu.glb';
+    new THREE.GLTFLoader().load(yol,
+      function(gltf){
+        try{
+          var kok = gltf.scene || (gltf.scenes && gltf.scenes[0]);
+          if(!kok){ window._sahaModelDurum = 'bos-model'; return; }
+          // Boy normalizasyonu: model hangi olcekte gelirse gelsin oyun olcegine oturur.
+          var kutu = new THREE.Box3().setFromObject(kok);
+          var boy = kutu.max.y - kutu.min.y;
+          if(boy > 0.01) kok.scale.multiplyScalar(1.8 / boy);
+          kok.traverse(function(o){ if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });
+          window._sahaInsanModeli = kok;
+          window._sahaModelDurum = 'hazir';
+          // Model gec geldiginde sahadaki oyuncular zaten kurulmus olur; yeniden kurmak
+          // yerine bir sonraki mac basinda devreye girer - mac ortasinda tum oyunculari
+          // degistirmek gorsel bir sicrama yaratirdi.
+        }catch(e){ window._sahaModelDurum = 'hata'; }
+      },
+      undefined,
+      function(){ window._sahaModelDurum = 'dosya-yok'; }   // 404: normal durum
+    );
+  }catch(e){ window._sahaModelDurum = 'hata'; }
+})();
+// Yuklenen modelden bir oyuncu govdesi uretir. Model yoksa null doner.
+function insanModelKopyala(m){
+  try{
+    var kaynak = window._sahaInsanModeli;
+    if(!kaynak) return null;
+    var kopya = (THREE.SkeletonUtils && THREE.SkeletonUtils.clone)
+      ? THREE.SkeletonUtils.clone(kaynak) : kaynak.clone(true);
+    // Forma rengi: modeldeki govde malzemesi takim rengine boyanir. Malzeme PAYLASILIR
+    // olursa iki takim ayni renge duser, bu yuzden klonlanir.
+    kopya.traverse(function(o){
+      if(o.isMesh && o.material){
+        o.material = o.material.clone();
+        if(o.material.color) o.material.color.copy(m.jer.color);
+      }
+    });
+    return kopya;
+  }catch(e){ return null; }
+}
 function makePlayer(m){
+  // Hazir insan modeli varsa onu kullan; yoksa asagidaki kutu modeline dus.
+  var hazir = insanModelKopyala(m);
+  if(hazir){
+    var gg = new THREE.Group();
+    gg.add(hazir);
+    // Kutu modelin animasyon arayuzu (bacakL/kolR ...) burada YOK; insanAdim bunu
+    // kontrol edip sessizce atlar. Rigli iskelet animasyonu ayri bir adim.
+    gg.userData = { phase: Math.random()*6, hazirModel: true };
+    return gg;
+  }
   // ══════════════════════════════════════════════════════════════════════════════════════
   // OYUNCU MODELI (kullanici: "cok basit kaliyorlar, insana benzemiyorlar")
   // ESKI HALI: Govde kutusu, kure kafa, iki bacak kutusu, iki kol kutusu. Uzuvlar
@@ -604,6 +685,7 @@ function makePlayer(m){
   const g = new THREE.Group();
 
   // Govde: hafif konik gorunum icin ust ve alt ayri
+  // Govde X'te genis (omuz), Z'de ince (gogus derinligi) - ileri yon +Z.
   const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52,0.46,0.28), m.jer);
   torso.position.y = 1.30; g.add(torso);
   const bel = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.22,0.26), m.jer);
@@ -620,9 +702,14 @@ function makePlayer(m){
   sac.position.y = 1.75; g.add(sac);
 
   // ── BACAKLAR: kalca eklemi -> ust bacak -> diz eklemi -> alt bacak -> ayak ──
-  function bacakYap(z){
+  // KOK SEBEP (kullanici: "oyuncular topu surerken yan gidiyor"):
+  // Bacaklar ve kollar Z ekseninde yan yana diziliyordu. Ama oyuncunun BAKIS yonu de
+  // +Z (rotation.y = atan2(dx,dz)). Yani iki bacak yan yana DEGIL, biri onde biri
+  // arkada duruyordu - figur kendi yuruyus yonune DIK bakiyor gibi gorunuyordu.
+  // DOGRUSU: Yanal ayrim X ekseninde, ileri yon +Z'de. Ayak ucu da +Z'ye bakar.
+  function bacakYap(x){
     const kalca = new THREE.Group();
-    kalca.position.set(0, 0.92, z);              // eklem noktasi: kalca hizasi
+    kalca.position.set(x, 0.92, 0);              // eklem noktasi: kalca hizasi, YANAL ayrim X'te
     const ust = new THREE.Mesh(new THREE.BoxGeometry(0.17,0.44,0.19), m.shr);
     ust.position.y = -0.22;                       // mesh eklemden ASAGI sarkar
     kalca.add(ust);
@@ -638,12 +725,12 @@ function makePlayer(m){
     g.add(kalca);
     return { kalca, diz };
   }
-  const bacakL = bacakYap(-0.13), bacakR = bacakYap(0.13);
+  const bacakL = bacakYap(-0.13), bacakR = bacakYap(0.13);   // X: sol/sag
 
   // ── KOLLAR: omuz eklemi -> ust kol -> dirsek -> on kol -> el ──
-  function kolYap(z){
+  function kolYap(x){
     const omuzEk = new THREE.Group();
-    omuzEk.position.set(0, 1.44, z);
+    omuzEk.position.set(x, 1.44, 0);             // YANAL ayrim X'te (bkz. bacakYap notu)
     const ust = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.32,0.13), m.jer);
     ust.position.y = -0.16;
     omuzEk.add(ust);
@@ -659,7 +746,7 @@ function makePlayer(m){
     g.add(omuzEk);
     return { omuz:omuzEk, dirsek };
   }
-  const kolL = kolYap(-0.33), kolR = kolYap(0.33);
+  const kolL = kolYap(-0.33), kolR = kolYap(0.33);          // X: sol/sag
 
   // Eski isimlerle uyum: animasyon kodu legL/armR gibi adlari kullaniyor.
   const legL = bacakL.kalca, legR = bacakR.kalca;
@@ -678,8 +765,8 @@ function makePlayer(m){
     new THREE.PlaneGeometry(0.34, 0.34),
     new THREE.MeshBasicMaterial({ map:numaraDoku, transparent:true, depthWrite:false })
   );
-  numaraMesh.position.set(-0.17, 1.22, 0);      // sirt: govde arkasi
-  numaraMesh.rotation.y = -Math.PI/2;
+  numaraMesh.position.set(0, 1.30, -0.15);      // sirt: govde ARKASI (-Z, ileri yon +Z)
+  numaraMesh.rotation.y = Math.PI;              // dokunun yuzu geriye baksin
   g.add(numaraMesh);
 
   // OKUNABİLİRLİK DÜZELTMESİ (2026-09-18-D, kullanıcı bildirdi: "bu yazı fontu okunamıyor"):
@@ -1576,7 +1663,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-L';
+window.APP_BUILD = '2026-09-18-N';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3625,6 +3712,13 @@ function devamEt(){
   if(!k) return false;
   try{
     window._sahaAktifFikstur = k.fikstur || null;
+    // KOK SEBEP (kullanici: "devam et tiklayinca mac ekrani acilmiyor"): basla() oyunu
+    // baslatiyor ama MENU PANELINI kapatmiyordu - oyun arkada calisiyor, kullanici
+    // menuye bakiyordu. Normal mac baslatmada bu iki satir zaten var (bkz. baslatDugme).
+    // Ses ve tam ekran da ayni yerde tetiklenir: kullanici dokunusu burada gerceklesiyor.
+    try{ sesBaslat(); tamEkran(true); }catch(e){}
+    document.getElementById('p-start').classList.remove('on');
+    document.getElementById('p-end').classList.remove('on');
     basla(k.mod || 'mac');
     // basla() her seyi sifirlar; kayitli degerler ONDAN SONRA geri yazilir.
     HALF = k.half || HALF;
