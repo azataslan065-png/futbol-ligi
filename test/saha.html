@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vN</title>
+<title>SAHA — 3D Futbol vP</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -310,6 +310,10 @@
      degildir, ayri dosya olarak gelir. Model YOKSA oyun mevcut kutu modeliyle calismaya
      devam eder - yukleyici sadece bir imkan, zorunluluk degil. -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
+<!-- SkeletonUtils: ISKELETLI (skinned) bir modeli klonlamak icin ZORUNLU.
+     Duz .clone() iskeleti paylastirir - 22 oyuncu ayni kemiklere baglanir ve hepsi
+     birbirinin hareketini yapar. SkeletonUtils.clone her kopyaya kendi iskeletini verir. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/utils/SkeletonUtils.js"></script>
 <script>
 "use strict";
 
@@ -541,6 +545,8 @@ MATS.kramp = new THREE.MeshLambertMaterial({ color:0x15161a });
 // degistiginde digerleri geride kaliyordu.
 function insanAdim(ud, dt, hiz, egilebilir){
   try{
+    // Hazir model varsa uzuv dondurmek yerine ISKELET animasyonu calisir.
+    if(ud && ud.hazirModel){ modelAnimGuncelle(ud, dt, hiz); return; }
     if(!ud || !ud.bacakL) return;
     var h = Math.max(0, Math.min(11, hiz || 0));
     var kosuyor = h > 3.2;
@@ -626,6 +632,10 @@ window._sahaModelDurum = 'aranıyor';
           if(boy > 0.01) kok.scale.multiplyScalar(1.8 / boy);
           kok.traverse(function(o){ if(o.isMesh){ o.castShadow = false; o.receiveShadow = false; } });
           window._sahaInsanModeli = kok;
+          // Animasyon klipleri saklanir: her oyuncu kendi AnimationMixer'ini kurup
+          // bu ortak kliplere baglanir. Klip verisi PAYLASILIR (kopyalanmaz) - 22 ayri
+          // kopya bellekte gereksiz yer kaplardi.
+          window._sahaModelKlipler = gltf.animations || [];
           window._sahaModelDurum = 'hazir';
           // Model gec geldiginde sahadaki oyuncular zaten kurulmus olur; yeniden kurmak
           // yerine bir sonraki mac basinda devreye girer - mac ortasinda tum oyunculari
@@ -642,18 +652,78 @@ function insanModelKopyala(m){
   try{
     var kaynak = window._sahaInsanModeli;
     if(!kaynak) return null;
+    // ISKELETLI model icin SkeletonUtils SART (bkz. betik etiketindeki not).
     var kopya = (THREE.SkeletonUtils && THREE.SkeletonUtils.clone)
       ? THREE.SkeletonUtils.clone(kaynak) : kaynak.clone(true);
-    // Forma rengi: modeldeki govde malzemesi takim rengine boyanir. Malzeme PAYLASILIR
-    // olursa iki takim ayni renge duser, bu yuzden klonlanir.
+    // FORMA RENGI: Yalnizca GIYSI malzemeleri boyanir. Ten, goz ve kas malzemelerini
+    // boyamak oyuncuyu tek renk bir heykele cevirirdi. Model malzemeleri adlandirilmis
+    // ('Skin', 'Eye', 'Eyebrows' ...), bu yuzden ada gore ayirmak guvenilir.
+    var tenSayilan = ['skin','eye','eyebrow','hair','teeth','mouth'];
     kopya.traverse(function(o){
-      if(o.isMesh && o.material){
-        o.material = o.material.clone();
-        if(o.material.color) o.material.color.copy(m.jer.color);
-      }
+      if(!o.isMesh || !o.material) return;
+      var mats = Array.isArray(o.material) ? o.material : [o.material];
+      var yeni = mats.map(function(mt){
+        var k = mt.clone();                       // paylasimli malzeme = tum takimlar ayni renk
+        var ad = String(mt.name || '').toLowerCase();
+        var tenMi = tenSayilan.some(function(x){ return ad.indexOf(x) >= 0; });
+        if(!tenMi && k.color) k.color.copy(m.jer.color);
+        return k;
+      });
+      o.material = Array.isArray(o.material) ? yeni : yeni[0];
+      o.frustumCulled = false;   // iskelet deformasyonu sinir kutusunu bozar; kirpilmayi kapat
     });
     return kopya;
   }catch(e){ return null; }
+}
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// ISKELET ANIMASYONU
+// Model 24 hazir klip getiriyor (Run, Walk, Idle, Kick_Left ...). Hiza gore aralarinda
+// GECIS yapilir - ani degisim yerine crossfade, yoksa oyuncu bir karede kosudan durusa
+// atlar ve bu goze carpar.
+// Hangi klip: 0-0.4 m/s durus, 0.4-3.2 yuruyus, ustu kosu. Esikler insanAdim'daki
+// kutu-model esikleriyle ayni tutuldu ki iki model ayni hizda ayni sey yapsin.
+function modelAnimKur(grup){
+  try{
+    var klipler = window._sahaModelKlipler;
+    if(!klipler || !klipler.length) return null;
+    var mixer = new THREE.AnimationMixer(grup);
+    function bul(ad){
+      for(var i=0;i<klipler.length;i++){
+        var n = String(klipler[i].name||'');
+        if(n === ad || n.split('|').pop() === ad) return klipler[i];
+      }
+      return null;
+    }
+    var k = { idle:bul('Idle'), walk:bul('Walk'), run:bul('Run') };
+    var eylem = {};
+    Object.keys(k).forEach(function(ad){
+      if(k[ad]){
+        eylem[ad] = mixer.clipAction(k[ad]);
+        eylem[ad].play();
+        eylem[ad].setEffectiveWeight(ad === 'idle' ? 1 : 0);
+      }
+    });
+    return { mixer: mixer, eylem: eylem, suanki: 'idle' };
+  }catch(e){ return null; }
+}
+// Her karede cagrilir: hiza gore klip secer ve mixer'i ilerletir.
+function modelAnimGuncelle(ud, dt, hiz){
+  try{
+    var a = ud && ud.anim;
+    if(!a) return;
+    var hedef = (hiz > 3.2) ? 'run' : (hiz > 0.4 ? 'walk' : 'idle');
+    if(hedef !== a.suanki && a.eylem[hedef]){
+      // 0.18 sn gecis: daha kisasi sicrama gibi, daha uzunu "kayiyor" hissi verir.
+      if(a.eylem[a.suanki]) a.eylem[a.suanki].crossFadeTo(a.eylem[hedef], 0.18, false);
+      a.eylem[hedef].setEffectiveWeight(1);
+      a.suanki = hedef;
+    }
+    // Kosu klibinin hizi gercek hizla orantili - sabit hizda oynatmak "paten kayma"
+    // hissi verir (ayaklar yere basmadan kayar).
+    if(a.eylem.run) a.eylem.run.setEffectiveTimeScale(Math.max(0.6, Math.min(1.8, hiz/5.5)));
+    if(a.eylem.walk) a.eylem.walk.setEffectiveTimeScale(Math.max(0.6, Math.min(1.6, hiz/1.8)));
+    a.mixer.update(dt);
+  }catch(e){}
 }
 function makePlayer(m){
   // Hazir insan modeli varsa onu kullan; yoksa asagidaki kutu modeline dus.
@@ -663,7 +733,7 @@ function makePlayer(m){
     gg.add(hazir);
     // Kutu modelin animasyon arayuzu (bacakL/kolR ...) burada YOK; insanAdim bunu
     // kontrol edip sessizce atlar. Rigli iskelet animasyonu ayri bir adim.
-    gg.userData = { phase: Math.random()*6, hazirModel: true };
+    gg.userData = { phase: Math.random()*6, hazirModel: true, anim: modelAnimKur(hazir) };
     return gg;
   }
   // ══════════════════════════════════════════════════════════════════════════════════════
@@ -1663,7 +1733,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-N';
+window.APP_BUILD = '2026-09-18-P';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
