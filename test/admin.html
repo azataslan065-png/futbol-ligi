@@ -596,6 +596,27 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
          Firebase kökündeki canliRozetGlobal düğümüne yazılır, TÜM canlı maçlarda otomatik
          uygulanır (bkz. saha.html/_sahaIzleRozetGlobalDinle). -->
     <div id="canliRozetGlobalBox"></div>
+    <!-- REKLAM PANOLARI: SAHA oyunundaki saha kenari panolarinin icerigi.
+         Oncelik video > fotograf > yazi. Bos birakilirsa panolar varsayilana doner. -->
+    <div class="card" style="margin-top:.6rem">
+      <h2>📢 Reklam Panoları</h2>
+      <p class="hint">SAHA oyunundaki saha kenarı panolarında görünür. Öncelik:
+        video, sonra fotoğraf, sonra yazı. Video sessiz ve döngüde oynar.<br>
+        Fotoğraf ve video <b>bağlantı</b> olarak girilir; bağlantı başka bir sitedeyse o
+        sitenin erişime izin vermesi gerekir, aksi halde varsayılan panolar görünür.</p>
+      <div class="row"><span>Yazı</span>
+        <input id="rkYazi" maxlength="28" placeholder="örn. AZATSPOR"></div>
+      <div class="row"><span>Zemin</span><input type="color" id="rkZemin" value="#14202a">
+        <span style="margin-left:.6rem">Yazı rengi</span><input type="color" id="rkRenk" value="#eaf2f6"></div>
+      <div class="row"><span>Fotoğraf</span>
+        <input id="rkGorsel" placeholder="https://... (.jpg / .png)"></div>
+      <div class="row"><span>Video</span>
+        <input id="rkVideo" placeholder="https://... (.mp4)"></div>
+      <div style="display:flex;gap:.4rem;margin-top:.4rem">
+        <button class="btn bgh" style="flex:1" onclick="reklamKaydet()">Kaydet</button>
+        <button class="btn" style="flex:1" onclick="reklamTemizle()">Varsayılana dön</button>
+      </div>
+    </div>
   </div>
 
   <!-- LİG -->
@@ -1838,7 +1859,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-T';
+window.APP_BUILD='2026-09-18-X';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5843,16 +5864,9 @@ function pozSuruklemeKur(){
       var k = aktif.getBoundingClientRect();
       var x = e.clientX - a.left - kaydirmaX;
       var y = e.clientY - a.top - kaydirmaY;
-      // HATA DUZELTMESI (kullanici: "rozeti ekranin tam sagina yerlestiremiyor"): ONCEDEN
-      // sinir "a.width - k.width" idi - yani kutunun TUM genisligi rezerve ediliyordu.
-      // Bu onizlemedeki kucuk yazi tipiyle (10px) olculen genislikti; gercek yayinda rozet
-      // farkli boyutta olabiliyor (bkz. yaziOlcek/logoOlcek), ve gercek render zaten KENDI
-      // tasma-korumasini (index.html/saha.html - 4px tampon) ayrica uyguluyor. Burada AYNI
-      // kucuk tamponu kullanmak, onizlemedeki surukleme sinirini gercek yayindakiyle
-      // TUTARLI hale getiriyor - admin artik kutuyu gercekten kenara kadar goturebiliyor.
-      var tampon = 4;
-      x = Math.max(0, Math.min(a.width - tampon, x));
-      y = Math.max(0, Math.min(a.height - tampon, y));
+      // Alan disina tasmayi engelle.
+      x = Math.max(0, Math.min(a.width - k.width, x));
+      y = Math.max(0, Math.min(a.height - k.height, y));
       var yx = Math.round((x / a.width) * 1000) / 10;
       var yy = Math.round((y / a.height) * 1000) / 10;
       aktif.style.left = yx + '%';
@@ -5872,6 +5886,47 @@ function pozSuruklemeKur(){
     alan.addEventListener('pointercancel', bitir);
   }catch(e){}
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// REKLAM PANOLARI (yonetici) - 'reklamPanolari' dugumune yazar; SAHA bunu dinler.
+// Bos alanlar null yazilir: oyun tarafinda "yoksa varsayilan" mantigi calissin diye.
+function reklamKaydet(){
+  var v = {
+    yazi:   (qs('rkYazi').value||'').trim() || null,
+    zemin:  qs('rkZemin').value || '#14202a',
+    renk:   qs('rkRenk').value || '#eaf2f6',
+    gorsel: (qs('rkGorsel').value||'').trim() || null,
+    video:  (qs('rkVideo').value||'').trim() || null,
+    ts: Date.now()
+  };
+  // Gecersiz bagalantiyi kaydetmeden yakala: http(s) degilse oyun zaten yukleyemez.
+  var hatali = ['gorsel','video'].filter(function(k){ return v[k] && !/^https?:\/\//i.test(v[k]); });
+  if(hatali.length){ toast('❌ Bağlantı http:// ya da https:// ile başlamalı','er'); return; }
+  firebase.database().ref('reklamPanolari').set(v)
+    .then(function(){ toast('📢 Reklam panoları güncellendi'); })
+    .catch(function(e){ toast('❌ Kaydedilemedi: ' + ((e&&e.message)||''),'er'); });
+}
+function reklamTemizle(){
+  firebase.database().ref('reklamPanolari').remove()
+    .then(function(){
+      ['rkYazi','rkGorsel','rkVideo'].forEach(function(id){ var e=qs(id); if(e) e.value=''; });
+      toast('↩️ Panolar varsayılana döndü');
+    })
+    .catch(function(){ toast('❌ İşlem başarısız','er'); });
+}
+// Panel acildiginda mevcut degerler forma yuklenir - yoksa yonetici neyin yayinda
+// oldugunu goremez ve bos formu kaydedip mevcut reklami silebilir.
+(function reklamFormYukle(){
+  try{
+    if(!window.firebase || !firebase.database){ setTimeout(reklamFormYukle, 600); return; }
+    firebase.database().ref('reklamPanolari').once('value').then(function(sn){
+      var v = sn.val() || {};
+      var set = function(id,val){ var e=qs(id); if(e && val!=null) e.value = val; };
+      set('rkYazi', v.yazi); set('rkZemin', v.zemin); set('rkRenk', v.renk);
+      set('rkGorsel', v.gorsel); set('rkVideo', v.video);
+    }).catch(function(){});
+  }catch(e){ setTimeout(reklamFormYukle, 1200); }
+})();
 
 function setOlcek(alan, deger){
   // Kaydiracin degeri yuzde; carpan olarak saklanir. Sinirlar 0.6-1.8: daha kucugu
@@ -5918,25 +5973,7 @@ function setCanliRozetPoz(poz){
   // Dort kose destekleniyor. Geriye uyum: eski kayitlarda yalnizca 'sol'/'sag' vardi,
   // taninmayan deger 'sol' kabul edilir - eski ayarlar bozulmaz.
   var gecerli = ['sol','sag','solust','sagust'];
-  poz = (gecerli.indexOf(poz) >= 0) ? poz : 'sol';
-  _canliRozetGlobalVeri.canliRozetPoz = poz;
-  // HATA DUZELTMESI (kullanici: "rozeti ekranin tam sagina yerlestiremiyor" / "degisiklik
-  // uygulanmiyor"): KOK SEBEP - izleyici tarafinda (index.html/saha.html) rozet konumu
-  // ONCE rozetX/rozetY (serbest surukleme yuzdeleri) var mi diye bakiyor, VARSA
-  // canliRozetPoz TAMAMEN yok sayiliyor. rozetX/Y ilk kayittan sonra HER ZAMAN dolu
-  // oldugundan bu dort kose dugmesi gercekte hicbir seyi degistirmiyordu - yonetici
-  // tikliyor, panelde vurgu degisiyor ama yayinda hicbir sey olmuyordu. COZUM: dugmeler
-  // artik rozetX/rozetY degerlerini de DOGRUDAN ilgili koseye yaziyor - boylece hem eski
-  // (poz) hem yeni (rozetX/Y) alan HER ZAMAN tutarli, dugme gercekten calisiyor.
-  var kose = {
-    solust:{x:3,  y:8},
-    sagust:{x:80, y:8},
-    sol:   {x:3,  y:86},
-    sag:   {x:80, y:86}
-  }[poz];
-  _canliRozetGlobalVeri.rozetX = kose.x;
-  _canliRozetGlobalVeri.rozetY = kose.y;
-  window._canliRozetKirli = true;   // "Rozeti Kaydet" ile veritabanina yazilana kadar taslak
+  _canliRozetGlobalVeri.canliRozetPoz = (gecerli.indexOf(poz) >= 0) ? poz : 'sol';
   renderCanliRozetGlobal();
 }
 function triggerCanliRozetLogoUpload(){

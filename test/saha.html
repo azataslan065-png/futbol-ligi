@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vT</title>
+<title>SAHA — 3D Futbol vX</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -509,10 +509,147 @@ function isiklariAyarla(){
         m.position.set(px, 0.48, sz*(HWZ + 2.2));
         if(sz > 0) m.rotation.y = Math.PI;     // yazi hep sahaya baksin
         scene.add(m);
+        // Yonetici icerigi (yazi/foto/video) bu listedeki panolara uygulanir.
+        (window._sahaReklamPanolari = window._sahaReklamPanolari || []).push({
+          mesh:m, varsayilan:m.material });
       }
     });
   }catch(e){}
 })();
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// STADYUM MIMARISI (kullanici: "stadyum cok basit duruyor")
+// Kutu hissini kiran uc oge:
+//  1) CATI: Uzun tribunlerin ustunde, sahaya dogru egimli saçak. Gercek statlarin en
+//     tanidik silueti. Kamera acisini kapatmamasi icin YUKSEK ve DAR tutuldu - saha
+//     gorusunu engelleyen bir cati oyunu bozar.
+//  2) CATI KIRISLERI: Catiyi tasiyan dikey direkler ve capraz destek. Duz bir plaka
+//     yerine "insa edilmis" bir yapi hissi verir.
+//  3) DIS HALKA: Tribunlerin arkasinda stadyumun dis cephesi - gokyuzu ile tribun
+//     arasindaki bosluk kapaniyor, sahne kapali bir stat gibi duruyor.
+// Poligon maliyeti dusuk: toplam birkac yuz ucgen.
+(function stadyumMimarisi(){
+  try{
+    var catiM  = new THREE.MeshLambertMaterial({ color:0xc9ced3, side:THREE.DoubleSide });
+    var kirisM = new THREE.MeshLambertMaterial({ color:0x55606a });
+    var cepheM = new THREE.MeshLambertMaterial({ color:0x2b3238 });
+    var seritM = new THREE.MeshLambertMaterial({ color:0x7a1d1d });
+    [-1,1].forEach(function(sz){
+      var zArka = sz*(HWZ+22), uzun = HLX*2+34;
+      // Cati plakasi: arkada yuksek, sahaya dogru egimli (saçak).
+      var cati = new THREE.Mesh(new THREE.BoxGeometry(uzun, 0.35, 15), catiM);
+      cati.position.set(0, 17.5, sz*(HWZ+15.5));
+      cati.rotation.x = sz * 0.16;                 // sahaya dogru hafif egim
+      scene.add(cati);
+      // On kenar seridi: catinin sahaya bakan yuzu, renkli bant
+      var serit = new THREE.Mesh(new THREE.BoxGeometry(uzun, 1.1, 0.4), seritM);
+      serit.position.set(0, 16.6, sz*(HWZ+8.6));
+      scene.add(serit);
+      // Dikey tasiyici kirisler (arka hatta, gorusu kapatmaz)
+      for(var i=-4;i<=4;i++){
+        var k = new THREE.Mesh(new THREE.BoxGeometry(0.6, 18, 0.6), kirisM);
+        k.position.set(i*(uzun/9), 9, zArka);
+        scene.add(k);
+        // Capraz destek: kirisle cati arasinda egik kol
+        var c = new THREE.Mesh(new THREE.BoxGeometry(0.35, 9, 0.35), kirisM);
+        c.position.set(i*(uzun/9), 15.2, sz*(HWZ+18.8));
+        c.rotation.x = -sz*0.62;
+        scene.add(c);
+      }
+      // Dis cephe: tribun arkasini kapatan yuksek duvar
+      var cephe = new THREE.Mesh(new THREE.BoxGeometry(uzun+10, 20, 1), cepheM);
+      cephe.position.set(0, 10, sz*(HWZ+25));
+      scene.add(cephe);
+    });
+    // Kale arkasi cepheleri: kisa kenarlar da kapansin
+    [-1,1].forEach(function(sx){
+      var c2 = new THREE.Mesh(new THREE.BoxGeometry(1, 16, HWZ*2+52), cepheM);
+      c2.position.set(sx*(HLX+27), 8, 0);
+      scene.add(c2);
+    });
+  }catch(e){}
+})();
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// YONETICI REKLAM ICERIGI (kullanici: "admin reklam panosuna yazi, foto, video ekleyebilsin")
+// Yonetici panelinden 'reklamPanolari' dugumune yazilir; oyun burada dinler.
+// ONCELIK: video > fotograf > yazi. Hicbiri yoksa panolar varsayilan yazilarina doner.
+// VIDEO KISITI: Tarayicilar SESLI videoyu otomatik oynatmaz. Pano videosu bu yuzden
+// SESSIZ ve DONGU halinde oynar - zaten reklam panosundan ses beklenmez.
+// GORSEL/VIDEO BASKA SITEDEYSE: Sunucu CORS izni vermezse doku cizilemez (tarayici
+// guvenligi). O durumda sessizce varsayilan panoya dusulur, oyun bozulmaz.
+var _reklamVideo = null;
+function reklamUygula(v){
+  try{
+    var liste = window._sahaReklamPanolari || [];
+    if(!liste.length) return;
+    // Onceki videoyu durdur - eski video arkada calismaya devam ederse pil tuketir.
+    if(_reklamVideo){ try{ _reklamVideo.pause(); _reklamVideo.src=''; }catch(e){} _reklamVideo = null; }
+    function hepsine(mat){ liste.forEach(function(p){ p.mesh.material = mat || p.varsayilan; }); }
+    if(!v || (!v.video && !v.gorsel && !v.yazi)){ hepsine(null); return; }
+    if(v.video){
+      var el = document.createElement('video');
+      el.src = v.video; el.crossOrigin = 'anonymous';
+      el.muted = true; el.loop = true; el.playsInline = true;
+      el.setAttribute('playsinline',''); el.setAttribute('muted','');
+      var p = el.play(); if(p && p.catch) p.catch(function(){});
+      _reklamVideo = el;
+      var vt = new THREE.VideoTexture(el);
+      hepsine(new THREE.MeshBasicMaterial({ map:vt }));
+      return;
+    }
+    if(v.gorsel){
+      var yk = new THREE.TextureLoader();
+      yk.setCrossOrigin && yk.setCrossOrigin('anonymous');
+      yk.load(v.gorsel,
+        function(t){ hepsine(new THREE.MeshBasicMaterial({ map:t })); },
+        undefined,
+        function(){ hepsine(null); });     // yuklenemezse varsayilana don
+      return;
+    }
+    // Yalnizca yazi: canvas dokusu
+    var c = document.createElement('canvas'); c.width = 512; c.height = 64;
+    var x = c.getContext('2d');
+    x.fillStyle = v.zemin || '#14202a'; x.fillRect(0,0,512,64);
+    x.fillStyle = v.renk || '#eaf2f6';
+    x.font = 'bold 38px Arial'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(String(v.yazi).slice(0,28), 256, 34);
+    hepsine(new THREE.MeshLambertMaterial({ map:new THREE.CanvasTexture(c) }));
+  }catch(e){ try{ if(window.DiagSaha) DiagSaha('reklamUygula', e); }catch(_e){} }
+}
+(function reklamDinle(){
+  try{
+    if(typeof fbHazir === 'undefined' || !fbHazir || !fbDb){ setTimeout(reklamDinle, 800); return; }
+    fbDb.ref('reklamPanolari').on('value', function(sn){ reklamUygula(sn.val()); });
+  }catch(e){ setTimeout(reklamDinle, 1500); }
+})();
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// TARAFTAR HAREKETI
+// Normal zamanda hafif kipirti; gol ve buyuk ataklarda coskuyla dalgalanma.
+// Hareket, dokunun dikey kaymasiyla saglanir: lekeler (oturan insanlar) yukari asagi
+// oynar, uzaktan ayağa kalkip oturan kalabalik gibi gorunur.
+// Coşku bir sayactir: gol aninda yukselir, birkac saniyede yavasca soner.
+window._sahaCosku = 0;
+function taraftarCoskula(miktar){ window._sahaCosku = Math.min(1, (window._sahaCosku||0) + (miktar||1)); }
+function taraftarHareket(dt){
+  try{
+    var liste = window._sahaKalabalikDokular; if(!liste || !liste.length) return;
+    window._sahaCosku = Math.max(0, (window._sahaCosku||0) - dt*0.22);
+    var c = window._sahaCosku;
+    var t = performance.now()/1000;
+    // Kipirti genligi cok kucuk (0.004); coskuda 0.05'e cikar. Frekans da artar:
+    // sakin tribun yavas soluk alir, coskulu tribun hizli dalgalanir.
+    var genlik = 0.004 + c*0.05;
+    var hiz = 1.4 + c*5.5;
+    for(var i=0;i<liste.length;i++){
+      var k = liste[i];
+      k.doku.offset.y = Math.sin(t*hiz + k.faz) * genlik;
+      // Coskuda yanal dalga da eklenir: "meksika dalgasi" hissi.
+      k.doku.offset.x = c > 0.3 ? Math.sin(t*1.6 + k.faz*0.5) * c * 0.02 : 0;
+    }
+  }catch(e){}
+}
 
 const gokIsik = new THREE.HemisphereLight(0xe4eef6, 0x35452f, 0.85);
 scene.add(gokIsik);
@@ -634,10 +771,16 @@ const tribunler = [];
   const kal  = new THREE.MeshLambertMaterial({ color:0x2e3a42 });
   // Kalabalik malzemesi: dokunun tekrar sayisi yuzeyin uzunluguna gore ayarlanir,
   // yoksa uzun kenarda insanlar yayvan gorunur.
+  // HAREKETLI TARAFTAR: Her tribun kademesinin dokusu ayri tutulur ve her karede
+  // hafifce kaydirilir (bkz. taraftarHareket). Binlerce ayri insan modeli telefonu
+  // cokertir; doku kaydirma TEK cizim cagrisi, maliyeti sifira yakin.
+  window._sahaKalabalikDokular = [];
   function kalabalikMat(tekrarX){
     const d = kalabalikD.clone();
     d.needsUpdate = true;
     d.repeat.set(tekrarX, 1);
+    // Her kademe farkli fazda salinsin - hepsi ayni anda kalkip inerse mekanik gorunur.
+    window._sahaKalabalikDokular.push({ doku:d, faz:Math.random()*6.28 });
     return new THREE.MeshLambertMaterial({ map:d });
   }
   const add = (geo, mat, x,y,z, listeye) => {
@@ -1950,7 +2093,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-T';
+window.APP_BUILD = '2026-09-18-X';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3474,6 +3617,7 @@ function tekrarOynat(dt){
 
 /* ---------- gol ---------- */
 function gol(takim){
+  try{ taraftarCoskula(1); }catch(e){}   // gol: tribunler ayaga kalkar
   if (takim === 0) skorA++; else skorB++;
   (takim === 0 ? istat.a : istat.b).isabet++;
   // ── OLAY KAYDI ──────────────────────────────────────────────────────────────────────
@@ -3932,6 +4076,7 @@ function loop(){
   const ham = Math.min(clock.getDelta(), 0.25);
   // Kare hizi sensoru: surekli dusuk hiz kayda gecer (bkz. sahaKareOlc).
   try{ sahaKareOlc(ham); }catch(e){}
+  try{ taraftarHareket(ham); }catch(e){}
   fpsSay++; fpsSure += ham;
   if (fpsSure >= 0.5){ fps = fpsSay / fpsSure; fpsSay = 0; fpsSure = 0; }
   if (window._sahaIzleModu){
@@ -4426,6 +4571,8 @@ function _sahaIzleRozetUygula(){
       // ancak cizildikten sonra bilinir, bu yuzden olcum bir kare sonra yapilir.
       el.style.transform = '';
       el.style.maxWidth = '';
+      el.style.marginLeft = '0px';   // olcumden ONCE sifirla - yoksa her turda ziplar
+      el.style.marginTop = '0px';
       requestAnimationFrame(function(){
         try{
           var g = el.getBoundingClientRect();

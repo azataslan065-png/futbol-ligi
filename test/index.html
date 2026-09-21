@@ -2539,7 +2539,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-T';
+window.APP_BUILD='2026-09-18-X';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -25112,27 +25112,6 @@ function ptCanliRozetUstOfset(poz){
   }catch(e){}
   return 12;
 }
-// HATA DUZELTMESI (kullanici: "tam ekran ile kucuk ekran goruntusu birebir ayni degil"):
-// KOK SEBEP - .ptp-stage kucuk (tam ekran olmayan) gorunumde HER ZAMAN 16:9'a sabitlenir
-// (bkz. yukarida .ptp-stage kurali), ama tam ekranda (.ptp-fs) bilerek cihazin GERCEK
-// ekran oranina gerilir (height:100%;aspect-ratio:auto - dikey/yatay video destegi icin,
-// bkz. oradaki not). Rozet/skorbord konumu ise stage'in YUZDESI olarak hesaplaniyordu.
-// Kucuk ekranda stage==16:9 oldugundan yuzde, admin onizlemesiyle (o da 16:9) birebir
-// eslesiyordu; tam ekranda stage cihaz oranina (cogu telefonda 16:9 DEGIL) gerildiginden
-// AYNI yuzde artik FARKLI bir noktaya denk geliyor - bindirme gercek goruntuye gore kayiyor.
-// COZUM: Bindirmeler artik stage'in TAMAMINA degil, stage icinde ORTALANMIS, admin
-// onizlemesiyle AYNI 16:9 oranli "icerik kutusuna" gore konumlanir - boylece kucuk ve
-// tam ekranda gorunen konum HER ZAMAN birebir ayni olur.
-function ptIcerikKutusu(kap){
-  try{
-    var kg = kap.getBoundingClientRect();
-    var oran = 16/9, w = kg.width, h = kg.height, icW, icH, ofX = 0, ofY = 0;
-    if(!w || !h) return {left:kg.left, top:kg.top, width:w||0, height:h||0};
-    if(w / h > oran){ icH = h; icW = h * oran; ofX = (w - icW) / 2; }
-    else { icW = w; icH = w / oran; ofY = (h - icH) / 2; }
-    return {left:kg.left + ofX, top:kg.top + ofY, width:icW, height:icH};
-  }catch(e){ return {left:0, top:0, width:0, height:0}; }
-}
 window._ptCanliRozet = null;
 function ptCanliRozetDinle(){
   try{
@@ -25175,23 +25154,13 @@ function ptCanliRozetUygula(){
     }
     // Tek kenar kullanilir; left/top atanir, sag/alt her seferinde temizlenir - ikisini
     // birden atamak tarayicida belirsiz sonuc verir.
-    // KONUM ARTIK PIKSEL: yuzde, stage'in TAMAMINA degil (bkz. ptIcerikKutusu notu),
-    // stage icindeki 16:9 icerik kutusuna gore hesaplanip piksele cevrilir - boylece kucuk
-    // ve tam ekranda AYNI noktaya denk gelir.
+    // TASMA KORUMASI: Yuzde, ogenin SOL-UST kosesini belirler. Saga/asagi yakin
+    // degerlerde ogenin bir kismi disarda kalirdi; %50'yi gecince kendi boyutu kadar
+    // iceri cekilir.
+    el.style.left = kx + '%';
+    el.style.top = ky + '%';
     el.style.right = '';
     el.style.bottom = '';
-    el.style.transform = '';
-    el.style.maxWidth = '';
-    var kap = el.offsetParent || el.parentElement;
-    if(kap){
-      var kg0 = kap.getBoundingClientRect();
-      var ic0 = ptIcerikKutusu(kap);
-      el.style.left = ((ic0.left - kg0.left) + (kx/100) * ic0.width) + 'px';
-      el.style.top  = ((ic0.top  - kg0.top)  + (ky/100) * ic0.height) + 'px';
-    } else {
-      el.style.left = kx + '%';
-      el.style.top = ky + '%';
-    }
     // HATA DUZELTMESI (kullanici: "rozet yerlesimi dogru hesaplanmiyor"):
     // Yonetici onizlemesinde konum SOL-UST KOSE olarak saklaniyor. Burada %50'yi gecince
     // oge kendi genisligi kadar iceri cekiliyordu (translate) - yani onizlemede birakilan
@@ -25201,13 +25170,18 @@ function ptCanliRozetUygula(){
     // Tasma duzeltmesi: max-width ogeyi DARALTIYORDU (sag tarafta rozet sikisip iki
     // satira dusuyordu). Artik oge dogal genisliginde kalir, gerekirse sola kaydirilir.
     // Genislik ancak cizildikten sonra bilinir - olcum bir kare sonra yapilir.
+    el.style.transform = '';
+    el.style.maxWidth = '';
+    el.style.marginLeft = '0px';     // olcumden ONCE sifirla (bkz. kok sebep notu)
+    el.style.marginTop = '0px';
     requestAnimationFrame(function(){
       try{
+        var kap = el.closest('.ptp-stage') || el.parentElement;
         if(!kap) return;
-        var icN = ptIcerikKutusu(kap), g = el.getBoundingClientRect();
-        var tasma = (g.right + 4) - (icN.left + icN.width);
+        var kg = kap.getBoundingClientRect(), g = el.getBoundingClientRect();
+        var tasma = (g.right + 4) - kg.right;
         el.style.marginLeft = (tasma > 0) ? (-tasma + 'px') : '0px';
-        var altTasma = (g.bottom + 4) - (icN.top + icN.height);
+        var altTasma = (g.bottom + 4) - kg.bottom;
         el.style.marginTop = (altTasma > 0) ? (-altTasma + 'px') : '0px';
       }catch(e){}
     });
@@ -25228,14 +25202,6 @@ function ptCanliRozetUygula(){
   }catch(e){}
 }
 try{ ptCanliRozetDinle(); }catch(e){}
-// Tam ekrana gecis/cikis ve donme de stage'in oranini (dolayisiyla 16:9 icerik kutusunu)
-// degistirir - veri akisi o an tikvermese bile bindirmeler yeniden hizalanmali.
-try{
-  window.addEventListener('resize', function(){
-    try{ ptCanliRozetUygula(); }catch(e){}
-    try{ ptpYayinBindirmeGuncelle(); }catch(e){}
-  });
-}catch(e){}
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // YAYIN SESI (kullanici: "izleyici tarafinda ses calmiyor")
@@ -25364,27 +25330,20 @@ function ptpYayinBindirmeGuncelle(){
         var _so = (_g.skorOlcek != null) ? _g.skorOlcek : 1;
         sk.style.fontSize = 'clamp(' + (8*_so).toFixed(1) + 'px,' + (2.2*_so).toFixed(2)
           + 'vw,' + (12.35*_so).toFixed(1) + 'px)';
+        sk.style.left = _sx + '%';
+        sk.style.top = _sy + '%';
         sk.style.transform = '';
         sk.style.maxWidth = '';
-        // AYNI DUZELTME (bkz. ptIcerikKutusu/ptCanliRozetUygula notu): skorbord da stage'in
-        // TAMAMINA degil, 16:9 icerik kutusuna gore konumlanir - kucuk/tam ekran tutarli olur.
-        var kap2 = sk.offsetParent || sk.parentElement;
-        if(kap2){
-          var kg20 = kap2.getBoundingClientRect();
-          var ic20 = ptIcerikKutusu(kap2);
-          sk.style.left = ((ic20.left - kg20.left) + (_sx/100) * ic20.width) + 'px';
-          sk.style.top  = ((ic20.top  - kg20.top)  + (_sy/100) * ic20.height) + 'px';
-        } else {
-          sk.style.left = _sx + '%';
-          sk.style.top = _sy + '%';
-        }
+        sk.style.marginLeft = '0px';   // olcumden ONCE sifirla - yoksa her turda ziplar
+        sk.style.marginTop = '0px';
         requestAnimationFrame(function(){
           try{
+            var kap2 = sk.closest('.ptp-stage') || sk.parentElement;
             if(!kap2) return;
-            var ic2N = ptIcerikKutusu(kap2), g2 = sk.getBoundingClientRect();
-            var t2 = (g2.right + 4) - (ic2N.left + ic2N.width);
+            var kg2 = kap2.getBoundingClientRect(), g2 = sk.getBoundingClientRect();
+            var t2 = (g2.right + 4) - kg2.right;
             sk.style.marginLeft = (t2 > 0) ? (-t2 + 'px') : '0px';
-            var a2t = (g2.bottom + 4) - (ic2N.top + ic2N.height);
+            var a2t = (g2.bottom + 4) - kg2.bottom;
             sk.style.marginTop = (a2t > 0) ? (-a2t + 'px') : '0px';
           }catch(e){}
         });
