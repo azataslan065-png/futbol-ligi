@@ -2611,18 +2611,30 @@ function _sahaOyuncuKonumlari(fk){
 // geri hareket ettiğinde (normal oyun akışı) küçük artılar/eksiler birbirini büyük ölçüde
 // GÖTÜRÜYORDU ve her yeni dakika sıfırdan başladığı için sürekli baskı bile görünür
 // büyüklüğe ULAŞAMADAN dakika değişip siliniyordu - sonuç: grafik "canlı" hissettirmiyordu.
-// ÇÖZÜM: artık dakikalar arası TAŞINAN, üstel yumuşatmalı, ANLIK bir gösterge kullanılıyor
-// (_sahaMomentumDeger) - topun o KAREDEKİ konumu hedefi belirler, gösterge bu hedefe birkaç
-// saniye içinde yumuşakça "yetişir" ve dakika değiştiğinde SIFIRLANMAZ. Bu sayede top uzun
-// süre bir tarafın yarı sahasında kalırsa baskı puanı gerçekten ve GÖRÜNÜR şekilde o tarafa
-// kayar - saha uygulamasının pitch görselinde görülen anlık durumla birebir tutarlıdır.
+// ÇÖZÜM (1. adım): dakikalar arası TAŞINAN, üstel yumuşatmalı, ANLIK bir gösterge
+// (_sahaMomentumDeger) - topun o KAREDEKİ konumu hedefi belirler, gösterge bu hedefe
+// birkaç saniye içinde yumuşakça "yetişir" ve dakika değiştiğinde SIFIRLANMAZ.
+//
+// SONRAKİ KULLANICI TALEBİ ("Baskımetre sadece bir takımı hesaplıyor; bu hatalı, top
+// hangi takımdaysa ona göre doğru verilerle ilerleme kaydedecek"): KÖK SEBEP (2. adım) -
+// hedef SADECE topun mutlak saha konumuna (top.x) bakıyordu, topu KİMİN kontrol ettiğine
+// hiç bakmıyordu. Bu yüzden örn. uzun bir vuruş/kaleci vuruşuyla top rakip yarı sahaya
+// gitse bile, o anı topu ELİNDE TUTMAYAN takım sanki baskı kuruyormuş gibi hesaba
+// katılıyordu; top belli bir bölgede sıkışıp kaldığında da gösterge hep AYNI tarafa yakın
+// kalıp gerçek sahiplik değişimini yansıtmıyordu. ÇÖZÜM: artık topa EN SON DOKUNAN takım
+// (top.attack - bkz. _sahaTopKonumu, sonDokunan'dan gelir) esas alınır; o takım kendi
+// hücum yönünde NE KADAR ilerlemişse baskı puanı O YÖNDE ve O ORANDA büyür, kendi
+// yarısında/geride tutuyorsa baskı sıfıra yaklaşır. Yön SADECE topu elinde tutan takıma
+// göre belirlendiği için artık iki takım da, topu ne zaman kontrol ederse o zaman gerçek
+// ilerlemesiyle DOĞRU ORANTILI şekilde hesaba katılır - "sadece bir takım" sorunu ortadan
+// kalkar.
 var _sahaMomentumDeger = 0; // -5..5, dakikalar arası taşınan canlı baskı göstergesi
 function _sahaMomentumBirik(top, dt){
   try{
     if(!top) return;
-    // Hedef: topun home-perspektif x'i (-1..1) doğrudan -5..5 baskı skalasına ölçeklenir -
-    // top kale sahasına ne kadar yakınsa (|x| büyüdükçe) o taraf o kadar baskın sayılır.
-    var hedef = Math.max(-5, Math.min(5, top.x * 6));
+    var yon = (top.attack === 'home') ? 1 : -1;         // topu şu an kim kontrol ediyor
+    var ilerleme = Math.max(0, yon * top.x);              // 0..1 - o takım kendi hücum yönünde ne kadar ilerlemiş
+    var hedef = Math.max(-5, Math.min(5, yon * ilerleme * 5));
     var k = Math.min(1, dt / 4); // ~4 saniyede hedefin büyük kısmına ulaşan yumuşatma
     _sahaMomentumDeger += (hedef - _sahaMomentumDeger) * k;
   }catch(e){}
