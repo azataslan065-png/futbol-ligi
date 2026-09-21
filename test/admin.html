@@ -5563,8 +5563,24 @@ function addMomentum(yon){
     v=Math.max(-5,Math.min(5,v));
     if(v===0)delete live.momentum[min];else live.momentum[min]=v;
   }
-  save();
   buildLivePanel(live);
+  // HATA DÜZELTMESİ (2026-09-21-A, kullanıcı bildirdi: "Baskımetre hâlâ anlık değil"):
+  // KÖK SEBEP - bu fonksiyon her basışta genel save()'i çağırıyordu; save() ÖNCE 3 ayrı
+  // Firebase okuması yapar (premiumAccessCodes/premiumRequests/TÜM matches ağacı), SONRA
+  // bu sezondaki HER maçı içeren TÜM matches tablosunu baştan yazar (bkz. save() içindeki
+  // notlar) - tek bir dakikalık baskı puanı için gereksiz derecede ağır, saniyeler
+  // sürebilen bir gidiş-dönüş, "anlık" hiç hissettirmiyordu; üst üste hızlı basışlarda da
+  // yarışan yazımlar birbirinin üzerine yazıp puan kaybına yol açabiliyordu. ÇÖZÜM: artık
+  // SADECE bu maçın 'momentum' alanına, doğrudan ve TEK BAŞINA, önceden hiçbir okuma
+  // yapmadan, tek küçük bir yazımla gönderiliyor - genel save() boru hattıyla ilişkisi
+  // tamamen kesildi. Puan Tablosu tarafı bu alanı zaten gerçek zamanlı dinlediği için
+  // (bkz. index.html/_leagueDataListener ve _matchesDirectListener) düğmeye her basış artık
+  // gerçekten anlık bir Firebase güncellemesine dönüşüyor.
+  if(_curLeagueId&&live.id){
+    db.ref('leagues/'+_curLeagueId+'/matches/'+live.id+'/momentum')
+      .set((live.momentum&&Object.keys(live.momentum).length)?live.momentum:null)
+      .catch(function(e){console.error('addMomentum anlık yazım başarısız:',e);});
+  }
 }
 function closeLivePanel(){qs('liveOv').classList.remove('on');if(_liveTimer){clearInterval(_liveTimer);_liveTimer=null;}}
 // KULLANICI TALEBİ: Birden fazla maç canlıyken, admin bu şeritten hangi maçı yönetmek
