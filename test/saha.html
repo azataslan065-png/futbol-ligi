@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vE</title>
+<title>SAHA — 3D Futbol vG</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -1622,6 +1622,9 @@ function _sahaBakimAktifMi(mt){
 function _sahaBakimIzinliMi(mt){
   try{
     if(!mt) return false;
+    // ONCELIKLI: Yoneticinin SAHA icin ACIKCA verdigi izin (kullanici kimligine bagli,
+    // ad eslestirmesi yok). Kaynak: bakimSahaIzinli/{uid} - Transfer > Kullanici Onaylari.
+    if(benimUid && window._bakimSahaIzinliBen === true) return true;
     // KOK SEBEP (kullanici: "izin verilen kullanici iki uygulamaya da giremiyor"):
     // Yonetici izin listesine PUAN TABLOSU KULLANICI ADI yaziyor (orada sameUserName ile
     // ada gore eslesiyor). Oyun ise yalnizca E-POSTAYLA karsilastiriyordu - eslesme hic
@@ -1641,6 +1644,17 @@ function _sahaBakimIzinliMi(mt){
   }catch(e){ return false; }
 }
 function _sahaBakimUygula(){
+  try{
+    // Giris bakim dinleyicisinden SONRA yapildiysa izin dinleyicisi henuz kurulmamistir.
+    // Bu islev dakikada bir calistigi icin kurulum burada garanti altina alinir.
+    if(fbHazir && benimUid && !window._bakimIzinDinleniyor){
+      window._bakimIzinDinleniyor = true;
+      fbDb.ref('bakimSahaIzinli/' + benimUid).on('value', function(sn){
+        window._bakimSahaIzinliBen = (sn.val() === true);
+        _sahaBakimUygula();
+      }, function(){ window._bakimSahaIzinliBen = false; });
+    }
+  }catch(e){}
   try{
     var aktif = _sahaBakimAktifMi(_sahaBakim) && !_sahaBakimIzinliMi(_sahaBakim);
     var el = document.getElementById('sahaBakimEkran');
@@ -1678,6 +1692,14 @@ function _sahaBakimUygula(){
 function _sahaBakimDinle(){
   try{
     if(!fbHazir || !sahaLigId) return;
+    // Kendi SAHA bakim iznimi dinle. Giris yapilmadiysa uid yok; o zaman izin de yok.
+    if(benimUid && !window._bakimIzinDinleniyor){
+      window._bakimIzinDinleniyor = true;
+      fbDb.ref('bakimSahaIzinli/' + benimUid).on('value', function(sn){
+        window._bakimSahaIzinliBen = (sn.val() === true);
+        _sahaBakimUygula();          // izin verilir verilmez bakim ekrani kalkar
+      }, function(){ window._bakimSahaIzinliBen = false; });
+    }
     fbDb.ref('leagues/' + sahaLigId + '/maintenance').on('value', function(sn){
       _sahaBakim = sn.val() || null;
       _sahaBakimUygula();
@@ -2213,7 +2235,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-21-E';
+window.APP_BUILD = '2026-09-21-G';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3172,6 +3194,11 @@ function sut(o){
   if (duran && duran.takim === t) duran = null;
 }
 function pasVer(p, takim, yonTercih){
+  // YAPAY ZEKA DAHIL butun paslar bu islevden gecer - animasyon burada tetiklenirse
+  // insan ve bilgisayar oyunculari ayni hareketi yapar. (Insan pasi icin pas() icinde
+  // ayrica tetikleniyordu; modelTekSefer ayni klibi bastan baslattigi icin cift
+  // tetikleme gorsel bir fark yaratmaz.)
+  try{ if(p && p.obj && p.obj.userData.hazirModel && ball.position.y <= 1.2) modelTekSefer(p.obj.userData, 'sutSag', 1.1); }catch(e){}
   const mates = players.filter(m => m.team === takim && m !== p && !m.gk && sahada(m));
   let best = null, bs = -1e9;
   mates.forEach(m => {
@@ -3348,6 +3375,14 @@ function aiHedef(p, kovalayan){
   return t;
 }
 function aiVurus(p){
+  // Bilgisayar oyuncusunun sutu: insan sutuyle ayni ayak secimi (topun hangi yanda oldugu).
+  try{
+    if(p && p.obj && p.obj.userData.hazirModel && ball.position.y <= 1.2){
+      var _yx = (ball.position.x - p.obj.position.x)*Math.cos(p.obj.rotation.y)
+              - (ball.position.z - p.obj.position.z)*Math.sin(p.obj.rotation.y);
+      modelTekSefer(p.obj.userData, _yx >= 0 ? 'sutSag' : 'sutSol', 1.5);
+    }
+  }catch(e){}
   if (p.cd > 0 || !yakin(p, 1.5)) return;
   const sapma = (2 - AYAR.zor) * 1.2;
   if (p.gk){

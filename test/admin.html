@@ -1374,6 +1374,7 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
       <div style="font-size:.62rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">📅 Başlangıç/bitiş girip kaydederseniz, bakım modu belirttiğiniz saatlerde <b>otomatik olarak</b> açılıp kapanır - "Aç" butonuna basmanıza gerek kalmaz. 🔘 "Bakım Modunu Aç/Kapat" butonu ise her zaman <b>anlık manuel</b> müdahale sağlar (saat girilmemiş olsa da, ya da girilen saatten önce/sonra da) - erken başlatmak veya erken bitirmek için kullanabilirsiniz. Yeni bir zamanlama kaydettiğinizde, önceki manuel müdahale sıfırlanıp otomatik moda dönülür.</div>
       <button class="btn bp" onclick="saveMaintenanceSettings()" style="width:100%;margin-bottom:.7rem">💾 Mesajı ve Saatleri Kaydet (Otomatik Moda Geç)</button>
       <div style="font-size:.66rem;font-weight:800;color:var(--tx);margin-bottom:.4rem">✅ Bakım Sırasında Giriş İzni Olanlar</div>
+      <p class="hint" style="margin:.2rem 0 .35rem">Bu liste yalnızca <b>Puan Tablosu</b> içindir. SAHA oyununa bakım sırasında girebilecekleri <b>Transfer → Kullanıcı Onayları</b> bölümünden 🔧 düğmesiyle seçin.</p>
       <div id="maintenanceAllowedList" style="margin-bottom:.5rem"></div>
       <button class="btn bp" onclick="openMaintenanceUserPicker()" style="width:100%">🔍 Kayıtlı Kullanıcılardan Seç</button>
     </div>
@@ -1861,7 +1862,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-21-E';
+window.APP_BUILD='2026-09-21-G';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -7013,6 +7014,11 @@ function transferDinle(){
       _tDurum.hata = (err && err.message) || 'okuma hatasi';
       transferTeshisCiz();
     });
+    // SAHA bakim izinleri: kullanici kimligine (uid) bagli - ad eslestirmesi YOK.
+    db.ref('bakimSahaIzinli').on('value', function(snap){
+      window._bakimSahaIzinli = snap.val() || {};
+      try{ onayCiz(); }catch(e){}
+    });
     db.ref('kullanicilar').on('value', function(snap){
       _kullanicilar = snap.val() || {};
       _tDurum.kullanici = Object.keys(_kullanicilar).length + ' kayit';
@@ -7162,8 +7168,22 @@ function onayCiz(){
       +'<button class="btn '+(onayli?'':'bgh')+'" style="min-height:30px;padding:.35rem .6rem" '
         +'onclick="kullaniciOnayDegistir(\''+uid+'\','+(!onayli)+')">'
         +(onayli ? '✅ Onayli' : 'Onayla')+'</button>'
+      // BAKIM IZNI (yalnizca SAHA): Bakim modu aciksa bu kullanici SAHA'ya girebilir.
+      // Puan Tablosu izni AYRIDIR (Lig > Bakim Modu listesi) - iki uygulama kullaniciyi
+      // farkli kimlikle taniyor (ad / e-posta), tek listeyle hangisinin kastedildigi
+      // belirsiz kaliyordu.
+      +(function(){ var iz = !!((window._bakimSahaIzinli||{})[uid]);
+        return '<button class="btn" title="Bakim sirasinda SAHA\'ya girebilir" '
+          +'style="min-height:30px;padding:.35rem .5rem;margin-left:.3rem;'
+          +(iz?'background:rgba(245,158,11,.18);border:1px solid rgba(245,158,11,.6)':'opacity:.55')+'" '
+          +'onclick="bakimSahaIzinDegistir(\''+uid+'\','+(!iz)+')">🔧'+(iz?' İzinli':'')+'</button>'; })()
     +'</div></div>';
   }).join('');
+}
+function bakimSahaIzinDegistir(uid, ver){
+  firebase.database().ref('bakimSahaIzinli/'+uid).set(ver ? true : null)
+    .then(function(){ toast(ver ? '🔧 Bakımda SAHA\'ya girebilir' : '🔧 Bakım izni kaldırıldı'); })
+    .catch(function(e){ toast('❌ Kaydedilemedi: '+((e&&e.message)||''),'er'); });
 }
 function kullaniciOnayDegistir(uid, onayla){
   firebase.database().ref('kullanicilar/'+uid+'/durum').set(onayla ? 'onayli' : 'bekliyor')
