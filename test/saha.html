@@ -2603,31 +2603,28 @@ function _sahaOyuncuKonumlari(fk){
   }catch(e){ return null; }
 }
 // ── CANLI BASKIMETRE (Puan Tablosu'ndaki Baskımetre grafiği için GERÇEK basınç verisi) ──
-// KULLANICI TALEBİ (2026-09-21-A, "Baskımetre ilgili maç için anlık veri akışı sağlasın"):
-// KÖK SEBEP - bu dosya (3D motorla OYNANAN maçlar) hiçbir zaman Firebase'e 'momentum'
-// yazmıyordu; o alan SADECE admin panelindeki elle "baskı" düğmeleriyle dolduruluyordu
-// (bkz. admin.html/addMomentum). Saha uygulamasıyla oynanan bir maçta admin bu düğmelere
-// dokunmadığı için Puan Tablosu'ndaki Baskımetre hep boş kalıyor, "Baskı verisi
-// girilmediği için olayların zamana dağılımı gösteriliyor" yedek görünümüne (Olay
-// Yoğunluğu) düşüyordu - yani saha maçları için GERÇEK bir anlık baskı veri akışı HİÇ
-// VAR OLMUYORDU (bkz. index.html/renderBaskimetre - m.momentum boşsa "mom" hep null).
-// ÇÖZÜM: topun hangi yarı sahada durduğu (home perspektifinden -1..1, bkz.
-// _sahaTopKonumu) her karede küçük bir katkıyla o anki dakikanın baskı puanına eklenir -
-// top uzun süre bir takımın rakip yarı sahasında kalırsa o takımın baskı puanı gerçek
-// zamanlı yükselir. Admin panelininkiyle BİREBİR AYNI format (dakika-anahtarlı, -5..+5
-// aralığında obje) kullanılarak sahaCanliYaz() içinde ballX/ballZ ile AYNI yazım
-// döngüsünde Firebase'e gönderilir - böylece Puan Tablosu, saha maçlarında da GERÇEK
-// "📊 Baskımetre"yi (yedek "Olay Yoğunluğu" değil) anlık olarak gösterir.
-var _sahaMomentumBirikim = {}; // {dakika(string): -5..5}
+// KULLANICI TALEBİ (2026-09-21-A, "Baskımetre ilgili maç için anlık veri akışı sağlasın",
+// ardından "hâlâ anlık değil" - ekran görüntüsüyle doğrulandı: top açıkça bir takımın yarı
+// sahasında olmasına rağmen grafik neredeyse boş/durağan kalıyordu): KÖK SEBEP - önceki
+// tasarım HER DAKİKA SIFIRDAN başlayan bir toplam kullanıyordu (_sahaMomentumBirikim[dk]),
+// topun o dakika içindeki net konum ortalamasını topluyordu. Top bir dakika içinde ileri-
+// geri hareket ettiğinde (normal oyun akışı) küçük artılar/eksiler birbirini büyük ölçüde
+// GÖTÜRÜYORDU ve her yeni dakika sıfırdan başladığı için sürekli baskı bile görünür
+// büyüklüğe ULAŞAMADAN dakika değişip siliniyordu - sonuç: grafik "canlı" hissettirmiyordu.
+// ÇÖZÜM: artık dakikalar arası TAŞINAN, üstel yumuşatmalı, ANLIK bir gösterge kullanılıyor
+// (_sahaMomentumDeger) - topun o KAREDEKİ konumu hedefi belirler, gösterge bu hedefe birkaç
+// saniye içinde yumuşakça "yetişir" ve dakika değiştiğinde SIFIRLANMAZ. Bu sayede top uzun
+// süre bir tarafın yarı sahasında kalırsa baskı puanı gerçekten ve GÖRÜNÜR şekilde o tarafa
+// kayar - saha uygulamasının pitch görselinde görülen anlık durumla birebir tutarlıdır.
+var _sahaMomentumDeger = 0; // -5..5, dakikalar arası taşınan canlı baskı göstergesi
 function _sahaMomentumBirik(top, dt){
   try{
     if(!top) return;
-    // Top orta çizgiye yakınsa etkisi az, rakip kale sahasına yaklaştıkça artar - dt'ye
-    // (kare süresine) göre ölçeklenir ki interval sıklığı değişse bile birikim tutarlı kalsın.
-    var etki = top.x * dt * 0.6;
-    var dk = String(Math.max(0, Math.min(120, Math.round(macDakika()||0))));
-    var mevcut = (_sahaMomentumBirikim[dk]||0) + etki;
-    _sahaMomentumBirikim[dk] = Math.max(-5, Math.min(5, mevcut));
+    // Hedef: topun home-perspektif x'i (-1..1) doğrudan -5..5 baskı skalasına ölçeklenir -
+    // top kale sahasına ne kadar yakınsa (|x| büyüdükçe) o taraf o kadar baskın sayılır.
+    var hedef = Math.max(-5, Math.min(5, top.x * 6));
+    var k = Math.min(1, dt / 4); // ~4 saniyede hedefin büyük kısmına ulaşan yumuşatma
+    _sahaMomentumDeger += (hedef - _sahaMomentumDeger) * k;
   }catch(e){}
 }
 function sahaCanliYaz(ilkYazim){
@@ -2676,10 +2673,11 @@ function sahaCanliYaz(ilkYazim){
       // GERÇEK BASKIMETRE VERİSİ - bkz. yukarıdaki _sahaMomentumBirik notu. Aynı yazım
       // döngüsüyle (top/oyuncu konumuyla BİREBİR AYNI anda) gönderilir ki Puan Tablosu
       // tarafında gerçekten "anlık" görünsün - ayrı/gecikmeli bir zamanlayıcıya gerek yok.
+      // Değer o dakikanın "o ana kadarki" canlı göstergesi olarak sürekli GÜNCELLENİR
+      // (üzerine yazılır) - dakika bitmeden önceki yazımlar bir sonrakiyle değiştirilir,
+      // böylece grafik gerçekten hareket ediyormuş gibi anlık akar.
       var _dkMom = String(Math.max(0, Math.min(120, Math.round(macDakika()||0))));
-      if(_sahaMomentumBirikim[_dkMom] !== undefined){
-        g[yol+'/momentum/'+_dkMom] = Math.round(_sahaMomentumBirikim[_dkMom]*10)/10;
-      }
+      g[yol+'/momentum/'+_dkMom] = Math.round(_sahaMomentumDeger*10)/10;
     }
     fbDb.ref().update(g).catch(function(e){ try{ console.error('[saha] canli yazim hatasi', e); }catch(_e){} });
   }catch(e){}
@@ -4343,9 +4341,9 @@ function basla(yeniMod){
   // Yeni maç: olay listesi sıfırlanır. Temizlenmezse önceki maçın golleri yenisine
   // karışır ve Puan Tablosu'na yanlış veri gider.
   olaylar = [];
-  // Yeni maç: bir önceki maçın baskı birikimi (dakika anahtarlı) taşınmasın - yoksa yeni
-  // maçın Baskımetre'si önceki maçtan kalma değerlerle başlamış olur.
-  _sahaMomentumBirikim = {};
+  // Yeni maç: bir önceki maçın baskı göstergesi taşınmasın - yoksa yeni maçın
+  // Baskımetre'si önceki maçtan kalma bir değerle başlamış olur.
+  _sahaMomentumDeger = 0;
   _akisIsaretler = new Set();
   _sonTacDk = -999;
   sonPasOyuncu = null; sonPasTakim = -1;
