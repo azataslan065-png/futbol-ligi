@@ -2606,37 +2606,46 @@ function _sahaOyuncuKonumlari(fk){
 // KULLANICI TALEBİ (2026-09-21-A, "Baskımetre ilgili maç için anlık veri akışı sağlasın",
 // ardından "hâlâ anlık değil" - ekran görüntüsüyle doğrulandı: top açıkça bir takımın yarı
 // sahasında olmasına rağmen grafik neredeyse boş/durağan kalıyordu): KÖK SEBEP - önceki
-// tasarım HER DAKİKA SIFIRDAN başlayan bir toplam kullanıyordu (_sahaMomentumBirikim[dk]),
-// topun o dakika içindeki net konum ortalamasını topluyordu. Top bir dakika içinde ileri-
-// geri hareket ettiğinde (normal oyun akışı) küçük artılar/eksiler birbirini büyük ölçüde
-// GÖTÜRÜYORDU ve her yeni dakika sıfırdan başladığı için sürekli baskı bile görünür
-// büyüklüğe ULAŞAMADAN dakika değişip siliniyordu - sonuç: grafik "canlı" hissettirmiyordu.
-// ÇÖZÜM (1. adım): dakikalar arası TAŞINAN, üstel yumuşatmalı, ANLIK bir gösterge
-// (_sahaMomentumDeger) - topun o KAREDEKİ konumu hedefi belirler, gösterge bu hedefe
-// birkaç saniye içinde yumuşakça "yetişir" ve dakika değiştiğinde SIFIRLANMAZ.
+// tasarım HER DAKİKA SIFIRDAN başlayan bir toplam kullanıyordu, topun o dakika içindeki NET
+// KONUM ortalamasını (kim tuttuğuna bakmadan salt top.x'e göre) topluyordu. Top bir dakika
+// içinde ileri-geri hareket ettiğinde küçük artılar/eksiler birbirini büyük ölçüde
+// GÖTÜRÜYORDU - sonuç: grafik "canlı" hissettirmiyordu.
 //
-// SONRAKİ KULLANICI TALEBİ ("Baskımetre sadece bir takımı hesaplıyor; bu hatalı, top
-// hangi takımdaysa ona göre doğru verilerle ilerleme kaydedecek"): KÖK SEBEP (2. adım) -
-// hedef SADECE topun mutlak saha konumuna (top.x) bakıyordu, topu KİMİN kontrol ettiğine
-// hiç bakmıyordu. Bu yüzden örn. uzun bir vuruş/kaleci vuruşuyla top rakip yarı sahaya
-// gitse bile, o anı topu ELİNDE TUTMAYAN takım sanki baskı kuruyormuş gibi hesaba
-// katılıyordu; top belli bir bölgede sıkışıp kaldığında da gösterge hep AYNI tarafa yakın
-// kalıp gerçek sahiplik değişimini yansıtmıyordu. ÇÖZÜM: artık topa EN SON DOKUNAN takım
-// (top.attack - bkz. _sahaTopKonumu, sonDokunan'dan gelir) esas alınır; o takım kendi
-// hücum yönünde NE KADAR ilerlemişse baskı puanı O YÖNDE ve O ORANDA büyür, kendi
-// yarısında/geride tutuyorsa baskı sıfıra yaklaşır. Yön SADECE topu elinde tutan takıma
-// göre belirlendiği için artık iki takım da, topu ne zaman kontrol ederse o zaman gerçek
-// ilerlemesiyle DOĞRU ORANTILI şekilde hesaba katılır - "sadece bir takım" sorunu ortadan
-// kalkar.
-var _sahaMomentumDeger = 0; // -5..5, dakikalar arası taşınan canlı baskı göstergesi
+// SONRAKİ KULLANICI TALEBİ ("Baskımetre sadece bir takımı hesaplıyor; top hangi takımdaysa
+// ona göre ilerleme kaydedecek"): hedef SADECE topun mutlak konumuna bakıp topu KİMİN
+// kontrol ettiğine bakmıyordu - bu yüzden topu elinde TUTMAYAN takım da baskı kuruyormuş
+// gibi hesaba katılabiliyordu.
+//
+// SON KULLANICI TALEBİ ("İlgili takım topla daha baskılı oynuyorsa veya topu o dakika
+// içinde daha etkili tutuyorsa çizgi uzunluğu ona göre ayarlanmalı"): KÖK SEBEP (3. adım) -
+// bir önceki çözüm (dakikalar arası taşınan, üstel yumuşatmalı TEK anlık gösterge) sadece
+// "şu an" hangi takım ne kadar ileride" sorusuna cevap veriyordu; o dakika BOYUNCA topu ne
+// kadar SÜREYLE ve ne kadar ETKİLİ (ne kadar ileride) tuttuğunu YANSITMIYORDU - kısa bir
+// anlık ileri top ile dakikanın tamamını baskıyla geçirmek grafikte ayırt edilemiyordu.
+// ÇÖZÜM: artık HER DAKİKA kendi içinde SIFIRDAN başlayan bir BİRİKİM kullanılıyor
+// (_sahaMomentumBirikim[dk]) - ama (2. adımdaki düzeltmeyle) katkı SADECE topu o an elinde
+// tutan takımın lehine ve SADECE o takımın kendi hücum yönünde ilerlediği kadar ekleniyor
+// (ilerleme<0 iken katkı 0, yani geride/kendi yarısında top tutmak baskı SAYILMIYOR). Top
+// bir takımda ne kadar UZUN SÜRE ve ne kadar İLERİDE kalırsa, o dakikanın birikimi o kadar
+// büyür (5'e doğru); top el değiştirdikçe biriken değer GERÇEK NET baskıyı yansıtır (artık
+// kim tutarsa tutsun rastgele ileri-geri hareketler birbirini götürmüyor, çünkü katkı hiçbir
+// zaman "topu tutmayan" takım lehine yazılmıyor). Kısa süreli bir baskı küçük/kısa bir
+// çubuk, dakikanın tamamına yayılan etkili bir baskı ise büyük/uzun bir çubuk üretir - bkz.
+// Baskımetre bilgi ekranındaki "Ev sahibi kısa süreli baskı" / "Konuk takım yoğun baskı"
+// örnekleriyle birebir aynı mantık.
+var _sahaMomentumBirikim = {}; // {dakika(string): -5..5, o dakikaya özel birikim}
 function _sahaMomentumBirik(top, dt){
   try{
     if(!top) return;
-    var yon = (top.attack === 'home') ? 1 : -1;         // topu şu an kim kontrol ediyor
-    var ilerleme = Math.max(0, yon * top.x);              // 0..1 - o takım kendi hücum yönünde ne kadar ilerlemiş
-    var hedef = Math.max(-5, Math.min(5, yon * ilerleme * 5));
-    var k = Math.min(1, dt / 4); // ~4 saniyede hedefin büyük kısmına ulaşan yumuşatma
-    _sahaMomentumDeger += (hedef - _sahaMomentumDeger) * k;
+    var yon = (top.attack === 'home') ? 1 : -1;          // topu şu an kim kontrol ediyor
+    var ilerleme = Math.max(0, yon * top.x);               // 0..1 - o takım kendi hücum yönünde ne kadar ilerlemiş
+    // Katkı süreyle (dt) ve ilerlemeyle orantılı - topu ne kadar UZUN SÜRE ve ne kadar
+    // İLERİDE tutarsa birikim o kadar hızlı büyür (sürekli tam ilerlemeyle ~12-13 sn'de
+    // tavan olan ±5'e ulaşır - bir dakikanın önemli bir kısmı boyunca sürmesi gerekir).
+    var katki = yon * ilerleme * dt * 0.4;
+    var dk = String(Math.max(0, Math.min(120, Math.round(macDakika()||0))));
+    var mevcut = (_sahaMomentumBirikim[dk]||0) + katki;
+    _sahaMomentumBirikim[dk] = Math.max(-5, Math.min(5, mevcut));
   }catch(e){}
 }
 function sahaCanliYaz(ilkYazim){
@@ -2689,7 +2698,9 @@ function sahaCanliYaz(ilkYazim){
       // (üzerine yazılır) - dakika bitmeden önceki yazımlar bir sonrakiyle değiştirilir,
       // böylece grafik gerçekten hareket ediyormuş gibi anlık akar.
       var _dkMom = String(Math.max(0, Math.min(120, Math.round(macDakika()||0))));
-      g[yol+'/momentum/'+_dkMom] = Math.round(_sahaMomentumDeger*10)/10;
+      if(_sahaMomentumBirikim[_dkMom] !== undefined){
+        g[yol+'/momentum/'+_dkMom] = Math.round(_sahaMomentumBirikim[_dkMom]*10)/10;
+      }
     }
     fbDb.ref().update(g).catch(function(e){ try{ console.error('[saha] canli yazim hatasi', e); }catch(_e){} });
   }catch(e){}
@@ -4353,9 +4364,9 @@ function basla(yeniMod){
   // Yeni maç: olay listesi sıfırlanır. Temizlenmezse önceki maçın golleri yenisine
   // karışır ve Puan Tablosu'na yanlış veri gider.
   olaylar = [];
-  // Yeni maç: bir önceki maçın baskı göstergesi taşınmasın - yoksa yeni maçın
-  // Baskımetre'si önceki maçtan kalma bir değerle başlamış olur.
-  _sahaMomentumDeger = 0;
+  // Yeni maç: bir önceki maçın baskı birikimi (dakika anahtarlı) taşınmasın - yoksa yeni
+  // maçın Baskımetre'si önceki maçtan kalma değerlerle başlamış olur.
+  _sahaMomentumBirikim = {};
   _akisIsaretler = new Set();
   _sonTacDk = -999;
   sonPasOyuncu = null; sonPasTakim = -1;
