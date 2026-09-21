@@ -2602,6 +2602,34 @@ function _sahaOyuncuKonumlari(fk){
     };
   }catch(e){ return null; }
 }
+// ── CANLI BASKIMETRE (Puan Tablosu'ndaki Baskımetre grafiği için GERÇEK basınç verisi) ──
+// KULLANICI TALEBİ (2026-09-21-A, "Baskımetre ilgili maç için anlık veri akışı sağlasın"):
+// KÖK SEBEP - bu dosya (3D motorla OYNANAN maçlar) hiçbir zaman Firebase'e 'momentum'
+// yazmıyordu; o alan SADECE admin panelindeki elle "baskı" düğmeleriyle dolduruluyordu
+// (bkz. admin.html/addMomentum). Saha uygulamasıyla oynanan bir maçta admin bu düğmelere
+// dokunmadığı için Puan Tablosu'ndaki Baskımetre hep boş kalıyor, "Baskı verisi
+// girilmediği için olayların zamana dağılımı gösteriliyor" yedek görünümüne (Olay
+// Yoğunluğu) düşüyordu - yani saha maçları için GERÇEK bir anlık baskı veri akışı HİÇ
+// VAR OLMUYORDU (bkz. index.html/renderBaskimetre - m.momentum boşsa "mom" hep null).
+// ÇÖZÜM: topun hangi yarı sahada durduğu (home perspektifinden -1..1, bkz.
+// _sahaTopKonumu) her karede küçük bir katkıyla o anki dakikanın baskı puanına eklenir -
+// top uzun süre bir takımın rakip yarı sahasında kalırsa o takımın baskı puanı gerçek
+// zamanlı yükselir. Admin panelininkiyle BİREBİR AYNI format (dakika-anahtarlı, -5..+5
+// aralığında obje) kullanılarak sahaCanliYaz() içinde ballX/ballZ ile AYNI yazım
+// döngüsünde Firebase'e gönderilir - böylece Puan Tablosu, saha maçlarında da GERÇEK
+// "📊 Baskımetre"yi (yedek "Olay Yoğunluğu" değil) anlık olarak gösterir.
+var _sahaMomentumBirikim = {}; // {dakika(string): -5..5}
+function _sahaMomentumBirik(top, dt){
+  try{
+    if(!top) return;
+    // Top orta çizgiye yakınsa etkisi az, rakip kale sahasına yaklaştıkça artar - dt'ye
+    // (kare süresine) göre ölçeklenir ki interval sıklığı değişse bile birikim tutarlı kalsın.
+    var etki = top.x * dt * 0.6;
+    var dk = String(Math.max(0, Math.min(120, Math.round(macDakika()||0))));
+    var mevcut = (_sahaMomentumBirikim[dk]||0) + etki;
+    _sahaMomentumBirikim[dk] = Math.max(-5, Math.min(5, mevcut));
+  }catch(e){}
+}
 function sahaCanliYaz(ilkYazim){
   try{
     var fk = window._sahaAktifFikstur; if(!fk || !fbHazir || !fbDb) return;
@@ -2645,6 +2673,13 @@ function sahaCanliYaz(ilkYazim){
         g[yol+'/homePlayers'] = konum.home;
         g[yol+'/awayPlayers'] = konum.away;
       }
+      // GERÇEK BASKIMETRE VERİSİ - bkz. yukarıdaki _sahaMomentumBirik notu. Aynı yazım
+      // döngüsüyle (top/oyuncu konumuyla BİREBİR AYNI anda) gönderilir ki Puan Tablosu
+      // tarafında gerçekten "anlık" görünsün - ayrı/gecikmeli bir zamanlayıcıya gerek yok.
+      var _dkMom = String(Math.max(0, Math.min(120, Math.round(macDakika()||0))));
+      if(_sahaMomentumBirikim[_dkMom] !== undefined){
+        g[yol+'/momentum/'+_dkMom] = Math.round(_sahaMomentumBirikim[_dkMom]*10)/10;
+      }
     }
     fbDb.ref().update(g).catch(function(e){ try{ console.error('[saha] canli yazim hatasi', e); }catch(_e){} });
   }catch(e){}
@@ -2676,6 +2711,11 @@ setInterval(function(){
       return;
     }
     var top=_sahaTopKonumu(fk); if(!top)return;
+    // Baskı birikimi HER karede (yazım yapılsa da yapılmasa da) güncellenir - top saha
+    // üzerinde durduğu sürece hangi tarafın baskı kurduğu kesintisiz hesaplanır; Firebase'e
+    // gönderim ise aşağıdaki normal throttle mantığıyla (top hareket ettiğinde ya da 2sn'lik
+    // nabızda) sahaCanliYaz() içinde yapılır.
+    _sahaMomentumBirik(top, 0.15);
     var dk=Math.round(macDakika()||0);
     var now=Date.now();
     var son=_sahaSonYazim;
@@ -4303,6 +4343,9 @@ function basla(yeniMod){
   // Yeni maç: olay listesi sıfırlanır. Temizlenmezse önceki maçın golleri yenisine
   // karışır ve Puan Tablosu'na yanlış veri gider.
   olaylar = [];
+  // Yeni maç: bir önceki maçın baskı birikimi (dakika anahtarlı) taşınmasın - yoksa yeni
+  // maçın Baskımetre'si önceki maçtan kalma değerlerle başlamış olur.
+  _sahaMomentumBirikim = {};
   _akisIsaretler = new Set();
   _sonTacDk = -999;
   sonPasOyuncu = null; sonPasTakim = -1;
