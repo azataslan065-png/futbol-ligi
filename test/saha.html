@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vH</title>
+<title>SAHA — 3D Futbol vE</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -1023,6 +1023,12 @@ window._sahaModelDurum = 'aranıyor';
           // kopya bellekte gereksiz yer kaplardi.
           window._sahaModelKlipler = gltf.animations || [];
           window._sahaModelDurum = 'hazir';
+          // KOK SEBEP (kullanici: "oyuncular icin gelistirme olmamis"): Model EZAMANSIZ
+          // yukleniyor; oyuncular ise sayfa acilirken kuruluyor. Model geldiginde oyuncular
+          // coktan KUTU olarak kurulmus oluyordu ve hic degistirilmiyordu - yani yeni model,
+          // animasyonlar ve sut hareketleri hic gorunmuyordu.
+          // COZUM: Model hazir olunca sahadaki her oyuncu yerinde yeni govdeyle degistirilir.
+          try{ oyunculariModeleGecir(); }catch(e){}
           // Model gec geldiginde sahadaki oyuncular zaten kurulmus olur; yeniden kurmak
           // yerine bir sonraki mac basinda devreye girer - mac ortasinda tum oyunculari
           // degistirmek gorsel bir sicrama yaratirdi.
@@ -1033,6 +1039,24 @@ window._sahaModelDurum = 'aranıyor';
     );
   }catch(e){ window._sahaModelDurum = 'hata'; }
 })();
+// Sahadaki oyunculari hazir modele gecirir (bkz. yukleyicideki kok sebep notu).
+// Konum, yon ve gorunurluk korunur; oyuncu nesnesi (p) ayni kalir, yalnizca p.obj degisir.
+function oyunculariModeleGecir(){
+  if(typeof players === 'undefined' || !players || !players.length) return;
+  players.forEach(function(p){
+    try{
+      var mat = p.gk ? (p.team === 0 ? MATS.ka : MATS.kb) : (p.team === 0 ? MATS.a : MATS.b);
+      var yeni = makePlayer(mat);
+      if(!yeni.userData || !yeni.userData.hazirModel) return;   // model yoksa dokunma
+      yeni.position.copy(p.obj.position);
+      yeni.rotation.copy(p.obj.rotation);
+      yeni.visible = p.obj.visible;
+      scene.remove(p.obj);
+      scene.add(yeni);
+      p.obj = yeni;
+    }catch(e){}
+  });
+}
 // Yuklenen modelden bir oyuncu govdesi uretir. Model yoksa null doner.
 function insanModelKopyala(m){
   try{
@@ -1081,6 +1105,20 @@ function modelAnimKur(grup){
       return null;
     }
     var k = { idle:bul('Idle'), walk:bul('Walk'), run:bul('Run') };
+    // TEK SEFERLIK KLIPLER (kullanici: "sut ve kaleci animasyonlari"):
+    //   sutSag/sutSol : Kick_Right / Kick_Left - sut ve pas
+    //   plonjon       : Roll - kalecinin yana atlayisi (modelde ozel kaleci klibi yok,
+    //                   Roll yana yuvarlanma oldugu icin en yakin hareket)
+    // LoopOnce: bir kez oynar ve biter; bitince yuruyus/kosu karisimina geri donulur.
+    var tek = { sutSag:bul('Kick_Right'), sutSol:bul('Kick_Left'), plonjon:bul('Roll') };
+    var tekEylem = {};
+    Object.keys(tek).forEach(function(ad){
+      if(!tek[ad]) return;
+      var e = mixer.clipAction(tek[ad]);
+      e.setLoop(THREE.LoopOnce, 1);
+      e.clampWhenFinished = false;
+      tekEylem[ad] = e;
+    });
     var eylem = {};
     Object.keys(k).forEach(function(ad){
       if(k[ad]){
@@ -1089,14 +1127,37 @@ function modelAnimKur(grup){
         eylem[ad].setEffectiveWeight(ad === 'idle' ? 1 : 0);
       }
     });
-    return { mixer: mixer, eylem: eylem, suanki: 'idle' };
+    return { mixer: mixer, eylem: eylem, suanki: 'idle', tek: tekEylem, tekBitis: 0 };
   }catch(e){ return null; }
+}
+// Tek seferlik hareketi oynatir (sut, pas, plonjon). Bittiginde modelAnimGuncelle
+// hareket karisimina geri doner. Ayni hareket art arda tetiklenirse bastan baslar.
+function modelTekSefer(ud, ad, hiz){
+  try{
+    var a = ud && ud.anim; if(!a || !a.tek || !a.tek[ad]) return;
+    var e = a.tek[ad];
+    e.reset();
+    e.setEffectiveTimeScale(hiz || 1.4);   // futbolda vurus hizli - klip biraz hizlandirildi
+    e.setEffectiveWeight(1);
+    e.fadeIn(0.06);
+    e.play();
+    // Yuruyus/kosu kliplerini hareket suresince bastir, yoksa iki hareket karisir.
+    Object.keys(a.eylem).forEach(function(k){ a.eylem[k].setEffectiveWeight(0.15); });
+    var sure = (e.getClip().duration / (hiz || 1.4)) * 1000;
+    a.tekBitis = performance.now() + sure;
+  }catch(e){}
 }
 // Her karede cagrilir: hiza gore klip secer ve mixer'i ilerletir.
 function modelAnimGuncelle(ud, dt, hiz){
   try{
     var a = ud && ud.anim;
     if(!a) return;
+    if(a.tekBitis && performance.now() < a.tekBitis){ a.mixer.update(dt); return; }
+    if(a.tekBitis){
+      // Tek seferlik hareket bitti: mevcut hareket klibinin agirligi geri verilir.
+      a.tekBitis = 0;
+      Object.keys(a.eylem).forEach(function(k){ a.eylem[k].setEffectiveWeight(k === a.suanki ? 1 : 0); });
+    }
     var hedef = (hiz > 3.2) ? 'run' : (hiz > 0.4 ? 'walk' : 'idle');
     if(hedef !== a.suanki && a.eylem[hedef]){
       // 0.18 sn gecis: daha kisasi sicrama gibi, daha uzunu "kayiyor" hissi verir.
@@ -1561,11 +1622,21 @@ function _sahaBakimAktifMi(mt){
 function _sahaBakimIzinliMi(mt){
   try{
     if(!mt) return false;
+    // KOK SEBEP (kullanici: "izin verilen kullanici iki uygulamaya da giremiyor"):
+    // Yonetici izin listesine PUAN TABLOSU KULLANICI ADI yaziyor (orada sameUserName ile
+    // ada gore eslesiyor). Oyun ise yalnizca E-POSTAYLA karsilastiriyordu - eslesme hic
+    // tutmadigi icin izinli kullanici Puan Tablosu'na girip oyunda bakim ekranina takiliyordu.
+    // COZUM: Kullanicinin tasidigi butun kimlik bicimleri denenir: e-posta, e-postanin
+    // @ oncesi, Firebase gorunen adi ve oyundaki hesap/takim adi. Puan Tablosu'yla ayni
+    // kural (buyuk-kucuk harf ve bosluk duyarsiz).
     var u = (firebase.auth().currentUser || {});
-    var ad = String(u.email || '').trim().toLocaleLowerCase('tr');
-    if(!ad) return false;
+    var norm = function(x){ return String(x || '').trim().toLocaleLowerCase('tr'); };
+    var eposta = norm(u.email);
+    var adaylar = [eposta, eposta.split('@')[0], norm(u.displayName),
+                   norm(benimKayit && benimKayit.ad)].filter(function(x){ return !!x; });
+    if(!adaylar.length) return false;
     return (mt.allowedUsers || []).some(function(x){
-      return String(x || '').trim().toLocaleLowerCase('tr') === ad;
+      return adaylar.indexOf(norm(x)) >= 0;
     });
   }catch(e){ return false; }
 }
@@ -2142,7 +2213,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-21-A';
+window.APP_BUILD = '2026-09-21-E';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -3067,6 +3138,15 @@ function sut(o){
   const g = Math.min(1, OYN[o].c);
   const d = vurusYonu(p, o);
   const kafa = ball.position.y > 1.2;
+  // SUT ANIMASYONU: Topun oyuncunun hangi tarafinda oldugu ayagi belirler - sagdaysa
+  // sag ayak. Kafa vurusunda ayak hareketi oynatilmaz. Guclu sut klibi daha hizli oynar.
+  try{
+    if(!kafa && p.obj.userData.hazirModel){
+      var _yanX = (ball.position.x - p.obj.position.x)*Math.cos(p.obj.rotation.y)
+                - (ball.position.z - p.obj.position.z)*Math.sin(p.obj.rotation.y);
+      modelTekSefer(p.obj.userData, _yanX >= 0 ? 'sutSag' : 'sutSol', 1.3 + g*0.6);
+    }
+  }catch(e){}
   if (kafa){
     // Kafa vurusunun gucu de nitelige bagli.
     const _nk = (p.nSut || 1);
@@ -3131,6 +3211,8 @@ function pas(o){
   const g = girdiYonu(o);
   const tercih = g.m > 0.25 ? new THREE.Vector3(g.x*dirA, 0, -g.y*dirA).normalize() : null;
   if (pasVer(p, t, tercih)){
+    // PAS ANIMASYONU: sutle ayni klip, daha yavas ve hafif - pas bir vurus degil dokunus.
+    try{ if(ball.position.y <= 1.2 && p.obj.userData.hazirModel) modelTekSefer(p.obj.userData, 'sutSag', 1.1); }catch(e){}
     if (ball.position.y > 1.2) bVel.y = 2.6;             // kafayla indirilen pas
     bSpin = 0;
     if (duran && duran.takim === t) duran = null;
@@ -3430,6 +3512,8 @@ function duranCalistir(){
     ofsaytTemizle();
   } else if (tip === 'penalti'){
     const savGK = (p.team === 0 ? teamB : teamA)[0];
+    // KALECI PLONJONU: Roll klibi kalecinin yana atlayisini temsil ediyor.
+    try{ if (savGK && savGK.obj.userData.hazirModel) modelTekSefer(savGK.obj.userData, 'plonjon', 1.6); }catch(e){}
     if (savGK){ savGK.dalis = (Math.random() < 0.5 ? -1 : 1) * (1.8 + Math.random()*1.8); savGK.dalisT = 1.3; }
     const h = new THREE.Vector3(p.dir*HLX, 0, (Math.random()-0.5)*GOAL_HW*1.5);
     const d = h.sub(ball.position).setY(0).normalize();
