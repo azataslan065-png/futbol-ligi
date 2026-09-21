@@ -2539,7 +2539,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-18-X';
+window.APP_BUILD='2026-09-19-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -25122,6 +25122,71 @@ function ptCanliRozetDinle(){
     });
   }catch(e){ setTimeout(ptCanliRozetDinle, 1000); }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// BOS-ALAN MODELI ILE YERLESTIRME (yonetici onizlemesiyle birebir ayni hesap)
+// Oran 0 = en sol/ust, 100 = en sag/alt. Pikselle yerlestirilir: yuzde kullanan CSS
+// 'left', kutunun genisligini hesaba katmaz ve sag kenarda bosluk birakir.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// GECICI OLCUM KUTUSU (rozet + tam ekran/kucuk ekran sorunu icin)
+// Iki turdur belirtiyi yamaliyoruz; artik OLCUYORUZ. Oynaticinin sol ust kosesinde
+// saniyede bir guncellenen kutu:
+//   ekran   : pencere boyutu ve tam ekran durumu
+//   sahne   : oynatici sahnesinin boyutu
+//   cerceve : oyunun gomulu cercevesinin boyutu (kirpma burada gorunur)
+//   rozet   : kayitli oran ve ekrandaki gercek konum/boyut
+//   skor    : ayni sekilde
+// Sorun cozulunce kaldirilacak.
+function ptOlcumKutusu(){
+  try{
+    var sahne = document.querySelector('.ptp-stage');
+    var k = document.getElementById('ptOlcum');
+    if(!sahne){ if(k) k.style.display='none'; return; }
+    if(!k || k.parentElement !== sahne){
+      if(k) k.remove();
+      k = document.createElement('div'); k.id = 'ptOlcum';
+      k.style.cssText = 'position:absolute;left:4px;top:4px;z-index:99;pointer-events:none;'
+        + 'font:9px/1.45 monospace;color:#9fe;background:rgba(0,0,0,.72);padding:4px 6px;'
+        + 'border-radius:4px;white-space:pre';
+      sahne.appendChild(k);
+    }
+    function r(el){ if(!el) return 'yok'; var g=el.getBoundingClientRect();
+      return Math.round(g.left)+','+Math.round(g.top)+' '+Math.round(g.width)+'x'+Math.round(g.height); }
+    var sg = sahne.getBoundingClientRect();
+    var cf = sahne.querySelector('iframe');
+    var video = sahne.querySelector('video');
+    var gv = window._ptCanliRozet || {};
+    var tam = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    k.textContent =
+        'ekran  : ' + innerWidth + 'x' + innerHeight + (tam ? ' TAM' : ' kucuk') + '\n'
+      + 'sahne  : ' + r(sahne) + '\n'
+      + 'cerceve: ' + r(cf) + (cf ? ' oran ' + (cf.getBoundingClientRect().width/Math.max(1,cf.getBoundingClientRect().height)).toFixed(2) : '') + '\n'
+      + 'video  : ' + r(video) + '\n'
+      + 'rozet  : kayit ' + gv.rozetX + '/' + gv.rozetY + ' -> ' + r(document.getElementById('ptCanliRozet')) + '\n'
+      + 'skor   : kayit ' + gv.skorX + '/' + gv.skorY + ' -> ' + r(document.getElementById('ptpSkor'));
+  }catch(e){}
+}
+try{ setInterval(ptOlcumKutusu, 1000); }catch(e){}
+
+function ptBosAlanYerlestir(el, oranX, oranY){
+  try{
+    if(!el) return;
+    var kap = el.closest('.ptp-stage') || el.parentElement;
+    if(!kap) return;
+    el.style.transform = ''; el.style.maxWidth = '';
+    el.style.marginLeft = '0px'; el.style.marginTop = '0px';
+    el.style.right = ''; el.style.bottom = '';
+    requestAnimationFrame(function(){
+      try{
+        var kg = kap.getBoundingClientRect(), g = el.getBoundingClientRect();
+        var x = (oranX/100) * Math.max(0, kg.width  - g.width);
+        var y = (oranY/100) * Math.max(0, kg.height - g.height);
+        el.style.left = x + 'px';
+        el.style.top  = y + 'px';
+      }catch(e){}
+    });
+  }catch(e){}
+}
 function ptCanliRozetUygula(){
   try{
     var g = window._ptCanliRozet;
@@ -25157,34 +25222,8 @@ function ptCanliRozetUygula(){
     // TASMA KORUMASI: Yuzde, ogenin SOL-UST kosesini belirler. Saga/asagi yakin
     // degerlerde ogenin bir kismi disarda kalirdi; %50'yi gecince kendi boyutu kadar
     // iceri cekilir.
-    el.style.left = kx + '%';
-    el.style.top = ky + '%';
-    el.style.right = '';
-    el.style.bottom = '';
-    // HATA DUZELTMESI (kullanici: "rozet yerlesimi dogru hesaplanmiyor"):
-    // Yonetici onizlemesinde konum SOL-UST KOSE olarak saklaniyor. Burada %50'yi gecince
-    // oge kendi genisligi kadar iceri cekiliyordu (translate) - yani onizlemede birakilan
-    // yerden FARKLI bir noktaya dusuyordu. Iki taraf ayni modeli kullanmali.
-    // Tasma artik max-width ile engellenir: oge capa noktasinda KALIR, yalnizca kalan
-    // alana sigacak kadar genisler.
-    // Tasma duzeltmesi: max-width ogeyi DARALTIYORDU (sag tarafta rozet sikisip iki
-    // satira dusuyordu). Artik oge dogal genisliginde kalir, gerekirse sola kaydirilir.
-    // Genislik ancak cizildikten sonra bilinir - olcum bir kare sonra yapilir.
-    el.style.transform = '';
-    el.style.maxWidth = '';
-    el.style.marginLeft = '0px';     // olcumden ONCE sifirla (bkz. kok sebep notu)
-    el.style.marginTop = '0px';
-    requestAnimationFrame(function(){
-      try{
-        var kap = el.closest('.ptp-stage') || el.parentElement;
-        if(!kap) return;
-        var kg = kap.getBoundingClientRect(), g = el.getBoundingClientRect();
-        var tasma = (g.right + 4) - kg.right;
-        el.style.marginLeft = (tasma > 0) ? (-tasma + 'px') : '0px';
-        var altTasma = (g.bottom + 4) - kg.bottom;
-        el.style.marginTop = (altTasma > 0) ? (-altTasma + 'px') : '0px';
-      }catch(e){}
-    });
+    ptBosAlanYerlestir(el, kx, ky);
+
     // OLCEKLER (kullanici: "skorboard ayri, yazi ayri, logo ayri"): Yazi ve logo
     // BAGIMSIZ olceklenir - sponsor logosu buyuk ama yazi kucuk istenebilir.
     // Kutunun tamamini scale ile buyutmek yerine yazi boyutunu ve logo yuksekligini
@@ -25330,23 +25369,8 @@ function ptpYayinBindirmeGuncelle(){
         var _so = (_g.skorOlcek != null) ? _g.skorOlcek : 1;
         sk.style.fontSize = 'clamp(' + (8*_so).toFixed(1) + 'px,' + (2.2*_so).toFixed(2)
           + 'vw,' + (12.35*_so).toFixed(1) + 'px)';
-        sk.style.left = _sx + '%';
-        sk.style.top = _sy + '%';
-        sk.style.transform = '';
-        sk.style.maxWidth = '';
-        sk.style.marginLeft = '0px';   // olcumden ONCE sifirla - yoksa her turda ziplar
-        sk.style.marginTop = '0px';
-        requestAnimationFrame(function(){
-          try{
-            var kap2 = sk.closest('.ptp-stage') || sk.parentElement;
-            if(!kap2) return;
-            var kg2 = kap2.getBoundingClientRect(), g2 = sk.getBoundingClientRect();
-            var t2 = (g2.right + 4) - kg2.right;
-            sk.style.marginLeft = (t2 > 0) ? (-t2 + 'px') : '0px';
-            var a2t = (g2.bottom + 4) - kg2.bottom;
-            sk.style.marginTop = (a2t > 0) ? (-a2t + 'px') : '0px';
-          }catch(e){}
-        });
+        ptBosAlanYerlestir(sk, _sx, _sy);
+
         sk.style.right = '';
         sk.style.bottom = '';
       }catch(e){}

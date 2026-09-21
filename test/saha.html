@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vX</title>
+<title>SAHA — 3D Futbol vB</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -578,43 +578,69 @@ function isiklariAyarla(){
 // SESSIZ ve DONGU halinde oynar - zaten reklam panosundan ses beklenmez.
 // GORSEL/VIDEO BASKA SITEDEYSE: Sunucu CORS izni vermezse doku cizilemez (tarayici
 // guvenligi). O durumda sessizce varsayilan panoya dusulur, oyun bozulmaz.
-var _reklamVideo = null;
+// COKLU ICERIK (kullanici: "butun panolar ayni seyi gostermesin, yonetici kac tane
+// eklediyse o gorunsun"): Veri artik bir LISTE (ogeler). Panolar sirayla dagitilir:
+// 3 oge varsa 1.pano A, 2.pano B, 3.pano C, 4.pano yine A ...
+// Her ogenin kendi turu vardir: yazi, gorsel (galeri/baglanti) ya da video.
+// Eski tek-icerik kaydi da desteklenir: liste yoksa tek oge sayilir.
+var _reklamVideolar = [];
+function reklamOgeMalzeme(o, bitti){
+  try{
+    if(!o){ bitti(null); return; }
+    if(o.tur === 'video' && o.kaynak){
+      var el = document.createElement('video');
+      el.src = o.kaynak; el.crossOrigin = 'anonymous';
+      el.muted = true; el.loop = true; el.playsInline = true;
+      el.setAttribute('playsinline',''); el.setAttribute('muted','');
+      var p = el.play(); if(p && p.catch) p.catch(function(){});
+      _reklamVideolar.push(el);
+      bitti(new THREE.MeshBasicMaterial({ map:new THREE.VideoTexture(el) }));
+      return;
+    }
+    if(o.tur === 'gorsel' && o.kaynak){
+      var yk = new THREE.TextureLoader();
+      if(yk.setCrossOrigin) yk.setCrossOrigin('anonymous');
+      yk.load(o.kaynak, function(t){ bitti(new THREE.MeshBasicMaterial({ map:t })); },
+              undefined, function(){ bitti(null); });
+      return;
+    }
+    var c = document.createElement('canvas'); c.width = 512; c.height = 64;
+    var x = c.getContext('2d');
+    x.fillStyle = o.zemin || '#14202a'; x.fillRect(0,0,512,64);
+    x.fillStyle = o.renk || '#eaf2f6';
+    x.font = 'bold 38px Arial'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(String(o.yazi || '').slice(0,28), 256, 34);
+    bitti(new THREE.MeshLambertMaterial({ map:new THREE.CanvasTexture(c) }));
+  }catch(e){ bitti(null); }
+}
 function reklamUygula(v){
   try{
     var liste = window._sahaReklamPanolari || [];
     if(!liste.length) return;
-    // Onceki videoyu durdur - eski video arkada calismaya devam ederse pil tuketir.
-    if(_reklamVideo){ try{ _reklamVideo.pause(); _reklamVideo.src=''; }catch(e){} _reklamVideo = null; }
-    function hepsine(mat){ liste.forEach(function(p){ p.mesh.material = mat || p.varsayilan; }); }
-    if(!v || (!v.video && !v.gorsel && !v.yazi)){ hepsine(null); return; }
-    if(v.video){
-      var el = document.createElement('video');
-      el.src = v.video; el.crossOrigin = 'anonymous';
-      el.muted = true; el.loop = true; el.playsInline = true;
-      el.setAttribute('playsinline',''); el.setAttribute('muted','');
-      var p = el.play(); if(p && p.catch) p.catch(function(){});
-      _reklamVideo = el;
-      var vt = new THREE.VideoTexture(el);
-      hepsine(new THREE.MeshBasicMaterial({ map:vt }));
-      return;
+    // Eski videolar durdurulur - arkada calismaya devam ederlerse pil tuketirler.
+    _reklamVideolar.forEach(function(el){ try{ el.pause(); el.removeAttribute('src'); el.load(); }catch(e){} });
+    _reklamVideolar = [];
+    var ogeler = [];
+    if(v && v.ogeler){
+      ogeler = Object.keys(v.ogeler).sort().map(function(k){ return v.ogeler[k]; })
+        .filter(function(o){ return o && (o.kaynak || o.yazi); });
+    }else if(v && (v.video || v.gorsel || v.yazi)){
+      ogeler = [ v.video ? {tur:'video', kaynak:v.video}
+               : v.gorsel ? {tur:'gorsel', kaynak:v.gorsel}
+               : {tur:'yazi', yazi:v.yazi, zemin:v.zemin, renk:v.renk} ];
     }
-    if(v.gorsel){
-      var yk = new THREE.TextureLoader();
-      yk.setCrossOrigin && yk.setCrossOrigin('anonymous');
-      yk.load(v.gorsel,
-        function(t){ hepsine(new THREE.MeshBasicMaterial({ map:t })); },
-        undefined,
-        function(){ hepsine(null); });     // yuklenemezse varsayilana don
-      return;
-    }
-    // Yalnizca yazi: canvas dokusu
-    var c = document.createElement('canvas'); c.width = 512; c.height = 64;
-    var x = c.getContext('2d');
-    x.fillStyle = v.zemin || '#14202a'; x.fillRect(0,0,512,64);
-    x.fillStyle = v.renk || '#eaf2f6';
-    x.font = 'bold 38px Arial'; x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.fillText(String(v.yazi).slice(0,28), 256, 34);
-    hepsine(new THREE.MeshLambertMaterial({ map:new THREE.CanvasTexture(c) }));
+    if(!ogeler.length){ liste.forEach(function(p){ p.mesh.material = p.varsayilan; }); return; }
+    // Her oge icin malzeme BIR KEZ uretilir ve panolar arasinda paylasilir - ayni
+    // videoyu 10 kez acmak 10 ayri video cozucusu demek, telefonu yorar.
+    var malzemeler = new Array(ogeler.length);
+    ogeler.forEach(function(o, idx){
+      reklamOgeMalzeme(o, function(mat){
+        malzemeler[idx] = mat;
+        liste.forEach(function(p, pi){
+          if(pi % ogeler.length === idx) p.mesh.material = mat || p.varsayilan;
+        });
+      });
+    });
   }catch(e){ try{ if(window.DiagSaha) DiagSaha('reklamUygula', e); }catch(_e){} }
 }
 (function reklamDinle(){
@@ -2025,6 +2051,27 @@ function magazaCiz(){
    saniye icinde bir kez yazilir - aksi halde veritabani tek bir hatayla dolar.
    ══════════════════════════════════════════════════════════════════════════════════════ */
 var _diagSonYazim = {};
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// YONETICI ANAHTARINA BAGLANTI (kullanici: "admin hata yakalamayi acinca saha da
+// tetikleniyor mu?")
+// ONCEDEN: Oyun bayragi HIC okumuyordu - her zaman kayit yaziyordu. Yonetici anahtari
+// kapatsa bile oyun veritabanina yazmaya devam ediyordu (kota ve gereksiz yuk).
+// SIMDI: Puan Tablosu'yla AYNI sozlesme - 'diagnostics/flags/saha_oyun'. Yonetici
+// Teshis panelinde "SAHA Oyunu" modulunu actiginda kayit baslar, kapattiginda durur.
+// VARSAYILAN KAPALI: Bayrak okunamazsa (ag yok, izin yok) kayit YAPILMAZ. Puan
+// Tablosu da ayni guvenli tarafi seciyor; bilinmeyen durumda veritabanina yazmamak
+// yanlislikla kota tuketmekten iyidir.
+// KONSOL AYRI: Hata konsola HER ZAMAN yazilir (ucretsiz, yerel) - yalnizca veritabanina
+// yazma bayraga bagli.
+var _diagSahaAcik = false;
+(function diagBayragiDinle(){
+  try{
+    if(!window.firebase || !firebase.database){ setTimeout(diagBayragiDinle, 800); return; }
+    firebase.database().ref('diagnostics/flags/saha_oyun').on('value',
+      function(sn){ _diagSahaAcik = (sn.val() === true); },
+      function(){ _diagSahaAcik = false; });
+  }catch(e){ _diagSahaAcik = false; }
+})();
 function DiagSaha(alan, hata, ek){
   try{
     var imza = String(alan) + '|' + String((hata && (hata.message || hata.code)) || hata || '');
@@ -2032,6 +2079,8 @@ function DiagSaha(alan, hata, ek){
     if(_diagSonYazim[imza] && (now - _diagSonYazim[imza]) < 30000) return;
     _diagSonYazim[imza] = now;
     try{ console.warn('[saha]', alan, hata); }catch(e){}
+    // Yonetici anahtari kapaliysa veritabanina YAZILMAZ (bkz. yukaridaki not).
+    if(!_diagSahaAcik) return;
     if(!window.firebase || !firebase.database) return;
     var kayit = {
       modul: 'saha_oyun',
@@ -2093,7 +2142,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-18-X';
+window.APP_BUILD = '2026-09-19-B';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -2736,7 +2785,14 @@ function ayarUygula(){
   takimUygula();
   havaUygula();
   renderer.setPixelRatio(Math.min(devicePixelRatio, AYAR.grafik));
-  tribunler.forEach(m => m.visible = AYAR.grafik > 1);
+  // KOK SEBEP (kullanici: "oyunda kadraja giren taraftar alani TV sekmesinde gorunmuyor"):
+  // Tribunler grafik KALITESI ayarina bagliydi: 'Dusuk' secili cihazda hic cizilmiyordu.
+  // Izleyici cihazinda ayar farkliysa oyuncunun gordugu kalabalik izleyicide yoktu -
+  // iki ekran ayni maci farkli gosteriyordu. Cati ve cephe bu listede olmadigi icin
+  // gorunuyor, yalnizca kalabalik kayboluyordu.
+  // Grafik ayari PERFORMANS icindir (piksel yogunlugu); sahnenin ICERIGINI degistirmemeli.
+  // Kalabalik zaten ucuz (dokulu kutular), her kalitede gorunur.
+  tribunler.forEach(m => m.visible = true);
   if (!AYAR.ses && tribunGain){ try { tribunGain.gain.value = 0; } catch(e){} }
   else if (AYAR.ses && tribunGain){ try { tribunGain.gain.value = 0.035; } catch(e){} }
 }
@@ -4560,27 +4616,16 @@ function _sahaIzleRozetUygula(){
       // katilmazsa saga/asagi yakin degerlerde rozetin bir kismi ekran disinda kalir.
       // Kucuk ekranlarda bu daha belirgin. Cozum: %50'yi gecen konumlarda oge kendi
       // boyutu kadar iceri cekilir (translate) - konum bilgisi bozulmadan tamami gorunur.
-      el.style.left = ekX + '%';
-      el.style.top = ekY + '%';
-      // Yonetici onizlemesiyle AYNI model: konum sol-ust kose. Tasma max-width ile
-      // engellenir, oge capa noktasindan kaydirilmaz (bkz. index.html'deki ayni not).
-      // KOK SEBEP (kullanici: "rozet konumu sag tarafta dogru hesaplanmiyor"):
-      // max-width ile tasma engelleniyordu ama bu ogeyi DARALTIYOR - sag tarafta rozet
-      // sikisip iki satira duşuyor, yonetici onizlemesindekiyle ayni gorunmuyordu.
-      // DOGRUSU: Oge dogal genisliginde kalsin, gerekirse SOLA kaydirilsin. Genislik
-      // ancak cizildikten sonra bilinir, bu yuzden olcum bir kare sonra yapilir.
-      el.style.transform = '';
-      el.style.maxWidth = '';
-      el.style.marginLeft = '0px';   // olcumden ONCE sifirla - yoksa her turda ziplar
-      el.style.marginTop = '0px';
+      // BOS-ALAN MODELI: yonetici onizlemesiyle ayni hesap (bkz. admin pozSuruklemeKur).
+      // 0 = en sol/ust, 100 = en sag/alt; kutu genisligi ne olursa olsun.
+      el.style.transform = ''; el.style.maxWidth = '';
+      el.style.marginLeft = '0px'; el.style.marginTop = '0px';
+      el.style.right = 'auto'; el.style.bottom = 'auto';
       requestAnimationFrame(function(){
         try{
           var g = el.getBoundingClientRect();
-          var tasma = (g.right + 6) - window.innerWidth;
-          // Yalnizca tasma varsa kaydir; yoksa capa noktasi aynen korunur.
-          el.style.marginLeft = (tasma > 0) ? (-tasma + 'px') : '0px';
-          var altTasma = (g.bottom + 6) - window.innerHeight;
-          el.style.marginTop = (altTasma > 0) ? (-altTasma + 'px') : '0px';
+          el.style.left = ((ekX/100) * Math.max(0, window.innerWidth  - g.width))  + 'px';
+          el.style.top  = ((ekY/100) * Math.max(0, window.innerHeight - g.height)) + 'px';
         }catch(e){}
       });
       el.style.right = 'auto';
@@ -5018,8 +5063,14 @@ function _sahaIzleKareAdimla(dt){
     if (!isFinite(_bp.x) || !isFinite(_bp.y) || Math.abs(_bp.x) > 0.78 || Math.abs(_bp.y) > 0.78) _acilKilit = true;
   }catch(e){}
   camHedef.set(cx, KAMERA_YUKSEKLIK, cz);
-  camera.position.lerp(camHedef, _acilKilit ? 1 : Math.min(1, dt*3.0));
-  bakHedef.set(cx + 5*dirA, 1.0, _acilKilit ? ball.position.z : ball.position.z*0.8);
+  // Oyuncu kamerasiyla AYNI davranis (bkz. KAMERA TITREMESI DUZELTMESI): anlik sicrama
+  // yok, bakis hedefi yumusatilir. Eski kopya kaldiginda izleyici kadrajı oyuncununkinden
+  // farkli ve titrek gorunuyordu.
+  camera.position.lerp(camHedef, Math.min(1, dt * (_acilKilit ? 9.0 : 3.0)));
+  var _izBakZ = _acilKilit ? ball.position.z : ball.position.z*0.8;
+  if (window._izBakZson == null) window._izBakZson = _izBakZ;
+  window._izBakZson += (_izBakZ - window._izBakZson) * Math.min(1, dt * (_acilKilit ? 9.0 : 4.0));
+  bakHedef.set(cx + 5*dirA, 1.0, window._izBakZson);
   camera.lookAt(bakHedef);
 }
 (function(){
