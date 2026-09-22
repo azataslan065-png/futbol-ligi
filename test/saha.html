@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vG</title>
+<title>SAHA — 3D Futbol vB</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -1395,6 +1395,12 @@ const sahada = p => !p.dis;
 const ring = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.66, 20),
   new THREE.MeshBasicMaterial({ color:0x6fd3ff, transparent:true, opacity:0.95, side:THREE.DoubleSide }));
 ring.rotation.x = -Math.PI/2; ring.position.y = 0.04;
+// KOK SEBEP (kullanici: "sahanin ortasindaki yuvarlak/isik"): Secim halkasi olusturuldugunda
+// GORUNUR ve konumu (0,0) - sahanin tam ortasi. Yalnizca kontrol edilen oyuncu varsa onun
+// altina tasiniyordu. Izleyici modunda ve mac baslamadan kontrol edilen oyuncu olmadigi
+// icin halka ortada parlak bir yuvarlak olarak kaliyordu; acik mavi saydam malzemesi
+// isik gibi gorunuyordu. Artik baslangicta gizli, yalnizca kontrol edilen oyuncu varken gorunur.
+ring.visible = false;
 scene.add(ring);
 const ring2 = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.66, 20),
   new THREE.MeshBasicMaterial({ color:0xffd45e, transparent:true, opacity:0.95, side:THREE.DoubleSide }));
@@ -2235,7 +2241,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-21-G';
+window.APP_BUILD = '2026-09-22-B';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -2770,6 +2776,11 @@ function sahaCanliYaz(ilkYazim){
     g[yol+'/events'] = _sahaMapEvents(olaylar, fk.benTarafHome);
     // İzleyici vuruş sesi senkronu için - bkz. sesVurus() üzerindeki not.
     g[yol+'/vurus'] = window._sahaVurusSayaci||0;
+    // EKRAN ORANI (kullanici: "SAHA'daki goruntu ve cerceve neyse TV'de o gosterilmeli"):
+    // Oyuncunun ekran orani (ornegin 20:9) yazilir. Izleyici sahnesi 16:9 oldugu icin
+    // dikeyde farkli miktarda alan kirpiliyordu. Izleyici bu oranla cercevesini kurar -
+    // oyuncunun gordugu kadraj birebir ayni olur.
+    try{ g[yol+'/ekranOran'] = Math.round((innerWidth / Math.max(1, innerHeight)) * 1000) / 1000; }catch(e){}
     var top = _sahaTopKonumu(fk);
     if(top){
       // Ondalıkları 2 haneye yuvarla - sık yazılacak küçük bir sayı olsun diye
@@ -3512,12 +3523,15 @@ function duvarKur(takim){
   const golMerkez = new THREE.Vector3(d*HLX, 0, 0);
   if (ball.position.distanceTo(golMerkez) > 30) return null;
   const yonG = golMerkez.clone().sub(ball.position).setY(0).normalize();
-  const taban = ball.position.clone().add(yonG.clone().multiplyScalar(9.15));
+  // KULLANICI TALEBI: Baraj toptan 7 metre uzakta ve 4 kisilik (onceden 9.15 m, 3 kisi).
+  const BARAJ_MESAFE = 7, BARAJ_KISI = 4;
+  const taban = ball.position.clone().add(yonG.clone().multiplyScalar(BARAJ_MESAFE));
   const yanal = new THREE.Vector3(-yonG.z, 0, yonG.x);
   const adaylar = (sav === 0 ? teamA : teamB).filter(p => !p.gk && sahada(p))
-    .sort((a,b) => a.obj.position.distanceTo(taban) - b.obj.position.distanceTo(taban)).slice(0,3);
+    .sort((a,b) => a.obj.position.distanceTo(taban) - b.obj.position.distanceTo(taban)).slice(0,BARAJ_KISI);
   adaylar.forEach((p, i) => {
-    p.duvarHedef = taban.clone().add(yanal.clone().multiplyScalar((i-1)*0.8));
+    // Kisi sayisina gore ortalanir: 4 kiside -1.5 .. +1.5 omuz omuza (0.8 m aralik).
+    p.duvarHedef = taban.clone().add(yanal.clone().multiplyScalar((i-(BARAJ_KISI-1)/2)*0.8));
     p.duvarHedef.y = 0;
   });
   return adaylar;
@@ -3528,7 +3542,23 @@ function duranBaslat(tip, takim, x, z){
   ofsaytTemizle(); avantaj = null;
   const alici = (tip === 'kale') ? (takim === 0 ? teamA : teamB)[0] : takimEnYakin(takim, ball.position);
   duran = { tip, takim, alici, bekle:1.0, hazir:0, omur:0, duvar:null };
-  if (tip === 'serbest' || tip === 'penalti') duran.duvar = duvarKur(takim);
+  if (tip === 'serbest') duran.duvar = duvarKur(takim);
+  // PENALTI (kullanici: "ceza sahasinda yalnizca kaleci ve atici olmali"):
+  // Onceden penaltida da BARAJ kuruluyordu - penaltida baraj olmaz. Atici ve iki kaleci
+  // disindaki herkes ceza sahasinin DISINA, penalti noktasinin arkasina dizilir.
+  // Ceza sahasi kale cizgisinden 16.5 m; oyuncular 21 m cizgisinde, yan yana 3.2 m aralikla.
+  // Mevcut "duvarHedef" mekanizmasi kullanildi: bu listedeki oyuncular hedef noktaya
+  // yurur ve vurus yapilana kadar orada kalir (bkz. aiHedef icindeki duvarHedef kontrolu).
+  if (tip === 'penalti'){
+    const yon = Math.sign(x) || 1;
+    const disari = players.filter(pp => !pp.gk && !pp.dis && pp !== alici);
+    const n = disari.length;
+    disari.forEach((pp, i) => {
+      const z = Math.max(-HWZ+2, Math.min(HWZ-2, (i - (n-1)/2) * 3.2));
+      pp.duvarHedef = new THREE.Vector3(yon*(HLX-21), 0, z);
+    });
+    duran.duvar = disari;
+  }
   if (alici){ alici.cd = 0; alici.tcd = 0; }
   if (takim === 0 && alici) ctrl = alici;
   mesaj('', ETIKET[tip] + (takim === 0 ? ' — sende' : ''), 1300);
@@ -4018,7 +4048,16 @@ function update(dt){
   TAKTIK.b.ileri = bIleriSmooth;
 
   /* --- oyuncular --- */
-  const kovA = enYakin(teamA), kovB = enYakin(teamB);
+  // KOK SEBEP (kullanici: "herkes topa kosuyor; oyuncular topu takim arkadasindan caliyor"):
+  // Her takim, top KIMDE OLURSA OLSUN topa en yakin oyuncusunu kosturuyordu. Top kendi
+  // takimindaki bir arkadastayken bile en yakin oyuncu ona kosup topu aliyordu.
+  // COZUM: Top bir takimdaysa, o takimin "kovalayicisi" topu tutanin KENDISIDIR - baska
+  // hicbir takim arkadasi topa kosmaz, pozisyonunu korur (pas secenegi olur). Yalnizca
+  // RAKIP takim topa baski yapmak icin bir oyuncu gonderir. Top sahipsizse (serbest top)
+  // iki takim da en yakin oyuncusunu gonderir - eskisi gibi.
+  const _sahipK = topSahibi();
+  const kovA = (_sahipK && _sahipK.team === 0) ? _sahipK : enYakin(teamA);
+  const kovB = (_sahipK && _sahipK.team === 1) ? _sahipK : enYakin(teamB);
   players.forEach(p => {
     if (p.dis) return;
     p.cd  = Math.max(0, p.cd - dt);
@@ -4112,7 +4151,15 @@ function update(dt){
     duran.bekle -= dt; duran.omur += dt;
     const yak = duran.alici ? duran.alici.obj.position.distanceTo(ball.position) : 99;
     if (duran.bekle <= 0 && yak < 2.2) duran.hazir += dt;
-    if ((duran.takim === 1 && duran.hazir > 0.3) || duran.hazir > 6 || duran.omur > 14) duranCalistir();
+    // ELLE TAC (kullanici: "tac atislari elle kullanilsin"): Kendi takiminin taci artik
+    // 6 sn sonra KENDILIGINDEN atilmaz; oyuncu pas ya da sut tusuyla atar. Rakip (yapay
+    // zeka) taci eskisi gibi otomatik. Guvenlik: oyuncu hic basmazsa 60 sn sonra atilir -
+    // oyun kilitli kalmasin (sekme arka plana alinmis, telefon birakilmis olabilir).
+    const _elleTac = (duran.tip === 'tac' && duran.takim === 0);
+    if (_elleTac && !duran._ipucu){ duran._ipucu = true; mesaj('TAÇ', 'Pas tuşuyla at', 2200); }
+    if ((duran.takim === 1 && duran.hazir > 0.3)
+        || (!_elleTac && duran.hazir > 6)
+        || duran.omur > (_elleTac ? 60 : 14)) duranCalistir();
   } else if (frozen <= 0){
     faulKontrol(dt);
   }
@@ -4262,7 +4309,9 @@ function update(dt){
   bakHedef.set(cx + 5*dirA, 1.0, window._bakZson);
   camera.lookAt(bakHedef);
 
-  if (ctrl) ring.position.set(ctrl.obj.position.x, 0.04, ctrl.obj.position.z);
+  // Halka yalnizca gercekten kontrol edilen oyuncu varken ve izleyici modunda DEGILKEN.
+  ring.visible = !!ctrl && !window._sahaIzleModu && !(ctrl.dis);
+  if (ring.visible) ring.position.set(ctrl.obj.position.x, 0.04, ctrl.obj.position.z);
   ring2.visible = (mod === 'iki' && !!ctrl2);
   if (ring2.visible) ring2.position.set(ctrl2.obj.position.x, 0.04, ctrl2.obj.position.z);
   hataGuncelle(); hataPanel(dt);
