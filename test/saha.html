@@ -130,7 +130,7 @@
     <div class="kod a">ŞMŞ</div>
     <div class="sk"><span id="sa">0</span> - <span id="sb">0</span></div>
     <div class="kod b">FRT</div>
-    <div class="sr"><span id="devre">1.</span>&nbsp;<span id="sure">0:00</span><span class="uz" id="uzatma"></span></div>
+    <div class="sr"><span id="devre" style="display:none"></span><span id="sure">0'</span><span class="uz" id="uzatma"></span></div>
   </div>
   <!-- KONDISYON + DEGISIKLIK HAKKI: Kondisyon gorunmezse oyuncu yavasladigini anlamaz,
        "oyun takiliyor" sanir. Degisiklik hakki da gorunur olmali; R'ye basip neden
@@ -643,6 +643,25 @@ function reklamUygula(v){
     });
   }catch(e){ try{ if(window.DiagSaha) DiagSaha('reklamUygula', e); }catch(_e){} }
 }
+// MAÇ SÜRESİ (2026-09-22-M, kullanıcı: "uzatmalar hariç maç süresini admin belirler"):
+// YOL (2026-09-22-N, kurallar kontrol edildi): Veritabanı kuralları HER kök yola ayrı izin
+// istiyor (bkz. admin.html/saveVideoCategoryGlobal notu). Önceki sürümdeki yeni kök 'sahaAyar'
+// için izin tanımlı olmadığından yazma permission_denied ile REDDEDİLİRDİ. Ayar, zaten izinli
+// ve çalıştığı kanıtlı 'globalAdminSettings' altına taşındı - Console'da ek ayar gerekmez.
+// globalAdminSettings/sahaMacSuresiDk = gerçek oyun süresi (dk, iki yarı toplamı). Futbol saati her durumda
+// 1'-90' akar; süre kısaldıkça hızlanır (15 dk -> her futbol dakikası 10 sn).
+// Oynanmakta olan maç ETKİLENMEZ - yeni değer bir sonraki maçta geçerli olur.
+window._sahaYoneticiSureDk = 0;
+(function sureDinle(){
+  try{
+    if(typeof fbHazir === 'undefined' || !fbHazir || !fbDb){ setTimeout(sureDinle, 800); return; }
+    fbDb.ref('globalAdminSettings/sahaMacSuresiDk').on('value', function(sn){
+      var v = Number(sn.val());
+      window._sahaYoneticiSureDk = (isFinite(v) && v >= 2 && v <= 90) ? v : 0;
+      try{ ayarUygula(); }catch(e){}
+    });
+  }catch(e){ setTimeout(sureDinle, 1500); }
+})();
 (function reklamDinle(){
   try{
     if(typeof fbHazir === 'undefined' || !fbHazir || !fbDb){ setTimeout(reklamDinle, 800); return; }
@@ -2248,7 +2267,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-22-L';
+window.APP_BUILD = '2026-09-22-P';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -2283,6 +2302,23 @@ function kadroOnizlemeCiz(){
 /* ---------- durum ---------- */
 let dirA = 1, ctrl = null;
 let skorA = 0, skorB = 0, saat = 0, devre = 1, uzatma = 0;
+// UZATMA (2026-09-22-M, kullanıcı: "Hakem, oyunun kaç dakika durduğuna göre ilk ve ikinci
+// yarı için ayrı ayrı uzatma verecek, skorbordda sürenin yanında belirecek"):
+//  durma[devre]    : o yarıda oyunun DURDUĞU süre (oyun saniyesi) - bkz. update()
+//  uzatmaVerildi   : hakem o yarının uzatmasını açıkladı mı (45'/90' gelince açıklanır)
+//  golBekleme      : gol ile santra arası - oyun duruyor, saat işliyor, süre birikir
+// Önceden uzatma rastgeleydi ve gol kutlamasında saat DURUYORDU (duran süre zaten
+// sayılmıyordu). Artık saat gerçek futboldaki gibi işlemeye devam eder, duran süre
+// biriktirilir ve uzatma olarak geri verilir.
+let durma = { 1:0, 2:0 }, uzatmaVerildi = false, golBekleme = false;
+// BİRİM (2026-09-22-N, kullanıcı: "uzatmalar maç içindeki oyun süresiyle hesaplansın"):
+// durma[] artık MAÇ İÇİ OYUN SÜRESİ (futbol saniyesi) tutar. Önceden gerçek saniye tutulup
+// yarı süresine oranlanıyordu; aynı gol kutlaması 3 dk'lık maçta ~2 dk, 90 dk'lık maçta
+// birkaç saniye uzatma üretiyordu - uzatma olaylara değil yöneticinin seçtiği süreye bağlıydı.
+// Artık oyundaki her duraklama, oyunun kendi temposundaki (her gerçek saniye = DURMA_OYUN_SN
+// futbol saniyesi) karşılığıyla sayılır; aynı olaylar hangi süre seçilirse seçilsin AYNI
+// uzatmayı verir. Katsayı 6: yöneticinin örnek verdiği 15 dk'lık maçın temposu (90/15).
+const DURMA_OYUN_SN = 6;
 let running = false, bitti = false, frozen = 0, duraklat = false;
 let mod = 'mac';                       // 'mac' | 'iki' | 'antrenman'
 let ctrl2 = null;                      // 2. oyuncunun kontrol ettiği (B takımı)
@@ -2294,6 +2330,21 @@ let sonDokunan = 0, sonDokunanOyuncu = null;
 let sonPasOyuncu = null, sonPasTakim = -1;
 let duran = null, faulCd = 0, avantaj = null;
 let ofsaytAday = [], ofsaytTakim = -1;
+// ══ FUTBOL KURALLARI DENETİMİ (2026-09-22-P, kullanıcı: "futbolda olup SAHA'da olmayanı ekle,
+// olanı kontrol et") - eklenen/düzeltilen kuralların durum değişkenleri:
+//  duranSonrasi : son duran top atıldıktan sonra BAŞKA bir oyuncu topa dokunana kadar dolu.
+//                 Taçtan ve endirekt serbest vuruştan DOĞRUDAN gol olmaz (Kural 15/13);
+//                 penaltı sürerken devre bitmez (Kural 7) - ikisi de bu bilgiyle karar verir.
+//  sonVurusTuru : topa son dokunuşun biçimi ('pas'|'sut'|'surus'|'tac'|'kafa'|'sekme').
+//                 Geri pas kuralı (Kural 12): takım arkadaşının AYAKLA bilerek verdiği ya da
+//                 taçla attığı topu kaleci ELLE alamaz; kafa ve sekme serbest.
+//  bekleyenKart : avantaj uygulanan faulün kartı, oyun ilk durduğunda gösterilir (Kural 12).
+let duranSonrasi = null, sonVurusTuru = '', bekleyenKart = [];
+function bekleyenKartlariGoster(){
+  if (!bekleyenKart.length) return;
+  const liste = bekleyenKart; bekleyenKart = [];
+  liste.forEach(k => { try{ if (k.p && !k.p.dis) kartVer(k.p, k.agir); }catch(e){} });
+}
 
 /* ---------- takımlar ---------- */
 // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -2464,7 +2515,7 @@ const istat = { a:bosIstat(), b:bosIstat() };
 // eklenirse burasi da genisletilmeli.
 const YEDEK_SAYISI = 6;
 let yedekler = { 0:[], 1:[] };        // takim -> [{ad,no}]
-let degisiklikHakki = { 0:3, 1:3 };   // futbol kurali: 3 hak
+let degisiklikHakki = { 0:5, 1:5 };   // futbol kurali (IFAB 2022+): 5 hak (onceden 3)
 
 function yedekleriKur(){
   try{
@@ -2479,7 +2530,7 @@ function yedekleriKur(){
       }
       yedekler[t] = liste;
     });
-    degisiklikHakki = { 0:3, 1:3 };
+    degisiklikHakki = { 0:5, 1:5 };
   }catch(e){}
 }
 // Sahadaki bir oyuncuyu yedekle degistirir. Basarili olursa true doner.
@@ -2506,6 +2557,7 @@ function oyuncuDegistir(t, sahadaki){
     sahadaki.st = 100;                                // dinc girer
     etiketYaz(sahadaki);
     degisiklikHakki[t] = (degisiklikHakki[t]||1) - 1;
+    try{ if (mod !== 'antrenman') durma[devre] = (durma[devre]||0) + 30; }catch(e){}   // +30 futbol saniyesi (bkz. uzatmaVer)
     // player: oyuna GIREN, player2: CIKAN - Puan Tablosu bu sirayi bekliyor.
     olayEkle('sub', sahadaki, { player2: cikan });
     mesaj('DEGISIKLIK', yedek.ad + ' ↔ ' + cikan, 1800);
@@ -2867,8 +2919,26 @@ function sahaCanliYaz(ilkYazim){
         g[yol+'/momentum/'+_dkMom] = Math.round(_sahaMomentumBirikim[_dkMom]*10)/10;
       }
     }
-    fbDb.ref().update(g).catch(function(e){ try{ console.error('[saha] canli yazim hatasi', e); }catch(_e){} });
+    _sahaCanliGonder(g);
   }catch(e){}
+}
+// ── KURAL GÜVENLİĞİ (2026-09-22-O) ─────────────────────────────────────────────────────
+// KÖK SEBEP (kurallar incelendi): Maç düğümüne yazma izni alan alan tanımlı. Tek bir
+// update() içindeki yollardan BİRİ bile izinsizse Firebase yazımın TAMAMINI reddeder.
+// 'momentum' kurallarda hiç yoktu, 'tabela' ve 'izleYon' (2026-09-22-L) de eklenmemişti -
+// gerçek veritabanında skor, konum, dakika dahil bütün canlı yazım reddediliyordu. Test
+// ortamı ('test/' kökü, herkese açık) bunu gizliyordu.
+// ÇÖZÜM: Kurallar güncellendi (database.rules.json). Ek olarak, sonradan eklenen alanlar
+// AYRI bir yazımda gönderilir: kurala eklenmemiş yeni bir alan bir daha temel canlı
+// yazımı (skor/konum/dakika) düşüremez, en kötü ihtimalle yalnızca kendisi reddedilir.
+var _SAHA_EK_ALANLAR = /\/(tabela|izleYon|momentum)(\/|$)/;
+function _sahaCanliGonder(g){
+  var ana = {}, ek = {}, ekVar = false;
+  Object.keys(g).forEach(function(k){
+    if(_SAHA_EK_ALANLAR.test(k)){ ek[k] = g[k]; ekVar = true; } else ana[k] = g[k];
+  });
+  fbDb.ref().update(ana).catch(function(e){ try{ console.error('[saha] canli yazim hatasi', e); if(window.DiagSaha) DiagSaha('canliYazim', e); }catch(_e){} });
+  if(ekVar) fbDb.ref().update(ek).catch(function(e){ try{ console.error('[saha] ek alan yazimi reddedildi (kurallar?)', e); if(window.DiagSaha) DiagSaha('canliEkAlan', e); }catch(_e){} });
 }
 // ── PERİYODİK CANLI YAZIM ───────────────────────────────────────────────────────────
 // KULLANICI TALEBİ: "Puan tablosu tarafında canlı görsel anlatım (top nerede, kim
@@ -2928,7 +2998,6 @@ function sahaFiksturSonucuKaydet(){
     var yol = 'leagues/'+fk.ligId+'/matches/'+fk.matchId;
     var g = {};
     g[yol+'/isLive'] = false;
-    g[yol+'/tabela'] = null;   // bkz. sahaCanliYaz - canlı tabela yalnızca maç sürerken geçerli
     g[yol+'/played'] = true;
     g[yol+'/sahaMode'] = true;
     g[yol+'/homeGoals'] = hG;
@@ -2936,6 +3005,9 @@ function sahaFiksturSonucuKaydet(){
     g[yol+'/minute'] = 90;
     g[yol+'/events'] = _sahaMapEvents(sonuc.events, fk.benTarafHome);
     g[yol+'/sahaStats'] = { home: istatHome, away: istatAway };
+    // Canlı tabela yalnızca maç sürerken geçerli - AYRI yazımda silinir (bkz. _sahaCanliGonder):
+    // kurala eklenmemişse maç SONUCUNUN kaydını düşürmesin.
+    try{ fbDb.ref(yol+'/tabela').remove().catch(function(){}); }catch(e){}
     fbDb.ref().update(g)
       .then(function(){ mesaj('KAYDEDILDI', 'Sonuc Puan Tablosuna islendi', 2200); })
       .catch(function(e){ mesaj('KAYIT HATASI', String((e&&e.message)||e).slice(0,90), 3000); });
@@ -2956,6 +3028,9 @@ function dizil(){
   });
 }
 function kickoff(byTeam){
+  golBekleme = false;   // santra: gol sonrası duraklama bitti (bkz. update/durma)
+  duranSonrasi = null; sonVurusTuru = '';
+  bekleyenKartlariGoster();
   duran = null; avantaj = null; faulCd = 2; ofsaytAday = [];
   yonleriUygula(); dizil();
   ball.position.set(0, R_BALL, 0); bVel.set(0,0,0);
@@ -3015,7 +3090,9 @@ function ayarUygula(){
   yaz('sw-ses', AYAR.ses); yaz('sw-tekrar', AYAR.tekrar); yaz('sw-tam', tamEkranMi());
   yaz('sw-hata', !!AYAR.hata);
   document.getElementById('hata').classList.toggle('on', !!AYAR.hata);
-  document.getElementById('sw-sure').textContent   = (SURELER.find(x=>x.sn===AYAR.sure) || SURELER[1]).ad;
+  document.getElementById('sw-sure').textContent   = (window._sahaYoneticiSureDk > 0)
+    ? ('Yönetici: ' + window._sahaYoneticiSureDk + ' dk')
+    : (SURELER.find(x=>x.sn===AYAR.sure) || SURELER[1]).ad;
   document.getElementById('sw-zor').textContent    = (ZORLUK.find(x=>x.k===AYAR.zor)    || ZORLUK[1]).ad;
   document.getElementById('sw-grafik').textContent = (GRAFIK.find(x=>x.k===AYAR.grafik) || GRAFIK[2]).ad;
   document.getElementById('sw-diz').textContent    = AYAR.diz;
@@ -3212,9 +3289,11 @@ function ofsaytCal(p){
   mesaj('OFSAYT', '', 1500);
   const rakip = p.team === 0 ? 1 : 0;
   ofsaytTemizle();
+  // Kural 11/13: Ofsaytın cezası ENDİREKT serbest vuruştur - önceden direkt sayılıyordu
+  // ve 30 m içindeyse doğrudan kaleye şut çekiliyordu.
   duranBaslat('serbest', rakip,
     Math.max(-HLX+3, Math.min(HLX-3, p.obj.position.x)),
-    Math.max(-HWZ+2, Math.min(HWZ-2, p.obj.position.z)));
+    Math.max(-HWZ+2, Math.min(HWZ-2, p.obj.position.z)), { dolayli:true });
 }
 
 /* ---------- vuruşlar ---------- */
@@ -3228,6 +3307,9 @@ function sut(o){
   const p = insanOyuncu(o), t = (o === 1) ? 1 : 0;
   OYN[o].ch = false;
   document.getElementById(o === 0 ? 'power' : 'power2').style.opacity = '0';
+  // TAÇ (Kural 15): Taç ELLE atılır. Önceden top elde (2.05 m) dururken şut tuşu topa
+  // AYAKLA vuruyordu. Artık şut tuşu da taç atışını yapar.
+  if (duran && duran.tip === 'tac' && duran.takim === t){ OYN[o].c = 0; try{ duranCalistir(); }catch(e){} return; }
   if (!p || p.cd > 0 || p.kayma > 0) return;
   const yatay = Math.hypot(ball.position.x - p.obj.position.x, ball.position.z - p.obj.position.z);
   if (yatay > 1.8 || ball.position.y > 2.7) return;
@@ -3261,11 +3343,16 @@ function sut(o){
   p.cd = 0.3; p.tcd = 0.35; OYN[o].c = 0; topKilit = 0.30;
   // Şut atan kişi asist adayı OLAMAZ; kendi pasına asist yapılmaz.
   if (sonPasOyuncu === p) { sonPasOyuncu = null; sonPasTakim = -1; }
-  sonDokunan = t; sonDokunanOyuncu = p;
+  sonDokunan = t; sonDokunanOyuncu = p; sonVurusTuru = kafa ? 'kafa' : 'sut';
   (t === 0 ? istat.a : istat.b).sut++;
   if (Math.abs(p.obj.position.x - p.dir*HLX) < 34) sesVurus(g);
   ofsaytHesapla(t);
-  if (duran && duran.takim === t) duran = null;
+  if (duran && duran.takim === t){ duranSonrasiKur(duran, p); duran = null; }
+}
+// Duran top oyuna girdi: atan ve topun "dolaylı" olup olmadığı saklanır (bkz. duranSonrasi).
+function duranSonrasiKur(d, atan){
+  duranSonrasi = { tip:d.tip, takim:d.takim, atan:atan, t:0,
+                   dolayli: (d.tip === 'tac' || !!d.dolayli) };
 }
 function pasVer(p, takim, yonTercih){
   // YAPAY ZEKA DAHIL butun paslar bu islevden gecer - animasyon burada tetiklenirse
@@ -3299,6 +3386,7 @@ function pasVer(p, takim, yonTercih){
   // Pastan ÖNCEKİ dokunan, bu pasın asist adayıdır (bkz. sonPasOyuncu notu).
   sonPasOyuncu = p; sonPasTakim = takim;
   sonDokunan = takim; sonDokunanOyuncu = p;
+  sonVurusTuru = (ball.position.y > 1.2) ? 'kafa' : 'pas';
   sesVurus(0.25);
   ofsaytHesapla(takim);
   return true;
@@ -3327,7 +3415,7 @@ function pas(o){
     try{ if(ball.position.y <= 1.2 && p.obj.userData.hazirModel) modelTekSefer(p.obj.userData, 'sutSag', 1.1); }catch(e){}
     if (ball.position.y > 1.2) bVel.y = 2.6;             // kafayla indirilen pas
     bSpin = 0;
-    if (duran && duran.takim === t) duran = null;
+    if (duran && duran.takim === t){ duranSonrasiKur(duran, p); duran = null; }
   }
 }
 function kay(o){                                         // kayarak müdahale
@@ -3542,6 +3630,13 @@ function topKontrol(dt){
 
   if (ofsaytTakim === p.team && ofsaytAday.indexOf(p) >= 0){ ofsaytCal(p); return; }
   if (ofsaytTakim >= 0 && p.team !== ofsaytTakim) ofsaytTemizle();
+  // OFSAYT (Kural 11): Ofsayt pozisyonu, takım arkadaşının topa OYNADIĞI an değerlendirilir.
+  // Ofsaytta OLMAYAN bir arkadaş topu alıp oynadıysa eski adaylar geçersizdir; bir sonraki
+  // pas/şutta ofsaytHesapla yeniden bakar. Önceden eski liste kalıyor, arkadaş topu sürüp
+  // sonra verdiğinde oyuncu artık ofsaytta olmasa bile ofsayt çalınabiliyordu.
+  else if (ofsaytTakim === p.team && ofsaytAday.indexOf(p) < 0 && p !== sonDokunanOyuncu) ofsaytTemizle();
+  // Duran topu atandan başka biri topa dokundu: "doğrudan gol olmaz" kısıtı kalkar.
+  if (duranSonrasi && p !== duranSonrasi.atan) duranSonrasi = null;
 
   const topHiz = Math.hypot(bVel.x, bVel.z);
   const oyuncuHiz = Math.hypot(p.vel.x, p.vel.z);
@@ -3550,7 +3645,7 @@ function topKontrol(dt){
   if (ball.position.y > 0.95){
     if (ball.position.y < 2.4 && bd < 1.25){
       bVel.x *= 0.30; bVel.z *= 0.30; bVel.y = -1.2;
-      p.tcd = 0.18; sonDokunan = p.team; sonDokunanOyuncu = p;
+      p.tcd = 0.18; sonDokunan = p.team; sonDokunanOyuncu = p; sonVurusTuru = 'sekme';
       gurultu(0.05, 0.06, 600);
     }
     return;
@@ -3559,7 +3654,7 @@ function topKontrol(dt){
   /* sert gelen top: önce ilk dokunuşla yavaşlat, aynı karede sürmeye başlama */
   if (topHiz > oyuncuHiz + 7){
     bVel.x *= 0.35; bVel.z *= 0.35; bSpin = 0;
-    p.tcd = 0.16; sonDokunan = p.team; sonDokunanOyuncu = p;
+    p.tcd = 0.16; sonDokunan = p.team; sonDokunanOyuncu = p; sonVurusTuru = 'sekme';
     gurultu(0.05, 0.07, 600);
     return;
   }
@@ -3576,7 +3671,7 @@ function topKontrol(dt){
   const vv = Math.hypot(bVel.x, bVel.z);
   if (vv > vmax && vv > 0.001){ bVel.x *= vmax/vv; bVel.z *= vmax/vv; }
   bVel.y = 0; bSpin = 0;
-  sonDokunan = p.team; sonDokunanOyuncu = p;
+  sonDokunan = p.team; sonDokunanOyuncu = p; sonVurusTuru = 'surus';
 }
 
 /* ---------- duran toplar ---------- */
@@ -3610,13 +3705,28 @@ function duvarKur(takim){
   });
   return adaylar;
 }
-function duranBaslat(tip, takim, x, z){
+function duranBaslat(tip, takim, x, z, sec){
+  sec = sec || {};
   ball.position.set(x, R_BALL, z); bVel.set(0,0,0);
-  sonDokunan = takim; sonDokunanOyuncu = null;
-  ofsaytTemizle(); avantaj = null;
+  sonDokunan = takim; sonDokunanOyuncu = null; sonVurusTuru = '';
+  ofsaytTemizle(); avantaj = null; duranSonrasi = null;
+  // Avantajdan kalan kart: oyun ilk durduğunda gösterilir.
+  bekleyenKartlariGoster();
   const alici = (tip === 'kale') ? (takim === 0 ? teamA : teamB)[0] : takimEnYakin(takim, ball.position);
-  duran = { tip, takim, alici, bekle:1.0, hazir:0, omur:0, duvar:null };
+  // dolayli: ENDİREKT serbest vuruş (ofsayt, geri pas) - kaleye doğrudan atılan top gol olmaz.
+  duran = { tip, takim, alici, bekle:1.0, hazir:0, omur:0, duvar:null, dolayli:!!sec.dolayli };
   if (tip === 'serbest') duran.duvar = duvarKur(takim);
+  // KALE VURUŞU (Kural 16): Top vurulana kadar rakipler ceza sahasının DIŞINDA olmalı.
+  // Önceden rakip forvetler ceza sahasında bekleyip kalecinin vuruşunu kesebiliyordu.
+  if (tip === 'kale'){
+    const s = Math.sign(x) || 1;
+    const icerde = (takim === 0 ? teamB : teamA).filter(pp => !pp.gk && sahada(pp)
+      && pp.obj.position.x*s > HLX-17.5 && Math.abs(pp.obj.position.z) < 21);
+    icerde.forEach(pp => {
+      pp.duvarHedef = new THREE.Vector3(s*(HLX-18.5), 0, Math.max(-HWZ+2, Math.min(HWZ-2, pp.obj.position.z)));
+    });
+    if (icerde.length) duran.duvar = icerde;
+  }
   // PENALTI (kullanici: "ceza sahasinda yalnizca kaleci ve atici olmali"):
   // Onceden penaltida da BARAJ kuruluyordu - penaltida baraj olmaz. Atici ve iki kaleci
   // disindaki herkes ceza sahasinin DISINA, penalti noktasinin arkasina dizilir.
@@ -3635,7 +3745,7 @@ function duranBaslat(tip, takim, x, z){
   }
   if (alici){ alici.cd = 0; alici.tcd = 0; }
   if (takim === 0 && alici) ctrl = alici;
-  mesaj('', ETIKET[tip] + (takim === 0 ? ' — sende' : ''), 1300);
+  mesaj('', (duran.dolayli ? 'Endirekt serbest vuruş' : ETIKET[tip]) + (takim === 0 ? ' — sende' : ''), 1300);
 }
 function duranCalistir(){
   if (!duran || !duran.alici){ duran = null; return; }
@@ -3658,7 +3768,7 @@ function duranCalistir(){
     const d = h.sub(ball.position).setY(0).normalize();
     bVel.set(d.x*30, 1.5, d.z*30);
     (p.team === 0 ? istat.a : istat.b).sut++;
-  } else if (tip === 'serbest' && kaleUzak < 30){
+  } else if (tip === 'serbest' && kaleUzak < 30 && !duran.dolayli){
     const h = new THREE.Vector3(p.dir*HLX, 0, (Math.random()-0.5)*GOAL_HW*1.6);
     const d = h.sub(ball.position).setY(0).normalize();
     bVel.set(d.x*26, 3.2, d.z*26);
@@ -3685,6 +3795,8 @@ function duranCalistir(){
   topKilit = 0.35;
   p.cd = 0.5; p.tcd = 0.5;
   sonDokunan = duran.takim; sonDokunanOyuncu = p;
+  sonVurusTuru = (tip === 'tac') ? 'tac' : 'pas';
+  duranSonrasiKur(duran, p);
   duran = null;
 }
 // TAÇ / KORNER: puan tablosunun akış/anlatım sekmesi golleri ve kartları zaten
@@ -3776,7 +3888,11 @@ function faulKontrol(dt){
       if (m && !m.dis) faul(m, i);
       return;
     }
-    if (avantaj.t <= 0) avantaj = null;
+    if (avantaj.t <= 0){
+      // Avantaj işledi: faul iptal değil, hakem kartı (varsa) oyun ilk durduğunda gösterir.
+      if (avantaj.ihlalci) bekleyenKart.push({ p:avantaj.ihlalci, agir:false });
+      avantaj = null;
+    }
     return;
   }
   if (faulCd > 0 || ball.position.y > 1.5) return;
@@ -3828,18 +3944,24 @@ function hud(){
     }
     if(yz) yz.textContent = k;
     const dh = document.getElementById('degHak');
-    if(dh) dh.textContent = (degisiklikHakki && degisiklikHakki[0]!=null) ? degisiklikHakki[0] : 3;
+    if(dh) dh.textContent = (degisiklikHakki && degisiklikHakki[0]!=null) ? degisiklikHakki[0] : 5;
   }catch(e){}
   document.getElementById('sa').textContent = skorA;
   document.getElementById('sb').textContent = skorB;
-  document.getElementById('devre').textContent = devre + '.';
-  const g = Math.max(0, saat - (devre-1)*HALF);
-  const mm = Math.floor((g + (devre-1)*HALF)/60), ss = Math.floor((g + (devre-1)*HALF)%60);
-  document.getElementById('sure').textContent = `${mm}:${ss<10?'0'+ss:ss}`;
-  document.getElementById('uzatma').textContent = (g > HALF && uzatma > 0) ? '+' + Math.ceil(uzatma) : '';
+  // FUTBOL SAATİ (2026-09-22-M): 1. yarı 1'-45', 2. yarı 46'-90' - gerçek oyun süresi ne
+  // olursa olsun (yönetici belirler) bu aralığa ölçeklenir. "1."/"2." ibaresi kaldırıldı.
+  // Uzatma, hakem açıkladıktan sonra dakikanın yanında görünür: 45' +2.
+  const _dv = document.getElementById('devre');
   if (mod === 'antrenman'){
-    document.getElementById('devre').textContent = 'ANT';
+    const mm = Math.floor(saat/60), ss = Math.floor(saat%60);
+    _dv.textContent = 'ANT'; _dv.style.display = ''; _dv.style.marginRight = '6px';
+    document.getElementById('sure').textContent = `${mm}:${ss<10?'0'+ss:ss}`;
     document.getElementById('uzatma').textContent = '';
+  } else {
+    _dv.textContent = ''; _dv.style.display = 'none';
+    document.getElementById('sure').textContent = macDakika() + "'";
+    document.getElementById('uzatma').textContent = (uzatmaVerildi && uzatma > 0)
+      ? '+' + Math.round(uzatma / Math.max(1,HALF) * 45) : '';
   }
 }
 const rc = document.getElementById('radar').getContext('2d');
@@ -4003,7 +4125,7 @@ function gol(takim){
   }catch(e){}
   sonPasOyuncu = null; sonPasTakim = -1;   // gol sonrası asist adayı sıfırlanır
   // ────────────────────────────────────────────────────────────────────────────────────
-  hud(); frozen = 2.2;
+  hud(); frozen = 2.2; golBekleme = true;
   sesDuduk(false); sesTribun(0.28, 4.5);
   mesaj('GOL!', takim === 0 ? takA().kod : takB().kod, 2000);
   try{ sahaCanliYaz(false); }catch(e){}
@@ -4068,12 +4190,27 @@ function _yayinKamerasiIc(dt){
 let birikim = 0, kayitSayac = 0;
 
 function update(dt){
-  if (frozen > 0) frozen -= dt;
-  else {
+  // Oyun duruyor mu? Gol sonrası (santraya kadar) ve faul/penaltı/korner duran topu
+  // hazırlanırken top oyunda değil. Taç ve kale vuruşu SAYILMAZ: çok sık ve kısa,
+  // gerçek hakemler de bunları uzatmaya eklemez. Devre başı/santra donması da sayılmaz.
+  const oyunDurdu = golBekleme || (duran && (duran.tip === 'serbest' || duran.tip === 'penalti' || duran.tip === 'korner'));
+  if (frozen > 0){
+    frozen -= dt;
+    // Gol kutlamasında saat artık işler (futbolda saat durmaz); duran süre uzatmaya yazılır.
+    if (golBekleme && mod !== 'antrenman'){ saat += dt; durma[devre] = (durma[devre]||0) + dt*DURMA_OYUN_SN; }
+  } else {
     saat += dt;
     if (mod !== 'antrenman'){
+      if (oyunDurdu) durma[devre] = (durma[devre]||0) + dt*DURMA_OYUN_SN;
+      // Hakem uzatmayı yarının son dakikasında (45' / 90' göründüğü an) açıklar.
+      if (!uzatmaVerildi && saat - (devre-1)*HALF >= HALF*(44.5/45)) uzatmaVer();
       const sinir = devre*HALF + uzatma;
-      if (saat >= sinir){
+      if (duranSonrasi) duranSonrasi.t += dt;
+      // Kural 7: Süre dolsa da verilmiş penaltı atılır ve sonuçlanır. Önceden uzatmanın son
+      // saniyesinde verilen penaltı atılmadan devre/maç bitiyordu.
+      const _penaltiSuruyor = (duran && duran.tip === 'penalti')
+        || (duranSonrasi && duranSonrasi.tip === 'penalti' && duranSonrasi.t < 2.5);
+      if (saat >= sinir && !_penaltiSuruyor){
         if (devre === 1){ devreArasi(); return; }
         bitir(); return;
       }
@@ -4319,6 +4456,15 @@ function update(dt){
     /* kaleci kurtarışı */
     players.forEach(gk => {
       if (!gk.gk || gk.dis || gk.cd > 0) return;
+      // Kural 12: Kaleci topu ELLE yalnızca KENDİ ceza sahasında tutabilir. Önceden sahanın
+      // her yerinde tutuyordu. Kendi kalesi -dir yönünde.
+      const _ks = -gk.dir;
+      const _cezaIci = ball.position.x*_ks > HLX-16.5 && Math.abs(ball.position.z) < 20.15;
+      if (!_cezaIci) return;
+      // GERİ PAS: takım arkadaşı topu AYAKLA bilerek verdiyse ya da taçla attıysa kaleci elle
+      // alamaz, ayakla oynar (topKontrol kalecileri de kapsıyor). Kafa ve sekme serbest.
+      if (sonDokunan === gk.team && sonDokunanOyuncu && sonDokunanOyuncu !== gk
+          && (sonVurusTuru === 'pas' || sonVurusTuru === 'surus' || sonVurusTuru === 'tac' || sonVurusTuru === 'sut')) return;
       // GOL BASITLESTIRME: 2.3 birimlik tutus yaricapi kale agzinin buyuk kismini
       // kapsiyordu (kale genisligi 7.32); 1.7'ye indirildi ki koseye yakin, iyi
       // yerlestirilmis sutlar kaleciyi gercekten gecebilsin.
@@ -4326,8 +4472,8 @@ function update(dt){
         const hizli = Math.hypot(bVel.x, bVel.z) > 12;
         bVel.set(0,0,0);
         ball.position.set(gk.obj.position.x + gk.dir*0.6, R_BALL, gk.obj.position.z);
-        gk.cd = 0.7; topKilit = 0.8; sonDokunan = gk.team; sonDokunanOyuncu = gk;
-        ofsaytTemizle();
+        gk.cd = 0.7; topKilit = 0.8; sonDokunan = gk.team; sonDokunanOyuncu = gk; sonVurusTuru = 'sekme';
+        ofsaytTemizle(); duranSonrasi = null;
         if (hizli){ (gk.team === 0 ? istat.b : istat.a).isabet++; sesTribun(0.12, 1.4); }
         mesaj('', 'Kaleci topu aldı', 900);
         setTimeout(() => { if (running && !bitti && !duran) aiVurus(gk); }, 600);
@@ -4341,12 +4487,25 @@ function update(dt){
     if (mod === 'antrenman' && disarida){
       if (kaleIci) gol(Math.sign(ball.position.x) === dirA ? 0 : 1);
       else topuGeriVer();
-    } else if (Math.abs(ball.position.z) > HWZ){
+    // Kural 9/10: Top ancak TAMAMI çizgiyi geçince dışarıda / gol sayılır. Önceden topun
+    // merkezi çizgiyi geçtiği an (yarısı hâlâ çizgi üstündeyken) taç ya da gol veriliyordu.
+    } else if (Math.abs(ball.position.z) > HWZ + R_BALL){
       tacAt(ball.position.z, sonDokunan === 0 ? 1 : 0);
-    } else if (Math.abs(ball.position.x) > HLX){
+    } else if (Math.abs(ball.position.x) > HLX + R_BALL){
       const s = Math.sign(ball.position.x);
       const golMu = Math.abs(ball.position.z) < GOAL_HW && ball.position.y < GOAL_H;
-      if (golMu && Math.abs(ball.position.x) < HLX + 2.2){
+      const _dolayliGol = golMu && Math.abs(ball.position.x) < HLX + 2.2 && duranSonrasi && duranSonrasi.dolayli;
+      if (_dolayliGol){
+        // Kural 13/15: Taçtan ya da endirekt serbest vuruştan topa kimse dokunmadan girdi.
+        // Rakip kaleye -> kale vuruşu; kendi kalesine -> rakibe korner.
+        const _atan = duranSonrasi.takim, _tip = duranSonrasi.tip;
+        const _savunan = (s === dirA) ? 1 : 0;
+        duranSonrasi = null;
+        mesaj('GOL SAYILMADI', _tip === 'tac' ? 'Taçtan doğrudan gol olmaz' : 'Endirekt serbest vuruş', 1900);
+        sesDuduk(false);
+        if (_savunan !== _atan) kaleVurusu(s, _savunan);
+        else korner(s, ball.position.z || 1, 1 - _atan);
+      } else if (golMu && Math.abs(ball.position.x) < HLX + 2.2){
         gol(s === dirA ? 0 : 1);
       } else {
         const savunan = (s === dirA) ? 1 : 0;
@@ -4428,7 +4587,20 @@ function update(dt){
 }
 
 /* ---------- devre / bitiş ---------- */
-function uzatmaHesapla(){ uzatma = Math.round(HALF*0.04 + Math.random()*HALF*0.08); }
+// Yarı başında uzatma yok; 45'/90'da uzatmaVer() açıklar.
+function uzatmaHesapla(){ uzatma = 0; uzatmaVerildi = false; }
+// Duran süreyi (futbol saniyesi) dakikaya çevirir, YUKARI yuvarlar.
+// En az 1 dk (hakemler pratikte hep en az 1 verir), en fazla 10 dk.
+// uzatma değişkeni oyun SANİYESİ cinsinden tutulur - bitiş sınırı (devre*HALF+uzatma)
+// ve Puan Tablosu'na giden extraMin hesabı bu birimle çalışıyor.
+function uzatmaVer(){
+  const dk = (durma[devre]||0) / 60;             // futbol saniyesi -> dakika
+  const ek = Math.max(1, Math.min(10, Math.ceil(dk - 0.05)));
+  uzatma = ek * HALF / 45;
+  uzatmaVerildi = true;
+  try{ mesaj('', 'Uzatma: +' + ek + ' dk', 1800); }catch(e){}
+  try{ sahaCanliYaz(false); }catch(e){}
+}
 function devreArasi(){
   // ── OLAY KAYDI ──
   // SIRA ÖNEMLİ: Önce uzatma, sonra devre arası. Puan Tablosu bu sırayı bekliyor
@@ -4441,7 +4613,7 @@ function devreArasi(){
                    player:'', player2:'', team:'home' });
     olaylar.push({ type:'half_time', min:45, player:'', player2:'', team:'home' });
   }catch(e){}
-  devre = 2; frozen = 2.6; dirA = -1;
+  devre = 2; frozen = 2.6; dirA = -1; golBekleme = false;   // son saniye golünün bekleyişi 2. yarıya taşınmasın
   saat = HALF; uzatmaHesapla();
   sesDuduk(true);
   mesaj('DEVRE ARASI', 'Saha değişti — hücum yönün yine sağa', 2400);
@@ -4759,6 +4931,7 @@ function devamKaydet(){
     if(!running || bitti || mod === 'antrenman') return;
     var k = {
       skorA: skorA, skorB: skorB, saat: saat, devre: devre, uzatma: uzatma,
+      durma: durma, uzatmaVerildi: uzatmaVerildi,
       mod: mod, half: HALF,
       olaylar: (olaylar || []).slice(),
       fikstur: window._sahaAktifFikstur || null,
@@ -4799,10 +4972,11 @@ function devamEt(){
     HALF = k.half || HALF;
     skorA = k.skorA || 0; skorB = k.skorB || 0;
     saat = k.saat || 0; devre = k.devre || 1; uzatma = k.uzatma || 0;
+    durma = k.durma || { 1:0, 2:0 }; uzatmaVerildi = !!k.uzatmaVerildi;
     dirA = (devre === 2) ? -1 : 1;
     olaylar = (k.olaylar || []).slice();
     try{ hud(); takimUygula(); }catch(e){}
-    mesaj('DEVAM', (skorA + ' - ' + skorB) + ' · ' + Math.round(saat/60) + '. dakika', 2200);
+    mesaj('DEVAM', (skorA + ' - ' + skorB) + ' · ' + macDakika() + '. dakika', 2200);
     return true;
   }catch(e){ return false; }
 }
@@ -4821,7 +4995,9 @@ try{
 
 function basla(yeniMod){
   mod = yeniMod || 'mac';
-  HALF = AYAR.sure;
+  // Yönetici süre belirlediyse (uzatmalar hariç toplam, dk) o geçerli; yoksa oyuncu ayarı.
+  HALF = (window._sahaYoneticiSureDk > 0) ? window._sahaYoneticiSureDk * 30 : AYAR.sure;
+  durma = { 1:0, 2:0 }; uzatmaVerildi = false; golBekleme = false;
   skorA = 0; skorB = 0; saat = 0; devre = 1; dirA = 1;
   // Yeni maç: olay listesi sıfırlanır. Temizlenmezse önceki maçın golleri yenisine
   // karışır ve Puan Tablosu'na yanlış veri gider.
@@ -4833,7 +5009,7 @@ function basla(yeniMod){
   _akisIsaretler = new Set();
   _sonTacDk = -999;
   sonPasOyuncu = null; sonPasTakim = -1;
-  yedekleriKur();          // her mac 3 hak ve dolu yedek kulubesiyle baslar
+  yedekleriKur();          // her mac 5 hak ve dolu yedek kulubesiyle baslar
   olaylar.push({ type:'match_start', min:1, player:'', player2:'', team:'home' });
   bitti = false; frozen = 1.0; tekrar = null;
   istat.a = bosIstat(); istat.b = bosIstat();
@@ -4935,6 +5111,7 @@ document.getElementById('sw-ses').onclick    = () => { AYAR.ses = !AYAR.ses; if 
 document.getElementById('sw-tekrar').onclick = () => { AYAR.tekrar = !AYAR.tekrar; ayarKaydet(); ayarUygula(); };
 document.getElementById('sw-tam').onclick    = () => { tamEkran(!tamEkranMi()); setTimeout(ayarUygula, 120); };
 document.getElementById('sw-sure').onclick   = () => {
+  if (window._sahaYoneticiSureDk > 0){ mesaj('', 'Maç süresini yönetici belirliyor', 1600); return; }
   const i = SURELER.findIndex(x => x.sn === AYAR.sure);
   AYAR.sure = SURELER[(i+1) % SURELER.length].sn; ayarKaydet(); ayarUygula();
 };
@@ -5414,7 +5591,7 @@ function _sahaIzleVeriUygula(m){
     var dk = Math.max(0, Math.min(120, Math.round(m.minute||0)));
     document.getElementById('sa').textContent = m.homeGoals||0;
     document.getElementById('sb').textContent = m.awayGoals||0;
-    document.getElementById('devre').textContent = dk>45?'2.':'1.';
+    document.getElementById('devre').textContent = '';   // "1."/"2." ibaresi kaldırıldı
     document.getElementById('sure').textContent = (dk>90?('90+'+(dk-90)):dk)+"'";
     // bkz. _sahaIzlePTKoprusu - PTPlayer'a bildirilen "an" bu değerden okunur.
     window._sahaIzleSonDakika = dk;

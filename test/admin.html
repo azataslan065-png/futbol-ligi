@@ -596,6 +596,23 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
          Firebase kökündeki canliRozetGlobal düğümüne yazılır, TÜM canlı maçlarda otomatik
          uygulanır (bkz. saha.html/_sahaIzleRozetGlobalDinle). -->
     <div id="canliRozetGlobalBox"></div>
+    <!-- MAÇ SÜRESİ (2026-09-22-M): SAHA'da oynanan maçların gerçek oyun süresi (uzatmalar
+         hariç, iki yarı toplamı). Futbol saati her durumda 1'-90' akar, süreye göre hızlanır.
+         globalAdminSettings/sahaMacSuresiDk alanına yazılır (izinli yol - bkz. saveVideoCategoryGlobal
+         notu); boş = oyuncular kendi ayarını kullanır. -->
+    <div class="card" style="margin-top:.6rem">
+      <h2>⏱ SAHA Maç Süresi</h2>
+      <p class="hint">Uzatmalar hariç gerçek oyun süresi. Skorbord her durumda 1'–45' / 46'–90'
+        akar; örn. 15 dk seçilirse her maç dakikası 10 saniye sürer. Uzatmayı hakem, oyunun
+        durduğu süreye göre her yarı için ayrı verir. Oynanan maçı etkilemez, sonraki maçta geçerli olur.</p>
+      <div class="row"><span>Süre (dk)</span>
+        <input id="sahaSureDk" type="number" min="2" max="90" step="1" placeholder="örn. 15" style="max-width:6rem"></div>
+      <div id="sahaSureDurum" class="hint" style="margin:.3rem 0"></div>
+      <div class="g2" style="margin:.35rem 0">
+        <button class="btn bp" onclick="sahaSureKaydet()">💾 Kaydet</button>
+        <button class="btn bgh" onclick="sahaSureKaldir()">↩️ Oyuncu ayarına bırak</button>
+      </div>
+    </div>
     <!-- REKLAM PANOLARI: SAHA oyunundaki saha kenari panolarinin icerigi.
          Oncelik video > fotograf > yazi. Bos birakilirsa panolar varsayilana doner. -->
     <div class="card" style="margin-top:.6rem">
@@ -1862,7 +1879,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-L';
+window.APP_BUILD='2026-09-22-P';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -6021,6 +6038,36 @@ function reklamTemizle(){
       _rkOgeler = sn.val() || {}; reklamListeCiz();
     });
   }catch(e){ setTimeout(reklamDinleAdmin, 1200); }
+})();
+
+// MAÇ SÜRESİ (yönetici) - bkz. HTML'deki "SAHA Maç Süresi" kartı ve saha.html/sureDinle.
+function sahaSureDurumYaz(v){
+  var d = qs('sahaSureDurum'); if(!d) return;
+  d.textContent = (v > 0)
+    ? ('Geçerli: ' + v + ' dk · her maç dakikası ' + (Math.round(v*600/90)/10) + ' sn')
+    : 'Ayarlanmadı - oyuncular kendi süre ayarını kullanıyor.';
+}
+function sahaSureKaydet(){
+  var v = parseInt((qs('sahaSureDk')||{}).value, 10);
+  if(!(v >= 2 && v <= 90)){ toast('❌ 2 ile 90 dk arasında bir süre girin','er'); return; }
+  firebase.database().ref('globalAdminSettings/sahaMacSuresiDk').set(v)
+    .then(function(){ toast('⏱ Maç süresi ' + v + ' dk'); })
+    .catch(function(e){ toast('❌ Kaydedilemedi: '+((e&&e.message)||''),'er'); });
+}
+function sahaSureKaldir(){
+  firebase.database().ref('globalAdminSettings/sahaMacSuresiDk').remove()
+    .then(function(){ toast('↩️ Süre oyuncu ayarına bırakıldı'); })
+    .catch(function(){ toast('❌ İşlem başarısız','er'); });
+}
+(function sahaSureDinleAdmin(){
+  try{
+    if(!window.firebase || !firebase.database){ setTimeout(sahaSureDinleAdmin, 600); return; }
+    firebase.database().ref('globalAdminSettings/sahaMacSuresiDk').on('value', function(sn){
+      var v = Number(sn.val()) || 0;
+      var inp = qs('sahaSureDk'); if(inp && document.activeElement !== inp) inp.value = v > 0 ? v : '';
+      sahaSureDurumYaz(v);
+    });
+  }catch(e){ setTimeout(sahaSureDinleAdmin, 1200); }
 })();
 
 function setOlcek(alan, deger){
