@@ -2248,7 +2248,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-22-J';
+window.APP_BUILD = '2026-09-22-K';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -4493,6 +4493,192 @@ function bitir(){
 }
 
 /* ---------- döngü (sabit adım) ---------- */
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// STADYUM EKRANLARI (KULLANICI TALEBİ 2026-09-22-K): "Stadyumun dört tarafına birer ekran;
+// üst 1/5'te solda/sağda takım logoları, yanlarında skorlar, ortada maç süresi; kalan 4/5'te
+// oyuncunun ekranındaki canlı ve anlık yayın."
+// YAYIN: Ana kameranın gördüğü görüntü düşük çözünürlüklü bir WebGLRenderTarget'a çizilir ve
+// ekranların alt 4/5'ine doku olarak verilir. Ekranlar bu çizim sırasında GİZLENİR - aksi halde
+// ekran kendi içini gösterir (sonsuz ayna) ve her kare bir önceki karenin kopyasını taşır.
+// Kadraj: Görüntü alanının oranı sabit (2:1). Kamera o an bu orana ayarlanıp dikey açı
+// o anki YATAY açıdan yeniden türetilir - yatay açı aynı kalır, yani ekranda oyuncunun
+// gördüğü genişlik birebir görünür, görüntü sünmez. Çizimden sonra kamera eski haline döner.
+// MALİYET: Sahne ikinci kez, küçük boyutta çizilir. Telefonu yormamak için:
+//  - her karede değil, grafik ayarına göre 2/3/4 karede bir güncellenir,
+//  - hiçbir ekran kadrajda değilse HİÇ çizilmez (çoğu an uzak tribün kadraj dışında).
+// YERLEŞİM - neden bu konumlar:
+//  - Yayın kamerası yakın tribünün İÇİNDE (z = ±(HWZ+10..18), y 13-15.5) duruyor. Yakın uzun
+//    kenardaki ekran kamerayla saha ARASINDA kalır ve oyunu kapatırdı. O ekran kamera o
+//    taraftayken çizilmez - kameranın arkasında/önünde duran ve yalnızca sırtı görünecek bir
+//    ekranın kadrajda karşılığı yok. Kamera taraf değiştirirse (devre arası) yer değiştirirler.
+//  - Uzun kenar ekranları reklam panolarının hemen arkasında, alçakta: kamera alçak olduğu
+//    için yüksekteki bir ekran kadrajın üstünde kalırdı.
+//  - Kale arkası ekranları ilk basamağın üstünde; kamera sahanın içinde kaldığı için hiçbir
+//    zaman aralarına girmez.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+var _stadEkran = (function(){
+  var E = { ekranlar:[], rt:null, kare:0, basOran:2.0, anahtar:'', logoOnbellek:{} };
+  try{
+    // Görüntü alanı 2:1, başlık alanı onun 1/4'ü -> toplamın 1/5'i başlık, 4/5'i yayın.
+    E.rt = new THREE.WebGLRenderTarget(512, 256, { minFilter:THREE.LinearFilter,
+      magFilter:THREE.LinearFilter, format:THREE.RGBAFormat });
+    // Başlık tuvali: 1024x128 = başlık alanıyla aynı oran (8:1).
+    var c = document.createElement('canvas'); c.width = 1024; c.height = 128;
+    E.tuval = c; E.ctx = c.getContext('2d');
+    E.baslikDoku = new THREE.CanvasTexture(c);
+    E.baslikDoku.minFilter = THREE.LinearFilter;
+    var baslikMat = new THREE.MeshBasicMaterial({ map:E.baslikDoku, fog:false });
+    var yayinMat  = new THREE.MeshBasicMaterial({ map:E.rt.texture, fog:false });
+    var kasaMat   = new THREE.MeshLambertMaterial({ color:0x1a1e22 });
+    var ayakMat   = new THREE.MeshLambertMaterial({ color:0x3a4249 });
+    function ekranKur(W, x, yAlt, z, uzunKenar, taraf){
+      var HB = W/8, HV = W/2, H = HB + HV;
+      var g = new THREE.Group();
+      // Kasa: ekranın arkası ve kenarları - sırttan bakınca da bir nesne görünsün.
+      var kasa = new THREE.Mesh(new THREE.BoxGeometry(W+0.5, H+0.5, 0.35), kasaMat);
+      kasa.position.set(0, H/2, -0.2); g.add(kasa);
+      var yayin = new THREE.Mesh(new THREE.PlaneGeometry(W, HV), yayinMat);
+      yayin.position.set(0, HV/2, 0.0); g.add(yayin);
+      var baslik = new THREE.Mesh(new THREE.PlaneGeometry(W, HB), baslikMat);
+      baslik.position.set(0, HV + HB/2, 0.0); g.add(baslik);
+      // İki ayak: ekran havada asılı durmasın.
+      [-1,1].forEach(function(s){
+        var ayak = new THREE.Mesh(new THREE.BoxGeometry(0.35, yAlt+0.01, 0.35), ayakMat);
+        ayak.position.set(s*W*0.35, -yAlt/2, -0.2); g.add(ayak);
+      });
+      g.position.set(x, yAlt, z);
+      g.lookAt(0, yAlt, 0);                 // ön yüz (+Z) sahanın ortasına bakar
+      scene.add(g);
+      // Kadraj testi için sınır küresi (ekranlar sabit, bir kez hesaplanır).
+      var merkez = new THREE.Vector3(x, yAlt + H/2, z);
+      E.ekranlar.push({ grup:g, kure:new THREE.Sphere(merkez, Math.hypot(W, H)/2 + 0.5),
+                        uzunKenar:uzunKenar, taraf:taraf });
+    }
+    // Uzun kenarlar: panolar z=HWZ+7 (kalınlık 0.4), ilk basamağın önü z=HWZ+8.4.
+    ekranKur(13, 0, 1.4,  (HWZ+7.8), true,  1);
+    ekranKur(13, 0, 1.4, -(HWZ+7.8), true, -1);
+    // Kale arkaları: ilk basamak (y<=2.8) x=HLX+9.4'ten başlar, ikincinin önü HLX+12.4.
+    ekranKur(16,  (HLX+10.4), 3.0, 0, false,  1);
+    ekranKur(16, -(HLX+10.4), 3.0, 0, false, -1);
+  }catch(e){ try{ if(window.DiagSaha) DiagSaha('stadEkranKur', e); }catch(_e){} }
+
+  // ── BAŞLIK VERİSİ: skorbordla (#board) AYNI kaynaktan okunur - oyunda da seyirci
+  // modunda da #board zaten doğru yazılıyor; ayrı bir hesap iki tabelanın ayrışmasına yol açardı.
+  function metin(id){ var el = document.getElementById(id); return el ? (el.textContent||'').trim() : ''; }
+  function logoAdresleri(){
+    var sol = '', sag = '';
+    try{
+      if (window._sahaIzleModu){
+        var h = window._sahaIzleHedef || {}, T = window._sahaIzleTakimlar || {};
+        sol = (T[h.homeId]||{}).logo || ''; sag = (T[h.awayId]||{}).logo || '';
+      } else if (window._sahaAktifFikstur && typeof sahaFikstur !== 'undefined'){
+        var fk = window._sahaAktifFikstur, mc = sahaFikstur[fk.matchId];
+        if (mc){
+          // #board solu = insan (teamA), sağı = rakip - tabelaAdi() ile aynı eşleme.
+          var benId = fk.benTarafHome ? mc.homeId : mc.awayId;
+          var rakipId = fk.benTarafHome ? mc.awayId : mc.homeId;
+          sol = (sahaLigTakimlar[benId]||{}).logo || ''; sag = (sahaLigTakimlar[rakipId]||{}).logo || '';
+        }
+      }
+    }catch(e){}
+    return [String(sol), String(sag)];
+  }
+  // Logo yükleyici. crossOrigin ZORUNLU: izinsiz bir başka sunucudan gelen resim tuvali
+  // "kirletir" ve WebGL dokusu yüklenemez (tüm ekran kararırdı). İzin vermeyen sunucuda
+  // resim hiç yüklenmez ve yerine takım kodlu renkli rozet çizilir.
+  function logo(url){
+    if (!url) return null;
+    var k = E.logoOnbellek[url];
+    if (k) return k.hazir ? k.img : null;
+    k = E.logoOnbellek[url] = { hazir:false, img:new Image() };
+    k.img.crossOrigin = 'anonymous';
+    k.img.onload = function(){ k.hazir = true; E.anahtar = ''; };   // yeniden çizime zorla
+    k.img.onerror = function(){ k.hazir = false; };
+    k.img.src = url;
+    return null;
+  }
+  function rozet(x, img, kod, renk){
+    var ctx = E.ctx, r = 50, cx = x, cy = 64;
+    if (img){
+      var o = Math.min(2*r/img.width, 2*r/img.height);
+      var w = img.width*o, h = img.height*o;
+      try{ ctx.drawImage(img, cx-w/2, cy-h/2, w, h); return; }catch(e){}
+    }
+    ctx.fillStyle = renk || '#445'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = '900 34px system-ui,Arial,sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText((kod||'').slice(0,3), cx, cy+2);
+  }
+  function baslikCiz(){
+    var ka = document.querySelector('#board .kod.a'), kb = document.querySelector('#board .kod.b');
+    var kodA = ka ? ka.textContent.trim() : '', kodB = kb ? kb.textContent.trim() : '';
+    var renkA = ka ? ka.style.background : '', renkB = kb ? kb.style.background : '';
+    var sure = metin('sure') + (metin('uzatma') ? ' ' + metin('uzatma') : '');
+    var sa = metin('sa') || '0', sb = metin('sb') || '0';
+    var ad = logoAdresleri(), la = logo(ad[0]), lb = logo(ad[1]);
+    var anahtar = [kodA,kodB,renkA,renkB,sure,sa,sb,ad[0],ad[1],!!la,!!lb].join('|');
+    if (anahtar === E.anahtar) return;      // değişiklik yoksa doku yeniden yüklenmez
+    E.anahtar = anahtar;
+    var ctx = E.ctx, W = 1024, H = 128;
+    var gr = ctx.createLinearGradient(0,0,0,H);
+    gr.addColorStop(0,'#16241e'); gr.addColorStop(1,'#0a120f');
+    ctx.fillStyle = gr; ctx.fillRect(0,0,W,H);
+    // Takım renkli ince kenar şeritleri
+    ctx.fillStyle = renkA || '#d8443a'; ctx.fillRect(0,0,8,H);
+    ctx.fillStyle = renkB || '#3d7fd4'; ctx.fillRect(W-8,0,8,H);
+    ctx.fillStyle = 'rgba(255,255,255,.12)'; ctx.fillRect(0,H-3,W,3);
+    rozet(72, la, kodA, renkA);
+    rozet(W-72, lb, kodB, renkB);
+    ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle';
+    ctx.font = '900 92px system-ui,Arial,sans-serif';
+    ctx.textAlign = 'left';  ctx.fillText(sa, 142, 68);
+    ctx.textAlign = 'right'; ctx.fillText(sb, W-142, 68);
+    // Orta: maç süresi, koyu kutu içinde
+    ctx.fillStyle = 'rgba(0,0,0,.45)';
+    ctx.fillRect(W/2-150, 18, 300, 92);
+    ctx.fillStyle = '#f0c14b'; ctx.textAlign = 'center';
+    ctx.font = '800 64px system-ui,Arial,sans-serif';
+    ctx.fillText(sure || '0:00', W/2, 66);
+    E.baslikDoku.needsUpdate = true;
+  }
+
+  var _frustum = new THREE.Frustum(), _mat = new THREE.Matrix4();
+  function guncelle(){
+    if (!E.rt || !E.ekranlar.length) return;
+    E.kare++;
+    // Yakın uzun kenar ekranı: kamera o taraftaysa çizilmez (bkz. üstteki YERLEŞİM notu).
+    var kamTaraf = camera.position.z >= 0 ? 1 : -1;
+    E.ekranlar.forEach(function(e){ e.grup.visible = !(e.uzunKenar && e.taraf === kamTaraf); });
+    if (E.kare % 15 === 0) { try{ baslikCiz(); }catch(e){} }   // saniyede ~4 kez yeterli
+    var aralik = (AYAR.grafik >= 2) ? 2 : (AYAR.grafik >= 1.5 ? 3 : 4);
+    if (E.kare % aralik !== 0) return;
+    // Kadrajda görünen bir ekran yoksa yayın çizilmez - en büyük tasarruf burası.
+    camera.updateMatrixWorld();
+    _mat.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_mat);
+    var gorunur = E.ekranlar.some(function(e){ return e.grup.visible && _frustum.intersectsSphere(e.kure); });
+    if (!gorunur) return;
+    var eskiOran = camera.aspect, eskiFov = camera.fov;
+    var gorunurlukler = E.ekranlar.map(function(e){ return e.grup.visible; });
+    try{
+      E.ekranlar.forEach(function(e){ e.grup.visible = false; });
+      // Yatay açı o anki kameradan (yakınlaştırma dahil) birebir korunur, dikey açı türetilir.
+      var tanYatay = Math.tan(eskiFov*Math.PI/360) * eskiOran;
+      camera.aspect = E.basOran;
+      camera.fov = Math.max(10, Math.min(150, 2*Math.atan(tanYatay/E.basOran)*180/Math.PI));
+      camera.updateProjectionMatrix();
+      renderer.setRenderTarget(E.rt);
+      renderer.render(scene, camera);
+    } finally {
+      renderer.setRenderTarget(null);
+      camera.aspect = eskiOran; camera.fov = eskiFov;
+      camera.updateProjectionMatrix();
+      E.ekranlar.forEach(function(e, i){ e.grup.visible = gorunurlukler[i]; });
+    }
+  }
+  return { guncelle:function(){ try{ guncelle(); }catch(e){} }, _E:E };
+})();
+
 function loop(){
   requestAnimationFrame(loop);
   const ham = Math.min(clock.getDelta(), 0.25);
@@ -4517,6 +4703,8 @@ function loop(){
       if (n >= 5) birikim = 0;
     }
   }
+  // Stadyum ekranlarının canlı yayını ana çizimden ÖNCE güncellenir (bkz. _stadEkran).
+  _stadEkran.guncelle();
   renderer.render(scene, camera);
 }
 

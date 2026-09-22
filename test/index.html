@@ -2539,7 +2539,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-J';
+window.APP_BUILD='2026-09-22-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -21892,8 +21892,32 @@ window.ptTumKanallar=function(){
 // maclar basa eklenince yoneticinin kanal sirasi ve numaralari kayiyordu (1. kanal 2.
 // oluyordu). Kumandada once yoneticinin kanallari KENDI SIRASIYLA, maclar SONDA.
 // TV sekmesindeki kart listesi degismedi; orada canli mac one cikmaya devam ediyor.
+// KULLANICI TALEBİ (2026-09-22-K): "Kumandadaki ilgili maç kartı 1. sırada, varsa diğer maçlar
+// 2. ve 3. sırada olmalı; maç kartları en üstte yer almalı." Yukarıdaki "maçlar sonda" kuralı
+// bu talep üzerine GERİ ALINDI. O kuralın gerekçesi (maç eklenince kanal numaraları kayıyor)
+// hâlâ geçerli ama artık bilinçli bir tercih: maçlar 1..N, yöneticinin kanalları N+1'den başlar.
+// "İLGİLİ MAÇ" = kullanıcının oynatıcıya GİRDİĞİ maç (TV listesinden dokunduğu maç kartı).
+// Neden "o an izlenen maç" değil: kumandadan 2. maça geçince o maç 1. sıraya çıksaydı,
+// eski maç 2. sıraya düşer ve CH+ tuşu iki maç arasında gidip gelirdi (numaralar her
+// geçişte yer değiştirirdi). Giriş maçı sabit kaldığı için numaralar izleme boyunca oturur.
+window._ptIlgiliMacId=window._ptIlgiliMacId||null;
+// Tek sıralama kuralı - kumandanın TÜM listeleri (oynatıcı içi, gömülü yayın kumandası,
+// iki cihazlı kumanda, TV sekmesi) bunu KİŞİSEL sıralama uygulandıktan SONRA çağırır.
+// Önce çağrılsaydı kişisel sıra (maçların kaydı yok -> Infinity) maçları yine sona iterdi.
+// Her grubun kendi içindeki sırası korunur.
+window.ptMacKartlariOne=function(list,ilgiliId){
+  if(!list||!list.length)return list;
+  var ilg=[],mac=[],diger=[];
+  // ilgiliId verilmişse (null dahil) o kullanılır; verilmemişse bu cihazın kendi seçimi.
+  var hedef=(ilgiliId!==undefined)?ilgiliId:(window._ptIlgiliMacId||null);
+  list.forEach(function(x){
+    if(x&&x.isMatchCard){(hedef&&x.id===hedef?ilg:mac).push(x);}
+    else diger.push(x);
+  });
+  return ilg.concat(mac,diger);
+};
 window.ptKumandaKanallari=function(){
-  return ((window.D&&D.videoLinks)||[]).concat(window._ptCanliMacKanallari());
+  return window.ptMacKartlariOne(window._ptCanliMacKanallari().concat((window.D&&D.videoLinks)||[]));
 };
 // TV listesindeki bir karta tıklandığında çağrılan tek giriş noktası. KULLANICI TALEBİ
 // üzerine artık canlı maç kartı da (id 'match_' ile başlar) admin'in eklediği normal TV/Video
@@ -21901,6 +21925,8 @@ window.ptKumandaKanallari=function(){
 // 'match_' önekini ptTumKanallar()'dan arayacak şekilde ayrılmıştı (bkz. oradaki not), tek
 // eksik buradaki ayrı yönlendirme daliydi; o kaldırıldı.
 window.ptKanalAc=function(id){
+  // Listeden bilinçli seçim: maç ise "ilgili maç" o olur, normal kanal ise sıfırlanır.
+  try{ window._ptIlgiliMacId=/^match_/.test(String(id))?String(id):null; }catch(e){}
   openVideoWatch(id);
 };
 window._videoScreenTab=window._videoScreenTab||'tv';
@@ -22012,8 +22038,9 @@ function renderVideoScreenList(){
   // KULLANICI TALEBİ: Canlı maç kartları, admin'in sıralamasından bağımsız olarak HER ZAMAN
   // TV sekmesinin EN ÜSTÜNDE görünür - kullanıcı maç başladığında onu aramadan bulmalı.
   // Array.sort kararlı (stable) olduğundan her grubun KENDİ İÇİNDEKİ sırası bozulmaz.
+  // (2026-09-22-K) Kumandayla AYNI kural: ilgili maç 1., diğer maçlar ardından.
   if(tab==='tv'){
-    baseList=baseList.slice().sort(function(a,b){return (b.isMatchCard?1:0)-(a.isMatchCard?1:0);});
+    baseList=window.ptMacKartlariOne(baseList);
   }
   const channelNoMap=new Map(baseList.map((v,i)=>[v.id,i+1]));
   let list=baseList;
@@ -22373,6 +22400,12 @@ function remoteCtrlPlaylist(isLive){
       });
     }
   }catch(e){}
+  // Numaralar TV'deki oynatıcıyla AYNI olmalı: ilgili maç TV'nin oturumundan (ilgiliMac) okunur -
+  // bu telefonun kendi seçimi değil, kumanda edilen cihazın seçimi geçerlidir.
+  if(isLive){
+    var _sd=window._remoteCtrlSessionData||{};
+    list=window.ptMacKartlariOne(list,_sd.ilgiliMac||null);
+  }
   return list;
 }
 // KULLANICI TALEBİ (aynı istek): Bu ekran, hedef oturumdan gelen "session" verisiyle her
@@ -24187,6 +24220,7 @@ window.PTFrame=(function(){
         });
       }
     }catch(e){}
+    if(canliMi)list=window.ptMacKartlariOne(list);
     return list;
   }
   function ptfKanal(yon){
@@ -28350,6 +28384,7 @@ function ptpUstBarParcalari(){
         });
       }
     }catch(e){}
+    if(canli)list=window.ptMacKartlariOne(list);
     return list;
   }
   // KULLANICI TALEBİ ("bu teşhisi admin tarafındaki hata yakalama kodları tarafından
@@ -30209,6 +30244,7 @@ function ptpUstBarParcalari(){
         firebase.database().ref(base+'/session').set({
           sessionId:window._ptRemoteSessionId,
           videoId:S.videoId,isLive:S.isLive,title:S.title||'',
+          ilgiliMac:window._ptIlgiliMacId||null,
           channelNo:idx>=0?idx+1:null,total:pl.length,
           playing:!S.video.paused,ts:Date.now(),
           // KULLANICI TALEBİ ("telefonu kumanda olarak kullanırken ekran modlarını da
@@ -30772,6 +30808,9 @@ window.openVideoWatch=function(videoId,secenek){
   // bir DOM kabi. Kanal kimligi hic okunamadigi icin her kanalda ilk canli maca
   // dusuyordu (bkz. ptpYayinBindirmeGuncelle notu).
   try{ window._ptAktifKanalId = videoId; }catch(e){}
+  // Maç, TV listesi dışındaki bir yoldan (maç detayı vb.) açıldıysa ve henüz ilgili maç
+  // yoksa o maç ilgili sayılır. Kanal geçişlerinde DEĞİŞTİRİLMEZ (bkz. ptMacKartlariOne).
+  try{ if(!window._ptIlgiliMacId && /^match_/.test(String(videoId))) window._ptIlgiliMacId=String(videoId); }catch(e){}
   // İzleme geçmişine kaydet - video AÇILDIĞI anda. İzlenme süresine bakmıyoruz: kullanıcı
   // "neye baktım" diye arıyor, üç saniye mi otuz dakika mı izlediği ayrı bir soru.
   try{if(window.ptGecmiseEkle)ptGecmiseEkle(videoId);}catch(e){}
