@@ -480,12 +480,26 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
        Tablosu bunu normal canli/sonuc mekanizmasiyla (isLive/played) zaten gosterir.
        ══════════════════════════════════════════════════════════════════════════════ -->
   <div id="pg-saha" class="pg">
+    <!-- İLK GİRİŞTE TAKIM SEÇİMİ (2026-09-22-U): SAHA'da takımı olmayan kullanıcıya ilk
+         girişte lig takımları listelenir; seçtiği takım kilitlenir (takimSahipleri). Bu kart
+         özelliği açar/kapatır ve seçimleri sıfırlar. Kayıt: globalAdminSettings/sahaTakimSecimi. -->
+    <div class="card">
+      <h2>🎮 İlk Girişte Takım Seçimi</h2>
+      <p class="hint">Açıkken takımı olmayan kullanıcıya SAHA'ya girişte ligdeki takımlar
+        sorulur. Seçilen takımı başka kullanıcı seçemez; değişikliği yalnızca siz yaparsınız
+        (aşağıdaki listeden takım değiştirin ya da "Yeniden sor" ile seçimi sıfırlayın).
+        Kapalıyken takımı eskisi gibi siz atarsınız.</p>
+      <div class="row"><span>Girişte takım sor</span>
+        <button class="btn" id="sahaTakimSecimiBtn" onclick="sahaTakimSecimiDegistir()">…</button></div>
+      <div id="sahaTakimSecimiOzet" class="hint" style="margin:.35rem 0"></div>
+      <button class="btn bgh" style="width:100%;color:#dc2626" onclick="sahaTumSecimleriSifirla()">↺ Tüm seçimleri sıfırla (herkese yeniden sor)</button>
+    </div>
     <div class="card">
       <h2>🎮 Saha Oyuncusu — Takım Ataması</h2>
-      <p class="hint">Her onaylı saha kullanıcısına ligdeki bir takımı atayın. Kullanıcı,
-        atandığı takımın fikstürdeki maçlarını saha uygulamasında oynayabilir; sonuç
-        otomatik olarak bu maça işlenir. Bir takım aynı anda yalnızca bir kullanıcıya
-        atanmalıdır.</p>
+      <p class="hint">Her saha kullanıcısının SAHA'da yönettiği takım. Kullanıcı ilk girişte
+        kendisi seçer; buradan değiştirebilir ya da "Yeniden sor" ile boşaltabilirsiniz
+        (kullanıcıya bir sonraki girişte yeniden sorulur). Bir takım aynı anda yalnızca bir
+        kullanıcıda olabilir.</p>
       <div id="sahaAtamaListe"></div>
     </div>
     <div class="card">
@@ -1879,7 +1893,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-T';
+window.APP_BUILD='2026-09-22-U';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -7276,6 +7290,54 @@ function sahaTakimAta(uid, takimId){
     });
   }catch(e){ setTimeout(takimSahipleriDinleAdmin, 1500); }
 })();
+// İLK GİRİŞTE TAKIM SEÇİMİ ayarı (bkz. HTML'deki kart ve saha.html/takimSecimAyarDinle).
+window._sahaTakimSecimiAcikA = true;
+(function sahaTakimSecimiDinle(){
+  try{
+    if(!window.firebase || !firebase.database){ setTimeout(sahaTakimSecimiDinle, 700); return; }
+    firebase.database().ref('globalAdminSettings/sahaTakimSecimi').on('value', function(sn){
+      window._sahaTakimSecimiAcikA = (sn.val() !== false);
+      sahaTakimSecimiCiz();
+    });
+  }catch(e){ setTimeout(sahaTakimSecimiDinle, 1500); }
+})();
+function sahaTakimSecimiCiz(){
+  var b = qs('sahaTakimSecimiBtn'), oz = qs('sahaTakimSecimiOzet');
+  if(b){ b.textContent = window._sahaTakimSecimiAcikA ? '✅ Açık' : 'Kapalı'; }
+  if(oz){
+    var ids = Object.keys(_kullanicilar||{});
+    var secen = ids.filter(function(u){ return (_kullanicilar[u]||{}).takimId; }).length;
+    oz.textContent = ids.length ? (secen + ' / ' + ids.length + ' kullanıcının takımı belli · '
+      + (ids.length - secen) + ' kullanıcıya girişte sorulacak') : 'Henüz kullanıcı yok.';
+  }
+}
+function sahaTakimSecimiDegistir(){
+  var yeni = !window._sahaTakimSecimiAcikA;
+  firebase.database().ref('globalAdminSettings/sahaTakimSecimi').set(yeni)
+    .then(function(){ toast(yeni ? '🎮 Girişte takım sorulacak' : '🎮 Takım seçimi kapatıldı'); })
+    .catch(function(e){ toast('❌ Kaydedilemedi: '+((e&&e.message)||''),'er'); });
+}
+// Tek kullanıcının seçimini sıfırlar: takımı ve kilidi boşalır, bir sonraki girişte sorulur.
+function sahaSecimSifirla(uid){
+  var k = _kullanicilar[uid] || {};
+  ptOnay((k.ad||'Bu kullanıcı') + ' için takım seçimi sıfırlansın mı? Bir sonraki girişte yeniden sorulur.',
+    {baslik:'Yeniden Sor', ikon:'↺', tamamYazi:'Sıfırla'}).then(function(ok){
+    if(ok) sahaTakimAta(uid, '');
+  });
+}
+function sahaTumSecimleriSifirla(){
+  ptOnay('TÜM kullanıcıların takım seçimi sıfırlansın mı? Herkese bir sonraki girişte yeniden sorulur. Oynanmış maçlar etkilenmez.',
+    {baslik:'Tüm Seçimleri Sıfırla', ikon:'↺', tehlikeli:true, tamamYazi:'Sıfırla'}).then(function(ok){
+    if(!ok) return;
+    var g = {};
+    Object.keys(_kullanicilar||{}).forEach(function(u){ if((_kullanicilar[u]||{}).takimId) g['kullanicilar/'+u+'/takimId'] = null; });
+    Object.keys(_takimSahipleriA||{}).forEach(function(t){ g['takimSahipleri/'+t] = null; });
+    if(!Object.keys(g).length){ toast('Sıfırlanacak seçim yok'); return; }
+    firebase.database().ref().update(g)
+      .then(function(){ toast('↺ Tüm takım seçimleri sıfırlandı'); })
+      .catch(function(e){ toast('❌ İşlem başarısız: '+((e&&e.message)||''),'er'); });
+  });
+}
 // Bu sürümden önce yapılmış atamaların kilidi yok: yönetici paneli açıkken bir kez tamamlanır
 // (yalnızca boş kilitler yazılır, var olan kilide dokunulmaz).
 var _takimKilitTamamlandi = false;
@@ -7293,6 +7355,7 @@ function takimKilitleriniTamamla(){
 function renderSahaAtama(){
   var kutu = qs('sahaAtamaListe'); if(!kutu) return;
   try{ takimKilitleriniTamamla(); }catch(e){}
+  try{ sahaTakimSecimiCiz(); }catch(e){}
   var ids = Object.keys(_kullanicilar);
   if(!ids.length){ kutu.innerHTML = '<p class="hint">Henüz kayıtlı saha kullanıcısı yok.</p>'; return; }
   var teamOpts = Object.keys(S.teams||{}).map(function(tid){
@@ -7300,9 +7363,8 @@ function renderSahaAtama(){
   }).sort(function(a,b){ return a.name.localeCompare(b.name,'tr'); });
   kutu.innerHTML = ids.map(function(uid){
     var k = _kullanicilar[uid] || {};
-    // Takımını kendisi seçmiş ama henüz onaylanmamış kullanıcı da listede: yönetici
-    // yanlış seçimi onaydan önce düzeltebilsin.
-    if(k.durum !== 'onayli' && !k.takimId) return '';
+    // Tüm kullanıcılar listelenir: takımını kendisi seçen (onaylı olmasa da) ve takımı
+    // henüz belli olmayan (ayar kapalıyken atanmayı bekleyen) kullanıcılar dahil.
     var mevcut = k.takimId || '';
     var sahipDiger = teamOpts.filter(function(t){
       var kilit = _takimSahipleriA[t.id];
@@ -7319,8 +7381,10 @@ function renderSahaAtama(){
       +'<div style="flex:1;min-width:120px"><b>'+escHtml(k.ad||'(adsız)')+'</b>'
       +'<div style="font-size:.64rem;opacity:.6">'+(mevcut&&S.teams[mevcut]?'🎮 '+escHtml(S.teams[mevcut].name):'henüz atanmadı')+'</div></div>'
       +'<select onchange="sahaTakimAta(\''+uid+'\', this.value)" style="max-width:180px">'+opts+'</select>'
+      +(mevcut ? '<button class="btn bgh" style="min-height:30px;padding:.3rem .5rem" title="Takımı boşalt; bir sonraki girişte yeniden sorulur" '
+        +'onclick="sahaSecimSifirla(\''+uid+'\')">↺ Yeniden sor</button>' : '')
       +'</div></div>';
-  }).join('') || '<p class="hint">Önce Transfer sekmesinden kullanıcı onaylayın.</p>';
+  }).join('') || '<p class="hint">Henüz saha kullanıcısı yok.</p>';
 }
 // KULLANICI TALEBİ: Admin, saha uygulaması için varsayılan fikstürü Saha sekmesinden
 // silip yeniden oluşturabilmeli. autoFixture() (Fikstür sekmesi) zaten bu işi yapıyor

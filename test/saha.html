@@ -658,6 +658,18 @@ function reklamUygula(v){
 // 1'-90' akar; süre kısaldıkça hızlanır (15 dk -> her futbol dakikası 10 sn).
 // Oynanmakta olan maç ETKİLENMEZ - yeni değer bir sonraki maçta geçerli olur.
 window._sahaYoneticiSureDk = 0;
+// TAKIM SEÇİMİ AYARI (2026-09-22-U): globalAdminSettings/sahaTakimSecimi - false ise ilk
+// girişte takım sorulmaz, takımı eskisi gibi yönetici atar. Kayıt yoksa (null) AÇIK sayılır.
+window._sahaTakimSecimiAcik = true;
+(function takimSecimAyarDinle(){
+  try{
+    if(typeof fbHazir === 'undefined' || !fbHazir || !fbDb){ setTimeout(takimSecimAyarDinle, 800); return; }
+    fbDb.ref('globalAdminSettings/sahaTakimSecimi').on('value', function(sn){
+      window._sahaTakimSecimiAcik = (sn.val() !== false);
+      try{ takimSecimKontrol(); hesapDurumCiz(); }catch(e){}
+    });
+  }catch(e){ setTimeout(takimSecimAyarDinle, 1500); }
+})();
 (function sureDinle(){
   try{
     if(typeof fbHazir === 'undefined' || !fbHazir || !fbDb){ setTimeout(sureDinle, 800); return; }
@@ -1759,7 +1771,7 @@ function _sahaFiksturDinle(){
   fbDb.ref('leagues/'+sahaLigId+'/teams').on('value', function(sn){
     sahaLigTakimlar = sn.val() || {};
     maclarCiz();
-    try{ takimSecimKontrol(); takimSecimCiz(); }catch(e){}
+    try{ takimSecimKontrol(); takimSecimCiz(); hesapDurumCiz(); }catch(e){}
   });
   fbDb.ref('leagues/'+sahaLigId+'/matches').on('value', function(sn){
     sahaFikstur = sn.val() || {};
@@ -1787,6 +1799,13 @@ function hesabiDinle(){
     hesapDurumCiz(); magazaCiz(); maclarCiz();
     try{ menuGoster(); }catch(e){}
     try{ takimSecimKontrol(); }catch(e){}
+  }, function(err){
+    // Okuma reddedildiyse önceden hiçbir şey olmuyordu: seçim ekranı "hesap yüklenmedi"
+    // diye hiç açılmıyor, kullanıcı da sebebini göremiyordu. Hata kayda ve ekrana düşer.
+    fbDurum = 'okuma-reddedildi';
+    try{ hesapDurumCiz(); }catch(e){}
+    try{ if(window.DiagSaha) DiagSaha('hesapOkuma', err, { anlami:'kullanicilar kaydi okunamadi; takim secimi acilamaz.',
+      oneri:'kullanicilar okuma kuralini ve giris kimligini denetleyin.' }); }catch(e){}
   });
   takimSahipleriDinle();
   // Havuz okumasi hesaptan BAGIMSIZ olmali: kullanici henuz kayit olmamis olsa bile
@@ -1842,7 +1861,7 @@ function takimSahipleriDinle(){
   });
 }
 function takimSecimKontrol(){
-  var gerek = !!(benimUid && _benimKayitYuklendi && sahaLigId
+  var gerek = !!(window._sahaTakimSecimiAcik && benimUid && _benimKayitYuklendi && sahaLigId
     && Object.keys(sahaLigTakimlar||{}).length
     && !(benimKayit && benimKayit.takimId) && !_takimSecimErtelendi);
   var el = document.getElementById('takimSecimEkran');
@@ -1887,6 +1906,33 @@ function takimSecimCiz(){
     + '<div style="flex:1;overflow-y:auto;overscroll-behavior:contain">'+(kartlar || '<div style="opacity:.6">Ligde takım yok.</div>')+'</div>'
     + '<button onclick="takimSecimErtele()" style="margin-top:.6rem;padding:.6rem;border-radius:10px;font:inherit;'
     + 'background:transparent;color:inherit;border:1px solid rgba(255,255,255,.2);opacity:.75">Sonra seç</button>';
+}
+// Menüdeki "Takımını seç" düğmesi: "Sonra seç" ile kapatılmış ya da açılamamış seçim ekranını
+// yeniden açar; açılamıyorsa SEBEBİ söyler (sessizce hiçbir şey olmaması en kötüsüydü).
+function takimSecimAc(){
+  _takimSecimErtelendi = false;
+  var neden = !window._sahaTakimSecimiAcik ? 'Takım seçimi yönetici tarafından kapatıldı'
+    : !benimUid ? 'Önce giriş yap'
+    : !_benimKayitYuklendi ? 'Hesap bilgisi okunamadı - bağlantıyı kontrol et'
+    : !sahaLigId ? 'Aktif lig okunamadı'
+    : !Object.keys(sahaLigTakimlar||{}).length ? 'Lig takımları okunamadı'
+    : (benimKayit && benimKayit.takimId) ? 'Takımın zaten belli - değişikliği yönetici yapar' : '';
+  if(neden){ mesaj('', neden, 2600); return; }
+  takimSecimKontrol();
+}
+function takimDurumHtml(){
+  try{
+    var tid = benimKayit && benimKayit.takimId;
+    if(tid){
+      var t = sahaLigTakimlar[tid] || {};
+      return '<div style="font-size:12px;margin-top:.35rem">🎮 Takımın: <b>'
+        + String(t.name || tid).replace(/</g,'&lt;') + '</b>'
+        + '<div style="font-size:11px;opacity:.55">Değişiklik için yöneticiye başvur.</div></div>';
+    }
+    if(!window._sahaTakimSecimiAcik)
+      return '<div style="font-size:11px;opacity:.6;margin-top:.35rem">🎮 Takımını yönetici atayacak.</div>';
+    return '<button class="btn alt" style="margin-top:.4rem" onclick="takimSecimAc()">🎮 Takımını seç</button>';
+  }catch(e){ return ''; }
 }
 function takimSecimErtele(){
   _takimSecimErtelendi = true;           // yalnızca bu oturum için; sonraki girişte yine sorulur
@@ -2202,12 +2248,14 @@ function hesapDurumCiz(){
     if(!benimUid){ k.innerHTML = '<span style="opacity:.6">Baglaniliyor...</span>'; return; }
     if(!kayitliMi()){
       k.innerHTML = '<span style="opacity:.75">Henuz kaydin yok.</span> '
-        +'<button class="btn alt" style="margin-top:.4rem" onclick="kayitEkraniAc()">Takim kur</button>';
+        +'<button class="btn alt" style="margin-top:.4rem" onclick="kayitEkraniAc()">Takim kur</button>'
+        + takimDurumHtml();
       return;
     }
     const onay = (benimKayit.durum === 'onayli');
     k.innerHTML = '<b>'+(benimKayit.ad||'')+'</b> · '+(benimKayit.para||0)+' SL'
-      + (onay ? '' : ' <span style="color:#e4b23c">· onay bekliyor</span>');
+      + (onay ? '' : ' <span style="color:#e4b23c">· onay bekliyor</span>')
+      + takimDurumHtml();
   }catch(e){}
 }
 
@@ -2403,7 +2451,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-22-T';
+window.APP_BUILD = '2026-09-22-U';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
