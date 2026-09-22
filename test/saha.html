@@ -2248,7 +2248,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-22-K';
+window.APP_BUILD = '2026-09-22-L';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -2788,6 +2788,35 @@ function sahaCanliYaz(ilkYazim){
     // dikeyde farkli miktarda alan kirpiliyordu. Izleyici bu oranla cercevesini kurar -
     // oyuncunun gordugu kadraj birebir ayni olur.
     try{ g[yol+'/ekranOran'] = Math.round((innerWidth / Math.max(1, innerHeight)) * 1000) / 1000; }catch(e){}
+    // ── OYUNCU/İZLEYİCİ UYUMU (2026-09-22-L, kullanıcı ekran görüntüsüyle bildirdi: "oynanış
+    // ekranı ile izleme ekranı birbiriyle uyuşmuyor") - ÜÇ AYRI KÖK SEBEP:
+    //  1) SAHA AYNALANIYORDU: Konumlar "ev sahibi perspektifine" çevrilerek yazılıyor (Puan
+    //     Tablosu'nun mini sahası bunu istiyor). İzleyici bu değeri DOĞRUDAN dünya koordinatı
+    //     sayıyordu: ev sahibi hep +x'e hücum ediyordu. Oyuncu DEPLASMANDAYSA (ya da 2. devrede
+    //     dirA=-1 iken) oyuncunun ekranında ev sahibi -x'e hücum ediyor -> izleyicide saha
+    //     sağ-sol ters. Kamera tarafı da (dirA) izleyicide hep 1'di.
+    //     ÇÖZÜM: izleYon = {dirA, benHome} yazılır; izleyici ev perspektifini oyuncunun
+    //     dünyasına geri çevirir ve kamerayı aynı tarafa koyar. ballX/homePlayers DEĞİŞMEDİ
+    //     (mini saha ve diğer okuyucular etkilenmesin diye).
+    //  2) SKORBORD SIRASI/RENGİ: Oyuncunun tabelasında SOLDA kendi takımı (teamA) var;
+    //     izleyicide solda hep ev sahibi vardı, renkler de sabit kırmızı/mavi sınıflardı.
+    //  3) SÜRE: Oyuncu oyun saatini (1. 1:38) görüyor, izleyiciye 90'a ölçekli dakika (31')
+    //     gidiyordu - iki farklı sayı.
+    //     ÇÖZÜM (2+3): Oyuncunun EKRANINDAKİ tabela (#board) olduğu gibi 'tabela' olarak
+    //     yazılır; izleyici ve TV bindirmesi bunu aynen gösterir. 'minute' alanı
+    //     değişmedi (olaylar, anlatım, baskımetre onu kullanıyor).
+    try{
+      var _kA = document.querySelector('#board .kod.a'), _kB = document.querySelector('#board .kod.b');
+      var _tx = function(id){ var el = document.getElementById(id); return el ? (el.textContent||'') : ''; };
+      g[yol+'/tabela'] = {
+        solKod: _kA ? _kA.textContent : '', sagKod: _kB ? _kB.textContent : '',
+        solRenk: hx(takA().jer), sagRenk: hx(takB().jer),
+        solSkor: skorA, sagSkor: skorB,
+        devre: _tx('devre'), sure: _tx('sure'), uz: _tx('uzatma'),
+        solTaraf: fk.benTarafHome ? 'home' : 'away'
+      };
+      g[yol+'/izleYon'] = { dirA: (dirA < 0 ? -1 : 1), benHome: !!fk.benTarafHome };
+    }catch(e){}
     var top = _sahaTopKonumu(fk);
     if(top){
       // Ondalıkları 2 haneye yuvarla - sık yazılacak küçük bir sayı olsun diye
@@ -2879,11 +2908,12 @@ setInterval(function(){
     var degisti=!son
       || Math.abs(son.x-top.x)>0.02 || Math.abs(son.z-top.z)>0.02   // top gözle görülür şekilde oynadı
       || son.attack!==top.attack                                     // hücum eden taraf değişti
-      || son.min!==dk;                                                // dakika ilerledi
+      || son.min!==dk                                                 // dakika ilerledi
+      || son.sn!==Math.floor(saat);                                   // tabela saati (izleyici birebir görsün)
     var nabizZamani=!son || (now-son.ts)>2000;                        // top dursa bile 2sn'de bir "canlı" imzası
     if(degisti||nabizZamani){
       sahaCanliYaz(false);
-      _sahaSonYazim={x:top.x,z:top.z,attack:top.attack,min:dk,ts:now};
+      _sahaSonYazim={x:top.x,z:top.z,attack:top.attack,min:dk,sn:Math.floor(saat),ts:now};
     }
   }catch(e){}
 }, 150);
@@ -2898,6 +2928,7 @@ function sahaFiksturSonucuKaydet(){
     var yol = 'leagues/'+fk.ligId+'/matches/'+fk.matchId;
     var g = {};
     g[yol+'/isLive'] = false;
+    g[yol+'/tabela'] = null;   // bkz. sahaCanliYaz - canlı tabela yalnızca maç sürerken geçerli
     g[yol+'/played'] = true;
     g[yol+'/sahaMode'] = true;
     g[yol+'/homeGoals'] = hG;
@@ -4571,6 +4602,8 @@ var _stadEkran = (function(){
       if (window._sahaIzleModu){
         var h = window._sahaIzleHedef || {}, T = window._sahaIzleTakimlar || {};
         sol = (T[h.homeId]||{}).logo || ''; sag = (T[h.awayId]||{}).logo || '';
+        // Tabela oyuncunun ekranındaki sırayla geliyor: oyuncu deplasmandaysa solda deplasman.
+        if (h.tabela && h.tabela.solTaraf === 'away'){ var _t = sol; sol = sag; sag = _t; }
       } else if (window._sahaAktifFikstur && typeof sahaFikstur !== 'undefined'){
         var fk = window._sahaAktifFikstur, mc = sahaFikstur[fk.matchId];
         if (mc){
@@ -5369,8 +5402,12 @@ function _sahaIzleVeriUygula(m){
     isLive: !!m.isLive, played: !!m.played,
     homeId: m.homeId || null, awayId: m.awayId || null,
     homeJer: (typeof m.homeJer==='number') ? m.homeJer : null,
-    awayJer: (typeof m.awayJer==='number') ? m.awayJer : null
+    awayJer: (typeof m.awayJer==='number') ? m.awayJer : null,
+    tabela: (m.tabela && typeof m.tabela==='object') ? m.tabela : null,
+    yon: (m.izleYon && typeof m.izleYon==='object') ? m.izleYon : null
   };
+  // Kamera oyuncununkiyle AYNI tarafta dursun (bkz. sahaCanliYaz/izleYon notu).
+  try{ if(window._sahaIzleHedef.yon) dirA = (window._sahaIzleHedef.yon.dirA < 0) ? -1 : 1; }catch(e){}
   _sahaIzleFormaUygula(window._sahaIzleHedef.homeJer, window._sahaIzleHedef.awayJer);
   _sahaIzleKadroUygula();
   try{
@@ -5382,6 +5419,8 @@ function _sahaIzleVeriUygula(m){
     // bkz. _sahaIzlePTKoprusu - PTPlayer'a bildirilen "an" bu değerden okunur.
     window._sahaIzleSonDakika = dk;
   }catch(e){}
+  // Oyuncunun ekranındaki tabela varsa AYNEN o gösterilir (sıra, renk, süre biçimi).
+  try{ _sahaIzleTabelaUygula(window._sahaIzleHedef.tabela); }catch(e){}
   if((!window._sahaIzleHedef.isLive || window._sahaIzleHedef.played) && !window._sahaIzleBittiGosterildi){
     window._sahaIzleBittiGosterildi = true;
     try{ var b=document.getElementById('sahaIzleBanner'); if(b)b.innerHTML='<span>🏁 MAÇ SONA ERDİ</span>'; }catch(e){}
@@ -5465,7 +5504,18 @@ function _sahaIzleKadroUygula(){
 // skorbordun "çalışmadığı" izlenimi veriyordu. Burada GERÇEK ev/deplasman takımının adından
 // (kisaKod ile) ve saha uygulamasının kendi takım renk paletinden (TAKIMLAR[0]/[1] - forma
 // rengi olarak zaten oyunda kullanılıyor) kısa kod ve renk üretilip #board'a yazılıyor.
+function _sahaIzleTabelaUygula(t){
+  if(!t) return;
+  var yaz = function(id, v){ var el = document.getElementById(id); if(el) el.textContent = (v==null?'':String(v)); };
+  yaz('sa', t.solSkor); yaz('sb', t.sagSkor);
+  yaz('devre', t.devre); yaz('sure', t.sure); yaz('uzatma', t.uz);
+  var ka = document.querySelector('#board .kod.a'), kb = document.querySelector('#board .kod.b');
+  if(ka){ ka.textContent = t.solKod || ''; if(t.solRenk) ka.style.background = t.solRenk; }
+  if(kb){ kb.textContent = t.sagKod || ''; if(t.sagRenk) kb.style.background = t.sagRenk; }
+}
 function _sahaIzleSkorbordTakimlariUygula(homeId, awayId){
+  // Oyuncudan gelen tabela varsa o geçerli - ev sahibi solda varsayımıyla üzerine yazılmaz.
+  try{ if(window._sahaIzleHedef && window._sahaIzleHedef.tabela) return; }catch(e){}
   try{
     var takimlar = window._sahaIzleTakimlar || {};
     var h = takimlar[homeId] || {}, a = takimlar[awayId] || {};
@@ -5565,12 +5615,13 @@ function _sahaIzlePTKoprusu(){
 // hız türetilip, ANA OYUNDAKİYLE AYNI animasyon formülü (phase/sw/rotation.y) buna uygulanıyor -
 // gerçek hız yayınlanmasa da görsel olarak ayırt edilemeyecek kadar yakın bir koşu animasyonu
 // ve dönüş elde ediliyor.
-function _sahaIzleTakimUygula(pool, arr, lerp, dt){
+function _sahaIzleTakimUygula(pool, arr, lerp, dt, xYon){
+  xYon = xYon || 1;
   for(var i=0;i<pool.length;i++){
     var p = pool[i];
     var pt = arr[i];
     if(pt && typeof pt[0]==='number' && typeof pt[1]==='number'){
-      var wx = pt[0]*HLX, wz = pt[1]*HWZ;
+      var wx = pt[0]*HLX*xYon, wz = pt[1]*HWZ;
       p.obj.visible = true; p.golge.visible = true;
       var oncekiX = p.obj.position.x, oncekiZ = p.obj.position.z;
       p.obj.position.x += (wx - p.obj.position.x)*lerp;
@@ -5601,8 +5652,12 @@ function _sahaIzleTakimUygula(pool, arr, lerp, dt){
 function _sahaIzleKareAdimla(dt){
   var h = window._sahaIzleHedef; if(!h)return;
   var lerp = Math.min(1, dt*6);
+  // Ev perspektifi -> oyuncunun dünyası: homeX = (benHome ? 1 : -1) * x * dirA / HLX
+  // olduğundan x = homeX * HLX * (benHome ? 1 : -1) * dirA. izleYon yoksa (eski veri) 1.
+  var xYon = 1;
+  try{ if(h.yon) xYon = (h.yon.benHome ? 1 : -1) * (h.yon.dirA < 0 ? -1 : 1); }catch(e){}
   if(h.top){
-    var bx = h.top.x*HLX, bz = h.top.z*HWZ;
+    var bx = h.top.x*HLX*xYon, bz = h.top.z*HWZ;
     var oncekiBX = ball.position.x, oncekiBZ = ball.position.z;
     ball.position.x += (bx-ball.position.x)*lerp;
     ball.position.z += (bz-ball.position.z)*lerp;
@@ -5627,8 +5682,8 @@ function _sahaIzleKareAdimla(dt){
   // tamamen boşsa (gerçek bir konum akışı hiç yoksa) dokunulmuyor - oyuncular sayfa açılışındaki
   // varsayılan diziliş konumunda (dizil()) görünmeye devam ediyor; yalnızca GERÇEK bir konum
   // akışı geldiğinde (dizi doluysa) canlı takip devreye giriyor.
-  if(h.home && h.home.length) _sahaIzleTakimUygula(teamB, h.home, lerp, dt);   // ev sahibi - mavi (2D mini-saha ile aynı renk kuralı)
-  if(h.away && h.away.length) _sahaIzleTakimUygula(teamA, h.away, lerp, dt);   // deplasman - kırmızı
+  if(h.home && h.home.length) _sahaIzleTakimUygula(teamB, h.home, lerp, dt, xYon);   // ev sahibi - mavi (2D mini-saha ile aynı renk kuralı)
+  if(h.away && h.away.length) _sahaIzleTakimUygula(teamA, h.away, lerp, dt, xYon);   // deplasman - kırmızı
   // KULLANICI TALEBİ (2026-09-18-E, ekran görüntüsü ile: "kamera açısını böyle yap ama topu
   // takip etsin"): Seyirci kamerası önceden KENDİ (daha zayıf, 0.55/0.35 katsayılı) bir
   // formülle çalışıyordu ve top sık sık kadraj dışında kalıyordu. Artık asıl OYUN kamerasıyla

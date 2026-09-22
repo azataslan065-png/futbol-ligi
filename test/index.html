@@ -2539,7 +2539,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-K';
+window.APP_BUILD='2026-09-22-L';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -25560,6 +25560,7 @@ function ptpYayinBindirmeGuncelle(){
       }
     }catch(e){}
     window._ptCanliMacIzleniyor = !!m;
+    if(!m) window._ptTabelaliMac = false;
 
     // Alt serit: mac belirlendikten sonra, her tazelemede (2 sn) guncellenir.
     try{ ptBirazdanSeridi(m); }catch(e){}
@@ -25570,11 +25571,32 @@ function ptpYayinBindirmeGuncelle(){
       var kodA = (a.short || (a.name||'').slice(0,3) || 'DEP').toLocaleUpperCase('tr');
       var dk = (m.minute != null) ? (m.minute + "'") : '';
       var uz = (m.extraMin) ? ('+' + m.extraMin) : '';
-      sk.innerHTML =
-        '<div class="kod a">' + escHtml(kodH) + '</div>'
-        + '<div class="sk">' + (Number(m.homeGoals)||0) + ' - ' + (Number(m.awayGoals)||0) + '</div>'
-        + '<div class="kod b">' + escHtml(kodA) + '</div>'
-        + (dk ? '<div class="sr">' + dk + (uz ? '<span class="uz">' + uz + '</span>' : '') + '</div>' : '');
+      var _skHtml;
+      // (2026-09-22-L, kullanıcı bildirdi: "oynanış ekranı ile izleme ekranı uyuşmuyor")
+      // SAHA'da oynanan maçta oyuncunun EKRANINDAKİ tabela (saha.html/sahaCanliYaz 'tabela')
+      // aynen gösterilir: solda oyuncunun takımı, onun forma rengi, oyunun kendi saati
+      // (ör. "1. 1:38"). Önceden burada ev sahibi solda ve 90'a ölçekli dakika vardı - oyuncu
+      // deplasmandayken skor ters, süre farklı görünüyordu. Tabela yoksa (yöneticinin elle
+      // yürüttüğü maç) eski gösterim aynen devam eder.
+      var _tb = (m.tabela && typeof m.tabela === 'object') ? m.tabela : null;
+      if(_tb){
+        var _renk = function(r){ return /^#[0-9a-fA-F]{3,8}$/.test(String(r||'')) ? ' style="background:'+r+'"' : ''; };
+        _skHtml =
+          '<div class="kod a"' + _renk(_tb.solRenk) + '>' + escHtml(String(_tb.solKod||'')) + '</div>'
+          + '<div class="sk">' + (Number(_tb.solSkor)||0) + ' - ' + (Number(_tb.sagSkor)||0) + '</div>'
+          + '<div class="kod b"' + _renk(_tb.sagRenk) + '>' + escHtml(String(_tb.sagKod||'')) + '</div>'
+          + '<div class="sr">' + escHtml(String(_tb.devre||'')) + '&nbsp;' + escHtml(String(_tb.sure||''))
+          + (_tb.uz ? '<span class="uz">' + escHtml(String(_tb.uz)) + '</span>' : '') + '</div>';
+      }else{
+        _skHtml =
+          '<div class="kod a">' + escHtml(kodH) + '</div>'
+          + '<div class="sk">' + (Number(m.homeGoals)||0) + ' - ' + (Number(m.awayGoals)||0) + '</div>'
+          + '<div class="kod b">' + escHtml(kodA) + '</div>'
+          + (dk ? '<div class="sr">' + dk + (uz ? '<span class="uz">' + uz + '</span>' : '') + '</div>' : '');
+      }
+      // Aynı içerik yeniden yazılmaz (saniyelik tazelemede gereksiz DOM işi olmasın).
+      if(sk._sonHtml !== _skHtml){ sk.innerHTML = _skHtml; sk._sonHtml = _skHtml; }
+      window._ptTabelaliMac = !!_tb;
       // SERBEST TASIMA: Skorboard konumu da onizlemede surukleniyor; rozetten BAGIMSIZ
       // kendi yuzde degerlerini tasir (skorX/skorY).
       // Geriye uyum: yeni alanlar yoksa eski kose adindan yuzde uretilir, boylece
@@ -25618,6 +25640,11 @@ try{
   // geldiginde tazeleniyordu, dakikalar ilerlerken donuk kaliyordu. Skorboard zamanlayicisi
   // zaten calistigi icin ikisi birlikte tazelenir - ayri bir zamanlayici acmak gereksiz yuk.
   // Aralik 2 saniye: skor ve baski gostergesi icin gecikme fark edilmez, yuk yaratmaz.
+  // Tabelalı (SAHA'da oynanan) maç izlenirken skorbord saniyede 2 kez tazelenir - oyuncunun
+  // ekranındaki saat saniye saniye ilerliyor, 2 sn'lik ana aralıkta süre atlayarak akardı.
+  if(!window._ptTabelaT) window._ptTabelaT = setInterval(function(){
+    try{ if(window._ptTabelaliMac && window._ptCanliMacIzleniyor) ptpYayinBindirmeGuncelle(); }catch(e){}
+  }, 500);
   if(!window._ptSkorT) window._ptSkorT = setInterval(function(){
     try{ ptBaskiOrnekle(); }catch(e){}
     try{ ptpYayinBindirmeGuncelle(); }catch(e){}
