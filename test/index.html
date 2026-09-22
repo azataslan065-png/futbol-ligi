@@ -2539,7 +2539,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-Q';
+window.APP_BUILD='2026-09-22-T';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -3216,6 +3216,34 @@ var _isUserTouching=false;
 // engellenir.
 let _deferredRenderFns=[];
 document.addEventListener('touchstart',()=>{_isUserTouching=true;},{passive:true});
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// AĞIR YENİDEN ÇİZİM PLANLAYICISI (2026-09-22-R, kullanıcı: "TV ile fikstür arasında geçişte
+// kasma/takılma var, her dokunuşta fikstür ekranı çıkıyor")
+// KÖK SEBEP: SAHA'da canlı maç oynanırken oyun maç düğümüne saniyede ~6-7 kez yazıyor (top
+// ve 22 oyuncunun konumu). Lig dinleyicisi HER yazımda aktif sekmenin TAMAMINI (renderTab)
+// ve açıksa TV kanal listesini SIFIRDAN yeniden çiziyordu - saniyede 6-7 tam sayfa. Parmak
+// ekrandayken çizimler erteleniyor ama TEKİLLEŞTİRİLMİYORDU: 2 sn'lik bir dokunuşta ~14
+// renderTab birikiyor, parmak kalkınca ARKA ARKAYA çalışıp ekranı donduruyordu. TV listesi
+// ise hiç ertelenmiyordu - dokunulan kanal kartı parmağın altında yeniden yaratılıyor,
+// dokunuş kayboluyor ya da alttaki sayfaya düşüyordu.
+// ÇÖZÜM: Her ağır çizim bir ANAHTAR altında planlanır: en fazla 'aralik' ms'de bir çalışır,
+// arada gelen istekler tek bir son çizimde birleşir, parmak ekrandayken hiç çalışmaz.
+// İlk çizim bekletilmez (açılışta ekran boş kalmasın).
+var _ptRenderPlan={};
+function ptRenderPlanla(anahtar,fn,aralik){
+  var p=_ptRenderPlan[anahtar]||(_ptRenderPlan[anahtar]={son:0,t:null,fn:null});
+  p.fn=fn;
+  if(p.t)return;                                    // zaten planlı: son isteğe birleşir
+  var calis=function(){
+    if(_isUserTouching){p.t=setTimeout(calis,160);return;}
+    p.t=null;p.son=Date.now();
+    var f=p.fn;p.fn=null;
+    try{f&&f();}catch(err){console.error('Planlı çizim hatası ('+anahtar+'):',err);}
+  };
+  if(!p.son&&!_isUserTouching){calis();return;}     // ilk çizim: hemen
+  p.t=setTimeout(calis,Math.max(0,(p.son+aralik)-Date.now()));
+}
+window.ptRenderPlanla=ptRenderPlanla;
 function _flushDeferredRender(){
   _isUserTouching=false;
   if(_deferredRenderFns.length){
@@ -5876,8 +5904,12 @@ function listenToLeague(leagueId){
     if(!searchHasFocus){
       // KULLANICI TALEBİ / HATA DÜZELTMESİ: Kullanıcı parmağı ekrandayken (dokunma/kaydırma
       // sürerken) bu ağır yeniden çizimi HEMEN yapmak yerine parmak kalkana kadar erteliyoruz.
-      if(_isUserTouching)_deferredRenderFns.push(()=>renderTab(_tab));
-      else renderTab(_tab);
+      // Planlı: en fazla saniyede bir, parmak ekrandayken değil (bkz. ptRenderPlanla).
+      ptRenderPlanla('sekme',function(){
+        var _si=document.getElementById('searchInp');
+        if(_si&&document.activeElement===_si)return;       // arama yazılırken klavye kapanmasın
+        renderTab(_tab);
+      },1000);
     }
     // KULLANICI TALEBİ: Gerçek lig verisi ilk kez başarıyla render edildiğinde, giriş sonrası
     // yükleniyor göstergesini kapat (artık ekran gerçekten dolu, "donmuş" görünmüyor).
@@ -6069,7 +6101,17 @@ function listenToLeague(leagueId){
         var _vsi=document.getElementById('videoScreenSearchInp');
         var _focused=_vsi&&document.activeElement===_vsi;
         if(_sw&&_sw.classList.contains('open')&&!_focused&&typeof renderVideoScreenList==='function'){
-          renderVideoScreenList();
+          // Planlı: koşullar çalışma anında yeniden denetlenir (liste o arada kapanmış olabilir).
+          ptRenderPlanla('tvListe',function(){
+            try{
+              var _k=window.PTSheetNav&&PTSheetNav.currentKey?PTSheetNav.currentKey():null;
+              var _w=document.getElementById('sheetWrap');
+              var _i=document.getElementById('videoScreenSearchInp');
+              if(_k!=='videoList'||!_w||!_w.classList.contains('open'))return;
+              if(_i&&document.activeElement===_i)return;
+              renderVideoScreenList();
+            }catch(e){}
+          },1500);
         }
       }
     }catch(err){}

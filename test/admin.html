@@ -1879,7 +1879,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-Q';
+window.APP_BUILD='2026-09-22-T';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -7248,13 +7248,51 @@ function kullaniciOnayDegistir(uid, onayla){
 // zaten var olan canli/sonuc gorunumu bunu OTOMATIK gosterir, ayrica kod yazmaya gerek
 // kalmaz. Burasi sadece ATAMAYI yapar ve durumu OZETLER.
 // ══════════════════════════════════════════════════════════════════════════════════════
+// TAKIM SAHİPLİĞİ (2026-09-22-R): Kullanıcı takımını SAHA'ya ilk girişte kendisi seçiyor ve
+// 'takimSahipleri/{takimId}' = uid ile kilitliyor (bkz. saha.html/takimSec). Değişikliği
+// yalnızca yönetici yapar: atama, kullanıcının takimId'si ile kilidi TEK işlemde günceller -
+// eski takımın kilidi açılır, yenisi bu kullanıcıya yazılır.
+window._takimSahipleriA = {};
 function sahaTakimAta(uid, takimId){
-  firebase.database().ref('kullanicilar/'+uid+'/takimId').set(takimId || null)
+  var eski = (_kullanicilar[uid]||{}).takimId || '';
+  if(takimId && _takimSahipleriA[takimId] && _takimSahipleriA[takimId] !== uid){
+    toast('❌ Bu takım başka bir kullanıcıda - önce onun atamasını kaldırın','er'); renderSahaAtama(); return;
+  }
+  var g = {};
+  g['kullanicilar/'+uid+'/takimId'] = takimId || null;
+  if(eski && eski !== takimId && (!_takimSahipleriA[eski] || _takimSahipleriA[eski] === uid)) g['takimSahipleri/'+eski] = null;
+  if(takimId) g['takimSahipleri/'+takimId] = uid;
+  firebase.database().ref().update(g)
     .then(function(){ toast(takimId ? '🎮 Takım atandı' : '🎮 Atama kaldırıldı'); })
-    .catch(function(){ toast('❌ Atama başarısız','er'); });
+    .catch(function(e){ toast('❌ Atama başarısız: '+((e&&e.message)||''),'er'); });
+}
+(function takimSahipleriDinleAdmin(){
+  try{
+    if(!window.firebase || !firebase.database){ setTimeout(takimSahipleriDinleAdmin, 700); return; }
+    firebase.database().ref('takimSahipleri').on('value', function(sn){
+      window._takimSahipleriA = sn.val() || {};
+      window._takimSahipleriYuklendi = true;
+      try{ renderSahaAtama(); }catch(e){}
+    });
+  }catch(e){ setTimeout(takimSahipleriDinleAdmin, 1500); }
+})();
+// Bu sürümden önce yapılmış atamaların kilidi yok: yönetici paneli açıkken bir kez tamamlanır
+// (yalnızca boş kilitler yazılır, var olan kilide dokunulmaz).
+var _takimKilitTamamlandi = false;
+function takimKilitleriniTamamla(){
+  if(_takimKilitTamamlandi || !window._takimSahipleriYuklendi) return;   // kilitler okunmadan yazma
+  var ids = Object.keys(_kullanicilar||{}); if(!ids.length) return;
+  _takimKilitTamamlandi = true;
+  var g = {}, n = 0;
+  ids.forEach(function(uid){
+    var tid = (_kullanicilar[uid]||{}).takimId;
+    if(tid && !_takimSahipleriA[tid] && !g['takimSahipleri/'+tid]){ g['takimSahipleri/'+tid] = uid; n++; }
+  });
+  if(n) firebase.database().ref().update(g).catch(function(){ _takimKilitTamamlandi = false; });
 }
 function renderSahaAtama(){
   var kutu = qs('sahaAtamaListe'); if(!kutu) return;
+  try{ takimKilitleriniTamamla(); }catch(e){}
   var ids = Object.keys(_kullanicilar);
   if(!ids.length){ kutu.innerHTML = '<p class="hint">Henüz kayıtlı saha kullanıcısı yok.</p>'; return; }
   var teamOpts = Object.keys(S.teams||{}).map(function(tid){
@@ -7262,11 +7300,14 @@ function renderSahaAtama(){
   }).sort(function(a,b){ return a.name.localeCompare(b.name,'tr'); });
   kutu.innerHTML = ids.map(function(uid){
     var k = _kullanicilar[uid] || {};
-    if(k.durum !== 'onayli') return '';
+    // Takımını kendisi seçmiş ama henüz onaylanmamış kullanıcı da listede: yönetici
+    // yanlış seçimi onaydan önce düzeltebilsin.
+    if(k.durum !== 'onayli' && !k.takimId) return '';
     var mevcut = k.takimId || '';
     var sahipDiger = teamOpts.filter(function(t){
-      return ids.some(function(u2){
-        return u2!==uid && (_kullanicilar[u2]||{}).takimId===t.id && (_kullanicilar[u2]||{}).durum==='onayli';
+      var kilit = _takimSahipleriA[t.id];
+      return (kilit && kilit !== uid) || ids.some(function(u2){
+        return u2!==uid && (_kullanicilar[u2]||{}).takimId===t.id;
       });
     }).map(function(t){ return t.id; });
     var opts = '<option value="">— Takım seçilmedi —</option>' + teamOpts.map(function(t){

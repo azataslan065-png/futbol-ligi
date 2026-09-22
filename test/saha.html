@@ -104,6 +104,9 @@
 
   #touch{position:fixed;inset:0;z-index:20;display:none;pointer-events:none}
   #touch.on{display:block}
+  /* Konsol kolu bağlıyken dokunmatik kontroller hiçbir koşulda görünmez (bkz. kolDurumUygula).
+     !important: başka bir kod 'on' sınıfını yeniden eklese bile gizli kalsın. */
+  body.kol-bagli #touch{display:none!important}
   #stick{position:absolute;left:20px;bottom:20px;width:124px;height:124px;border-radius:50%;
     border:1.5px solid rgba(255,255,255,.2);background:rgba(8,13,11,.32);pointer-events:auto}
   #knob{position:absolute;left:50%;top:50%;width:50px;height:50px;margin:-25px 0 0 -25px;border-radius:50%;
@@ -279,6 +282,9 @@
       <div class="row"><span>Hava<small>Işık ve sis</small></span><button id="sw-hava">Gece</button></div>
     <div class="row"><span>Baskı<small>Topa kaç kişi gider</small></span><button id="sw-baski">Orta</button></div>
     <div class="row"><span>Ağırlık<small>Takımın saha üzerindeki yeri</small></span><button id="sw-agirlik">Dengeli</button></div>
+    <!-- KONSOL KOLU: durum + tuş ataması (bkz. kolAyarCiz) -->
+    <div class="row"><span>Konsol kolu<small>Tuş atamasını düzenle</small></span><button id="sw-kol" onclick="var k=document.getElementById('kolAyar');k.style.display=k.style.display==='none'?'block':'none';kolAyarCiz();">Yok</button></div>
+    <div id="kolAyar" style="display:none;margin:.1rem 0 .5rem;padding:.4rem .6rem;border-radius:10px;background:rgba(0,0,0,.22)"></div>
     <div class="row"><span>Hata ayıklama<small>Ofsayt çizgisi, dokunuş yarıçapı, sayaçlar — <b>H</b></small></span><button id="sw-hata">Kapalı</button></div>
     <button class="btn" id="b-ayar-kapa">Devam et</button>
   </div>
@@ -1753,6 +1759,7 @@ function _sahaFiksturDinle(){
   fbDb.ref('leagues/'+sahaLigId+'/teams').on('value', function(sn){
     sahaLigTakimlar = sn.val() || {};
     maclarCiz();
+    try{ takimSecimKontrol(); takimSecimCiz(); }catch(e){}
   });
   fbDb.ref('leagues/'+sahaLigId+'/matches').on('value', function(sn){
     sahaFikstur = sn.val() || {};
@@ -1768,12 +1775,20 @@ try{
   });
 }catch(e){}
 
+// Kayıt tamam mı? Takım seçimi (2026-09-22-R) kayıttan ÖNCE yapılabildiği için düğümde
+// yalnızca takimId olabilir; kayıt, formun yazdığı 'durum' alanıyla anlaşılır.
+function kayitliMi(){ return !!(benimKayit && benimKayit.durum); }
+var _benimKayitYuklendi = false;
 function hesabiDinle(){
   if(!fbHazir || !benimUid) return;
   fbDb.ref('kullanicilar/'+benimUid).on('value', function(sn){
     benimKayit = sn.val();
+    _benimKayitYuklendi = true;
     hesapDurumCiz(); magazaCiz(); maclarCiz();
+    try{ menuGoster(); }catch(e){}
+    try{ takimSecimKontrol(); }catch(e){}
   });
+  takimSahipleriDinle();
   // Havuz okumasi hesaptan BAGIMSIZ olmali: kullanici henuz kayit olmamis olsa bile
   // magazayi gorebilmeli, yoksa "once kayit ol ama ne alacagini goremezsin" durumu olur.
   fbDb.ref('oyuncuHavuzu').on('value', function(sn){
@@ -1791,6 +1806,115 @@ function hesabiDinle(){
 
 // Kullanici kaydi: takimi KENDI secer, yonetici onaylar (tasarim.md 2.4).
 // Baslangic kadrosu burada uretilir - 30-40 guc araliginda, hepsi baslangic:true.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// KONTROLCÜ TAKIM SEÇİMİ (2026-09-22-R, kullanıcı: "SAHA'ya ilk girişte takım seçimi sunulsun;
+// seçilen takımı başkası seçemesin, değişikliği admin yapsın")
+// Önceden kullanıcı yalnızca kendi takımını kuruyor, ligdeki hangi takımı oynatacağını
+// (takimId) yönetici elle atıyordu.
+// TEKİLLİK: 'takimSahipleri/{takimId}' = uid. Yazım bir TRANSACTION ile yapılır: düğüm boşsa
+// yazılır, doluysa işlem iptal olur - iki kişi aynı anda aynı takıma bassa bile yalnızca
+// biri alır. Veritabanı kuralı da doluyken üzerine yazmayı yalnızca yöneticiye bırakır.
+// DEĞİŞİKLİK: Kullanıcı seçtikten sonra bu ekran bir daha açılmaz; takımı yalnızca yönetici
+// (admin > Saha > Takım ataması) değiştirir ya da boşaltır.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+var _takimSahipleri = {}, _takimSahipleriDinleniyor = false, _takimSecimErtelendi = false;
+function takimSahipleriDinle(){
+  if(_takimSahipleriDinleniyor || !fbHazir) return;
+  _takimSahipleriDinleniyor = true;
+  // Bu sürümden ÖNCE yönetici tarafından atanmış kullanıcıların takimSahipleri kaydı
+  // yok (yönetici paneli açılınca tamamlanır). O zamana kadar da dolu görünsünler diye
+  // kullanıcı kayıtlarındaki takimId'ler de okunur.
+  fbDb.ref('kullanicilar').once('value').then(function(sn){
+    var v = sn.val() || {};
+    Object.keys(v).forEach(function(uid){
+      var tid = v[uid] && v[uid].takimId;
+      if(tid && uid !== benimUid && !_takimSahipleri[tid]) _takimSahipleri[tid] = uid;
+    });
+    try{ takimSecimCiz(); }catch(e){}
+  }).catch(function(){});
+  fbDb.ref('takimSahipleri').on('value', function(sn){
+    _takimSahipleri = Object.assign({}, _takimSahipleri, sn.val() || {});
+    try{ takimSecimCiz(); }catch(e){}
+  }, function(err){
+    try{ if(window.DiagSaha) DiagSaha('takimSahipleriOkuma', err, {
+      anlami:'Takim sahipleri okunamadi; dolu takimlar isaretlenemez.',
+      oneri:'Kurallarda takimSahipleri dali tanimli mi?'}); }catch(e){}
+  });
+}
+function takimSecimKontrol(){
+  var gerek = !!(benimUid && _benimKayitYuklendi && sahaLigId
+    && Object.keys(sahaLigTakimlar||{}).length
+    && !(benimKayit && benimKayit.takimId) && !_takimSecimErtelendi);
+  var el = document.getElementById('takimSecimEkran');
+  if(!gerek){ if(el) el.style.display = 'none'; return; }
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'takimSecimEkran';
+    el.style.cssText = 'position:fixed;inset:0;z-index:2147482000;display:flex;flex-direction:column;'
+      + 'background:rgba(8,14,11,.97);color:#eef2ee;font-family:inherit;padding:1rem 1rem calc(1rem + env(safe-area-inset-bottom,0px));'
+      + 'padding-top:calc(1rem + env(safe-area-inset-top,0px))';
+    document.body.appendChild(el);
+  }
+  el.style.display = 'flex';
+  takimSecimCiz();
+}
+function takimSecimCiz(){
+  var el = document.getElementById('takimSecimEkran');
+  if(!el || el.style.display === 'none') return;
+  var ids = Object.keys(sahaLigTakimlar||{}).sort(function(a,b){
+    return String((sahaLigTakimlar[a]||{}).name||'').localeCompare(String((sahaLigTakimlar[b]||{}).name||''),'tr');
+  });
+  var esc = function(t){ return String(t==null?'':t).replace(/[&<>"']/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); };
+  var kartlar = ids.map(function(tid){
+    var t = sahaLigTakimlar[tid] || {};
+    var sahip = _takimSahipleri[tid];
+    var dolu = !!(sahip && sahip !== benimUid);
+    var logo = t.logo ? '<img src="'+esc(t.logo)+'" style="width:34px;height:34px;object-fit:contain" onerror="this.style.display=\'none\'">'
+                      : '<span style="font-size:1.5rem">⚽</span>';
+    return '<button '+(dolu?'disabled':'')+' onclick="takimSec(\''+esc(tid)+'\')" style="display:flex;align-items:center;gap:.7rem;'
+      + 'width:100%;text-align:left;padding:.7rem .8rem;margin-bottom:.45rem;border-radius:12px;font:inherit;color:inherit;'
+      + 'border:1px solid rgba(255,255,255,.14);background:'+(dolu?'rgba(255,255,255,.03)':'rgba(47,174,122,.12)')+';'
+      + (dolu?'opacity:.45':'cursor:pointer')+'">'
+      + '<span style="width:36px;display:flex;justify-content:center">'+logo+'</span>'
+      + '<span style="flex:1;min-width:0;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(t.name||'(adsız)')+'</span>'
+      + '<span style="font-size:.72rem;font-weight:700;'+(dolu?'color:#e4b23c':'color:#8fd0b0')+'">'+(dolu?'Başka kullanıcıda':'Seç')+'</span>'
+      + '</button>';
+  }).join('');
+  el.innerHTML = '<div style="font-size:1.1rem;font-weight:900;margin-bottom:.25rem">🎮 Takımını seç</div>'
+    + '<div style="font-size:.8rem;opacity:.72;line-height:1.5;margin-bottom:.8rem">SAHA\'da bu takımı yöneteceksin. '
+    + 'Seçtiğin takımı başka kimse seçemez. <b>Seçimini yalnızca yönetici değiştirebilir.</b></div>'
+    + '<div style="flex:1;overflow-y:auto;overscroll-behavior:contain">'+(kartlar || '<div style="opacity:.6">Ligde takım yok.</div>')+'</div>'
+    + '<button onclick="takimSecimErtele()" style="margin-top:.6rem;padding:.6rem;border-radius:10px;font:inherit;'
+    + 'background:transparent;color:inherit;border:1px solid rgba(255,255,255,.2);opacity:.75">Sonra seç</button>';
+}
+function takimSecimErtele(){
+  _takimSecimErtelendi = true;           // yalnızca bu oturum için; sonraki girişte yine sorulur
+  var el = document.getElementById('takimSecimEkran'); if(el) el.style.display = 'none';
+}
+function takimSec(tid){
+  if(!fbHazir || !benimUid || !tid) return;
+  var t = sahaLigTakimlar[tid] || {};
+  if(!confirm((t.name||'Bu takım') + ' seçilsin mi?\n\nBu seçimi yalnızca yönetici değiştirebilir.')) return;
+  fbDb.ref('takimSahipleri/' + tid).transaction(function(cur){
+    if(cur && cur !== benimUid) return;          // başkasının: iptal
+    return benimUid;
+  }).then(function(r){
+    if(!r.committed){
+      mesaj('', 'Bu takım az önce başka bir kullanıcı tarafından seçildi', 2400);
+      return;
+    }
+    return fbDb.ref('kullanicilar/' + benimUid + '/takimId').set(tid).then(function(){
+      mesaj('TAKIMIN', t.name || '', 2200);
+      var el = document.getElementById('takimSecimEkran'); if(el) el.style.display = 'none';
+    });
+  }).catch(function(err){
+    var m = (err && (err.message || err.code)) || 'bilinmeyen hata';
+    mesaj('SEÇİLEMEDİ', String(m).slice(0,90), 3200);
+    try{ if(window.DiagSaha) DiagSaha('takimSec', err, { anlami:'Takim secimi kaydedilemedi.',
+      oneri:'takimSahipleri ve kullanicilar yazma kurallarini denetleyin.' }); }catch(e){}
+  });
+}
 function hesapOlustur(takimKod, kullaniciAd, amblem, renk){
   if(!fbHazir || !benimUid){ mesaj('', 'Baglanti yok', 1600); return; }
   const kadro = KADROLAR[takimKod] || [];
@@ -1820,6 +1944,8 @@ function hesapOlustur(takimKod, kullaniciAd, amblem, renk){
     kadro: { ilk11: yeni.slice(0,11), yedek: yeni.slice(11,18) },
     kayitTs: Date.now()
   };
+  // Takım seçimi kayıttan önce yapıldıysa, düğümü baştan yazan bu işlem onu silmesin.
+  if(benimKayit && benimKayit.takimId) guncel['kullanicilar/'+benimUid].takimId = benimKayit.takimId;
   // TEK ISLEMDE yazilir: kadro yazilip kullanici yazilamazsa sahipsiz oyuncular kalirdi.
   fbDb.ref().update(guncel)
     .then(function(){
@@ -1845,7 +1971,7 @@ function hesapOlustur(takimKod, kullaniciAd, amblem, renk){
 // geri bildirim icin - tek basina guvenlik saglamaz.
 function oyuncuSatinAl(id){
   const o = magazaHavuz[id];
-  if(!o || !benimKayit){ return; }
+  if(!o || !kayitliMi()){ return; }
   if(o.sahip){ mesaj('', 'Bu oyuncu satilmis', 1500); return; }
   if(!o.satista){ mesaj('', 'Satista degil', 1500); return; }
   if((benimKayit.para||0) < (o.fiyat||0)){ mesaj('', 'Paran yetmiyor', 1600); return; }
@@ -1910,7 +2036,8 @@ function girisYap(){
   });
 }
 function cikisYap(){
-  benimKayit = null; benimUid = null;
+  benimKayit = null; benimUid = null; _benimKayitYuklendi = false; _takimSecimErtelendi = false;
+  try{ takimSecimKontrol(); }catch(e){}
   try{ localStorage.removeItem('saha_girisIsim'); }catch(e){}
   menuGoster();
 }
@@ -1938,8 +2065,17 @@ function menuGoster(){
     if(m) m.style.display = girisli ? 'block' : 'none';
     // Takimi olmayan kullaniciya kurma formu acilir; oyun dugmeleri anlamsiz kalmasin.
     const kk = document.getElementById('kayitKutu');
-    if(kk) kk.style.display = (girisli && !benimKayit) ? 'block' : 'none';
-    if(girisli && !benimKayit) kayitSecenekleriCiz();
+    if(kk) kk.style.display = (girisli && _benimKayitYuklendi && !kayitliMi()) ? 'block' : 'none';
+    if(girisli && _benimKayitYuklendi && !kayitliMi()){
+      kayitSecenekleriCiz();
+      // Seçilen lig takımının adı forma önceden yazılır.
+      try{
+        var _st = benimKayit && benimKayit.takimId ? (sahaLigTakimlar[benimKayit.takimId]||{}) : null;
+        var _ad = document.getElementById('kyTakimAd'), _kd = document.getElementById('kyKisaAd');
+        if(_st && _st.name && _ad && !_ad.value) _ad.value = _st.name;
+        if(_st && _st.short && _kd && !_kd.value) _kd.value = String(_st.short).slice(0,4);
+      }catch(e){}
+    }
   }catch(e){}
 }
 // Maclarim: kullanicinin (kullanicilar/{uid}/takimId ile atandigi) takimina ait,
@@ -1947,7 +2083,7 @@ function menuGoster(){
 function maclarCiz(){
   try{
     const k = document.getElementById('maclarListe'); if(!k) return;
-    if(!benimKayit){ k.innerHTML = '<div style="opacity:.6;font-size:12px">Once takimini kur.</div>'; return; }
+    if(!kayitliMi()){ k.innerHTML = '<div style="opacity:.6;font-size:12px">Once takimini kur.</div>'; return; }
     if(benimKayit.durum !== 'onayli'){
       k.innerHTML = '<div style="opacity:.6;font-size:12px;line-height:1.6">'
         +'Hesabin yonetici onayi bekliyor.<br>Onaylandiktan sonra maclarin burada gorunur.</div>';
@@ -2018,7 +2154,7 @@ function fiksturMacinaBasla(matchId){
 function kadromCiz(){
   try{
     const k = document.getElementById('kadroListe'); if(!k) return;
-    if(!benimKayit){ k.innerHTML = '<div style="opacity:.6;font-size:12px">Once takimini kur.</div>'; return; }
+    if(!kayitliMi()){ k.innerHTML = '<div style="opacity:.6;font-size:12px">Once takimini kur.</div>'; return; }
     const benim = Object.keys(magazaHavuz).filter(function(id){
       return magazaHavuz[id] && magazaHavuz[id].sahip === benimUid;
     });
@@ -2064,7 +2200,7 @@ function hesapDurumCiz(){
       return;
     }
     if(!benimUid){ k.innerHTML = '<span style="opacity:.6">Baglaniliyor...</span>'; return; }
-    if(!benimKayit){
+    if(!kayitliMi()){
       k.innerHTML = '<span style="opacity:.75">Henuz kaydin yok.</span> '
         +'<button class="btn alt" style="margin-top:.4rem" onclick="kayitEkraniAc()">Takim kur</button>';
       return;
@@ -2267,7 +2403,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-22-Q';
+window.APP_BUILD = '2026-09-22-T';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -2340,6 +2476,28 @@ let ofsaytAday = [], ofsaytTakim = -1;
 //                 taçla attığı topu kaleci ELLE alamaz; kafa ve sekme serbest.
 //  bekleyenKart : avantaj uygulanan faulün kartı, oyun ilk durduğunda gösterilir (Kural 12).
 let duranSonrasi = null, sonVurusTuru = '', bekleyenKart = [];
+// GERÇEK DOKUNUŞ (2026-09-22-R, kullanıcı: "goller geçersiz sayılıyor"):
+// KÖK SEBEP (benim önceki sürümümdeki hata): "Duran toptan sonra başka biri dokundu mu"
+// yalnızca topKontrol'de (topu ayakla alma) izleniyordu. Taçtan/ortadan gelen topa DOĞRUDAN
+// vurulan şut ya da kafa (sut) topKontrol'den geçmiyor - kısıt kalkmadan kalıyor ve gol
+// "taçtan doğrudan gol" sayılıp iptal ediliyordu. Ayrıca topKontrol'deki kontrol, topun
+// 2.4 m üstünden geçtiği (hiç dokunmayan) oyuncuyu da dokunmuş sayıyordu.
+// ÇÖZÜM: Topa gerçekten dokunulan HER noktada (ayakla alma, göğüs, ilk dokunuş, şut, kafa,
+// pas, kayarak müdahale) bu işlev çağrılır.
+function topaDokundu(p){
+  if (!p) return;
+  if (duranSonrasi && p !== duranSonrasi.atan) duranSonrasi = null;
+  // Ofsaytta OLMAYAN bir takım arkadaşı topu oynadı: eski adaylar geçersiz (Kural 11).
+  if (ofsaytTakim === p.team && ofsaytAday.indexOf(p) < 0 && p !== sonDokunanOyuncu) ofsaytTemizle();
+}
+// Top şu an bir TAKIM ARKADAŞININ ayağında mı (sürüyor)? O zaman p topa vuramaz/alamaz.
+function arkadasSuruyor(p){
+  const s = sonDokunanOyuncu;
+  return !!(p && s && s !== p && !s.dis && s.team === p.team && sonVurusTuru === 'surus'
+    && Math.hypot(ball.position.x - s.obj.position.x, ball.position.z - s.obj.position.z) < 1.6);
+}
+// Ofsayt pozisyonundaki oyuncu topa (ilk vuruşla dahil) oynarsa ofsayt çalınır.
+function ofsaytMi(p){ return !!(p && ofsaytTakim === p.team && ofsaytAday.indexOf(p) >= 0); }
 function bekleyenKartlariGoster(){
   if (!bekleyenKart.length) return;
   const liste = bekleyenKart; bekleyenKart = [];
@@ -3140,8 +3298,9 @@ function ayarUygula(){
   if (!AYAR.ses && tribunGain){ try { tribunGain.gain.value = 0; } catch(e){} }
   else if (AYAR.ses && tribunGain){ try { tribunGain.gain.value = 0.035; } catch(e){} }
 }
-function ayarAc(){ if (running && !bitti) duraklat = true; ayarUygula(); document.getElementById('p-ayar').classList.add('on'); }
-function ayarKapa(){ document.getElementById('p-ayar').classList.remove('on'); duraklat = false; }
+function ayarAc(){ if (running && !bitti) duraklat = true; ayarUygula(); try{ kolAyarCiz(); }catch(e){} document.getElementById('p-ayar').classList.add('on'); }
+function ayarKapa(){ _kolDinleIptal(); document.getElementById('p-ayar').classList.remove('on'); duraklat = false; }
+function _kolDinleIptal(){ try{ if (typeof _kolDinle !== 'undefined') _kolDinle = null; }catch(e){} }
 document.addEventListener('fullscreenchange', ayarUygula);
 document.addEventListener('webkitfullscreenchange', ayarUygula);
 
@@ -3224,6 +3383,7 @@ function girdiYonu(o){                      // ekran girdisini dünya yönüne �
     if (keys['KeyD']) ix += 1;
     ix += touchMove.x; iy -= touchMove.y;
   }
+  { const kg = kolYonu(o); ix += kg.x; iy += kg.y; }        // konsol kolu
   if (okKullan && (o === 1 || mod !== 'iki')){
     if (keys['ArrowUp'])    iy += 1;
     if (keys['ArrowDown'])  iy -= 1;
@@ -3235,8 +3395,8 @@ function girdiYonu(o){                      // ekran girdisini dünya yönüne �
   return { x:ix, y:iy, m:Math.min(1, m) };
 }
 function kosTusu(o){
-  if (o === 1) return !!keys['ShiftRight'];
-  return !!(keys['ShiftLeft'] || (mod !== 'iki' && keys['ShiftRight']) || touchKos);
+  if (o === 1) return !!keys['ShiftRight'] || kolKosuyor(1);
+  return !!(keys['ShiftLeft'] || (mod !== 'iki' && keys['ShiftRight']) || touchKos || kolKosuyor(0));
 }
 function insanOyuncu(o){ return o === 1 ? ctrl2 : ctrl; }
 // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -3266,6 +3426,18 @@ function yon(p){ return new THREE.Vector3(Math.sin(p.obj.rotation.y), 0, Math.co
 function yakin(p, r){
   const dx = ball.position.x - p.obj.position.x, dz = ball.position.z - p.obj.position.z;
   return (dx*dx + dz*dz) < r*r && ball.position.y < 1.8;
+}
+const _destekOyuncu = { 0:null, 1:null };
+function destekSec(list, kov, sahip, tk){
+  if (!tk || !(tk.baski > 0)) return null;
+  if (sahip && list.indexOf(sahip) >= 0) return null;       // top bizde: baskı yok
+  let best = null, bd = tk.baski;
+  list.forEach(p => {
+    if (p.gk || p.dis || p === kov) return;
+    const d = p.obj.position.distanceTo(ball.position);
+    if (d < bd){ bd = d; best = p; }
+  });
+  return best;
 }
 function enYakin(list){
   let best = null, bd = 1e9;
@@ -3339,6 +3511,9 @@ function sut(o){
   if (!p || p.cd > 0 || p.kayma > 0) return;
   const yatay = Math.hypot(ball.position.x - p.obj.position.x, ball.position.z - p.obj.position.z);
   if (yatay > 1.8 || ball.position.y > 2.7) return;
+  if (arkadasSuruyor(p)) return;                            // arkadaşının topuna vurmaz
+  if (ofsaytMi(p)){ OYN[o].c = 0; ofsaytCal(p); return; }   // ilk vuruşla ofsayt
+  topaDokundu(p);
   const g = Math.min(1, OYN[o].c);
   const d = vurusYonu(p, o);
   const kafa = ball.position.y > 1.2;
@@ -3386,6 +3561,7 @@ function pasVer(p, takim, yonTercih){
   // ayrica tetikleniyordu; modelTekSefer ayni klibi bastan baslattigi icin cift
   // tetikleme gorsel bir fark yaratmaz.)
   try{ if(p && p.obj && p.obj.userData.hazirModel && ball.position.y <= 1.2) modelTekSefer(p.obj.userData, 'sutSag', 1.1); }catch(e){}
+  topaDokundu(p);
   const mates = players.filter(m => m.team === takim && m !== p && !m.gk && sahada(m));
   let best = null, bs = -1e9;
   mates.forEach(m => {
@@ -3434,6 +3610,9 @@ function pas(o){
   if (!p || p.cd > 0 || p.kayma > 0) return;
   const yatay = Math.hypot(ball.position.x - p.obj.position.x, ball.position.z - p.obj.position.z);
   if (yatay > 1.9 || ball.position.y > 2.7) return;
+  if (arkadasSuruyor(p)) return;
+  if (ofsaytMi(p)){ ofsaytCal(p); return; }                 // ilk dokunuşla pas: ofsayt
+  topaDokundu(p);
   const g = girdiYonu(o);
   const tercih = g.m > 0.25 ? new THREE.Vector3(g.x*dirA, 0, -g.y*dirA).normalize() : null;
   if (pasVer(p, t, tercih)){
@@ -3467,6 +3646,7 @@ function kaymaKontrol(p, dt){
       p.kaymaVurdu = true;
       if (Math.random() < 0.68){
         bVel.set(p.kaymaYon.x*9, 0.6, p.kaymaYon.z*9);
+        topaDokundu(p);
         sonDokunan = p.team; sonDokunanOyuncu = p; s.tcd = 0.6; topKilit = 0.18;
         sesVurus(0.25); mesaj('', 'Kayarak kesti', 800);
       } else {
@@ -3556,8 +3736,12 @@ function aiHedef(p, kovalayan){
     return ball.position.clone().setY(0);
   }
   const tk = p.team === 0 ? TAKTIK.a : TAKTIK.b;
-  if (tk.baski > 0 && p.obj.position.distanceTo(ball.position) < tk.baski){
-    return ball.position.clone().setY(0);                 // baskı: yakındaki de gider
+  if (p === _destekOyuncu[p.team]){
+    // Destek baskısı: topun 3.5 m kale tarafında, pas/şut açısını kapatır.
+    const kale = new THREE.Vector3(-p.dir*HLX, 0, 0);
+    const yonK = kale.sub(ball.position).setY(0);
+    if (yonK.lengthSq() > 0.01) yonK.normalize();
+    return ball.position.clone().setY(0).addScaledVector(yonK, 3.5);
   }
   const t = p.home.clone();
   t.x += (ball.position.x - t.x) * 0.45;
@@ -3583,6 +3767,9 @@ function aiVurus(p){
     }
   }catch(e){}
   if (p.cd > 0 || !yakin(p, 1.5)) return;
+  if (arkadasSuruyor(p)) return;          // topu süren arkadaşının ayağından almaz
+  if (ofsaytMi(p)){ ofsaytCal(p); return; }
+  topaDokundu(p);
   const sapma = (2 - AYAR.zor) * 1.2;
   if (p.gk){
     if (Math.random() < 0.5 && pasVer(p, p.team)){        // elle atış
@@ -3645,9 +3832,17 @@ function topKontrol(dt){
   if (topKilit > 0) return;                    // vuruştan hemen sonra kimse topa yapışmasın
 
   // aynı anda yalnızca tek oyuncu topu kontrol eder; sahip olan biraz avantajlı
+  // TAKIM ARKADAŞINDAN TOP ÇALMA (kullanıcı bildirdi): En yakın oyuncu takıma bakılmadan
+  // seçiliyordu - kullanıcının oyuncusu topu süren arkadaşına yaklaşınca topu alıyordu.
+  // Artık bir oyuncu topu SÜRERKEN (ayağında) takım arkadaşları topu ondan alamaz; top
+  // yalnızca pasla ya da rakip müdahalesiyle el değiştirir. Serbest topta herkes alabilir.
+  const _sahip = sonDokunanOyuncu;
+  const _surulen = !!(_sahip && !_sahip.dis && sonVurusTuru === 'surus'
+    && Math.hypot(ball.position.x - _sahip.obj.position.x, ball.position.z - _sahip.obj.position.z) < 1.6);
   let p = null, bd = 1.45;
   for (const q of players){
     if (q.dis || q.cd > 0 || q.tcd > 0 || q.kayma > 0) continue;
+    if (_surulen && q !== _sahip && q.team === _sahip.team) continue;
     let d = Math.hypot(ball.position.x - q.obj.position.x, ball.position.z - q.obj.position.z);
     if (q === sonDokunanOyuncu) d -= 0.35;
     if (d < bd){ bd = d; p = q; }
@@ -3660,9 +3855,7 @@ function topKontrol(dt){
   // Ofsaytta OLMAYAN bir arkadaş topu alıp oynadıysa eski adaylar geçersizdir; bir sonraki
   // pas/şutta ofsaytHesapla yeniden bakar. Önceden eski liste kalıyor, arkadaş topu sürüp
   // sonra verdiğinde oyuncu artık ofsaytta olmasa bile ofsayt çalınabiliyordu.
-  else if (ofsaytTakim === p.team && ofsaytAday.indexOf(p) < 0 && p !== sonDokunanOyuncu) ofsaytTemizle();
-  // Duran topu atandan başka biri topa dokundu: "doğrudan gol olmaz" kısıtı kalkar.
-  if (duranSonrasi && p !== duranSonrasi.atan) duranSonrasi = null;
+  // (Dokunuşa bağlı kontroller topaDokundu() içinde, gerçek temas noktalarında yapılır.)
 
   const topHiz = Math.hypot(bVel.x, bVel.z);
   const oyuncuHiz = Math.hypot(p.vel.x, p.vel.z);
@@ -3671,6 +3864,7 @@ function topKontrol(dt){
   if (ball.position.y > 0.95){
     if (ball.position.y < 2.4 && bd < 1.25){
       bVel.x *= 0.30; bVel.z *= 0.30; bVel.y = -1.2;
+      topaDokundu(p);
       p.tcd = 0.18; sonDokunan = p.team; sonDokunanOyuncu = p; sonVurusTuru = 'sekme';
       gurultu(0.05, 0.06, 600);
     }
@@ -3680,6 +3874,7 @@ function topKontrol(dt){
   /* sert gelen top: önce ilk dokunuşla yavaşlat, aynı karede sürmeye başlama */
   if (topHiz > oyuncuHiz + 7){
     bVel.x *= 0.35; bVel.z *= 0.35; bSpin = 0;
+    topaDokundu(p);
     p.tcd = 0.16; sonDokunan = p.team; sonDokunanOyuncu = p; sonVurusTuru = 'sekme';
     gurultu(0.05, 0.07, 600);
     return;
@@ -3697,6 +3892,7 @@ function topKontrol(dt){
   const vv = Math.hypot(bVel.x, bVel.z);
   if (vv > vmax && vv > 0.001){ bVel.x *= vmax/vv; bVel.z *= vmax/vv; }
   bVel.y = 0; bSpin = 0;
+  if (sonDokunanOyuncu !== p) topaDokundu(p);
   sonDokunan = p.team; sonDokunanOyuncu = p; sonVurusTuru = 'surus';
 }
 
@@ -3740,7 +3936,8 @@ function duranBaslat(tip, takim, x, z, sec){
   bekleyenKartlariGoster();
   const alici = (tip === 'kale') ? (takim === 0 ? teamA : teamB)[0] : takimEnYakin(takim, ball.position);
   // dolayli: ENDİREKT serbest vuruş (ofsayt, geri pas) - kaleye doğrudan atılan top gol olmaz.
-  duran = { tip, takim, alici, bekle:1.0, hazir:0, omur:0, duvar:null, dolayli:!!sec.dolayli };
+  duran = { tip, takim, alici, bekle:1.0, hazir:0, omur:0, duvar:null, dolayli:!!sec.dolayli,
+            nokta:{ x:x, z:z } };   // taç atıcısı bu noktaya bağlıdır (bkz. duran top bloğu)
   if (tip === 'serbest') duran.duvar = duvarKur(takim);
   // KALE VURUŞU (Kural 16): Top vurulana kadar rakipler ceza sahasının DIŞINDA olmalı.
   // Önceden rakip forvetler ceza sahasında bekleyip kalecinin vuruşunu kesebiliyordu.
@@ -3806,9 +4003,15 @@ function duranCalistir(){
     // sonra atis yuksekligi ve havadan gelen yay geri verilir. Takim arkadasi bulunamazsa
     // eskisi gibi ileri atilir.
     ball.position.y = R_BALL;
+    // Atıcı çizginin dışında durur; top eli terk ettiği an çizginin HEMEN İÇİNE alınır.
+    // Aksi halde top dışarıda başlar ve aynı karede yeniden "taç" sayılırdı (Kural 15:
+    // top, sahaya girdiği an oyundadır).
+    { const _s = Math.sign(ball.position.z) || 1;
+      ball.position.z = _s * (HWZ - R_BALL - 0.1); }
     if (pasVer(p, duran.takim)){
       ball.position.y = 1.9;                      // elden cikiyor
       bVel.y = Math.max(bVel.y, 3.4);             // tac atisi havadan, hafif yayla gider
+      ofsaytTemizle();                            // Kural 11: taçtan ofsayt olmaz (pasVer hesaplamıştı)
     } else {
       bVel.set(p.dir*18, 5, (Math.random()-0.5)*8);
       ofsaytTemizle();
@@ -4152,6 +4355,7 @@ function gol(takim){
   sonPasOyuncu = null; sonPasTakim = -1;   // gol sonrası asist adayı sıfırlanır
   // ────────────────────────────────────────────────────────────────────────────────────
   hud(); frozen = 2.2; golBekleme = true;
+  try{ kolTitret(450, 0.9); }catch(e){}
   sesDuduk(false); sesTribun(0.28, 4.5);
   mesaj('GOL!', takim === 0 ? takA().kod : takB().kod, 2000);
   try{ sahaCanliYaz(false); }catch(e){}
@@ -4308,6 +4512,14 @@ function update(dt){
   const _sahipK = topSahibi();
   const kovA = (_sahipK && _sahipK.team === 0) ? _sahipK : enYakin(teamA);
   const kovB = (_sahipK && _sahipK.team === 1) ? _sahipK : enYakin(teamB);
+  // TOPLU KOVALAMA (kullanıcı bildirdi: "rakip oyuncular toplu olarak topu kovalıyor"):
+  // KÖK SEBEP: Baskı ayarı (Orta 7 m / Yüksek 13 m) o yarıçaptaki HER oyuncuyu topun
+  // kendisine koşturuyordu - top kimde olursa olsun, kendi takımında bile. 13 m'de 4-5 kişi
+  // aynı noktaya yığılıyordu. ÇÖZÜM: Topu kovalayan 1 kişi + baskıda en fazla 1 DESTEK
+  // oyuncusu; destek topun kendisine değil, top ile kendi kalesi arasına (kapatma) gider.
+  // Top kendi takımındayken baskı yapılmaz.
+  _destekOyuncu[0] = destekSec(teamA, kovA, _sahipK, TAKTIK.a);
+  _destekOyuncu[1] = destekSec(teamB, kovB, _sahipK, TAKTIK.b);
   players.forEach(p => {
     if (p.dis) return;
     p.cd  = Math.max(0, p.cd - dt);
@@ -4405,7 +4617,22 @@ function update(dt){
     // Yatay konum noktada kaldigi icin "atici noktaya vardi mi" hesabi (yak) etkilenmez.
     if (duran.tip === 'tac' && duran.alici && duran.alici.obj){
       var _ap = duran.alici.obj.position;
-      var _yat = Math.hypot(_ap.x - ball.position.x, _ap.z - ball.position.z);
+      // TAÇ ELDE SAHAYA TAŞINIYORDU (kullanıcı bildirdi): Top her karede atıcının eline
+      // konuyor, "noktaya vardı mı" da TOPA göre ölçülüyordu - top oyuncuyla birlikte
+      // yürüdüğü için mesafe hep sıfırdı, oyuncu topu elinde sahanın içine sokabiliyordu.
+      // Kural 15: taç, topun çıktığı yerden, çizginin ÜSTÜNDEN/DIŞINDAN atılır.
+      // ÇÖZÜM: Mesafe sabit TAÇ NOKTASINA göre ölçülür; noktadaki atıcı çizginin dışında
+      // tutulur ve çizgi boyunca en fazla 1 m kayabilir. Noktadan uzaklaşırsa top ondan
+      // alınıp noktaya geri konur.
+      var _tn = duran.nokta || { x:ball.position.x, z:ball.position.z };
+      var _ts = Math.sign(_tn.z) || 1;
+      var _yat = Math.hypot(_ap.x - _tn.x, _ap.z - _tn.z);
+      if (_yat < 1.6){
+        _ap.x = Math.max(_tn.x - 1.0, Math.min(_tn.x + 1.0, _ap.x));
+        if (_ap.z * _ts < HWZ + 0.25) _ap.z = _ts * (HWZ + 0.25);
+      } else {
+        ball.position.set(_tn.x, R_BALL, _tn.z);
+      }
       if (_yat < 1.4){
         var _ry = duran.alici.obj.rotation.y;
         ball.position.x = _ap.x + Math.sin(_ry)*0.12;   // hafif onde: basin ustunde, gogus hizasinin onunde
@@ -4910,12 +5137,199 @@ var _stadEkran = (function(){
   return { guncelle:function(){ try{ guncelle(); }catch(e){} }, _E:E };
 })();
 
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// KONSOL KOLU (2026-09-22-S, kullanıcı: "kullanıcı konsol kolu ile maç yapabilir, ayarlardan
+// tuş ataması düzenleyebilir")
+// Tarayıcının Gamepad API'si kullanılır: Xbox, PlayStation ve standart eşlemeli Bluetooth
+// kollar telefonda da bilgisayarda da çalışır. Kol, bağlandıktan sonra İLK TUŞA BASILINCA
+// görünür (tarayıcı güvenlik kuralı - sayfa kolu bundan önce göremez).
+// Kol olayla değil, her karede OKUNARAK işlenir (API böyle çalışıyor). Tuşun basıldığı ve
+// bırakıldığı an önceki kareyle karşılaştırılarak bulunur, klavyedeki keydown/keyup gibi.
+// Hareket: sol çubuk + yön tuşları (yön tuşu bir eyleme atanmadıysa). İki kişilik modda
+// ikinci kol ikinci oyuncuyu yönetir.
+// Atamalar AYAR.kol'da saklanır (ayarKaydet ile cihazda kalır); boşsa varsayılan geçerli.
+// ══════════════════════════════════════════════════════════════════════════════════════════
+const KOL_EYLEMLER = [
+  { k:'pas',      ad:'Pas' },
+  { k:'sut',      ad:'Şut (basılı tut = güç)' },
+  { k:'mudahale', ad:'Müdahale' },
+  { k:'kay',      ad:'Kayarak müdahale' },
+  { k:'kos',      ad:'Koş (basılı tut)' },
+  { k:'degistir', ad:'Oyuncu değiştir' },
+  { k:'yedek',    ad:'Yedekten oyuncu al' },
+  { k:'menu',     ad:'Duraklat / Ayarlar' }
+];
+const KOL_VARSAYILAN = { pas:0, sut:1, mudahale:2, kay:3, kos:7, degistir:4, yedek:8, menu:9 };
+const KOL_TUS_ADI = ['A / ✕','B / ○','X / □','Y / △','LB / L1','RB / R1','LT / L2','RT / R2',
+  'Back / Select','Start / Options','Sol çubuk (bas)','Sağ çubuk (bas)','Yön ↑','Yön ↓','Yön ←','Yön →','Home / PS'];
+function kolTusAdi(i){ return (i == null || i < 0) ? '—' : (KOL_TUS_ADI[i] || ('Tuş ' + i)); }
+function kolAtama(){
+  const a = Object.assign({}, KOL_VARSAYILAN, (AYAR.kol && typeof AYAR.kol === 'object') ? AYAR.kol : {});
+  return a;
+}
+const _kolOnceki = [[], []];     // oyuncu (0/1) başına önceki karedeki tuş durumları
+let _kolDinle = null;            // atama bekleyen eylem anahtarı
+let _kolSonBagli = '';
+function kolListesi(){
+  try{
+    const g = navigator.getGamepads ? navigator.getGamepads() : [];
+    const l = [];
+    for (let i = 0; i < (g ? g.length : 0); i++) if (g[i] && g[i].connected !== false) l.push(g[i]);
+    return l;
+  }catch(e){ return []; }
+}
+function kolBasili(b){ return !!(b && (b.pressed || b.value > 0.5)); }
+// Ölü bölge: çubuğun merkezdeki küçük kayması (kol eskidikçe artar) oyuncuyu kendiliğinden
+// yürütmesin. Bölge dışı yeniden 0..1'e ölçeklenir ki hassasiyet kaybolmasın.
+function kolEksen(v){
+  const o = 0.2, a = Math.abs(v || 0);
+  if (a < o) return 0;
+  return Math.sign(v) * Math.min(1, (a - o) / (1 - o));
+}
+// o numaralı insan oyuncunun kolu (iki kişilik modda ikinci kol ikinci oyuncuya).
+function kolOyuncu(o){
+  const l = kolListesi();
+  if (o === 1) return (mod === 'iki') ? (l[1] || null) : null;
+  return l[0] || null;
+}
+function kolYonu(o){
+  const g = kolOyuncu(o); if (!g) return { x:0, y:0 };
+  let x = kolEksen(g.axes[0]), y = -kolEksen(g.axes[1]);     // yukarı = ileri
+  const a = kolAtama(), atanmis = Object.keys(a).map(k => a[k]);
+  const dp = (i) => atanmis.indexOf(i) < 0 && kolBasili(g.buttons[i]);
+  if (dp(12)) y += 1; if (dp(13)) y -= 1; if (dp(14)) x -= 1; if (dp(15)) x += 1;
+  return { x:x, y:y };
+}
+function kolKosuyor(o){
+  const g = kolOyuncu(o); if (!g) return false;
+  return kolBasili(g.buttons[kolAtama().kos]);
+}
+function kolTitret(sure, guc){
+  try{
+    kolListesi().forEach(g => {
+      if (g.vibrationActuator && g.vibrationActuator.playEffect)
+        g.vibrationActuator.playEffect('dual-rumble', { duration:sure||200, strongMagnitude:guc||0.6, weakMagnitude:(guc||0.6)*0.6 }).catch(function(){});
+    });
+  }catch(e){}
+}
+// Her karede çağrılır (bkz. loop). Oyun duraklatılmışken de çalışır: menü tuşu ve tuş
+// atama ekranı kol ile kullanılabilsin.
+function kolOku(){
+  const l = kolListesi();
+  // Bağlantı durumu değişince ayar ekranı ve dokunmatik düğmeler güncellenir.
+  const imza = l.map(g => g.index + ':' + g.id).join('|');
+  if (imza !== _kolSonBagli){
+    _kolSonBagli = imza;
+    try{ kolAyarCiz(); }catch(e){}
+    if (l.length){ _kolGoruldu = true; try{ mesaj('', '🎮 Kol bağlandı', 1400); }catch(e){} }
+    kolDurumUygula();
+  }
+  if (!l.length) return;
+  const a = kolAtama();
+  // Tuş atama modu: ilk basılan tuş seçilen eyleme atanır.
+  if (_kolDinle){
+    const g = l[0];
+    for (let i = 0; i < g.buttons.length; i++){
+      if (kolBasili(g.buttons[i]) && !(_kolOnceki[0][i])){
+        kolAta(_kolDinle, i);
+        break;
+      }
+    }
+    _kolOnceki[0] = g.buttons.map(kolBasili);
+    return;
+  }
+  [0, 1].forEach(o => {
+    const g = kolOyuncu(o); if (!g) return;
+    const simdi = g.buttons.map(kolBasili), once = _kolOnceki[o] || [];
+    const basti = (k) => simdi[a[k]] && !once[a[k]];
+    const birakti = (k) => !simdi[a[k]] && once[a[k]];
+    if (basti('menu') && o === 0){
+      const ayarAcik = document.getElementById('p-ayar').classList.contains('on');
+      if (ayarAcik) ayarKapa();
+      else if (!document.getElementById('p-start').classList.contains('on') &&
+               !document.getElementById('p-end').classList.contains('on')) ayarAc();
+    }
+    if (running && !duraklat){
+      if (basti('sut')){ OYN[o].ch = true; OYN[o].c = 0; }
+      if (birakti('sut') && OYN[o].ch) sut(o);
+      if (basti('pas')) pas(o);
+      if (basti('mudahale')) mudahale(o);
+      if (basti('kay')) kay(o);
+      if (basti('degistir')) degistir(o);
+      if (basti('yedek')) degisiklikYap(o);
+    } else if (birakti('sut')){ OYN[o].ch = false; }
+    _kolOnceki[o] = simdi;
+  });
+}
+function kolAta(eylem, tus){
+  const a = kolAtama();
+  // Tuş başka bir eylemdeyse iki eylemin tuşları YER DEĞİŞTİRİR - bir tuş iki işe
+  // bağlanıp biri hiç çalışmaz hale gelmesin.
+  const eski = a[eylem];
+  Object.keys(a).forEach(k => { if (k !== eylem && a[k] === tus) a[k] = eski; });
+  a[eylem] = tus;
+  AYAR.kol = a; ayarKaydet();
+  _kolDinle = null;
+  kolAyarCiz();
+  try{ mesaj('', (KOL_EYLEMLER.find(x => x.k === eylem)||{}).ad + ': ' + kolTusAdi(tus), 1300); }catch(e){}
+}
+function kolAtamaBasla(eylem){
+  _kolDinle = (_kolDinle === eylem) ? null : eylem;      // aynı satıra tekrar basmak iptal eder
+  kolAyarCiz();
+}
+function kolVarsayilan(){
+  AYAR.kol = Object.assign({}, KOL_VARSAYILAN); ayarKaydet();
+  _kolDinle = null; kolAyarCiz();
+}
+function kolAyarCiz(){
+  const k = document.getElementById('kolAyar'); if (!k) return;
+  const l = kolListesi(), a = kolAtama();
+  const sw = document.getElementById('sw-kol');
+  if (sw) sw.textContent = l.length ? ('Bağlı' + (l.length > 1 ? ' (' + l.length + ')' : '')) : 'Yok';
+  const esc = (t) => String(t==null?'':t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  k.innerHTML =
+    '<div style="font-size:12px;opacity:.75;line-height:1.5;margin:.2rem 0 .5rem">'
+    + (l.length ? ('🎮 ' + l.map(g => esc(String(g.id).slice(0, 46))).join('<br>🎮 '))
+                : 'Kol görünmüyor. Kolu bağlayıp <b>herhangi bir tuşuna bas</b> - tarayıcı kolu ancak o zaman gösterir.')
+    + '<br>Hareket: sol çubuk ve yön tuşları. İki kişilik modda 2. kol 2. oyuncuyu yönetir.</div>'
+    + KOL_EYLEMLER.map(e => {
+        const dinle = (_kolDinle === e.k);
+        return '<div class="row"><span>' + e.ad + '</span><button onclick="kolAtamaBasla(\'' + e.k + '\')" '
+          + (dinle ? 'style="background:#e4b23c;color:#111"' : '') + '>'
+          + (dinle ? 'Bir tuşa bas…' : kolTusAdi(a[e.k])) + '</button></div>';
+      }).join('')
+    + '<button class="btn alt" style="margin-top:.4rem" onclick="kolVarsayilan()">Varsayılana dön</button>';
+}
+// DOKUNMATİK KONTROLLERİ GİZLEME (2026-09-22-T, kullanıcı: "kol bağlıyken oynanıştaki kontrol
+// butonları görünmesin"). Önceki sürümde gizleme her karede getGamepads() listesine
+// bakıyordu. Bu liste bazı telefonlarda anlık boş dönebiliyor (sekme odağı, uyku, Bluetooth
+// gecikmesi) ve düğmeler kol takılıyken yeniden beliriyordu; ayrıca yalnızca dokunmatik
+// ekran algılanan cihazda çalışıyordu. Artık: kol BİR KEZ görüldü mü düğmeler gizli kalır;
+// yalnızca tarayıcı kolun çıkarıldığını bildirirse (gamepaddisconnected) ve gerçekten hiç
+// kol kalmadıysa geri gelir. Gizleme body sınıfıyla yapılır, başka kod bozamaz.
+let _kolGoruldu = false;
+function kolDurumUygula(){
+  try{
+    document.body.classList.toggle('kol-bagli', _kolGoruldu);
+    if (_kolGoruldu){                         // gizlenen çubukta basılı kalan yön sıfırlanır
+      touchMove.x = touchMove.y = 0; touchKos = false;
+      const kn = document.getElementById('knob'); if (kn) kn.style.transform = '';
+    }
+  }catch(e){}
+}
+addEventListener('gamepadconnected', () => { _kolSonBagli = ''; _kolGoruldu = true; kolDurumUygula(); });
+addEventListener('gamepaddisconnected', () => {
+  _kolSonBagli = ''; _kolOnceki[0] = []; _kolOnceki[1] = [];
+  setTimeout(() => { if (!kolListesi().length){ _kolGoruldu = false; kolDurumUygula(); } }, 400);
+});
+
 function loop(){
   requestAnimationFrame(loop);
   const ham = Math.min(clock.getDelta(), 0.25);
   // Kare hizi sensoru: surekli dusuk hiz kayda gecer (bkz. sahaKareOlc).
   try{ sahaKareOlc(ham); }catch(e){}
   try{ taraftarHareket(ham); }catch(e){}
+  if (!window._sahaIzleModu){ try{ kolOku(); }catch(e){} }    // konsol kolu (bkz. KONSOL KOLU)
   fpsSay++; fpsSure += ham;
   if (fpsSure >= 0.5){ fps = fpsSay / fpsSure; fpsSay = 0; fpsSure = 0; }
   if (window._sahaIzleModu){
