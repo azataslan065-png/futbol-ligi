@@ -2267,7 +2267,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-22-P';
+window.APP_BUILD = '2026-09-22-Q';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -2627,6 +2627,28 @@ function akisKontrol(){
     });
   }catch(e){}
 }
+// SKORBORD SAATİ (2026-09-22-Q, kullanıcı: "maç süresi dakikayla beraber saniye de görünmeli"):
+// Futbol saniyesi: 1. yarı 00:00 -> 45:00, 2. yarı 45:00 -> 90:00 (45:00-45:59 = 46. dakika,
+// yani "46'dan başlar" kuralıyla aynı). Uzatmada saat DURMAZ, akmaya devam eder (46:12 +3).
+// Gerçek yarı süresi (HALF, yönetici belirler) ne olursa olsun bu aralığa ölçeklenir.
+function macSaniye(){
+  const bas = (devre === 2) ? HALF : 0;
+  const g = Math.max(0, saat - bas);
+  return (devre === 2 ? 2700 : 0) + g / Math.max(1, HALF) * 2700;
+}
+function saatMetni(sn){
+  sn = Math.max(0, Math.floor(sn || 0));
+  const m = Math.floor(sn / 60), s = sn % 60;
+  return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+}
+// Saat şu an akıyor mu? İzleyici ve TV bindirmesi iki yazım arasındaki saniyeleri kendi
+// tahmin eder; saat durduysa (duraklatma, devre başı santrası, tekrar) tahmin yapmamalı.
+function saatAkiyor(){
+  try{
+    return !!(running && !bitti && !duraklat && !tekrar && mod !== 'antrenman'
+              && (frozen <= 0 || golBekleme));
+  }catch(e){ return false; }
+}
 function macDakika(){
   try{
     // DİKKAT - iki tuzak var, ikisi de sınamada yakalandı:
@@ -2865,7 +2887,11 @@ function sahaCanliYaz(ilkYazim){
         solRenk: hx(takA().jer), sagRenk: hx(takB().jer),
         solSkor: skorA, sagSkor: skorB,
         devre: _tx('devre'), sure: _tx('sure'), uz: _tx('uzatma'),
-        solTaraf: fk.benTarafHome ? 'home' : 'away'
+        solTaraf: fk.benTarafHome ? 'home' : 'away',
+        // Saniyeli saat için: izleyici iki yazım arasını bu değerlerle kendisi ilerletir
+        // (yazım saniyede ~1; 15 dk'lık maçta futbol saati saniyede 6 sn akıyor).
+        saniye: Math.round(macSaniye()*10)/10, hiz: 2700 / Math.max(1, HALF),
+        akiyor: saatAkiyor(), ts: Date.now()
       };
       g[yol+'/izleYon'] = { dirA: (dirA < 0 ? -1 : 1), benHome: !!fk.benTarafHome };
     }catch(e){}
@@ -3959,7 +3985,7 @@ function hud(){
     document.getElementById('uzatma').textContent = '';
   } else {
     _dv.textContent = ''; _dv.style.display = 'none';
-    document.getElementById('sure').textContent = macDakika() + "'";
+    document.getElementById('sure').textContent = saatMetni(macSaniye());
     document.getElementById('uzatma').textContent = (uzatmaVerildi && uzatma > 0)
       ? '+' + Math.round(uzatma / Math.max(1,HALF) * 45) : '';
   }
@@ -4840,9 +4866,9 @@ var _stadEkran = (function(){
     ctx.textAlign = 'right'; ctx.fillText(sb, W-142, 68);
     // Orta: maç süresi, koyu kutu içinde
     ctx.fillStyle = 'rgba(0,0,0,.45)';
-    ctx.fillRect(W/2-150, 18, 300, 92);
+    ctx.fillRect(W/2-175, 18, 350, 92);        // "46:12 +3" sığsın diye genişletildi
     ctx.fillStyle = '#f0c14b'; ctx.textAlign = 'center';
-    ctx.font = '800 64px system-ui,Arial,sans-serif';
+    ctx.font = '800 54px system-ui,Arial,sans-serif';
     ctx.fillText(sure || '0:00', W/2, 66);
     E.baslikDoku.needsUpdate = true;
   }
@@ -5681,8 +5707,20 @@ function _sahaIzleKadroUygula(){
 // skorbordun "çalışmadığı" izlenimi veriyordu. Burada GERÇEK ev/deplasman takımının adından
 // (kisaKod ile) ve saha uygulamasının kendi takım renk paletinden (TAKIMLAR[0]/[1] - forma
 // rengi olarak zaten oyunda kullanılıyor) kısa kod ve renk üretilip #board'a yazılıyor.
+var _sahaIzleSaat = null;   // {saniye, hiz, akiyor, alinma, ts}
+function _sahaIzleSaatTik(){
+  var z = _sahaIzleSaat; if(!z) return;
+  var gecen = z.akiyor ? Math.min(1.5, (performance.now() - z.alinma) / 1000) : 0;
+  var txt = saatMetni(z.saniye + gecen * z.hiz);
+  var el = document.getElementById('sure');
+  if(el && el.textContent !== txt) el.textContent = txt;
+}
 function _sahaIzleTabelaUygula(t){
   if(!t) return;
+  if(typeof t.saniye === 'number' && (!_sahaIzleSaat || _sahaIzleSaat.ts !== t.ts)){
+    _sahaIzleSaat = { saniye:t.saniye, hiz:Number(t.hiz)||1, akiyor:!!t.akiyor,
+                      alinma:performance.now(), ts:t.ts };
+  }
   var yaz = function(id, v){ var el = document.getElementById(id); if(el) el.textContent = (v==null?'':String(v)); };
   yaz('sa', t.solSkor); yaz('sb', t.sagSkor);
   yaz('devre', t.devre); yaz('sure', t.sure); yaz('uzatma', t.uz);
@@ -5828,6 +5866,7 @@ function _sahaIzleTakimUygula(pool, arr, lerp, dt, xYon){
 // loop() içinden HER KAREDE çağrılır (bkz. aşağıdaki loop() değişikliği).
 function _sahaIzleKareAdimla(dt){
   var h = window._sahaIzleHedef; if(!h)return;
+  try{ _sahaIzleSaatTik(); }catch(e){}
   var lerp = Math.min(1, dt*6);
   // Ev perspektifi -> oyuncunun dünyası: homeX = (benHome ? 1 : -1) * x * dirA / HLX
   // olduğundan x = homeX * HLX * (benHome ? 1 : -1) * dirA. izleYon yoksa (eski veri) 1.

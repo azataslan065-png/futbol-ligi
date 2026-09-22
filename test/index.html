@@ -2539,7 +2539,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-P';
+window.APP_BUILD='2026-09-22-Q';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -25515,6 +25515,14 @@ function ptBirazdanSeridi(m){
     el.style.display = 'block';
   }catch(e){}
 }
+function ptTabelaSaatMetni(tb){
+  var z = window._ptTbSaat;
+  if(!tb || typeof tb.saniye !== 'number' || !z) return String((tb && tb.sure) || '');
+  var gecen = z.akiyor ? Math.min(1.5, (Date.now() - z.alinma) / 1000) : 0;
+  var sn = Math.max(0, Math.floor(z.saniye + gecen * z.hiz));
+  var mm = Math.floor(sn / 60), ss = sn % 60;
+  return (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss;
+}
 function ptpYayinBindirmeGuncelle(){
   try{
     var sk = document.getElementById('ptpSkor');
@@ -25579,13 +25587,21 @@ function ptpYayinBindirmeGuncelle(){
       // deplasmandayken skor ters, süre farklı görünüyordu. Tabela yoksa (yöneticinin elle
       // yürüttüğü maç) eski gösterim aynen devam eder.
       var _tb = (m.tabela && typeof m.tabela === 'object') ? m.tabela : null;
+      // (2026-09-22-Q) Saniyeli saat: tabela saniyede ~1 yazılıyor; aradaki saniyeler
+      // gelen hızla (hiz) burada ilerletilir - 15 dk'lık maçta saat saniyede 6 sn akar.
+      if(_tb && typeof _tb.saniye === 'number'){
+        var _z = window._ptTbSaat;
+        if(!_z || _z.ts !== _tb.ts) window._ptTbSaat = _z = { ts:_tb.ts, saniye:_tb.saniye,
+          hiz:Number(_tb.hiz)||1, akiyor:!!_tb.akiyor, alinma:Date.now() };
+      }
       if(_tb){
         var _renk = function(r){ return /^#[0-9a-fA-F]{3,8}$/.test(String(r||'')) ? ' style="background:'+r+'"' : ''; };
         _skHtml =
           '<div class="kod a"' + _renk(_tb.solRenk) + '>' + escHtml(String(_tb.solKod||'')) + '</div>'
           + '<div class="sk">' + (Number(_tb.solSkor)||0) + ' - ' + (Number(_tb.sagSkor)||0) + '</div>'
           + '<div class="kod b"' + _renk(_tb.sagRenk) + '>' + escHtml(String(_tb.sagKod||'')) + '</div>'
-          + '<div class="sr">' + (_tb.devre ? escHtml(String(_tb.devre)) + '&nbsp;' : '') + escHtml(String(_tb.sure||''))
+          + '<div class="sr">' + (_tb.devre ? escHtml(String(_tb.devre)) + '&nbsp;' : '')
+          + '<span class="ptpSaat">' + escHtml(ptTabelaSaatMetni(_tb)) + '</span>'
           + (_tb.uz ? '<span class="uz">' + escHtml(String(_tb.uz)) + '</span>' : '') + '</div>';
       }else{
         _skHtml =
@@ -25645,6 +25661,22 @@ try{
   if(!window._ptTabelaT) window._ptTabelaT = setInterval(function(){
     try{ if(window._ptTabelaliMac && window._ptCanliMacIzleniyor) ptpYayinBindirmeGuncelle(); }catch(e){}
   }, 500);
+  // Saniyeli saat: yalnızca saat yazısı sık tazelenir (tüm bindirmeyi yeniden kurmadan).
+  if(!window._ptSaatT) window._ptSaatT = setInterval(function(){
+    try{
+      if(!(window._ptTabelaliMac && window._ptCanliMacIzleniyor)) return;
+      var el = document.querySelector('#ptpSkor .ptpSaat'); if(!el) return;
+      var kid = String(window._ptAktifKanalId || ''), mm = null;
+      if(kid.indexOf('match_') === 0) mm = (window.D && D.matches) ? D.matches[kid.slice(6)] : null;
+      else{
+        var kay = ((window.D && D.videoLinks) || []).filter(function(x){ return x && x.id === kid; })[0];
+        if(kay && kay.macId && D.matches) mm = D.matches[kay.macId];
+      }
+      if(!mm || !mm.tabela) return;
+      var t = ptTabelaSaatMetni(mm.tabela);
+      if(el.textContent !== t) el.textContent = t;
+    }catch(e){}
+  }, 150);
   if(!window._ptSkorT) window._ptSkorT = setInterval(function(){
     try{ ptBaskiOrnekle(); }catch(e){}
     try{ ptpYayinBindirmeGuncelle(); }catch(e){}
