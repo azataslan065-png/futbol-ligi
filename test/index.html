@@ -2539,7 +2539,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-B';
+window.APP_BUILD='2026-09-22-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -12127,7 +12127,9 @@ function renderBaskimetre(m){
     if(!mom && ornek){
       Object.keys(ornek).forEach(function(k){
         var i=Number(k), o=ornek[k];
-        if(i>=0 && i<=sonDk && o && o.n) deger[i] = (o.t/o.n) * 2.2;   // olay agirliklariyla ayni olcek
+        // Olcek: tam sahiplik (+1/-1) bir GOL agirligina (3) esittir. Onceki 2.2 katsayi,
+        // gol olan macta cubuklari 0-2 piksele dusuruyordu (bkz. enBuyuk notu).
+        if(i>=0 && i<=sonDk && o && o.n) deger[i] = (o.t/o.n) * 3;
       });
     }
     if(mom){
@@ -12147,7 +12149,33 @@ function renderBaskimetre(m){
       }
       for(let i=0;i<=sonDk;i++)deger[i]=yumusak[i];
     }
-    const enBuyuk=Math.max(1,...deger.map(v=>Math.abs(v)));
+    // KOK SEBEP (kullanici: "top surekli hareketli ama baskimetre cizgi atmiyor"):
+    // Cubuk yuksekligi grafikteki EN BUYUK degere gore olcekleniyordu. Top sahipligi kucuk
+    // katsayiyla eklendigi icin bir gol oldugunda olcek gole gore ayarlaniyor, sahiplik
+    // cubuklari 0-2 piksele inip yuvarlamayla HIC CIZILMIYORDU. Veri geliyordu, gorunmuyordu.
+    // COZUM: Canli SAHA macinda olcegin tabani tam sahiplige (3) sabitlenir - boylece %30
+    // sahiplik her zaman yarim yuksekligin ~%30'u kadar gorunur, gol olsa da olmasa da.
+    const _canliSaha = !!(!mom && ornek);
+    // Canli SAHA macinda cubuklar YALNIZCA top sahipliginden, SABIT olcekle (-1..+1) cizilir.
+    // Goller grafikte zaten ayri isaretle (golDk) gosteriliyor; cubuklara karistiklarinda
+    // olcegi buyutup sahiplik cubuklarini gorunmez yapiyorlardi. Hafif yumusatma (komsu
+    // dakikalar) tek dakikalik sicramalari yumusatir.
+    if(_canliSaha){
+      var _ham = new Array(sonDk+1).fill(null);
+      Object.keys(ornek).forEach(function(k){
+        var i=Number(k), o=ornek[k];
+        if(i>=0 && i<=sonDk && o && o.n) _ham[i] = Math.max(-1, Math.min(1, o.t/o.n));
+      });
+      for(var _i=0; _i<=sonDk; _i++){
+        var _t=0, _n=0;
+        for(var _j=_i-1; _j<=_i+1; _j++){
+          if(_j<0 || _j>sonDk || _ham[_j]==null) continue;
+          var _w = (_j===_i) ? 1 : 0.5; _t += _ham[_j]*_w; _n += _w;
+        }
+        deger[_i] = _n ? _t/_n : 0;
+      }
+    }
+    const enBuyuk = _canliSaha ? 1 : Math.max(1, ...deger.map(v=>Math.abs(v)));
     if(!mom&&enBuyuk<=0.01)return '';
 
     const golDk=evs.filter(e=>['goal','pen_goal','og'].includes(e.type));
@@ -25486,14 +25514,7 @@ try{
         var _m = (D.matches||{})[_mdMatchId];
         var _kutu = document.getElementById('baskimetreLive_' + _mdMatchId);
         if(_kutu && _m && (_m.isLive || _m._realIsLive || (_m.sahaOnayli && !_m.played)) && typeof renderBaskimetre === 'function'){
-          // GECICI OLCUM SATIRI: Baskimetre iki turdur tahminle degistirildi. Bu satir
-          // verinin gercekten gelip gelmedigini gosterir; sorun cozulunce kaldirilacak.
-          var _o = (window._ptBaskiOrnek||{})[_m.id] || {}, _say = 0;
-          Object.keys(_o).forEach(function(k){ _say += (_o[k] && _o[k].n) || 0; });
-          _kutu.innerHTML = renderBaskimetre(_m)
-            + '<div style="font:9px/1.5 monospace;opacity:.65;margin-top:4px">olcum: canli='
-            + (!!_m.isLive) + ' onay=' + (!!_m.sahaOnayli) + ' dk=' + _m.minute
-            + ' sahip=' + _m.ballAttack + ' ballX=' + _m.ballX + ' ornek=' + _say + '</div>';
+          _kutu.innerHTML = renderBaskimetre(_m);
         }
       }
     }catch(e){}

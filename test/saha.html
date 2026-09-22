@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>SAHA — 3D Futbol vB</title>
+<title>SAHA — 3D Futbol vD</title>
 <style>
   :root{
     --kirmizi:#d8443a; --mavi:#3d7fd4;
@@ -977,6 +977,13 @@ function insanAdim(ud, dt, hiz, egilebilir){
       ud.govde.position.y = 1.30 + zipla;
       if(ud.omuzParca) ud.omuzParca.position.y = 1.47 + zipla;
       if(ud.bas) ud.bas.position.y = 1.74 + zipla;
+    }
+    // TAC POZU: top elindeyken iki kol basin ustunde. Zaman damgasi 120 ms'den eskiyse
+    // uygulanmaz - atistan sonra kollar kendiliginden normal kosu hareketine doner.
+    if(ud.tacZaman && performance.now() - ud.tacZaman < 120 && ud.kolL && ud.kolR){
+      ud.kolL.omuz.rotation.x = -2.95; ud.kolR.omuz.rotation.x = -2.95;
+      ud.kolL.dirsek.rotation.x = -0.35; ud.kolR.dirsek.rotation.x = -0.35;
+      ud.kolL.omuz.rotation.z = 0.18; ud.kolR.omuz.rotation.z = -0.18;
     }
   }catch(e){}
 }
@@ -2241,7 +2248,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-22-B';
+window.APP_BUILD = '2026-09-22-D';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -4147,6 +4154,23 @@ function update(dt){
   if (duran){
     bVel.set(0,0,0);
     ball.position.y = R_BALL;
+    // TAC: TOP ATICININ ELINDE (kullanici: "tac atisi kiminse top o oyuncunun elinde
+    // olacak"). Onceden top yerde, atis noktasinda duruyordu - tac ayakla atiliyormus gibi
+    // gorunuyordu. Atici noktaya varinca (yatay mesafe < 1.4 m) top basinin ustune, iki
+    // elin arasina kalkar; kollar yukarida (bkz. insanAdim'daki tac pozu). Golge yerde
+    // kalir - topun havada, elde oldugu anlasilsin.
+    // Yatay konum noktada kaldigi icin "atici noktaya vardi mi" hesabi (yak) etkilenmez.
+    if (duran.tip === 'tac' && duran.alici && duran.alici.obj){
+      var _ap = duran.alici.obj.position;
+      var _yat = Math.hypot(_ap.x - ball.position.x, _ap.z - ball.position.z);
+      if (_yat < 1.4){
+        var _ry = duran.alici.obj.rotation.y;
+        ball.position.x = _ap.x + Math.sin(_ry)*0.12;   // hafif onde: basin ustunde, gogus hizasinin onunde
+        ball.position.z = _ap.z + Math.cos(_ry)*0.12;
+        ball.position.y = 2.05;
+        duran.alici.obj.userData.tacZaman = performance.now();
+      }
+    }
     topGolge.position.set(ball.position.x, 0.02, ball.position.z);
     duran.bekle -= dt; duran.omur += dt;
     const yak = duran.alici ? duran.alici.obj.position.distanceTo(ball.position) : 99;
