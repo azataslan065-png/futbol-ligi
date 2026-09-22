@@ -2539,7 +2539,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-D';
+window.APP_BUILD='2026-09-22-G';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -12172,15 +12172,40 @@ function renderBaskimetre(m){
           if(_j<0 || _j>sonDk || _ham[_j]==null) continue;
           var _w = (_j===_i) ? 1 : 0.5; _t += _ham[_j]*_w; _n += _w;
         }
-        deger[_i] = _n ? _t/_n : 0;
+        var _v = _n ? _t/_n : 0;
+        // KOK SEBEP (kullanici: "D surumunde de olmamis"): Gercek macta bir dakikadaki sahiplik
+        // genelde 55/45 - 65/35 arasi; ortalamasi 0.1-0.3 cikiyor ve bu 2-5 piksellik cubuk
+        // demek - telefonda neredeyse gorunmuyordu. Izole testte gercekci olmayan tek tarafli
+        // degerler kullandigim icin bunu yakalayamadim.
+        // COZUM: Karekok olcegi - siralama korunur, kucuk farklar buyutulur:
+        //   0.1 -> 7px, 0.2 -> 9px, 0.3 -> 12px, 0.5 -> 15px
+        // Esit dakikalar (|v| < 0.02) bos kalir; bu dogru - baski yoktur.
+        deger[_i] = (Math.abs(_v) < 0.02) ? 0 : Math.sign(_v) * Math.min(1, Math.sqrt(Math.abs(_v)) * 1.4);
       }
     }
     const enBuyuk = _canliSaha ? 1 : Math.max(1, ...deger.map(v=>Math.abs(v)));
-    if(!mom&&enBuyuk<=0.01)return '';
+    if(!mom&&enBuyuk<=0.01&&!((window._ptSahiplik||{})[m.id]))return '';
 
     const golDk=evs.filter(e=>['goal','pen_goal','og'].includes(e.type));
     const H=32;   // eskiden 64 - kullanıcı talebiyle yarıya indirildi
+    // Canli SAHA macinda sahiplik SURESI olculduyse o kullanilir (bkz. ptSahiplikOlc).
+    var _sure = (window._ptSahiplik||{})[m.id];
     const cubuklar=deger.map((v,i)=>{
+      if(_sure){
+        // Her dakika iki bagimsiz cubuk: ev sahibi YUKARI (mavi), deplasman ASAGI (kirmizi).
+        // Uzunluk = o dakikadaki sahiplik payi. 70/30 bir dakikada ev cubugu 11 px, dep 4 px.
+        var o = _sure[i], topl = o ? (o.h + o.a) : 0;
+        if(!topl) return `<div style="flex:1;min-width:0"></div>`;
+        var yh = Math.round(o.h/topl*(H/2-1)), ya = Math.round(o.a/topl*(H/2-1));
+        return `<div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;height:${H}px">
+          <div style="height:${H/2}px;display:flex;align-items:flex-end;justify-content:center">
+            ${yh?`<div style="width:38%;height:${yh}px;background:#3b82f6;border-radius:1px 1px 0 0"></div>`:''}
+          </div>
+          <div style="height:${H/2}px;display:flex;align-items:flex-start;justify-content:center">
+            ${ya?`<div style="width:38%;height:${ya}px;background:#ef4444;border-radius:0 0 1px 1px"></div>`:''}
+          </div>
+        </div>`;
+      }
       const y=Math.round(Math.abs(v)/enBuyuk*(H/2-1));
       const evSahibi=v>0;
       if(!y)return `<div style="flex:1;min-width:0"></div>`;
@@ -25383,6 +25408,34 @@ function ptBaskiOrnekle(){
     });
   }catch(e){}
 }
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// SAHIPLIK SURESI OLCUMU (kullanici: "1 dakika icinde topu ne kadar ayaginda tutarsa cizgi
+// ona gore uzun atacak; ayni deplasman icin de")
+// Her oyun dakikasi icin iki ayri sure tutulur: ev sahibinin ve deplasmanin topu tuttugu
+// milisaniye. Ornekleme 500 ms'de bir - oyunda zaman hizlandirilmis (1 oyun dakikasi
+// gercekte ~3 sn), onceki 2 sn'lik ornekleme her dakikaya ancak 1-2 ornek dusuruyordu.
+// Olcum izleyicinin cihazinda; veritabanina yazilmaz.
+window._ptSahiplik = window._ptSahiplik || {};
+window._ptSahiplikSon = window._ptSahiplikSon || {};
+function ptSahiplikOlc(){
+  try{
+    var simdi = performance.now();
+    Object.keys((window.D && D.matches) || {}).forEach(function(mid){
+      var m = D.matches[mid];
+      if(!m || !m.isLive || m.played) { delete window._ptSahiplikSon[mid]; return; }
+      var sahip = m.ballAttack;
+      var once = window._ptSahiplikSon[mid];
+      window._ptSahiplikSon[mid] = simdi;
+      if(once == null || (sahip !== 'home' && sahip !== 'away')) return;
+      var dt = Math.min(1500, simdi - once);          // sekme uyuduysa sismesin
+      var dk = Math.max(0, Math.round(Number(m.minute) || 0));
+      var d = window._ptSahiplik[mid] || (window._ptSahiplik[mid] = {});
+      var o = d[dk] || (d[dk] = { h:0, a:0 });
+      if(sahip === 'home') o.h += dt; else o.a += dt;
+    });
+  }catch(e){}
+}
+try{ if(!window._ptSahiplikT) window._ptSahiplikT = setInterval(ptSahiplikOlc, 500); }catch(e){}
 function ptBirazdanSeridi(m){
   try{
     var sahne = document.querySelector('.ptp-stage');
