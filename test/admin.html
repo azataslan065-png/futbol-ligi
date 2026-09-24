@@ -480,6 +480,29 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
        Tablosu bunu normal canli/sonuc mekanizmasiyla (isLive/played) zaten gosterir.
        ══════════════════════════════════════════════════════════════════════════════ -->
   <div id="pg-saha" class="pg">
+    <!-- MADDE 1.2 (2026-09-25) — SAHA GİRİŞ EKRANI ARKA PLAN FOTOĞRAFI: appBrandLogo ile
+         AYNI desen (compressPhoto -> Supabase Storage -> gerçek dosya URL'si). Kayıt
+         globalAdminSettings/sahaGirisTemasi altında (bkz. yukarıdaki 2026-09-22-N notu -
+         yalnızca bu kök yazma izinli; yeni bir kök permission_denied ile reddedilir). -->
+    <div class="card">
+      <h2>🔐 SAHA Giriş Ekranı</h2>
+      <p class="hint">Saha uygulamasının giriş ekranına tam ekran bir arka plan fotoğrafı
+        ekleyin. Kart, fotoğraf altından görünecek şekilde camsı/yarı saydam olur.</p>
+      <div id="sahaGirisTemaOnizle" style="width:100%;aspect-ratio:16/9;border-radius:10px;
+        background:var(--s2);border:1px solid var(--br);display:flex;align-items:center;
+        justify-content:center;color:var(--mu);font-size:.72rem;overflow:hidden;margin-bottom:.5rem;
+        background-size:cover;background-position:center">Fotoğraf seçilmedi</div>
+      <input type="file" id="sahaGirisTemaFile" accept="image/*,.heic,.heif"
+        style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none"
+        onchange="handleSahaGirisTemaUpload(this)"/>
+      <div class="g2" style="margin-bottom:.5rem">
+        <button class="btn bgh" onclick="document.getElementById('sahaGirisTemaFile').click()" style="font-size:.72rem">📤 Fotoğraf Seç</button>
+        <button class="btn" style="font-size:.72rem;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)" onclick="removeSahaGirisTema()">🗑️ Kaldır</button>
+      </div>
+      <div class="row"><span>Karartma<small>Kartın okunurluğu için fotoğrafın koyulaştırılma oranı</small></span>
+        <input id="sahaGirisTemaKarartma" type="range" min="0" max="100" value="55" style="width:60%"
+          oninput="debouncedSaveSahaGirisTema()"></div>
+    </div>
     <!-- İLK GİRİŞTE TAKIM SEÇİMİ (2026-09-22-U): SAHA'da takımı olmayan kullanıcıya ilk
          girişte lig takımları listelenir; seçtiği takım kilitlenir (takimSahipleri). Bu kart
          özelliği açar/kapatır ve seçimleri sıfırlar. Kayıt: globalAdminSettings/sahaTakimSecimi. -->
@@ -2159,6 +2182,9 @@ db.ref('globalAdminSettings').on('value',function(snap){
   var g=snap.val()||{};
   S.adminMenuGroups=g.adminMenuGroups||null;
   S.pageLayout=g.pageLayout||null;
+  // MADDE 1.2 (2026-09-25) — SAHA giriş ekranı arka plan fotoğrafı (bkz. loadSahaGirisTema).
+  S.sahaGirisTemasi=g.sahaGirisTemasi||null;
+  try{ var _pgSahaAcik=qs('pg-saha'); if(_pgSahaAcik&&_pgSahaAcik.classList.contains('on')) loadSahaGirisTema(); }catch(_e){}
   // ══════════════════════════════════════════════════════════════════════════════════════
   // YAKALAYICI (kullanıcı: "yöneticinin yaptığı ayarlar sıralaması belirli bir süre sonra
   // sıfırlanıyor"):
@@ -7532,6 +7558,7 @@ function renderSahaMaclar(){
   }).join('');
 }
 function renderSaha(){
+  try{ loadSahaGirisTema(); }catch(e){}
   try{ renderSahaAtama(); }catch(e){}
   try{ renderSahaMaclar(); }catch(e){}
 }
@@ -13413,6 +13440,57 @@ function setAppLogoPlace(p){ _appLogoPlace=p; updateAppLogoPlaceBtns(); }
 function updateAppLogoPlaceBtns(){
   var ids={left:'alpLeft',center:'alpCenter',right:'alpRight',hidden:'alpHidden'};
   Object.keys(ids).forEach(function(k){var b=qs(ids[k]);if(!b)return;var on=(k===_appLogoPlace);b.style.background=on?'var(--ac)':'transparent';b.style.color=on?'#fff':'var(--mu)';b.style.borderColor=on?'var(--ac)':'var(--br)';});
+}
+// MADDE 1.2 (2026-09-25) — SAHA giriş ekranı arka plan fotoğrafı. appBrandLogo ile AYNI
+// desen: compressPhoto() Supabase Storage'a yükler, dönen gerçek dosya URL'si
+// globalAdminSettings/sahaGirisTemasi altına yazılır (izinli tek kök).
+function loadSahaGirisTema(){
+  try{
+    var v = S.sahaGirisTemasi || null;
+    var box = qs('sahaGirisTemaOnizle');
+    var kar = qs('sahaGirisTemaKarartma');
+    if(kar) kar.value = (v && isFinite(Number(v.karartma))) ? Number(v.karartma) : 55;
+    if(box){
+      if(v && v.url){ box.style.backgroundImage = 'url("'+v.url+'")'; box.textContent = ''; }
+      else { box.style.backgroundImage = 'none'; box.textContent = 'Fotoğraf seçilmedi'; }
+    }
+  }catch(e){}
+}
+function handleSahaGirisTemaUpload(input){
+  var file = input.files && input.files[0]; if(!file) return;
+  input.value = '';
+  compressPhoto(file, async function(publicUrl){
+    try{
+      var kar = Number(qs('sahaGirisTemaKarartma') && qs('sahaGirisTemaKarartma').value) || 55;
+      await db.ref('globalAdminSettings/sahaGirisTemasi').set({url:publicUrl, karartma:kar});
+      S.sahaGirisTemasi = {url:publicUrl, karartma:kar};
+      loadSahaGirisTema();
+      logAction('🔐 SAHA giriş ekranı arka planı güncellendi');
+      toast('✅ Arka plan fotoğrafı yüklendi');
+    }catch(err){ toast('❌ Yüklenemedi: '+(err&&err.message||'hata'),'er'); }
+  }, 1600, null, 'saha-login-bg');
+}
+function removeSahaGirisTema(){
+  if(!confirm('Giriş ekranı arka plan fotoğrafı kaldırılsın mı?')) return;
+  db.ref('globalAdminSettings/sahaGirisTemasi').remove().then(function(){
+    S.sahaGirisTemasi = null;
+    loadSahaGirisTema();
+    logAction('🔐 SAHA giriş ekranı arka planı kaldırıldı');
+    toast('🗑️ Kaldırıldı');
+  }).catch(function(err){ toast('❌ '+(err&&err.message||'hata'),'er'); });
+}
+var _sahaGirisTemaKarartmaZaman = null;
+function debouncedSaveSahaGirisTema(){
+  clearTimeout(_sahaGirisTemaKarartmaZaman);
+  _sahaGirisTemaKarartmaZaman = setTimeout(function(){
+    try{
+      var v = S.sahaGirisTemasi || null;
+      if(!v || !v.url) return; // fotoğraf yoksa karartmanın kaydedilecek bir anlamı yok
+      var kar = Number(qs('sahaGirisTemaKarartma') && qs('sahaGirisTemaKarartma').value) || 55;
+      db.ref('globalAdminSettings/sahaGirisTemasi/karartma').set(kar);
+      S.sahaGirisTemasi.karartma = kar;
+    }catch(e){}
+  }, 400);
 }
 // Uygulama logosu dosya upload (Lig logosu ile AYNI sıkıştırma/boyutlandırma deseni)
 // KULLANICI TALEBİ: Supabase Storage'a geçiş - artık base64 yerine paylaşılan compressPhoto()
