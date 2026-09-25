@@ -2566,7 +2566,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-25-E';
+window.APP_BUILD='2026-09-25-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5705,13 +5705,29 @@ function ptVeriKaynagiYaz(k){
 function ptSezonKaynagi(meta){
   return (meta && meta.kaynak === 'saha') ? 'saha' : 'klasik';
 }
+/* YUMUŞAK SÜZGEÇ (kullanıcı bildirdi: "kullanıcı diğer tarafa geçemiyor, verileri
+   görünmüyor" — ve "admin hangi tarafta olursa olsun kullanıcı istediği alana giriş
+   yapabilir").
+   KÖK SEBEP: Süzgeç SERT'ti. Seçilen kaynakta hiç sezon yoksa _leaguesMeta boş
+   kalıyor, _curLeagueId hiç atanmıyor, loadProfileAndEnter 50 kez deneyip
+   "Bağlantı kurulamadı" diyordu - kullanıcı uygulamaya HİÇ giremiyor, dolayısıyla
+   seçimi değiştireceği Sezonlar bölümüne de ulaşamıyordu. Kendi kendini kilitleyen
+   bir tasarımdı.
+   DÜZELTME: Süzgeç bir TERCİH, duvar değil. Seçilen kaynakta sezon yoksa hepsi
+   gösterilir ve durum kullanıcıya söylenir. Kimse kendi verisinden kilitlenmez. */
+window._ptKaynakBosDustu = false;
 function ptKaynakSuz(ham){
   var k = ptVeriKaynagi();
-  if(!k) return ham || {};                       // henuz secilmedi: hepsi
-  var cikti = {};
+  if(!k){ window._ptKaynakBosDustu = false; return ham || {}; }   // henuz secilmedi: hepsi
+  var cikti = {}, sayi = 0;
   Object.keys(ham || {}).forEach(function(id){
-    if(ptSezonKaynagi(ham[id]) === k) cikti[id] = ham[id];
+    if(ptSezonKaynagi(ham[id]) === k){ cikti[id] = ham[id]; sayi++; }
   });
+  if(!sayi){
+    window._ptKaynakBosDustu = true;
+    return ham || {};
+  }
+  window._ptKaynakBosDustu = false;
   return cikti;
 }
 function ptKaynakSayilari(){
@@ -5767,9 +5783,9 @@ window.ptKaynakSec = function(k){
     var ids = Object.keys(_leaguesMeta);
     populateLoginLeagueSel();
     // Şu anki sezon yeni kaynakta yoksa, o kaynağın varsayılan sezonuna geçilir.
-    if(!ids.length){
+    if(window._ptKaynakBosDustu){
       ptKaynakBosUyar(k);
-    } else if(ids.indexOf(_curLeagueId) < 0){
+    } else if(ids.length && ids.indexOf(_curLeagueId) < 0){
       var yeni = pickDefaultLeagueId(_leaguesMeta);
       if(yeni){
         _curLeagueId = yeni;
@@ -5797,8 +5813,8 @@ window.ptKaynakGeri = function(){
 function ptKaynakBosUyar(k){
   try{
     showToast(k === 'saha'
-      ? 'ℹ️ SAHA kaynağında henüz sezon yok - yönetici bir sezonu SAHA olarak işaretlemeli'
-      : 'ℹ️ SAHA dışı kaynakta henüz sezon yok', 'er');
+      ? 'ℹ️ SAHA kaynağında henüz sezon yok - tüm sezonlar gösteriliyor'
+      : 'ℹ️ SAHA dışı kaynakta henüz sezon yok - tüm sezonlar gösteriliyor', 'er');
   }catch(e){}
 }
 
@@ -31849,7 +31865,7 @@ window.openSeasonMenu=function(){
       <span style="font-size:1.1rem">🔀</span>
       <div style="flex:1;text-align:left">
         <div style="font-size:.82rem;font-weight:800;color:var(--tx)">Veri Kaynağı</div>
-        <div style="font-size:.64rem;color:var(--mu)">${ptVeriKaynagi()==='saha'?'SAHA uygulaması üzerinden':ptVeriKaynagi()==='klasik'?'SAHA olmadan':'Seçilmedi'} - değiştir</div>
+        <div style="font-size:.64rem;color:var(--mu)">${ptVeriKaynagi()==='saha'?'SAHA uygulaması üzerinden':ptVeriKaynagi()==='klasik'?'SAHA olmadan':'Seçilmedi'}${window._ptKaynakBosDustu?' · bu kaynakta sezon yok, hepsi gösteriliyor':''} - değiştir</div>
       </div>
       <span style="color:var(--mu)">›</span>
     </button>

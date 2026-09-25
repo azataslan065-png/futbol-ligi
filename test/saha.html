@@ -173,6 +173,12 @@
     font-weight:700;cursor:pointer;white-space:nowrap;opacity:.62;transition:all .14s}
   .sh-tab:hover{opacity:.9}
   .sh-tab.on{opacity:1;background:rgba(63,138,69,.26);border-color:rgba(99,190,120,.5)}
+  #shellProfil{display:flex;align-items:center;gap:7px;flex-shrink:0;max-width:150px}
+  #shellProfil .av{width:28px;height:28px;border-radius:50%;flex-shrink:0;object-fit:cover;
+    background:linear-gradient(155deg,#3f8a45,#255c30);border:1px solid rgba(255,255,255,.18);
+    display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#eaf6ec}
+  #shellProfil .ad{font-size:12px;font-weight:700;opacity:.8;overflow:hidden;
+    text-overflow:ellipsis;white-space:nowrap}
   #shellSag{display:flex;align-items:center;gap:8px;flex-shrink:0}
   #shellPara{font-size:12.5px;font-weight:800;padding:6px 10px;border-radius:8px;
     background:rgba(228,178,60,.14);border:1px solid rgba(228,178,60,.3);color:#f0cd72;white-space:nowrap}
@@ -256,6 +262,7 @@
 
   @media (max-width:430px){
     #shellMarka{display:none}
+    #shellProfil .ad{display:none}
     #shellUst{padding:8px 10px;gap:8px}
     #shellIcerik{padding:12px 11px calc(16px + env(safe-area-inset-bottom,0px))}
     .sh-ayar input[type=range]{flex:0 0 96px}
@@ -352,7 +359,7 @@
 
 <div id="touch">
   <div id="stick"><div id="knob"></div></div>
-  <!-- OYUNCU DEĞİŞİKLİĞİ (2026-09-25-E): değişiklik ekranını açar (bkz. degisiklikPanelAc) -->
+  <!-- OYUNCU DEĞİŞİKLİĞİ (2026-09-25-F): değişiklik ekranını açar (bkz. degisiklikPanelAc) -->
   <button id="tb-deg" type="button" style="position:absolute;left:20px;bottom:156px;pointer-events:auto;
     min-width:52px;height:40px;border-radius:20px;border:1.5px solid rgba(255,255,255,.25);
     background:rgba(8,13,11,.45);color:#fff;font:700 13px system-ui,sans-serif">⇄ Değişiklik</button>
@@ -440,6 +447,8 @@
   <div id="shellKap">
     <header id="shellUst">
       <div id="shellMarka">⚽ <span>SAHA</span></div>
+      <!-- PROFİL: Puan Tablosu'ndaki fotoğraf ve ad. Fotoğraf yoksa adın baş harfi. -->
+      <div id="shellProfil" title="Profilin"></div>
       <nav id="shellMenu">
         <button class="sh-tab on" type="button" data-s="lig">🏆 Lig</button>
         <button class="sh-tab" type="button" data-s="arkadas">🎮 Arkadaş maçı</button>
@@ -2337,6 +2346,15 @@ function girisYap(){
       return;
     }
     girisMesaj('');
+    /* PROFİL FOTOĞRAFI (kullanıcı: "Puan Tablosu tarafındaki profil fotoğrafı burada
+       da görünmeli"): Aynı düğümden (userProfiles/{visitorId}) okunur - SAHA'ya ayrı
+       bir fotoğraf yükletmek, kullanıcıdan aynı işi iki kez istemek olurdu. Profil
+       zaten burada okunuyordu (şifre denetimi için); avatar da aynı okumadan alınır,
+       ikinci bir istek yapılmaz. */
+    try{
+      window._sahaProfil = { ad:(v.name||isim), avatar:(v.avatar||null), favTeam:(v.favTeam||null) };
+      sahaAvatarCiz();
+    }catch(e){ _sessiz(e,'girisYap:profil','saha_ag'); }
     // BENI HATIRLA (MADDE 1.1): isaretli degilse isim de saklanmaz. Onceden isim her
     // durumda yaziliyordu ve ortak bir cihazda bir sonraki kullanici baskasinin
     // ismiyle karsilasiyordu. Sifre hicbir kosulda saklanmaz.
@@ -2379,7 +2397,8 @@ function sahaAktifYaz(cevrimici){
       try{ yol.onDisconnect().update({ online:false, lastSeen: firebase.database.ServerValue.TIMESTAMP }); }catch(e){}
       yol.update({
         online: true,
-        ad: (benimKayit && benimKayit.ad) || '',
+        ad: ((window._sahaProfil && window._sahaProfil.ad) || (benimKayit && benimKayit.ad) || ''),
+        avatar: ((window._sahaProfil && window._sahaProfil.avatar) || null),
         takimId: (benimKayit && benimKayit.takimId) || null,
         macta: !!(typeof running !== 'undefined' && running && !bitti),
         lastSeen: Date.now()
@@ -2414,6 +2433,7 @@ try{
 
 function cikisYap(){
   try{ sahaAktifDurdur(); }catch(e){}
+  try{ window._sahaProfil = null; sahaAvatarCiz(); }catch(e){}
   benimKayit = null; benimUid = null; _benimKayitYuklendi = false; _takimSecimErtelendi = false;
   try{ takimSecimKontrol(); }catch(e){_sessiz(e,'cikisYap:2089','saha_oyun');}
   try{ localStorage.removeItem('saha_girisIsim'); }catch(e){_sessiz(e,'cikisYap:2090','saha_oyun');}
@@ -2524,7 +2544,25 @@ function sahaSayfaTazele(ad){
 /* ── ÜST ŞERİT: para ve engel bildirimi ──────────────────────────────────────────────
    Şerit yalnızca bir ENGEL varken doluyor (onay bekliyor, takım atanmamış, bağlantı
    yok). Her durumda bir satır yazmak, şeridi göz ardı edilen bir süse çevirirdi. */
+/* Profil fotoğrafı: Puan Tablosu'ndaki avatar. Yoksa adın baş harfi gösterilir -
+   kırık bir görsel yer tutucudan iyidir. Görsel yüklenemezse (silinmiş bağlantı)
+   onerror ile yine baş harfe düşülür. */
+function sahaAvatarCiz(){
+  try{
+    var k = document.getElementById('shellProfil'); if(!k) return;
+    var p = window._sahaProfil || {};
+    var ad = p.ad || (benimKayit && benimKayit.ad) || '';
+    var bas = (ad || '?').charAt(0).toLocaleUpperCase('tr');
+    var av = p.avatar || '';
+    var gecerli = av && /^(data:image\/|https?:\/\/)/.test(av);
+    k.innerHTML = (gecerli
+        ? '<img class="av" src="' + esc(av) + '" alt="" onerror="this.outerHTML=\'<div class=&quot;av&quot;>' + esc(bas) + '</div>\'">'
+        : '<div class="av">' + esc(bas) + '</div>')
+      + '<div class="ad">' + esc(ad) + '</div>';
+  }catch(e){ _sessiz(e,'sahaAvatarCiz','saha_oyun'); }
+}
 function shellDurumCiz(){
+  try{ sahaAvatarCiz(); }catch(e){}
   try{
     var p = document.getElementById('shellPara');
     if(p) p.textContent = (benimKayit ? (benimKayit.para||0) : 0) + ' SL';
@@ -3872,7 +3910,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-25-E';
+window.APP_BUILD = '2026-09-25-F';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -4159,7 +4197,7 @@ let yedekler = { 0:[], 1:[] };        // takim -> [{ad,no}]
 let degisiklikHakki = { 0:5, 1:5 };   // futbol kurali (IFAB 2022+): 5 hak (onceden 3)
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
-// OYUNCU DEĞİŞİKLİĞİ (2026-09-25-E, kullanıcı: "oyuncu değişikliğini kullanıcı kendisi yapacak
+// OYUNCU DEĞİŞİKLİĞİ (2026-09-25-F, kullanıcı: "oyuncu değişikliğini kullanıcı kendisi yapacak
 // ve değişimi ilgili takımın kadrosundaki oyuncularla gerçekleştirecek")
 // ÖNCEDEN: Değişiklik tuşu, o an KONTROL EDİLEN oyuncuyu sıradaki yedekle otomatik değiştiriyordu
 // (kim çıkacak, kim girecek seçilemiyordu). Yedekler de takımın gerçek kadrosundan değil, oyunun
@@ -4706,7 +4744,7 @@ function sahaCanliYaz(ilkYazim){
         saniye: Math.round(macSaniye()*10)/10, hiz: 2700 / Math.max(1, HALF),
         akiyor: saatAkiyor(), ts: Date.now()
       };
-      // (2026-09-25-E) Değişiklik yapıldıysa sahadaki GÜNCEL isimler de gider - izleyici
+      // (2026-09-25-F) Değişiklik yapıldıysa sahadaki GÜNCEL isimler de gider - izleyici
       // ekranında giren oyuncunun adı görünsün. Sıra: kaleci + saha oyuncuları, havuz sırasıyla
       // (bkz. _sahaIzleKadroAta). Değişiklik yoksa gönderilmez (gereksiz veri).
       if (window._sahaDegisiklikOldu){

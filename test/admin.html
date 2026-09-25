@@ -1936,7 +1936,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-25-E';
+window.APP_BUILD='2026-09-25-F';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -20566,15 +20566,20 @@ window.admKaynakSec = function(k){
     // gerek yok. Seçili sezon yeni kaynakta yoksa o kaynağın bir sezonuna geçilir.
     var suz = admKaynakSuz(_admLeaguesMetaHam);
     var ids = Object.keys(suz);
-    populateLeagueSel(suz);
+    // Seçilen kaynak boşsa hepsi gösterilir ve SEÇİLİ SEZONA DOKUNULMAZ: sezon
+    // değiştirmek activeDisplayLeague'i yazar, bu da Puan Tablosu kullanıcılarını
+    // peşinden sürükler. Bir süzgeç yüzünden kullanıcıları taşımak yanlış olurdu.
     if(!ids.length){
+      suz = _admLeaguesMetaHam; ids = Object.keys(suz);
+      populateLeagueSel(suz);
       toast(k === 'saha'
-        ? 'ℹ️ SAHA kaynağında sezon yok - bir sezonu Lig bölümünden SAHA olarak işaretleyin'
-        : 'ℹ️ SAHA dışı kaynakta sezon yok', 'er');
+        ? 'ℹ️ SAHA kaynağında sezon yok - tüm sezonlar gösteriliyor. Bir sezonu Lig bölümünden SAHA olarak işaretleyebilirsin.'
+        : 'ℹ️ SAHA dışı kaynakta sezon yok - tüm sezonlar gösteriliyor.', 'er');
     } else if(ids.indexOf(_curLeagueId) < 0){
+      populateLeagueSel(suz);
       var yeni = ids.filter(function(id){ return suz[id].status !== 'finished'; }).sort().reverse()[0] || ids.sort().reverse()[0];
       if(yeni) switchLeague(yeni);
-    }
+    } else { populateLeagueSel(suz); }
     if(window._admKaynakDegistirme) toast('✅ Veri kaynağı: ' + admKaynakAdi(k));
   }catch(e){ DiagSil('admKaynakSec', e); }
   window._admKaynakDegistirme = false;
@@ -20656,8 +20661,19 @@ function init(){
     var meta=admKaynakSuz(_admLeaguesMetaHam);
     try{ admSezonKaynakCiz(); }catch(_e){}
     var ids=Object.keys(meta);
-    if(!ids.length){
-      // İlk lig otomatik oluşturulsun
+    /* ══════════════════════════════════════════════════════════════════════════════
+       KÖK SEBEP (kullanıcı bildirdi: "veriler görünmüyor, eklenen veriler siliniyor,
+       kayıtlar tutulmuyor") - BU BLOK BENİM EKLEDİĞİM SÜZGECİN YAN ETKİSİYDİ.
+       Aşağıdaki "hiç lig yoksa ilkini oluştur" kuralı, SÜZÜLMÜŞ listeye bakıyordu.
+       Yönetici "SAHA üzerinden" seçtiğinde ve hiçbir sezon SAHA olarak işaretli
+       değilken süzülmüş liste BOŞ geliyor; kod bunu "hiç sezon yok" sanıp YENİ BİR
+       SEZON OLUŞTURUYOR, seçili sezonu ona çeviriyor ve adm_curLeague'i üzerine
+       yazıyordu. Yöneticinin gerçek sezonu silinmiş gibi görünüyor, eklenen veriler
+       yeni boş sezona gidiyordu. Her açılışta tekrarladığı için çöp sezonlar birikiyordu.
+       DÜZELTME: Otomatik oluşturma kararı HER ZAMAN ham listeye bakar. Bir süzgeç,
+       hiçbir koşulda veri oluşturmamalı ya da var olanı gizleyip yok saydırmamalı. */
+    if(!Object.keys(_admLeaguesMetaHam).length){
+      // Gerçekten hiç lig yok: ilkini oluştur.
       var nid=uid();
       meta[nid]={id:nid,name:'Süper Lig'};
       db.ref('leaguesMeta/'+nid).set(meta[nid]).then(function(){
@@ -20668,6 +20684,17 @@ function init(){
       });
       return;
     }
+    /* YUMUŞAK SÜZGEÇ (kullanıcı: "admin hangi tarafta olursa olsun kullanıcı istediği
+       alana giriş yapabilir"): Seçilen kaynakta hiç sezon yoksa PANELİ BOŞ BIRAKMAK
+       yerine hepsi gösterilir. Sert süzgeç, yöneticiyi kendi verisinden kilitliyordu -
+       bir tercih, erişimi engelleyen bir duvara dönüşmemeli. */
+    if(!ids.length){
+      meta=_admLeaguesMetaHam; ids=Object.keys(meta);
+      if(!window._admKaynakBosUyarildi){
+        window._admKaynakBosUyarildi=true;
+        setTimeout(function(){ try{ toast('ℹ️ '+admKaynakAdi(admVeriKaynagi())+' kaynağında sezon yok - tüm sezonlar gösteriliyor','er'); }catch(e){} },900);
+      }
+    } else { window._admKaynakBosUyarildi=false; }
     populateLeagueSel(meta);
     var saved=localStorage.getItem('adm_curLeague');
     // HATA DÜZELTMESİ (kullanıcı bildirdi: "sezon silince eski hâline dönüyor"): Seçili sezon
