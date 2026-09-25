@@ -361,7 +361,7 @@
 
 <div id="touch">
   <div id="stick"><div id="knob"></div></div>
-  <!-- OYUNCU DEĞİŞİKLİĞİ (2026-09-26-A): değişiklik ekranını açar (bkz. degisiklikPanelAc) -->
+  <!-- OYUNCU DEĞİŞİKLİĞİ (2026-09-26-B): değişiklik ekranını açar (bkz. degisiklikPanelAc) -->
   <button id="tb-deg" type="button" style="position:absolute;left:20px;bottom:156px;pointer-events:auto;
     min-width:52px;height:40px;border-radius:20px;border:1.5px solid rgba(255,255,255,.25);
     background:rgba(8,13,11,.45);color:#fff;font:700 13px system-ui,sans-serif">⇄ Değişiklik</button>
@@ -502,7 +502,6 @@
     <!-- KONSOL KOLU: durum + tuş ataması (bkz. kolAyarCiz) -->
     <div class="row"><span>Konsol kolu<small>Tuş atamasını düzenle</small></span><button id="sw-kol" onclick="var k=document.getElementById('kolAyar');k.style.display=k.style.display==='none'?'block':'none';kolAyarCiz();">Yok</button></div>
     <div id="kolAyar" style="display:none;margin:.1rem 0 .5rem;padding:.4rem .6rem;border-radius:10px;background:rgba(0,0,0,.22)"></div>
-    <div class="row"><span>Hata ayıklama<small>Ofsayt çizgisi, dokunuş yarıçapı, sayaçlar — <b>H</b></small></span><button id="sw-hata">Kapalı</button></div>
     <button class="btn alt" type="button" onclick="ayarKapa();degisiklikPanelAc(0);">⇄ Oyuncu değişikliği</button>
     <button class="btn" id="b-ayar-kapa">Devam et</button>
   </div>
@@ -1827,13 +1826,24 @@ try{
     var _testMi = (location.pathname.indexOf('/test/') !== -1);
     var _orjRef = fbDb.ref.bind(fbDb);
     window._sahaTestOrtami = _testMi;
-    if(_testMi){
-      fbDb.ref = function(yol){
-        var y = (yol == null ? '' : String(yol)).replace(/^\/+/, '');
-        if(y.indexOf('.info/') === 0 || y === '.info') return _orjRef(y);
-        return _orjRef('test/' + y);
-      };
-    }
+    /* VERİ KÖKÜ (kullanıcı: "adminin SAHA için yaptığı ayarlar ayrı saklanacak")
+       SAHA uygulaması HER ZAMAN SAHA kökünde çalışır - burada seçim yok, uygulamanın
+       kendisi zaten "SAHA tarafı". Lig, takımlar ve fikstür 'sahaVeri/' altından gelir.
+       ORTAK kalanlar önek almaz: sohbet (paylasilan/genelSohbet'e yönlendirilir),
+       bakım (globalConfig), TV (channelPool), profiller, oyuncu havuzu ve ekonomi. */
+    window.SAHA_KOK_ONEK = 'sahaVeri/';
+    var _AYRIK = /^(leagues|leaguesMeta|activeDisplayLeague)(\/|$)/;
+    var _SOHBET = /^leagues\/[^\/]+\/generalChat(\/|$)/;
+    fbDb.ref = function(yol){
+      var y = (yol == null ? '' : String(yol)).replace(/^\/+/, '');
+      if(y.indexOf('.info/') === 0 || y === '.info') return _orjRef(y);
+      if(_SOHBET.test(y)){
+        y = 'paylasilan/genelSohbet' + y.replace(/^leagues\/[^\/]+\/generalChat/, '');
+      } else if(_AYRIK.test(y)){
+        y = window.SAHA_KOK_ONEK + y;
+      }
+      return _orjRef(_testMi ? ('test/' + y) : y);
+    };
   }catch(e){_sessiz(e,'sesTribun:1610','saha_ses');}
   fbHazir = true;
   // NOT: Kimlik artik bu anonim/otomatik Firebase Auth oturumundan GELMIYOR (bkz. girisYap) -
@@ -2973,6 +2983,9 @@ function sayAyarCiz(){
     + '</div>';
 
   h += '<div class="sh-kart"><div class="sh-kart-bas">Görüntü</div>'
+    + '<div class="sh-ayar"><div class="et">Tam ekran<small>Mobilde yatay kilit de denenir</small></div>'
+      + '<button type="button" class="' + (tamEkranMi() ? '' : 'off') + '" onclick="ayarTamEkranAcKapa()">'
+      + (tamEkranMi() ? 'Açık' : 'Kapalı') + '</button></div>'
     + '<div class="sh-ayar"><div class="et">Grafik<small>Çözünürlük ve tribün yoğunluğu</small></div>'
       + '<button type="button" onclick="ayarGrafikDongu()">' + ['Düşük','Orta','Yüksek'][AYAR.grafik||0] + '</button></div>'
     + '<div class="sh-ayar"><div class="et">Radar<small>Alt ortadaki mini saha</small></div>'
@@ -2988,6 +3001,26 @@ function ayarSesAcKapa(){ AYAR.ses = !AYAR.ses; if(AYAR.ses) sesBaslat(); ayarKa
 function ayarTipAcKapa(){ AYAR.tip = !AYAR.tip; ayarKaydet(); ayarUygula(); sayAyarCiz(); }
 function ayarRadarAcKapa(){ AYAR.radar = !AYAR.radar; ayarKaydet(); ayarUygula(); if(AYAR.radar) radar(); sayAyarCiz(); }
 function ayarTekrarAcKapa(){ AYAR.tekrar = !AYAR.tekrar; ayarKaydet(); ayarUygula(); sayAyarCiz(); }
+/* TAM EKRAN (kullanıcı talebi): Tarayıcı tam ekranı yalnızca bir KULLANICI HAREKETİ
+   içinde açılabilir - bu yüzden düğmeye basıldığı anda çağrılır, ayar olarak saklanıp
+   sonradan uygulanamaz. Çıkış da aynı düğmeden. Durum tarayıcıdan okunur (tamEkranMi),
+   kendi bayrağımızı tutmak gerçekle ayrışma riski taşırdı: kullanıcı ESC ile çıkarsa
+   bayrak "açık" kalırdı. */
+function ayarTamEkranAcKapa(){
+  try{
+    tamEkran(!tamEkranMi());
+    // Tarayıcı geçişi tamamlayana kadar kısa bir gecikme; hemen çizersek eski durumu yazardık.
+    setTimeout(function(){ try{ sayAyarCiz(); }catch(e){} }, 220);
+  }catch(e){ _sessiz(e,'ayarTamEkranAcKapa','saha_oyun'); }
+}
+// Tam ekrandan ESC ya da geri tuşuyla çıkılırsa ayar sayfasındaki düğme güncellensin.
+try{
+  ['fullscreenchange','webkitfullscreenchange'].forEach(function(ol){
+    document.addEventListener(ol, function(){
+      try{ if(_shellSayfa === 'ayar') sayAyarCiz(); }catch(e){}
+    });
+  });
+}catch(e){ _sessiz(e,'tamEkranDinleyici','saha_oyun'); }
 function ayarGrafikDongu(){ AYAR.grafik = ((AYAR.grafik||0) + 1) % 3; ayarKaydet(); ayarUygula(); sayAyarCiz(); }
 // Kaydirici oninput'ta her hareket icin sayfayi bastan cizmek titreme yapiyordu;
 // yalnizca yanindaki deger yazisi guncellenir.
@@ -3937,7 +3970,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-26-A';
+window.APP_BUILD = '2026-09-26-B';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -4224,7 +4257,7 @@ let yedekler = { 0:[], 1:[] };        // takim -> [{ad,no}]
 let degisiklikHakki = { 0:5, 1:5 };   // futbol kurali (IFAB 2022+): 5 hak (onceden 3)
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
-// OYUNCU DEĞİŞİKLİĞİ (2026-09-26-A, kullanıcı: "oyuncu değişikliğini kullanıcı kendisi yapacak
+// OYUNCU DEĞİŞİKLİĞİ (2026-09-26-B, kullanıcı: "oyuncu değişikliğini kullanıcı kendisi yapacak
 // ve değişimi ilgili takımın kadrosundaki oyuncularla gerçekleştirecek")
 // ÖNCEDEN: Değişiklik tuşu, o an KONTROL EDİLEN oyuncuyu sıradaki yedekle otomatik değiştiriyordu
 // (kim çıkacak, kim girecek seçilemiyordu). Yedekler de takımın gerçek kadrosundan değil, oyunun
@@ -4771,7 +4804,7 @@ function sahaCanliYaz(ilkYazim){
         saniye: Math.round(macSaniye()*10)/10, hiz: 2700 / Math.max(1, HALF),
         akiyor: saatAkiyor(), ts: Date.now()
       };
-      // (2026-09-26-A) Değişiklik yapıldıysa sahadaki GÜNCEL isimler de gider - izleyici
+      // (2026-09-26-B) Değişiklik yapıldıysa sahadaki GÜNCEL isimler de gider - izleyici
       // ekranında giren oyuncunun adı görünsün. Sıra: kaleci + saha oyuncuları, havuz sırasıyla
       // (bkz. _sahaIzleKadroAta). Değişiklik yoksa gönderilmez (gereksiz veri).
       if (window._sahaDegisiklikOldu){
@@ -5010,7 +5043,8 @@ function ayarUygula(){
   };
   yaz('sw-radar', AYAR.radar); yaz('sw-tip', AYAR.tip);
   yaz('sw-ses', AYAR.ses); yaz('sw-tekrar', AYAR.tekrar); yaz('sw-tam', tamEkranMi());
-  yaz('sw-hata', !!AYAR.hata);
+  // 'sw-hata' düğmesi maç içi ayar panelinden kaldırıldı (kullanıcı talebi);
+  // hata ayıklama katmanı yalnızca H tuşuyla açılıyor.
   document.getElementById('hata').classList.toggle('on', !!AYAR.hata);
   document.getElementById('sw-sure').textContent   = (window._sahaYoneticiSureDk > 0)
     ? ('Yönetici: ' + window._sahaYoneticiSureDk + ' dk')
@@ -7461,7 +7495,6 @@ document.getElementById('sw-agirlik').onclick = () => {
   const i = AGIRLIK.findIndex(x => x.k === AYAR.agirlik);
   AYAR.agirlik = AGIRLIK[(i+1) % AGIRLIK.length].k; TAKTIK.a.ileri = AYAR.agirlik; ayarKaydet(); ayarUygula();
 };
-document.getElementById('sw-hata').onclick    = () => { AYAR.hata = !AYAR.hata; ayarKaydet(); ayarUygula(); hataGuncelle(); };
 addEventListener('keydown', e => {
   if (e.code === 'KeyH'){ AYAR.hata = !AYAR.hata; ayarKaydet(); ayarUygula(); hataGuncelle(); }
   if (degisiklikPanelAcikMi()){

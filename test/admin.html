@@ -1920,6 +1920,21 @@ window.ptTestVeriKopyala=function(){
     else koy();
   }catch(e){}
 })();
+
+/* VERİ KÖKÜ AYRIMI - bkz. index.html'deki aynı başlıklı açıklama.
+   AYRILAN: leagues · leaguesMeta · activeDisplayLeague
+   ORTAK  : sohbet (paylasilan/genelSohbet'e yönlendirilir), bakım (globalConfig),
+            TV (channelPool + paylasilan/tvKanallari), profiller, teşhis, SAHA ekonomisi */
+window.SAHA_KOK_ONEK = 'sahaVeri/';
+window._AYRIK_KOKLER = /^(leagues|leaguesMeta|activeDisplayLeague)(\/|$)/;
+window._SOHBET_YOLU = /^leagues\/[^\/]+\/generalChat(\/|$)/;
+function _kokUygula(y, onek){
+  if(window._SOHBET_YOLU.test(y)){
+    return 'paylasilan/genelSohbet' + y.replace(/^leagues\/[^\/]+\/generalChat/, '');
+  }
+  if(onek && window._AYRIK_KOKLER.test(y)) return onek + y;
+  return y;
+}
 (function ptTestVeriKoku(){
   try{
     var testMi=(location.pathname.indexOf('/test/')!==-1);
@@ -1927,14 +1942,15 @@ window.ptTestVeriKopyala=function(){
     var orj=d.ref.bind(d);
     window._ptGercekRef=orj;
     window._ptTestOrtami=testMi;
-    if(!testMi)return;
+    // Kök öneki ÇAĞRI ANINDA okunur (yönetici kaynağı açılıştan sonra seçiyor).
     d.ref=function(yol){
       var y=(yol==null?'':String(yol)).replace(/^\/+/,'');
       // ÖNEMLİ: Firebase'in '.info/connected' gibi özel '.info/...' yolları KÖKTEN
       // ayrılmıştır ve hiçbir önekle birleştirilemez - birleştirilirse Firebase
       // "invalid path" hatasıyla çöker. Bu yüzden bu özel yollar öneksiz bırakılır.
       if(y.indexOf('.info/')===0||y==='.info')return orj(y);
-      return orj('test/'+y);
+      y=_kokUygula(y, (admVeriKaynagi()==='saha') ? window.SAHA_KOK_ONEK : '');
+      return orj(testMi ? ('test/'+y) : y);
     };
   }catch(e){}
 })();
@@ -1942,7 +1958,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-A';
+window.APP_BUILD='2026-09-26-B';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -3356,7 +3372,20 @@ function save(){
     // save() çağrılarında videoLinks payload'dan TAMAMEN ÇIKARILIR - update() zaten
     // dokunmadığı alanları Firebase'de OLDUĞU GİBİ bıraktığından, bu alanın kaza ile
     // eskiyle üzerine yazılması artık MÜMKÜN DEĞİL.
-    if(window._videoLinksDirty){window._videoLinksDirty=false;}
+    if(window._videoLinksDirty){
+      window._videoLinksDirty=false;
+      /* TV SEKMESİ ORTAK (kullanıcı: "sadece sohbet, bakım modu ve TV sekmesi ortak")
+         videoLinks lig BELGESİNİN İÇİNDE durduğu için kök ayrımıyla ikiye bölünürdü.
+         Yol yeniden yazılarak çözülemez - ayrı bir yol değil, belgenin bir alanı.
+         Çözüm: aynı liste ORTAK düğüme de yazılır; iki taraf da okurken oradan
+         bindirir (bkz. admOrtakTvDinle / index: ptOrtakTvUygula). Lig belgesine de
+         yazmaya devam ediyoruz: güncellenmemiş bir istemci hâlâ oradan okuyor. */
+      try{
+        firebase.database().ref('paylasilan/tvKanallari')
+          .set(Array.isArray(payload.videoLinks)?payload.videoLinks:[])
+          .catch(function(e){ DiagSil('ortakTvYazim',e); });
+      }catch(e){ DiagSil('ortakTvYazim',e); }
+    }
     else{delete payload.videoLinks;}
     payload.premiumAccessCodes=Object.assign({},S.premiumAccessCodes||{},existingPremiumCodes||{});
     payload.premiumRequests=Object.assign({},payload.premiumRequests||{},existingPremiumRequests||{});
@@ -20495,15 +20524,9 @@ function admVeriKaynagiYaz(k){
 function admSezonKaynagi(meta){
   return (meta && meta.kaynak === 'saha') ? 'saha' : 'klasik';
 }
-function admKaynakSuz(ham){
-  var k = admVeriKaynagi();
-  if(!k) return ham || {};
-  var cikti = {};
-  Object.keys(ham || {}).forEach(function(id){
-    if(admSezonKaynagi(ham[id]) === k) cikti[id] = ham[id];
-  });
-  return cikti;
-}
+/* SEZON SÜZGECİ ARTIK GEREKSİZ - ayrım KÖK düzeyinde (bkz. veri kökü ayrımı).
+   Her kökün kendi leaguesMeta'sı yalnızca o tarafın sezonlarını içeriyor. */
+function admKaynakSuz(ham){ return ham || {}; }
 function admKaynakSayilari(){
   var s = 0, d = 0;
   Object.keys(_admLeaguesMetaHam || {}).forEach(function(id){
@@ -20560,6 +20583,24 @@ function admKaynakEkraniAc(degistirmeMi){
 }
 window.admKaynakDegistirAc = function(){ admKaynakEkraniAc(true); };
 // Gövde sınıfı: SAHA'ya özgü kartların görünürlüğünü tek yerden sürer (bkz. CSS).
+/* TV listesi ORTAK: yönetici hangi kökte olursa olsun aynı listeyi görür ve düzenler. */
+window._admOrtakTv = null;
+(function admOrtakTvDinle(){
+  try{
+    if(!window.firebase||!firebase.database){ setTimeout(admOrtakTvDinle,700); return; }
+    firebase.database().ref('paylasilan/tvKanallari').on('value',function(sn){
+      var v=sn.val();
+      window._admOrtakTv = Array.isArray(v) ? v : (v ? Object.values(v) : null);
+      admOrtakTvUygula();
+      try{ if(typeof renderVideoLinkAdmin==='function') renderVideoLinkAdmin(); }catch(e){}
+    },function(err){ DiagSil('admOrtakTvDinle',err); });
+  }catch(e){ DiagSil('admOrtakTvDinle',e); setTimeout(admOrtakTvDinle,1400); }
+})();
+function admOrtakTvUygula(){
+  // Ortak düğüm henüz yoksa lig belgesindeki liste olduğu gibi kalır: mevcut kurulum
+  // hiçbir şey kaybetmez, ilk kaydetmede ortak düğüme taşınır.
+  try{ if(window._admOrtakTv && window.S) S.videoLinks = window._admOrtakTv; }catch(e){}
+}
 function admKaynakGovdeUygula(){
   try{
     var k = admVeriKaynagi();
@@ -20575,8 +20616,15 @@ function admKaynakKapat(){
   window._admKaynakDegistirme = false;
 }
 window.admKaynakSec = function(k){
+  var degisti = (admVeriKaynagi() !== k) && !!admVeriKaynagi();
   admVeriKaynagiYaz(k);
   admKaynakKapat();
+  // KÖK DEĞİŞTİ -> SAYFA YENİLENİR (bkz. index'teki aynı gerekçe).
+  if(degisti){
+    try{ toast('🔄 Veri kaynağı değişti, yeniden yükleniyor…'); }catch(e){}
+    setTimeout(function(){ location.reload(); }, 600);
+    return;
+  }
   try{
     // Süzgeç yeniden uygulanır; ham liste elde olduğu için Firebase'den tekrar okumaya
     // gerek yok. Seçili sezon yeni kaynakta yoksa o kaynağın bir sezonuna geçilir.
@@ -20629,18 +20677,21 @@ window.admSezonKaynakDegistir = function(k){
       toast('❌ Kaydedilemedi: ' + ((e&&e.message)||''), 'er');
     });
 };
+/* Sezon ETİKETİ kaldırıldı: ayrım artık kök düzeyinde. Bu şerit yalnızca hangi
+   kökte çalışıldığını söyler - "sezonum kayboldu" sanılan durumun en hızlı cevabı bu. */
 function admSezonKaynakCiz(){
   var k = qs('admSezonKaynakKutu'); if(!k) return;
-  var meta = (_admLeaguesMetaHam || {})[_curLeagueId] || {};
-  var su = admSezonKaynagi(meta);
-  k.innerHTML = '<div class="row"><span>Bu sezonun kaynağı<small>'
-    + (su === 'saha' ? 'Maçları SAHA uygulamasında oynanıyor' : 'Elle girilen / başka oyundan gelen sezon')
-    + '</small></span>'
-    + '<button class="btn ' + (su === 'saha' ? 'bp' : 'bgh') + '" onclick="admSezonKaynakDegistir(\''
-    + (su === 'saha' ? 'klasik' : 'saha') + '\')">'
-    + (su === 'saha' ? '⚽ SAHA sezonu' : '📋 SAHA değil') + '</button></div>'
-    + '<div class="hint" style="margin-top:.3rem">Kullanıcılar girişte "SAHA üzerinden" ya da "SAHA olmadan" seçer; '
-    + 'yalnızca kendi seçtikleri kaynağın sezonlarını görür.</div>';
+  var kk = admVeriKaynagi();
+  if(!kk){ k.innerHTML = ''; k.style.display='none'; return; }
+  k.style.display='';
+  var saha = (kk === 'saha');
+  k.innerHTML = '<div style="display:flex;align-items:center;gap:.5rem;font-size:.7rem">'
+    + '<span style="font-size:.95rem">' + (saha ? '⚽' : '📋') + '</span>'
+    + '<div style="flex:1;line-height:1.5"><b>' + (saha ? 'SAHA verileri' : 'SAHA dışı veriler') + '</b>'
+    + '<div style="color:var(--mu);font-size:.64rem">Bu taraftaki lig, takım ve fikstür ayrı saklanır. '
+    + 'Sohbet, bakım modu ve TV listesi ortaktır.</div></div>'
+    + '<button class="btn bgh" style="font-size:.66rem;min-height:28px;padding:.3rem .55rem" '
+    + 'onclick="admKaynakEkraniAc(true)">Değiştir</button></div>';
 }
 
 function init(){

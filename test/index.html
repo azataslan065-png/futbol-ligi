@@ -2523,6 +2523,39 @@ const app=firebase.initializeApp(FB);
     });
   }catch(e){}
 })();
+
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   VERİ KÖKÜ AYRIMI (kullanıcı: "adminin lig logosu, takımlar, fikstür, puan tablosu ve
+   saha bölümü için yaptığı ayarlar AYRI saklanacak; sadece sohbet, bakım modu ve TV
+   sekmesi ortak veri akışı sağlayacak")
+   Önceki sürümde ayrım sezon ETİKETİYLE yapılıyordu - aynı kökte duran sezonlar
+   süzülüyordu. O yaklaşım istenen şeyi vermiyordu: iki taraf hâlâ aynı veriyi
+   paylaşıyor, yöneticinin bir taraf için yaptığı ayar diğerine de yazılıyordu.
+   Artık AYRI KÖK var. Kökün kendisi, bu dosyadaki mevcut 'test/' mekanizmasıyla
+   aynı yoldan uygulanır: 'ref' BİR KEZ sarılır, atlanan çağrı yeri kalmaz.
+
+     AYRILAN  : leagues · leaguesMeta · activeDisplayLeague
+                (lig logosu, takımlar, fikstür, puan tablosu, sezon ayarları - hepsi
+                 bu üç kökün altında)
+     ORTAK    : sohbet (leagues/*/generalChat -> paylasilan/genelSohbet'e yönlendirilir)
+                bakım (globalConfig/maintenance), TV (channelPool + paylasilan/tvKanallari),
+                kimlik ve profiller (userProfiles), teşhis, SAHA ekonomisi
+
+   Klasik taraf ÖNEKSİZ kalır: bugüne kadarki bütün veri orada duruyor ve önek
+   eklemek onu bir anda görünmez kılardı. SAHA tarafı 'sahaVeri/' altında başlar.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+window.SAHA_KOK_ONEK = 'sahaVeri/';
+window._AYRIK_KOKLER = /^(leagues|leaguesMeta|activeDisplayLeague)(\/|$)/;
+// Sohbet ortak: hangi kökte olursak olalım tek bir düğüme gider. Lig kimlikleri iki
+// kökte farklı olduğu için sohbeti lige göre anahtarlamak imkânsız - tek ortak akış.
+window._SOHBET_YOLU = /^leagues\/[^\/]+\/generalChat(\/|$)/;
+function _kokUygula(y, onek){
+  if(window._SOHBET_YOLU.test(y)){
+    return 'paylasilan/genelSohbet' + y.replace(/^leagues\/[^\/]+\/generalChat/, '');
+  }
+  if(onek && window._AYRIK_KOKLER.test(y)) return onek + y;
+  return y;
+}
 (function ptTestVeriKoku(){
   try{
     var testMi=(location.pathname.indexOf('/test/')!==-1);
@@ -2530,14 +2563,16 @@ const app=firebase.initializeApp(FB);
     var orj=d.ref.bind(d);
     window._ptGercekRef=orj;          // önek UYGULANMAMIŞ hâli
     window._ptTestOrtami=testMi;
-    if(!testMi)return;
+    // Kök öneki ÇAĞRI ANINDA okunur: kullanıcı kaynağı açılıştan sonra seçiyor.
+    // (Seçim değişince sayfa yeniden yükleniyor - bkz. ptKaynakSec.)
     d.ref=function(yol){
       var y=(yol==null?'':String(yol)).replace(/^\/+/,'');
       // ÖNEMLİ: Firebase'in '.info/connected' gibi özel '.info/...' yolları KÖKTEN
       // ayrılmıştır ve hiçbir önekle birleştirilemez - birleştirilirse Firebase
       // "invalid path" hatasıyla çöker. Bu yüzden bu özel yollar öneksiz bırakılır.
       if(y.indexOf('.info/')===0||y==='.info')return orj(y);
-      return orj('test/'+y);
+      y=_kokUygula(y, (ptVeriKaynagi()==='saha') ? window.SAHA_KOK_ONEK : '');
+      return orj(testMi ? ('test/'+y) : y);
     };
   }catch(e){}
 })();
@@ -2566,7 +2601,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-A';
+window.APP_BUILD='2026-09-26-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5629,6 +5664,8 @@ function init(){
   attachLeaguesMetaListener();
   // Küresel bakım: sezondan bağımsız, iki uygulamayı birden kapsar.
   ptKureselBakimDinle();
+  // TV listesi ortak: kök ayrımından etkilenmez (bkz. ptOrtakTvDinle).
+  ptOrtakTvDinle();
 }
 
 function getHashLeagueId(){
@@ -5723,6 +5760,28 @@ window._ptKaynakBosDustu = false;
    birini atlayıp ayrımın sessizce delinmesi demekti.
    Kaynak seçilmemişse ya da süzgeç boşa düşüp hepsi gösteriliyorsa görünür kalır:
    ikisinde de kullanıcının aktif bir "SAHA istemiyorum" tercihi yok. */
+/* TV SEKMESİ ORTAK (kullanıcı: "sadece sohbet, bakım modu ve TV sekmesi ortak veri
+   akışı sağlayacak")
+   Yöneticinin TV listesi (videoLinks) lig BELGESİNİN İÇİNDE duruyor - yani kök
+   ayrımıyla birlikte o da ikiye bölünürdü. Yolu yeniden yazarak çözülemez, çünkü
+   ayrı bir yol değil; belgenin bir alanı. Bu yüzden ortak bir düğümden BİNDİRİLİYOR:
+   lig verisi geldikten sonra D.videoLinks ortak listeyle değiştirilir.
+   Ortak düğüm henüz yoksa lig belgesindeki liste olduğu gibi kalır - böylece mevcut
+   kurulumlar hiçbir şey kaybetmez, ilk yazımda ortak düğüme taşınır. */
+window._ptOrtakTv = null;
+function ptOrtakTvDinle(){
+  try{
+    firebase.database().ref('paylasilan/tvKanallari').on('value',function(sn){
+      var v=sn.val();
+      window._ptOrtakTv = Array.isArray(v) ? v : (v ? Object.values(v) : null);
+      ptOrtakTvUygula();
+      try{ if(typeof renderTab==='function' && _curTab==='tv') renderTab(); }catch(e){}
+    },function(err){ DiagSil('ptOrtakTvDinle',err); });
+  }catch(e){ DiagSil('ptOrtakTvDinle',e); }
+}
+function ptOrtakTvUygula(){
+  try{ if(window._ptOrtakTv) D.videoLinks = window._ptOrtakTv; }catch(e){}
+}
 function ptSahaGoster(){
   try{
     var k = ptVeriKaynagi();
@@ -5731,19 +5790,13 @@ function ptSahaGoster(){
     return k === 'saha';
   }catch(e){ return true; }
 }
+/* SEZON SÜZGECİ ARTIK GEREKSİZ - ayrım KÖK düzeyinde yapılıyor (bkz. veri kökü
+   ayrımı). Her kökün kendi 'leaguesMeta'sı yalnızca o tarafın sezonlarını içerdiği
+   için süzülecek bir şey kalmadı. İşlev, çağrı yerlerini bozmamak için duruyor ve
+   listeyi olduğu gibi döndürüyor; sezon etiketine (kaynak) bakan mantık kaldırıldı. */
 function ptKaynakSuz(ham){
-  var k = ptVeriKaynagi();
-  if(!k){ window._ptKaynakBosDustu = false; return ham || {}; }   // henuz secilmedi: hepsi
-  var cikti = {}, sayi = 0;
-  Object.keys(ham || {}).forEach(function(id){
-    if(ptSezonKaynagi(ham[id]) === k){ cikti[id] = ham[id]; sayi++; }
-  });
-  if(!sayi){
-    window._ptKaynakBosDustu = true;
-    return ham || {};
-  }
   window._ptKaynakBosDustu = false;
-  return cikti;
+  return ham || {};
 }
 function ptKaynakSayilari(){
   var s = 0, d = 0;
@@ -5788,7 +5841,17 @@ function ptKaynakEkraniAc(degistirmeMi){
 }
 window.ptKaynakSec = function(k){
   var oncekiVardi = !!ptVeriKaynagi();
+  var degisti = (ptVeriKaynagi() !== k);
   ptVeriKaynagiYaz(k);
+  /* KÖK DEĞİŞTİ -> SAYFA YENİLENİR. Bütün Firebase dinleyicileri ESKİ kökün yollarına
+     bağlı; onları tek tek koparıp yeniden bağlamak, birini atlayıp iki kökten aynı anda
+     veri okuyan bir ekran bırakma riski taşıyordu. Yeniden yükleme tek satır ve kesin.
+     İlk seçimde yenileme YOK: henüz hiçbir dinleyici kurulmadan seçiliyor. */
+  if(degisti && oncekiVardi){
+    try{ showToast('🔄 Veri kaynağı değişti, yeniden yükleniyor…'); }catch(e){}
+    setTimeout(function(){ location.reload(); }, 600);
+    return;
+  }
   var scr = document.getElementById('kaynakScreen');
   if(scr) scr.style.display = 'none';
   // Seçim, hangi sezonların görüneceğini değiştirir. Süzgeci yeniden uygulamak için
@@ -5912,6 +5975,10 @@ function listenToLeague(leagueId){
     }
     D={leagueName:'Futbol Ligi',season:'',teams:{},matches:{},generalChat:{},archives:[],videoLinks:[]};
     if(d)D={...D,...d};
+    // TV listesi ORTAK: lig belgesinden gelen liste, ortak düğümle değiştirilir
+    // (bkz. ptOrtakTvDinle). Her lig senkronunda uygulanmalı - aksi halde bir sonraki
+    // senkron ortak listeyi lig belgesindekiyle geri ezerdi.
+    try{ ptOrtakTvUygula(); }catch(e){}
     // KULLANICI TALEBİ: "Admin yeni bir tema, emoji ya da yazı tipi paketi eklediği zaman
     // bunu hemen kullanıcı görmeyecek. Bunun için bir havuz olacak... İsteğe bağlı puan
     // tablosu tarafında görünmesini aktifleştirebilir veya erişimi kapatabilir." - Admin'in
