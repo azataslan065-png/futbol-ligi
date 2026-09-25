@@ -212,6 +212,23 @@ body.bg-anim-sway #bgFixedLayer{transform-origin:center;animation:bgSway calc(7s
 
 /* ── MODE SELECTION SCREEN ── */
 #modeScreen{display:none;position:fixed;inset:0;background:var(--bg);z-index:950;flex-direction:column;align-items:center;justify-content:center;padding:1.5rem}
+/* VERİ KAYNAĞI SEÇİM EKRANI (MADDE 1) - modeScreen ile aynı katman düzeni, çünkü
+   ikisi de giriş ile uygulama arasında duran tam ekran adımlar. */
+#kaynakScreen{display:none;position:fixed;inset:0;background:var(--bg);z-index:951;flex-direction:column;align-items:center;justify-content:center;padding:1.5rem;overflow-y:auto}
+#kaynakScreen .kaynak-baslik{font-size:1.25rem;font-weight:900;color:var(--tx);margin-bottom:.35rem;text-align:center;font-family:var(--font-family,'Outfit'),sans-serif}
+#kaynakScreen .kaynak-alt{font-size:.78rem;color:var(--mu);margin-bottom:1.3rem;text-align:center;line-height:1.55;max-width:340px;font-family:var(--font-family,'Outfit'),sans-serif}
+#kaynakGrid{width:100%;max-width:400px;display:flex;flex-direction:column;gap:.6rem}
+.kaynak-kart{display:flex;align-items:center;gap:.8rem;background:var(--s2);border:1.5px solid var(--br);border-radius:16px;padding:.9rem 1rem;cursor:pointer;transition:border-color .15s,background .15s;font-family:var(--font-family,'Outfit'),sans-serif}
+.kaynak-kart:hover{border-color:var(--ac);background:var(--s3)}
+.kaynak-kart.secili{border-color:var(--ac);background:var(--s3)}
+.kaynak-ikon{font-size:1.7rem;flex-shrink:0}
+.kaynak-bilgi{flex:1;min-width:0;text-align:left}
+.kaynak-ad{font-size:.85rem;font-weight:800;color:var(--tx);line-height:1.35}
+.kaynak-secili{display:inline-block;margin-left:.4rem;font-size:.58rem;font-weight:800;background:var(--ac);color:#fff;border-radius:6px;padding:.1rem .35rem;vertical-align:middle}
+.kaynak-aciklama{font-size:.68rem;color:var(--mu);margin-top:.22rem;line-height:1.5}
+.kaynak-sayi{font-size:.64rem;color:var(--ac);font-weight:800;margin-top:.3rem}
+.kaynak-ok{color:var(--mu);font-size:1rem;flex-shrink:0}
+#kaynakGeri{margin-top:1.1rem;background:none;border:none;color:var(--mu);font-size:.76rem;font-weight:700;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif}
 .mode-title{font-size:1.3rem;font-weight:900;margin-bottom:.3rem;text-align:center}
 .mode-sub{font-size:.8rem;color:var(--mu);margin-bottom:1.8rem;text-align:center}
 .mode-grid{width:100%;max-width:380px;display:flex;flex-direction:column;gap:.7rem}
@@ -2255,6 +2272,16 @@ window.addEventListener('DOMContentLoaded',function(){
 </div>
 
 <!-- ═══ MOD SEÇİM EKRANI ═══ -->
+<!-- VERİ KAYNAĞI SEÇİMİ (kullanıcı: Puan Tablosu MADDE 1)
+     Girişten sonra BİR KEZ açılır; seçim saklanır ve sonraki girişlerde sorulmaz.
+     Değiştirmek için Sezonlar bölümünde her zaman bir düğme vardır. -->
+<div id="kaynakScreen">
+  <div class="kaynak-baslik">Hangi verileri görmek istersin?</div>
+  <div class="kaynak-alt">Bu seçim yalnızca bir kez sorulur. Sezonlar bölümünden istediğin zaman değiştirebilirsin.</div>
+  <div class="kaynak-grid" id="kaynakGrid"></div>
+  <button id="kaynakGeri" onclick="ptKaynakGeri()">← Vazgeç</button>
+</div>
+
 <div id="modeScreen">
   <h1 class="mode-title">Görünüm Seç</h1>
   <p class="mode-sub">Nasıl takip etmek istersin?</p>
@@ -2539,7 +2566,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-22-W';
+window.APP_BUILD='2026-09-25-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -4727,7 +4754,39 @@ window.doEnter=function(){
 // METNİ olarak yazılıyor. Burada üç durum da (yeni 'auto', eski null/undefined ve çok eski
 // "enabled" alanı) TEK bir normalize adımıyla ele alınır - admin ile Puan Tablosu ASLA farklı
 // karar veremez.
+// KÜRESEL BAKIM (kullanıcı: "hangi taraftan açılırsa açılsın iki uygulama da bakımda")
+// Bakım artık sezona değil UYGULAMAYA ait. Sezon düğümü de okunmaya devam ediyor:
+// ikisinden HERHANGİ BİRİ aktifse bakım aktiftir. Yalnızca küresel düğüme bakmak,
+// henüz küresel düğüme yazmamış eski bir panelin bakımını görmezden gelmek olurdu.
+window._ptKureselBakim=null;
+function ptKureselBakimDinle(){
+  try{
+    firebase.database().ref('globalConfig/maintenance').on('value',function(sn){
+      window._ptKureselBakim=sn.val()||null;
+      // Kullanıcı içerideyken bakım açılırsa anında dışarı alınır - aksi halde
+      // bakım başladığı hâlde açık kalan bir oturum veri yazmaya devam ederdi.
+      try{
+        var mt=window._ptKureselBakim;
+        if(isMaintenanceCurrentlyActive(mt)&&!isUserAllowedDuringMaintenance(mt,_userName)){
+          showMaintenanceScreen(mt);
+        }
+      }catch(e){DiagSil('ptKureselBakimDinle:uygula',e);}
+    },function(err){
+      if(window.DiagCore&&DiagCore.kaydet)
+        DiagCore.kaydet('pt_maintenance','hata','Küresel bakım durumu okunamadı',
+          {kod:(err&&err.code)||'?',mesaj:(err&&err.message)||''},30000);
+    });
+  }catch(e){DiagSil('ptKureselBakimDinle',e);}
+}
 function isMaintenanceCurrentlyActive(mt){
+  // Küresel düğüm aktifse, hangi sezonda olunduğuna bakılmaksızın bakım açıktır.
+  try{
+    var g=window._ptKureselBakim;
+    if(g&&g!==mt&&_bakimDurumHesapla(g))return true;
+  }catch(e){}
+  return _bakimDurumHesapla(mt);
+}
+function _bakimDurumHesapla(mt){
   if(!mt)return false;
   let state=mt.manualState;
   if(state!=='on'&&state!=='off')state=(mt.enabled===true&&state===undefined)?'on':'auto';
@@ -4891,6 +4950,12 @@ function doEnterAfterPasswordCheck(name){
   }
   // NOT: Kupa Ağacı/Grup Tabloları yapısı kullanıcı talebi üzerine TAMAMEN kaldırıldı -
   // ileride sıfırdan yeniden inşa edilecek. Giriş her zaman doğrudan Puan Tablosu'na girer.
+  // VERİ KAYNAĞI (MADDE 1): daha önce seçilmediyse önce o sorulur; seçimden sonra
+  // ptKaynakSec() uygulamayı açar. Seçim varsa doğrudan girilir.
+  if(!ptVeriKaynagi()&&ptKaynakEkraniAc(false)){
+    loadProfileAndEnter(name,pendingFav);
+    return;
+  }
   selectMode('standings');
   loadProfileAndEnter(name,pendingFav);
 };
@@ -5470,7 +5535,12 @@ function init(){
   function attachLeaguesMetaListener(){
   db.ref('leaguesMeta').on('value',snap=>{
     _leaguesMetaRetryCount=0; // başarılı okuma - yeniden deneme sayacı sıfırlanır
-    _leaguesMeta=snap.val()||{};
+    // VERİ KAYNAĞI SÜZGECİ (MADDE 1): ham liste saklanır (seçim ekranındaki sayılar
+    // için), uygulamanın geri kalanı yalnızca SÜZÜLMÜŞ listeyi görür. Süzme burada -
+    // tek noktada - yapıldığı için sezon seçici, giriş listesi, geçmiş sezonlar ve
+    // otomatik sezon geçişi kendiliğinden doğru davranır.
+    _leaguesMetaHam=snap.val()||{};
+    _leaguesMeta=ptKaynakSuz(_leaguesMetaHam);
     var ids=Object.keys(_leaguesMeta);
     populateLoginLeagueSel();
     if(!ids.length)return;
@@ -5557,6 +5627,8 @@ function init(){
   });
   }
   attachLeaguesMetaListener();
+  // Küresel bakım: sezondan bağımsız, iki uygulamayı birden kapsar.
+  ptKureselBakimDinle();
 }
 
 function getHashLeagueId(){
@@ -5604,6 +5676,132 @@ var _leagueDataListenerId=null;
 var _visitorsListenerId=null;
 // Silinen/bitmiş sezon sonrası hangi sezona düşüleceğinin TEK kuralı (admin panelindeki
 // pickDefaultLeagueId ile birebir aynı): önce en yeni AKTİF sezon, hiç yoksa en yeni sezon.
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   VERİ KAYNAĞI AYRIMI (kullanıcı: Puan Tablosu MADDE 1)
+   Kullanıcı, giriş yaptıktan sonra bir kez seçer: "SAHA uygulaması üzerinden" ya da
+   "SAHA olmadan". Seçim, hangi SEZONLARIN görüneceğini belirler.
+
+   NEDEN SEZON DÜZEYİNDE: Ayrı bir veritabanı KÖKÜ ("saha/" öneki gibi) kurmak ilk
+   akla gelen yoldu ama mevcut verinin tamamını görünmez kılardı - yöneticinin elle
+   girdiği eFootball sezonu da, SAHA'nın yazdığı maçlar da aynı kökte duruyor. Bunun
+   yerine her sezon bir KAYNAK etiketi taşır (leaguesMeta/{ligId}/kaynak):
+     'saha'  → maçları SAHA uygulamasında oynanan sezon
+     diğer   → elle girilen / başka bir oyundan gelen sezon (varsayılan)
+   Etiketi yönetici koyar. Süzme TEK BİR NOKTADA yapılır (leaguesMeta okunduğu yer);
+   sezon seçici, giriş listesi, geçmiş sezonlar ve otomatik sezon geçişi bu süzülmüş
+   listeyi kullandığı için hepsi kendiliğinden doğru davranır. Her tüketiciyi ayrı ayrı
+   yamalamak, birini atlayıp ayrımın sessizce delinmesi demekti.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+var _leaguesMetaHam = {};        // suzulmemis tam liste - secim ekrani sayilari icin
+function ptVeriKaynagi(){
+  try{ return localStorage.getItem('pt_veriKaynagi') || ''; }catch(e){ return ''; }
+}
+function ptVeriKaynagiYaz(k){
+  try{ localStorage.setItem('pt_veriKaynagi', k); }catch(e){ DiagSil('ptVeriKaynagiYaz', e); }
+}
+// Bir sezonun kaynagi. Etiketi olmayan her sezon 'klasik' sayilir: mevcut sezonlarin
+// hicbirinde etiket yok ve onlar elle girildi - varsayilani 'saha' yapmak, bugune
+// kadarki butun veriyi yanlis tarafa koyardi.
+function ptSezonKaynagi(meta){
+  return (meta && meta.kaynak === 'saha') ? 'saha' : 'klasik';
+}
+function ptKaynakSuz(ham){
+  var k = ptVeriKaynagi();
+  if(!k) return ham || {};                       // henuz secilmedi: hepsi
+  var cikti = {};
+  Object.keys(ham || {}).forEach(function(id){
+    if(ptSezonKaynagi(ham[id]) === k) cikti[id] = ham[id];
+  });
+  return cikti;
+}
+function ptKaynakSayilari(){
+  var s = 0, d = 0;
+  Object.keys(_leaguesMetaHam || {}).forEach(function(id){
+    if(ptSezonKaynagi(_leaguesMetaHam[id]) === 'saha') s++; else d++;
+  });
+  return { saha:s, klasik:d };
+}
+
+// ── SEÇİM EKRANI ────────────────────────────────────────────────────────────────────
+// Girişten sonra BİR KEZ açılır. Sonraki girişlerde açılmaz; kullanıcı Sezonlar
+// bölümünden istediği zaman değiştirebilir (kullanıcı talebi).
+function ptKaynakEkraniAc(degistirmeMi){
+  var scr = document.getElementById('kaynakScreen');
+  if(!scr) return false;
+  var say = ptKaynakSayilari();
+  var secili = ptVeriKaynagi();
+  var kutu = document.getElementById('kaynakGrid');
+  if(kutu){
+    kutu.innerHTML = [
+      ['saha',   '⚽', 'SAHA uygulaması üzerinden devam et',
+       'Yalnızca SAHA uygulamasında oynanan sezonları ve takımları görürsün.',
+       say.saha],
+      ['klasik', '📋', 'SAHA uygulaması olmadan devam et',
+       'SAHA verileri gizlenir; elle girilen ve diğer oyunlardan gelen sezonlar görünür.',
+       say.klasik]
+    ].map(function(o){
+      return '<div class="kaynak-kart' + (secili === o[0] ? ' secili' : '') + '" onclick="ptKaynakSec(\'' + o[0] + '\')">'
+        + '<div class="kaynak-ikon">' + o[1] + '</div>'
+        + '<div class="kaynak-bilgi">'
+          + '<div class="kaynak-ad">' + o[2] + (secili === o[0] ? '<span class="kaynak-secili">Seçili</span>' : '') + '</div>'
+          + '<div class="kaynak-aciklama">' + o[3] + '</div>'
+          + '<div class="kaynak-sayi">' + (o[4] ? (o[4] + ' sezon') : 'Henüz sezon yok') + '</div>'
+        + '</div><div class="kaynak-ok">→</div></div>';
+    }).join('');
+  }
+  var geri = document.getElementById('kaynakGeri');
+  if(geri) geri.style.display = degistirmeMi ? 'block' : 'none';
+  window._kaynakDegistirme = !!degistirmeMi;
+  scr.style.display = 'flex';
+  return true;
+}
+window.ptKaynakSec = function(k){
+  var oncekiVardi = !!ptVeriKaynagi();
+  ptVeriKaynagiYaz(k);
+  var scr = document.getElementById('kaynakScreen');
+  if(scr) scr.style.display = 'none';
+  // Seçim, hangi sezonların görüneceğini değiştirir. Süzgeci yeniden uygulamak için
+  // ham listeden yeniden türetilir - Firebase'den tekrar okumaya gerek yok.
+  try{
+    _leaguesMeta = ptKaynakSuz(_leaguesMetaHam);
+    var ids = Object.keys(_leaguesMeta);
+    populateLoginLeagueSel();
+    // Şu anki sezon yeni kaynakta yoksa, o kaynağın varsayılan sezonuna geçilir.
+    if(!ids.length){
+      ptKaynakBosUyar(k);
+    } else if(ids.indexOf(_curLeagueId) < 0){
+      var yeni = pickDefaultLeagueId(_leaguesMeta);
+      if(yeni){
+        _curLeagueId = yeni;
+        try{ localStorage.setItem('pt_curLeague', yeni); }catch(e){}
+        listenToLeague(yeni);
+      }
+    }
+  }catch(e){ DiagSil('ptKaynakSec', e); }
+  if(window._kaynakDegistirme && oncekiVardi){
+    try{ showToast('✅ Veri kaynağı değiştirildi'); }catch(e){}
+    try{ closeSheet(); }catch(e){}
+  } else {
+    try{ selectMode('standings'); }catch(e){ DiagSil('ptKaynakSec:selectMode', e); }
+  }
+  window._kaynakDegistirme = false;
+};
+window.ptKaynakGeri = function(){
+  var scr = document.getElementById('kaynakScreen');
+  if(scr) scr.style.display = 'none';
+  window._kaynakDegistirme = false;
+};
+// Seçilen kaynakta hiç sezon yoksa: sessizce boş bir uygulama göstermek yerine ne
+// olduğunu söyleyip çıkış yolunu veriyoruz. Boş ekran, "uygulama bozuldu" sanılan
+// en sık durumdu.
+function ptKaynakBosUyar(k){
+  try{
+    showToast(k === 'saha'
+      ? 'ℹ️ SAHA kaynağında henüz sezon yok - yönetici bir sezonu SAHA olarak işaretlemeli'
+      : 'ℹ️ SAHA dışı kaynakta henüz sezon yok', 'er');
+  }catch(e){}
+}
+
 function pickDefaultLeagueId(meta){
   var ids=Object.keys(meta||{});
   if(!ids.length)return '';
@@ -31638,11 +31836,20 @@ window.openSeasonMenu=function(){
       </div>
       <span style="color:var(--mu)">›</span>
     </button>
-    <button onclick="openPastSeasons()" style="width:100%;display:flex;align-items:center;gap:.6rem;background:var(--s2);border:1.5px solid var(--br);border-radius:12px;padding:.65rem .8rem;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">
+    <button onclick="openPastSeasons()" style="width:100%;display:flex;align-items:center;gap:.6rem;background:var(--s2);border:1.5px solid var(--br);border-radius:12px;padding:.65rem .8rem;margin-bottom:.5rem;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">
       <span style="font-size:1.1rem">📜</span>
       <div style="flex:1;text-align:left">
         <div style="font-size:.82rem;font-weight:800;color:var(--tx)">Geçmiş Sezonlar</div>
         <div style="font-size:.64rem;color:var(--mu)">Bitmiş sezonların puan tablosunu görüntüle</div>
+      </div>
+      <span style="color:var(--mu)">›</span>
+    </button>
+    <!-- VERİ KAYNAĞI (MADDE 1): kullanıcı seçimini her zaman buradan değiştirebilir. -->
+    <button onclick="ptKaynakEkraniAc(true)" style="width:100%;display:flex;align-items:center;gap:.6rem;background:var(--s2);border:1.5px solid var(--br);border-radius:12px;padding:.65rem .8rem;cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif">
+      <span style="font-size:1.1rem">🔀</span>
+      <div style="flex:1;text-align:left">
+        <div style="font-size:.82rem;font-weight:800;color:var(--tx)">Veri Kaynağı</div>
+        <div style="font-size:.64rem;color:var(--mu)">${ptVeriKaynagi()==='saha'?'SAHA uygulaması üzerinden':ptVeriKaynagi()==='klasik'?'SAHA olmadan':'Seçilmedi'} - değiştir</div>
       </div>
       <span style="color:var(--mu)">›</span>
     </button>
