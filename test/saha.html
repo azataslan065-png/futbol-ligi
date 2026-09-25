@@ -98,11 +98,13 @@
   #p-start.giris-modu .card h1{display:none}   /* marka bloğu yerini alıyor */
 
   .gs-marka{text-align:center;margin-bottom:18px}
-  .gs-top{width:54px;height:54px;margin:0 auto 10px;border-radius:50%;
+  .gs-top{width:54px;height:54px;margin:0 auto 10px;border-radius:50%;overflow:hidden;
     display:flex;align-items:center;justify-content:center;font-size:27px;
     background:linear-gradient(155deg,#3f8a45,#255c30);
     box-shadow:0 8px 22px rgba(63,138,69,.35),inset 0 1px 0 rgba(255,255,255,.22)}
+  .gs-top img{width:100%;height:100%;object-fit:cover;display:block}
   .gs-ad{font-size:29px;font-weight:800;letter-spacing:.18em;line-height:1}
+  .gs-ad.kucuk{font-size:21px;letter-spacing:.04em}
   .gs-alt{margin-top:7px;font-size:11.5px;letter-spacing:.05em;opacity:.55}
 
   .gs-etiket{display:block;text-align:left;font-size:11px;font-weight:700;letter-spacing:.06em;
@@ -359,7 +361,7 @@
 
 <div id="touch">
   <div id="stick"><div id="knob"></div></div>
-  <!-- OYUNCU DEĞİŞİKLİĞİ (2026-09-25-F): değişiklik ekranını açar (bkz. degisiklikPanelAc) -->
+  <!-- OYUNCU DEĞİŞİKLİĞİ (2026-09-26-A): değişiklik ekranını açar (bkz. degisiklikPanelAc) -->
   <button id="tb-deg" type="button" style="position:absolute;left:20px;bottom:156px;pointer-events:auto;
     min-width:52px;height:40px;border-radius:20px;border:1.5px solid rgba(255,255,255,.25);
     background:rgba(8,13,11,.45);color:#fff;font:700 13px system-ui,sans-serif">⇄ Değişiklik</button>
@@ -392,9 +394,13 @@
     <!-- 1) GIRIS - hesabi olmayan buradan gecer -->
     <div id="girisBolum">
       <div class="gs-marka">
-        <div class="gs-top">⚽</div>
-        <div class="gs-ad">SAHA</div>
-        <div class="gs-alt">Lig · Transfer · Antrenman</div>
+        <!-- PROFİL ÖNİZLEME (kullanıcı: "profil fotoğrafı giriş ekranında da görünsün"):
+             İsim alanına yazılan ada ait Puan Tablosu profili okunur; fotoğrafı varsa
+             SAHA topu yerine o gösterilir. Kullanıcı daha şifresini yazmadan doğru
+             hesaba baktığını görür - yanlış isimle uğraşmanın en sık sebebi buydu. -->
+        <div class="gs-top" id="gsAvatar">⚽</div>
+        <div class="gs-ad" id="gsMarkaAd">SAHA</div>
+        <div class="gs-alt" id="gsMarkaAlt">Lig · Transfer · Antrenman</div>
       </div>
 
       <label class="gs-etiket" for="gsIsim">İsim</label>
@@ -1884,7 +1890,7 @@ try{
     if(_hatirlananIsim){
       setTimeout(function(){
         var isimEl = document.getElementById('gsIsim');
-        if(isimEl && !isimEl.value){ isimEl.value = _hatirlananIsim; girisYap(); }
+        if(isimEl && !isimEl.value){ isimEl.value = _hatirlananIsim; try{ gsProfilAra(); }catch(e){} girisYap(); }
       }, 300);
     }
   }catch(e){_sessiz(e,'sesTribun:1639','saha_ses');}
@@ -3304,7 +3310,14 @@ function odaNetDurumYaz(){
       top: { x:y2(ball.position.x), y:y2(ball.position.y), z:y2(ball.position.z) },
       a: diz(teamA), b: diz(teamB),
       k1: (ctrl ? teamA.indexOf(ctrl) : -1),
-      k2: (ctrl2 ? teamB.indexOf(ctrl2) : -1)
+      k2: (ctrl2 ? teamB.indexOf(ctrl2) : -1),
+      /* DURAN TOP (kullanıcı: "taç atışı, serbest vuruş ve penaltı gibi veriler doğru
+         hesaplanmıyor"): Oyuncu konumları zaten geliyordu ama konuk oyunun NEDEN durduğunu
+         bilmiyordu - barajın neden dizildiğini, topun neden atıcının elinde beklediğini
+         göremiyor, ekranda hiçbir açıklama çıkmıyordu. Duran topun TÜRÜ ve hangi takıma
+         ait olduğu artık yayınlanıyor; konuk aynı bildirimi gösterir. */
+      duran: (duran ? { tip: duran.tip, takim: duran.takim } : null),
+      gol: !!golBekleme
     }).catch(function(e){ _sessiz(e,'odaNetDurumYaz','saha_ag'); });
   }catch(e){ _sessiz(e,'odaNetDurumYaz','saha_ag'); }
 }
@@ -3450,10 +3463,24 @@ function odaNetKareAdimla(dt){
   }catch(e){ _sessiz(e,'odaNetKareAdimla','saha_grafik'); }
 }
 // Konuk tarafında skor/saat göstergesi host'un verisinden beslenir - kendi saati yok.
+var ODA_DURAN_AD = { tac:'TAÇ', korner:'KORNER', serbest:'SERBEST VURUŞ',
+                     penalti:'PENALTI', kale:'KALE VURUŞU' };
 function odaNetKonukHud(v){
   try{
     skorA = v.sA||0; skorB = v.sB||0; devre = v.dv||1; saat = v.sa||0; bitti = !!v.bitti;
     hud();
+    // Duran top: türü değiştiğinde bir kez bildirilir. Her pakette göstermek, mesajı
+    // ekranda sürekli yanıp sönen bir şeye çevirirdi.
+    try{
+      var d = v.duran, imza = d ? (d.tip + ':' + d.takim) : '';
+      if(imza !== window._odaDuranImza){
+        window._odaDuranImza = imza;
+        if(d){
+          var benim = (d.takim === 1);   // konuk teamB'yi oynar
+          mesaj(ODA_DURAN_AD[d.tip] || 'DURAN TOP', benim ? 'Sende' : 'Rakipte', 1500);
+        }
+      }
+    }catch(e){ _sessiz(e,'odaNetKonukHud:duran','saha_izle'); }
     // Host maçı bitirdiyse konuk da bitiş ekranını görür; aksi halde boş bir sahada
     // sonsuza kadar bekler.
     if(bitti && !window._odaKonukBitisGosterildi){
@@ -3910,7 +3937,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-25-F';
+window.APP_BUILD = '2026-09-26-A';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -4197,7 +4224,7 @@ let yedekler = { 0:[], 1:[] };        // takim -> [{ad,no}]
 let degisiklikHakki = { 0:5, 1:5 };   // futbol kurali (IFAB 2022+): 5 hak (onceden 3)
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
-// OYUNCU DEĞİŞİKLİĞİ (2026-09-25-F, kullanıcı: "oyuncu değişikliğini kullanıcı kendisi yapacak
+// OYUNCU DEĞİŞİKLİĞİ (2026-09-26-A, kullanıcı: "oyuncu değişikliğini kullanıcı kendisi yapacak
 // ve değişimi ilgili takımın kadrosundaki oyuncularla gerçekleştirecek")
 // ÖNCEDEN: Değişiklik tuşu, o an KONTROL EDİLEN oyuncuyu sıradaki yedekle otomatik değiştiriyordu
 // (kim çıkacak, kim girecek seçilemiyordu). Yedekler de takımın gerçek kadrosundan değil, oyunun
@@ -4744,7 +4771,7 @@ function sahaCanliYaz(ilkYazim){
         saniye: Math.round(macSaniye()*10)/10, hiz: 2700 / Math.max(1, HALF),
         akiyor: saatAkiyor(), ts: Date.now()
       };
-      // (2026-09-25-F) Değişiklik yapıldıysa sahadaki GÜNCEL isimler de gider - izleyici
+      // (2026-09-26-A) Değişiklik yapıldıysa sahadaki GÜNCEL isimler de gider - izleyici
       // ekranında giren oyuncunun adı görünsün. Sıra: kaleci + saha oyuncuları, havuz sırasıyla
       // (bkz. _sahaIzleKadroAta). Değişiklik yoksa gönderilmez (gereksiz veri).
       if (window._sahaDegisiklikOldu){
@@ -5102,8 +5129,13 @@ function girdiYonu(o){                      // ekran girdisini dünya yönüne �
   if(o === 1 && window._sahaOdaHost){
     var u = odaUzakGirdiTaze();
     if(u){
+      /* KÖK SEBEP #2 (aynı şikayet): Konuğun kamerası ters tarafta (bkz. _yayinKamerasiIc),
+         dolayısıyla onun ekranındaki "sağ" host'un dünyasında "sol"dur. Girdi olduğu gibi
+         uygulanınca rakip, konuğun bastığı yönün TERSİNE koşuyordu. Kamera 180° döndüğü
+         için iki eksen de işaret değiştirir; girdi burada çevrilir - konuğun cihazında
+         çevirmek, host'un kendi klavyesiyle oynadığı durumu da bozardı. */
       var _um = Math.hypot(u.x||0, u.y||0);
-      return { x:(u.x||0), y:(u.y||0), m:Math.min(1, _um) };
+      return { x:-(u.x||0), y:-(u.y||0), m:Math.min(1, _um) };
     }
     return { x:0, y:0, m:0 };
   }
@@ -6128,6 +6160,15 @@ function yayinKamerasi(dt){
 }
 function _yayinKamerasiIc(dt){
   var s = (typeof dirA !== 'undefined' && dirA) ? dirA : 1;
+  /* ══════════════════════════════════════════════════════════════════════════════════
+     KÖK SEBEP #1 (kullanıcı: "arkadaş maçında iki cihaz arasındaki konumlar doğru
+     hesaplanmıyor"): Kamera HER ZAMAN dirA tarafına konuyordu. Host kendi dirA'sını
+     yayınlıyor, konuk da onu uyguluyordu - yani konuk sahayı HOST'UN tarafından
+     görüyordu. Konumlar aslında doğru geliyordu; YANLIŞ OLAN BAKIŞ AÇISIYDI: konuğun
+     kendi kalesi karşı uçta görünüyor, oyuncusu geriye koşuyor gibi duruyordu.
+     ÇÖZÜM: Konuk kamerayı ters tarafa koyar. Konumlara dokunulmaz - dünya koordinatları
+     iki cihazda da aynı kalır, yalnızca bakış yönü her oyuncunun kendi tarafıdır. */
+  if(window._sahaOdaKonuk) s = -s;
   // topYakin: +HWZ = kameraya en yakin tac, -HWZ = en uzak tac
   var topYakin = Math.max(-HWZ, Math.min(HWZ, ball.position.z * s));
   var oran = topYakin / HWZ;                            // -1 uzak ... +1 yakin
@@ -7312,6 +7353,58 @@ catch(e){ _sessiz(e,'shellCikis:bagla','saha_oyun'); }
 document.getElementById('b-giris').onclick   = girisYap;
 document.getElementById('gsIsim').addEventListener('keydown', function(e){ if(e.key==='Enter') girisYap(); });
 document.getElementById('gsSifre').addEventListener('keydown', function(e){ if(e.key==='Enter') girisYap(); });
+/* GİRİŞ EKRANI PROFİL ÖNİZLEMESİ
+   İsim yazıldıkça Puan Tablosu profili aranır. Her harfte istek atmamak için 500 ms
+   beklenir; kullanıcı yazmayı bıraktığında tek bir okuma yapılır. Bulunamazsa sessizce
+   varsayılan görünüme dönülür - "böyle bir kullanıcı yok" demek, şifre denetiminden
+   ÖNCE hesap varlığını ifşa etmek olurdu. */
+var _gsProfilT = null, _gsProfilSonAd = '';
+function gsProfilAra(){
+  try{
+    var el = document.getElementById('gsIsim'); if(!el) return;
+    var isim = (el.value||'').trim();
+    if(isim === _gsProfilSonAd) return;
+    _gsProfilSonAd = isim;
+    if(_gsProfilT) clearTimeout(_gsProfilT);
+    if(!isim){ gsProfilCiz(null); return; }
+    _gsProfilT = setTimeout(function(){
+      try{
+        if(!fbHazir || !fbDb) return;
+        var vid = visitorIdFromNameSaha(isim);
+        fbDb.ref('userProfiles/'+vid).once('value').then(function(sn){
+          // Arada isim değiştiyse geç gelen cevabı uygulama.
+          if((document.getElementById('gsIsim').value||'').trim() !== isim) return;
+          var v = sn.val();
+          gsProfilCiz(v ? { ad:(v.name||isim), avatar:(v.avatar||null) } : null);
+        }).catch(function(e){ _sessiz(e,'gsProfilAra','saha_ag'); });
+      }catch(e){ _sessiz(e,'gsProfilAra','saha_ag'); }
+    }, 500);
+  }catch(e){ _sessiz(e,'gsProfilAra','saha_oyun'); }
+}
+function gsProfilCiz(p){
+  try{
+    var av = document.getElementById('gsAvatar');
+    var ad = document.getElementById('gsMarkaAd');
+    var alt = document.getElementById('gsMarkaAlt');
+    if(!av || !ad || !alt) return;
+    if(!p){
+      av.innerHTML = '⚽'; ad.textContent = 'SAHA'; ad.classList.remove('kucuk');
+      alt.textContent = 'Lig · Transfer · Antrenman';
+      return;
+    }
+    var gecerli = p.avatar && /^(data:image\/|https?:\/\/)/.test(p.avatar);
+    av.innerHTML = gecerli
+      ? '<img src="' + esc(p.avatar) + '" alt="" onerror="this.parentNode.innerHTML=\'⚽\'">'
+      : esc((p.ad||'?').charAt(0).toLocaleUpperCase('tr'));
+    ad.textContent = p.ad || 'SAHA';
+    ad.classList.add('kucuk');
+    alt.textContent = 'Devam etmek için şifreni gir';
+  }catch(e){ _sessiz(e,'gsProfilCiz','saha_oyun'); }
+}
+try{
+  var _gi = document.getElementById('gsIsim');
+  if(_gi){ _gi.addEventListener('input', gsProfilAra); _gi.addEventListener('change', gsProfilAra); }
+}catch(e){ _sessiz(e,'gsProfilAra:bagla','saha_oyun'); }
 // SIFREYI GOSTER/GIZLE (MADDE 1.1)
 try{
   document.getElementById('gsGoz').onclick = function(){

@@ -2566,7 +2566,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-25-F';
+window.APP_BUILD='2026-09-26-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5716,6 +5716,21 @@ function ptSezonKaynagi(meta){
    DÜZELTME: Süzgeç bir TERCİH, duvar değil. Seçilen kaynakta sezon yoksa hepsi
    gösterilir ve durum kullanıcıya söylenir. Kimse kendi verisinden kilitlenmez. */
 window._ptKaynakBosDustu = false;
+/* SAHA İÇERİĞİ GÖRÜNÜRLÜĞÜ (kullanıcı: "yöneticinin SAHA üzerinde yaptığı düzenlemeler
+   diğer tarafta görünmemeli; sadece SAHA uygulamasında ve kullanıcı SAHA sekmesindeyken")
+   SAHA'ya özgü her şey - canlı maç kartları, mini saha, baskımetre, 🎮 Saha rozeti,
+   SAHA maçları listesi - bu TEK karardan geçer. Her birini ayrı ayrı yamalamak,
+   birini atlayıp ayrımın sessizce delinmesi demekti.
+   Kaynak seçilmemişse ya da süzgeç boşa düşüp hepsi gösteriliyorsa görünür kalır:
+   ikisinde de kullanıcının aktif bir "SAHA istemiyorum" tercihi yok. */
+function ptSahaGoster(){
+  try{
+    var k = ptVeriKaynagi();
+    if(!k) return true;                        // secim yapilmadi
+    if(window._ptKaynakBosDustu) return true;  // suzgec bos kaldi, hepsi gosteriliyor
+    return k === 'saha';
+  }catch(e){ return true; }
+}
 function ptKaynakSuz(ham){
   var k = ptVeriKaynagi();
   if(!k){ window._ptKaynakBosDustu = false; return ham || {}; }   // henuz secilmedi: hepsi
@@ -10502,7 +10517,7 @@ function renderResults(){
     const win=m.homeGoals>m.awayGoals?'home':m.awayGoals>m.homeGoals?'away':m.penaltyWinner||'draw';
     const liveTag=m.isLive?`<span style="background:#dc2626;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;margin-left:.4rem;animation:lp 1.4s infinite">🔴 CANLI ${m.minute||0}'</span>`:'';
     const finishedTag=(m.played&&!m.isLive)?`<span style="background:#1a1a1a;color:#d1d5db;font-size:.56rem;font-weight:700;border-radius:6px;padding:.08rem .45rem;margin-left:.4rem;border:1px solid rgba(255,255,255,.1)">Maç Sonucu</span>`:'';
-    const sahaTag=m.sahaMode?`<span style="background:#7c3aed;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;margin-left:.4rem">🎮 Saha</span>`:'';
+    const sahaTag=(m.sahaMode&&ptSahaGoster())?`<span style="background:#7c3aed;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;margin-left:.4rem">🎮 Saha</span>`:'';
     html+=`<div class="mc wide-able" onclick="showMatchDetail('${m.id}','results')" style="${m.isLive?'border:1.5px solid rgba(239,68,68,.4)':''}">
       <div class="mc-week"><span>${m.week||0}. Hafta${m.date?' · '+m.date:''}</span>${liveTag}${finishedTag}${sahaTag}</div>
       <div class="mc-teams">
@@ -10525,7 +10540,7 @@ function renderResults(){
 function renderSaha(){
   const el=document.getElementById('pg-saha');
   if(!el)return;
-  const maclar=Object.values(D.matches||{}).filter(m=>m.sahaMode).sort((a,b)=>{
+  const maclar=(!ptSahaGoster()?[]:Object.values(D.matches||{}).filter(m=>m.sahaMode)).sort((a,b)=>{
     if(a.isLive&&!b.isLive)return -1;
     if(!a.isLive&&b.isLive)return 1;
     if(a.isLive===b.isLive&&!a.played&&!b.played)return (a.week||0)-(b.week||0);
@@ -12241,6 +12256,7 @@ function gorevliDetay(ad,rol){
 window._sahaPitchPrev=window._sahaPitchPrev||{};
 function renderSahaPitch(m,h,a){
   try{
+    if(!ptSahaGoster())return '';   // SAHA'ya özgü
     if(!m||!m.isLive||!m.sahaMode)return '';
     if(typeof m.ballX!=='number'||typeof m.ballZ!=='number')return '';
     const x=Math.max(-1,Math.min(1,m.ballX));
@@ -12354,6 +12370,7 @@ function renderSahaPitch(m,h,a){
   }catch(e){ try{DiagSil('renderSahaPitch',e);}catch(_e){} return ''; }
 }
 function renderBaskimetre(m){
+  if(!ptSahaGoster())return '';   // SAHA'ya özgü: bkz. ptSahaGoster
 
   try{
     /* ── BASKIMETRE / OLAY YOĞUNLUĞU ─────────────────────────────────────────────────
@@ -22116,6 +22133,9 @@ window.openChannelLockedSheet=function(videoId){
 // _sahaIzleKareAdimla'daki "dizi tamamen boşsa dokunulmuyor" notu).
 window._ptCanliMacKanallari=function(){
   try{
+    // SAHA'ya özgü: kullanıcı "SAHA olmadan" seçtiyse bu kartlar hiç listelenmez
+    // (bkz. ptSahaGoster).
+    if(!ptSahaGoster()) return [];
     var teams=(window.D&&D.teams)||{};
     var matches=(window.D&&D.matches)||{};
     var lig=window._curLeagueId||'';
