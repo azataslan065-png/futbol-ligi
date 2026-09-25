@@ -335,6 +335,13 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
   <h1 style="font-size:1.3rem;font-weight:900;text-align:center;margin-bottom:.3rem">Admin Paneli</h1>
   <p style="font-size:.78rem;color:var(--mu);text-align:center;margin-bottom:1.5rem">Önce lig seçin, sonra giriş yapın</p>
   <div style="width:100%;max-width:340px">
+    <!-- VERİ KAYNAĞI - GİRİŞ EKRANINDA (kök seçimi girişten ÖNCE yapılmalı)
+         KÖK SEBEP: Kaynak seçim ekranı girişten SONRA açılıyordu. Kaynak kökü
+         değiştirdiği için, boş bir köke ayarlı olan yönetici "Lig bulunamadı"
+         görüyor, giriş yapamıyor ve seçimi değiştireceği ekrana da ulaşamıyordu.
+         Hangi veriyle çalışacağın, hangi ligi seçeceğinden ÖNCE gelmeli. -->
+    <div class="field"><span class="lbl">Veri kaynağı</span>
+      <div id="loginKaynakSec" style="display:flex;gap:.4rem"></div></div>
     <div class="field"><span class="lbl">Lig</span><select id="loginLeagueSel" onchange="onLoginLeagueChange()"><option value="">Yükleniyor...</option></select></div>
     <!-- KULLANICI GÜVENLİĞİ: Giriş artık Firebase hesabıyla yapılır. E-posta alanı doluysa
          kimlik doğrulama Firebase üzerinden gerçekleşir ve yazma yetkisi SUNUCUDA verilir.
@@ -1958,7 +1965,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-B';
+window.APP_BUILD='2026-09-26-C';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -3527,15 +3534,46 @@ function closeSheet(){
 // bu da "ek yönetici hesabı oluşturuluyor ama girişte kabul edilmiyor" sorununun kesin
 // kanıtlanmış kök sebebiydi - hesaplar oluşturulup kaydediliyordu ama hiçbir kod onları
 // gerçekten kontrol etmiyordu.
+/* Giriş ekranındaki kaynak seçici. Giriş YAPILMADAN önce çalışır; henüz hiçbir
+   dinleyici kurulmadığı için sayfa yenilemeye gerek yok - liste yeniden okunur. */
+function loginKaynakCiz(){
+  var k=qs('loginKaynakSec'); if(!k)return;
+  var su=admVeriKaynagi()||'klasik';
+  k.innerHTML=[['klasik','📋 SAHA dışı'],['saha','⚽ SAHA']].map(function(o){
+    var secili=(su===o[0]);
+    return '<button type="button" onclick="loginKaynakSec(\''+o[0]+'\')" '
+      +'style="flex:1;padding:.5rem .4rem;border-radius:10px;cursor:pointer;font:inherit;'
+      +'font-size:.72rem;font-weight:700;border:1.5px solid '+(secili?'var(--ac)':'var(--br)')+';'
+      +'background:'+(secili?'var(--ac)':'var(--s2)')+';color:'+(secili?'#fff':'var(--tx)')+'">'
+      +o[1]+'</button>';
+  }).join('');
+}
+window.loginKaynakSec=function(k){
+  admVeriKaynagiYaz(k);
+  loginKaynakCiz();
+  var sel=qs('loginLeagueSel');
+  if(sel)sel.innerHTML='<option value="">Yükleniyor...</option>';
+  try{ qs('loginErr').textContent=''; }catch(e){}
+  loadLoginLeagueList();
+};
 var _loginLeagueAccounts={};
 var _loginLeagueRetryCount=0;
 function loadLoginLeagueList(){
+  try{ loginKaynakCiz(); }catch(e){}
   var sel=qs('loginLeagueSel');
   db.ref('leaguesMeta').once('value').then(function(snap){
     _loginLeagueRetryCount=0; // başarılı okuma - sayaç sıfırlanır
     var meta=snap.val()||{};
     var ids=Object.keys(meta);
-    if(!ids.length){sel.innerHTML='<option value="">Lig bulunamadı</option>';return;}
+    if(!ids.length){
+      // Hangi KÖKTE lig bulunamadığını söylemek şart: "Lig bulunamadı" tek başına,
+      // yanlış tarafta olduğunu anlamayan bir yöneticiyi kilitliyordu.
+      var kk=admVeriKaynagi()==='saha'?'SAHA':'SAHA dışı';
+      sel.innerHTML='<option value="">'+kk+' tarafında lig yok</option>';
+      try{ qs('loginErr').innerHTML='ℹ️ <b>'+kk+'</b> tarafında henüz sezon yok. '
+        +'Üstteki düğmeden diğer tarafa geçebilir ya da giriş yapıp yeni sezon oluşturabilirsin.'; }catch(e){}
+      return;
+    }
     sel.innerHTML=ids.map(function(id){return '<option value="'+id+'">'+(meta[id].name||'Lig')+(meta[id].status==='finished'?' (Bitti)':'')+'</option>';}).join('');
     onLoginLeagueChange();
   }).catch(function(e){
@@ -20783,7 +20821,9 @@ function init(){
   });
   // VERİ KAYNAĞI (MADDE 1): girişte bir kez sorulur. init() tek hook noktası -
   // beş ayrı giriş yolunun her birine ayrı ayrı eklemek, birini atlama riski taşırdı.
-  try{ admKaynakGovdeUygula(); setTimeout(admKaynakGirisKontrol, 600); }catch(e){ DiagSil('init:kaynak', e); }
+  // Kaynak artık GİRİŞ EKRANINDA seçiliyor (bkz. loginKaynakCiz); girişten sonra
+  // ayrıca sormaya gerek yok - iki kez sormak, seçimi değiştirmiş gibi hissettiriyordu.
+  try{ admKaynakGovdeUygula(); }catch(e){ DiagSil('init:kaynak', e); }
 }
 
 var _leagueDataListener=null;

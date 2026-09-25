@@ -2237,6 +2237,15 @@ window.addEventListener('DOMContentLoaded',function(){
          aktifken sayfa otomatik olarak eski hesaba giriş yapmaya çalışır; bu bağlantı SADECE
          bu durumda görünür ve kullanıcının otomatik girişi iptal edip TEMİZ bir giriş
          ekranından (farklı bir isimle) devam etmesini sağlar. -->
+    <!-- VERİ KAYNAĞI - GİRİŞ EKRANINDA (kök seçimi girişten ÖNCE yapılmalı)
+         KÖK SEBEP: Seçim ekranı girişten SONRA açılıyordu. Kaynak veri KÖKÜNÜ
+         değiştirdiği için, boş bir köke ayarlı kullanıcı hiç giremiyor ve seçimi
+         değiştireceği ekrana da ulaşamıyordu - kendi kendini kilitleyen bir akış. -->
+    <div style="margin-top:.6rem">
+      <div style="font-size:.62rem;font-weight:800;color:var(--mu);margin-bottom:.3rem;text-transform:uppercase;letter-spacing:.04em">Veri kaynağı</div>
+      <div id="ptLoginKaynak" style="display:flex;gap:.4rem"></div>
+      <div id="ptLoginKaynakNot" style="font-size:.62rem;color:var(--mu);margin-top:.3rem;line-height:1.5"></div>
+    </div>
     <button type="button" id="switchAccountLink" onclick="cancelRememberedAutoLogin()" style="display:none;background:none;border:none;color:var(--ac3);font-size:.68rem;font-weight:700;text-decoration:underline;cursor:pointer;margin-top:.4rem;padding:.35rem 0;min-height:32px;text-align:left">👤 Farklı bir hesapla giriş yap</button>
     <!-- KULLANICI TALEBİ: Kullanıcı Giriş Şifresi Sistemi - bir isimle ilk kez giriş
          yapılıyorsa şifre oluşturma istenir, sonraki girişlerde bu şifre istenir. Bu alan
@@ -2601,7 +2610,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-B';
+window.APP_BUILD='2026-09-26-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -4987,10 +4996,10 @@ function doEnterAfterPasswordCheck(name){
   // ileride sıfırdan yeniden inşa edilecek. Giriş her zaman doğrudan Puan Tablosu'na girer.
   // VERİ KAYNAĞI (MADDE 1): daha önce seçilmediyse önce o sorulur; seçimden sonra
   // ptKaynakSec() uygulamayı açar. Seçim varsa doğrudan girilir.
-  if(!ptVeriKaynagi()&&ptKaynakEkraniAc(false)){
-    loadProfileAndEnter(name,pendingFav);
-    return;
-  }
+  // Kaynak artık GİRİŞ EKRANINDA seçiliyor (bkz. ptLoginKaynakCiz); girişten sonra
+  // ayrıca sormuyoruz. Hiç seçilmemişse varsayılan "SAHA dışı" kabul edilir - bugüne
+  // kadarki bütün veri orada ve kimse boş bir köke düşmemeli.
+  if(!ptVeriKaynagi()) ptVeriKaynagiYaz('klasik');
   selectMode('standings');
   loadProfileAndEnter(name,pendingFav);
 };
@@ -5578,6 +5587,7 @@ function init(){
     _leaguesMeta=ptKaynakSuz(_leaguesMetaHam);
     var ids=Object.keys(_leaguesMeta);
     populateLoginLeagueSel();
+    try{ ptLoginKaynakCiz(); }catch(e){}
     if(!ids.length)return;
     tryFollowAdminLeague();
     // ÖNEMLİ: Eğer kullanıcının şu an içinde olduğu lig "bitmiş" (finished) olarak
@@ -5666,6 +5676,7 @@ function init(){
   ptKureselBakimDinle();
   // TV listesi ortak: kök ayrımından etkilenmez (bkz. ptOrtakTvDinle).
   ptOrtakTvDinle();
+  try{ ptLoginKaynakCiz(); }catch(e){}
 }
 
 function getHashLeagueId(){
@@ -5782,6 +5793,37 @@ function ptOrtakTvDinle(){
 function ptOrtakTvUygula(){
   try{ if(window._ptOrtakTv) D.videoLinks = window._ptOrtakTv; }catch(e){}
 }
+/* Giriş ekranındaki kaynak seçici. Kök değiştiği için seçim sayfayı yeniler -
+   dinleyiciler açılışta zaten kuruluyor, onları tek tek yeniden bağlamak birini
+   atlama riski taşırdı. */
+function ptLoginKaynakCiz(){
+  try{
+    var k=document.getElementById('ptLoginKaynak'); if(!k)return;
+    var su=ptVeriKaynagi()||'klasik';
+    k.innerHTML=[['klasik','📋 SAHA dışı'],['saha','⚽ SAHA']].map(function(o){
+      var sec=(su===o[0]);
+      return '<button type="button" onclick="ptLoginKaynakSec(\''+o[0]+'\')" '
+        +'style="flex:1;padding:.45rem .3rem;border-radius:10px;cursor:pointer;font-family:inherit;'
+        +'font-size:.7rem;font-weight:700;border:1.5px solid '+(sec?'var(--ac)':'var(--br)')+';'
+        +'background:'+(sec?'var(--ac)':'var(--s2)')+';color:'+(sec?'#fff':'var(--tx)')+'">'
+        +o[1]+'</button>';
+    }).join('');
+    var not=document.getElementById('ptLoginKaynakNot');
+    if(not){
+      var bos=!Object.keys(_leaguesMeta||{}).length;
+      not.innerHTML=bos
+        ? '⚠️ Bu tarafta henüz sezon yok - diğer tarafa geçmeyi dene.'
+        : 'Sohbet, bakım modu ve TV listesi iki tarafta da ortaktır.';
+    }
+  }catch(e){ DiagSil('ptLoginKaynakCiz',e); }
+}
+window.ptLoginKaynakSec=function(k){
+  if(ptVeriKaynagi()===k){ ptLoginKaynakCiz(); return; }
+  ptVeriKaynagiYaz(k);
+  ptLoginKaynakCiz();
+  try{ showToast('🔄 Veri kaynağı değişti, yeniden yükleniyor…'); }catch(e){}
+  setTimeout(function(){ location.reload(); }, 500);
+};
 function ptSahaGoster(){
   try{
     var k = ptVeriKaynagi();
