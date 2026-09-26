@@ -2387,7 +2387,7 @@ window.addEventListener('DOMContentLoaded',function(){
 <div id="pg-stats" class="page"></div>
 <div id="pg-compare" class="page"></div>
 <div id="pg-analysis" class="page"></div>
-<div id="pg-saha" class="page"></div>
+<!-- pg-saha kaldırıldı: 🎮 Saha sekmesi artık yok (kullanıcı talebi). -->
 <div id="pg-fantasy" class="page"></div>
 
 </div><!-- /app -->
@@ -2610,7 +2610,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-D';
+window.APP_BUILD='2026-09-26-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5463,10 +5463,12 @@ var _curLeagueId='';
 var _leaguesMeta={};
 // Alt navigasyon çubuğu: admin'in belirlediği sıraya (D.navOrder) göre dinamik oluşturulur.
 // Sıra ayarlanmamışsa varsayılan sıra kullanılır. Bilinmeyen/eksik id'ler güvenli şekilde atlanır.
+/* 🎮 Saha SEKMESİ KALDIRILDI (kullanıcı talebi) - her iki tarafta da.
+   SAHA maçları artık normal fikstürde görünüyor; yönetici onayladığında maç SAHA
+   uygulaması üzerinden oynanabiliyor. Ayrı bir sekmeye gerek kalmadı. */
 const NAV_TABS_DEF={
   standings:{label:'Puan Durumu'},fixture:{label:'Fikstür'},results:{label:'Sonuçlar'},
-  form:{label:'Form'},stats:{label:'İstatistik'},compare:{label:'🆚 Karşılaştır'},analysis:{label:'📊 Lig Analizi'},
-  saha:{label:'🎮 Saha'}
+  form:{label:'Form'},stats:{label:'İstatistik'},compare:{label:'🆚 Karşılaştır'},analysis:{label:'📊 Lig Analizi'}
 };
 function renderMainNav(){
   const nav=document.getElementById('mainNav');
@@ -5476,11 +5478,12 @@ function renderMainNav(){
   // oluşturulduğu için kaydırma konumu sıfırlanıp çubuk BAŞA dönüyordu. Artık mevcut
   // kaydırma konumu saklanıp yeniden uygulanıyor.
   const savedScroll=nav.scrollLeft;
-  const defaultOrder=['standings','fixture','results','saha','form','stats','compare','analysis'];
+  const defaultOrder=['standings','fixture','results','form','stats','compare','analysis'];
   // HATA DÜZELTMESİ: Admin bir sıra KAYDETMEMİŞSE, `order` doğrudan `defaultOrder`
   // dizisinin KENDİSİNE işaret ediyordu (kopyası değil). Aşağıdaki tamamlama döngüsü de
   // aynı diziyi gezerken ona push yapabildiğinden, paylaşılan varsayılan liste kalıcı
   // olarak bozulabiliyordu. Artık HER durumda bir KOPYA üzerinde çalışılır.
+  // Yöneticinin eski kayıtlı sırasında 'saha' kalmış olabilir; NAV_TABS_DEF süzgeci onu eler.
   const raw=(D.navOrder&&D.navOrder.length)?D.navOrder.filter(id=>NAV_TABS_DEF[id]):defaultOrder.slice();
   // SAVUNMA: Bozuk kayıtta aynı sekme birden fazla kez bulunabilir - tekrarlar temizlenir,
   // yoksa alt menüde AYNI sekme iki kez görünürdü.
@@ -5676,7 +5679,11 @@ function init(){
   ptKureselBakimDinle();
   // TV listesi ortak: kök ayrımından etkilenmez (bkz. ptOrtakTvDinle).
   ptOrtakTvDinle();
+  // Tema ve görünüm modu da ortak (bkz. ptOrtakGorunumDinle).
+  ptOrtakGorunumDinle();
   try{ ptLoginKaynakCiz(); }catch(e){}
+  // Kaynak geçişinden dönülüyorsa giriş ekranı atlanır (bkz. ptKaynakGecisTamamla).
+  try{ ptKaynakGecisTamamla(); }catch(e){}
 }
 
 function getHashLeagueId(){
@@ -5780,6 +5787,31 @@ window._ptKaynakBosDustu = false;
    Ortak düğüm henüz yoksa lig belgesindeki liste olduğu gibi kalır - böylece mevcut
    kurulumlar hiçbir şey kaybetmez, ilk yazımda ortak düğüme taşınır. */
 window._ptOrtakTv = null;
+window._ptOrtakGorunum = null;
+/* ORTAK GÖRÜNÜM (kullanıcı: "uygulama teması, görünüm modu ... her iki alan için ortak")
+   Bu alanlar lig BELGESİNİN İÇİNDE duruyor, yani kök ayrımıyla ikiye bölünürdü.
+   TV listesiyle aynı çözüm: ortak bir düğümden bindiriliyor. Ortak düğüm yoksa lig
+   belgesindeki değer olduğu gibi kalır - mevcut kurulum hiçbir şey kaybetmez. */
+var PT_ORTAK_GORUNUM_ALANLARI = ['customTheme','bgTheme','cardStyle','loginScreenTheme'];
+function ptOrtakGorunumDinle(){
+  try{
+    firebase.database().ref('paylasilan/gorunum').on('value',function(sn){
+      window._ptOrtakGorunum = sn.val() || null;
+      ptOrtakGorunumUygula();
+      try{ applyTheme(); }catch(e){}
+      try{ if(typeof applyBgTheme==='function') applyBgTheme(); }catch(e){}
+      try{ if(typeof applyCardStyle==='function') applyCardStyle(); }catch(e){}
+    },function(err){ DiagSil('ptOrtakGorunumDinle',err); });
+  }catch(e){ DiagSil('ptOrtakGorunumDinle',e); }
+}
+function ptOrtakGorunumUygula(){
+  try{
+    var g = window._ptOrtakGorunum; if(!g) return;
+    PT_ORTAK_GORUNUM_ALANLARI.forEach(function(alan){
+      if(g[alan] !== undefined && g[alan] !== null) D[alan] = g[alan];
+    });
+  }catch(e){}
+}
 function ptOrtakTvDinle(){
   try{
     firebase.database().ref('paylasilan/tvKanallari').on('value',function(sn){
@@ -5813,7 +5845,7 @@ function ptLoginKaynakCiz(){
       var bos=!Object.keys(_leaguesMeta||{}).length;
       not.innerHTML=bos
         ? '⚠️ Bu tarafta henüz sezon yok - diğer tarafa geçmeyi dene.'
-        : 'Sohbet, bakım modu ve TV listesi iki tarafta da ortaktır.';
+        : 'Sohbet, bakım modu, TV listesi, uygulama teması ve görünüm modu iki tarafta da ortaktır.';
     }
   }catch(e){ DiagSil('ptLoginKaynakCiz',e); }
 }
@@ -5821,9 +5853,46 @@ window.ptLoginKaynakSec=function(k){
   if(ptVeriKaynagi()===k){ ptLoginKaynakCiz(); return; }
   ptVeriKaynagiYaz(k);
   ptLoginKaynakCiz();
-  try{ showToast('🔄 Veri kaynağı değişti, yeniden yükleniyor…'); }catch(e){}
-  setTimeout(function(){ location.reload(); }, 500);
+  ptKaynakGecisYap(k);
 };
+/* KAYNAK GEÇİŞİ - OTURUM KORUNUR (kullanıcı: "uygulama içindeyken SAHA tarafına geçince
+   giriş ekranına atıyor; direkt geçiş sağlasın")
+   Kök değiştiği için sayfa yeniden yüklenmek ZORUNDA: bütün Firebase dinleyicileri eski
+   kökün yollarına bağlı ve onları tek tek yeniden bağlamak, birini atlayıp iki kökten
+   aynı anda okuyan bir ekran bırakma riski taşıyor.
+   Ama yeniden yükleme kullanıcıyı giriş ekranına atmamalı. Bu yüzden giriş bilgisi
+   yenilemeden ÖNCE saklanır ve açılışta otomatik olarak geri girilir - kullanıcı yalnızca
+   kısa bir yükleme görür, isim ve şifre tekrar istenmez. */
+function ptKaynakGecisYap(k){
+  try{
+    if(_userName){
+      // Yalnızca BU yenileme için geçerli bir bilet; kullanıldığı anda silinir.
+      sessionStorage.setItem('pt_kaynakGecisAd', _userName);
+    }
+  }catch(e){}
+  try{ showToast('🔄 ' + (k==='saha'?'SAHA':'SAHA dışı') + ' tarafına geçiliyor…'); }catch(e){}
+  setTimeout(function(){ location.reload(); }, 450);
+}
+/* Açılışta bilet varsa doğrudan içeri gir - şifre tekrar sorulmaz, çünkü kullanıcı
+   bu oturumda zaten doğrulanmıştı. Bilet sessionStorage'da: sekme kapanınca yok olur,
+   başka bir cihaza ya da sekmeye taşınmaz. */
+function ptKaynakGecisTamamla(){
+  try{
+    var ad = sessionStorage.getItem('pt_kaynakGecisAd');
+    if(!ad) return false;
+    sessionStorage.removeItem('pt_kaynakGecisAd');
+    var inp = document.getElementById('nameInp');
+    if(inp) inp.value = ad;
+    // Lig verisi gelene kadar bekle; doEnterAfterPasswordCheck _curLeagueId istiyor.
+    var deneme = 0;
+    (function bekle(){
+      if(_curLeagueId){ try{ doEnterAfterPasswordCheck(ad); }catch(e){ DiagSil('ptKaynakGecisTamamla',e); } return; }
+      if(++deneme > 60) return;                 // ~12 sn sonra vazgeç, giriş ekranı kalır
+      setTimeout(bekle, 200);
+    })();
+    return true;
+  }catch(e){ DiagSil('ptKaynakGecisTamamla',e); return false; }
+}
 function ptSahaGoster(){
   try{
     var k = ptVeriKaynagi();
@@ -5890,8 +5959,9 @@ window.ptKaynakSec = function(k){
      veri okuyan bir ekran bırakma riski taşıyordu. Yeniden yükleme tek satır ve kesin.
      İlk seçimde yenileme YOK: henüz hiçbir dinleyici kurulmadan seçiliyor. */
   if(degisti && oncekiVardi){
-    try{ showToast('🔄 Veri kaynağı değişti, yeniden yükleniyor…'); }catch(e){}
-    setTimeout(function(){ location.reload(); }, 600);
+    // Oturum korunur: kullanıcı giriş ekranına DÜŞMEZ, yenilemeden sonra doğrudan
+    // içeride devam eder (bkz. ptKaynakGecisYap / ptKaynakGecisTamamla).
+    ptKaynakGecisYap(k);
     return;
   }
   var scr = document.getElementById('kaynakScreen');
@@ -6021,6 +6091,7 @@ function listenToLeague(leagueId){
     // (bkz. ptOrtakTvDinle). Her lig senkronunda uygulanmalı - aksi halde bir sonraki
     // senkron ortak listeyi lig belgesindekiyle geri ezerdi.
     try{ ptOrtakTvUygula(); }catch(e){}
+    try{ ptOrtakGorunumUygula(); }catch(e){}
     // KULLANICI TALEBİ: "Admin yeni bir tema, emoji ya da yazı tipi paketi eklediği zaman
     // bunu hemen kullanıcı görmeyecek. Bunun için bir havuz olacak... İsteğe bağlı puan
     // tablosu tarafında görünmesini aktifleştirebilir veya erişimi kapatabilir." - Admin'in
@@ -6512,7 +6583,7 @@ function renderTab(id){
     var _wl=Math.max(0,Math.min(20,Number(D.standingsWideLevel!=null?D.standingsWideLevel:(D.standingsWide?20:0))||0));
     document.body.style.setProperty('--pg-wide-frac',_wl/20);
   }catch(e){}
-  withHScrollPreserved(()=>{if(id==='standings')renderStandings();else if(id==='fixture')renderFixture();else if(id==='results')renderResults();else if(id==='form')renderForm();else if(id==='stats')renderStats();else if(id==='compare')renderCompare();else if(id==='analysis')renderAnalysis();else if(id==='saha')renderSaha();});}
+  withHScrollPreserved(()=>{if(id==='standings')renderStandings();else if(id==='fixture')renderFixture();else if(id==='results')renderResults();else if(id==='form')renderForm();else if(id==='stats')renderStats();else if(id==='compare')renderCompare();else if(id==='analysis')renderAnalysis();});}
 
 // ── STANDINGS ──
 // ── MOD SEÇİM EKRANI ──
@@ -10646,7 +10717,9 @@ function renderResults(){
    iş bu maçları 'sahaMode:true' etiketine göre süzüp listelemek; skor/canlı gösterimi
    zaten mevcut mekanizmadan (aynı alanlar) doğru gelir.
    ══════════════════════════════════════════════════════════════════════════════════════ */
+// 🎮 Saha sekmesi kaldırıldı; bu işlev çağrı yerlerini bozmamak için duruyor.
 function renderSaha(){
+  return;
   const el=document.getElementById('pg-saha');
   if(!el)return;
   const maclar=(!ptSahaGoster()?[]:Object.values(D.matches||{}).filter(m=>m.sahaMode)).sort((a,b)=>{
