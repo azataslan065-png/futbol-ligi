@@ -2803,36 +2803,202 @@ function satisFiyati(o){
     return Math.round(taban * kat);
   }catch(e){ _sessiz(e,'satisFiyati','saha_ag'); return 0; }
 }
+/* ══ OYUNCU DEĞERİ ═══════════════════════════════════════════════════════════════
+   Kullanıcı fiyat BELİRLEYEMEZ (kullanıcı talebi): değer tamamen performanstan
+   türer. Fiyat ilan anında KİLİTLENİR - yoksa geri sayım sürerken oynanan bir maç
+   tutarı değiştirir ve kullanıcı ekranda gördüğünden başka bir para alırdı. */
+var SAHA_SATIS_SURE_MS = 60 * 60 * 1000;      // 1 saat
+function satisIlaniniOku(o){
+  try{
+    var i = o && o.satisIlan;
+    if(!i || !i.bitis) return null;
+    return { fiyat: Math.max(0, i.fiyat || 0), bitis: i.bitis, kalan: i.bitis - Date.now() };
+  }catch(e){ return null; }
+}
+function _sureBicim(ms){
+  var sn = Math.max(0, Math.floor(ms / 1000));
+  var s = Math.floor(sn / 3600), d = Math.floor((sn % 3600) / 60), k = sn % 60;
+  return s + ':' + String(d).padStart(2,'0') + ':' + String(k).padStart(2,'0');
+}
+/* OYUNCU DETAYI: satırın tamamı tıklanabilir. Oyuncunun kim olduğunu görmeden
+   alıp satmak, ekonominin en can sıkıcı yanıydı. */
+function oyuncuDetayAc(id){
+  try{
+    var o = magazaHavuz[id]; if(!o) return;
+    var el = document.getElementById('oyuncuDetayKutu');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'oyuncuDetayKutu';
+      el.style.cssText = 'position:fixed;inset:0;z-index:2147481000;display:flex;align-items:center;'
+        + 'justify-content:center;background:rgba(6,10,16,.86);backdrop-filter:blur(3px);padding:18px';
+      el.onclick = function(ev){ if(ev.target === el) el.style.display = 'none'; };
+      document.body.appendChild(el);
+    }
+    var mac = o.macSayisi || 0;
+    var ort = mac ? (Math.round((o.puanToplam||0)/mac*10)/10) : null;
+    var benimMi = (o.sahip === benimUid);
+    var ilan = satisIlaniniOku(o);
+    var deger = benimMi ? satisFiyati(o) : (o.fiyat || 0);
+    // Fotoğraf yoksa adın baş harfi - mevkiye göre sabit bir renkle.
+    var renkler = { 'K':'#f59e0b','STP':'#3b82f6','SOB':'#3b82f6','SAB':'#3b82f6',
+                    'DOS':'#22c55e','OOS':'#22c55e','GÖ':'#22c55e','SF':'#ef4444','GF':'#ef4444' };
+    var renk = renkler[o.mevki] || '#7c3aed';
+    var gorsel = o.foto
+      ? '<img src="' + esc(o.foto) + '" style="width:92px;height:92px;border-radius:50%;object-fit:cover;border:3px solid ' + renk + '">'
+      : '<div style="width:92px;height:92px;border-radius:50%;display:flex;align-items:center;justify-content:center;'
+        + 'font-size:36px;font-weight:900;color:#fff;background:' + renk + '33;border:3px solid ' + renk + '">'
+        + esc((o.ad || '?').trim().charAt(0).toUpperCase()) + '</div>';
+    function satir(etiket, deger2){
+      return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.07)">'
+        + '<span style="opacity:.6;font-size:12.5px">' + etiket + '</span>'
+        + '<span style="font-weight:800;font-size:12.5px;text-align:right">' + deger2 + '</span></div>';
+    }
+    el.innerHTML = '<div style="background:#0f1720;border:1px solid rgba(255,255,255,.1);border-radius:18px;'
+      + 'max-width:360px;width:100%;max-height:86vh;overflow:auto;padding:20px;color:#e6edf5">'
+      + '<div style="display:flex;flex-direction:column;align-items:center;gap:10px;margin-bottom:14px">'
+      + gorsel
+      + '<div style="font-size:18px;font-weight:900;text-align:center">' + esc(o.ad || '?') + '</div>'
+      + '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">'
+      + '<span style="background:' + renk + '33;border:1px solid ' + renk + ';border-radius:20px;padding:3px 10px;font-size:11.5px;font-weight:800">'
+      + esc(o.mevki || '—') + '</span>'
+      + '<span style="background:rgba(255,255,255,.07);border-radius:20px;padding:3px 10px;font-size:11.5px;font-weight:800">Güç ' + (o.guc||0) + '</span>'
+      + (o.baslangic ? '<span style="background:rgba(255,255,255,.07);border-radius:20px;padding:3px 10px;font-size:11.5px">Başlangıç kadrosu</span>' : '')
+      + '</div></div>'
+      + satir('Değer', '<b style="color:#7ee0a0">' + deger + ' SL</b>')
+      + (benimMi && o.alisFiyat ? satir('Alış fiyatı', o.alisFiyat + ' SL') : '')
+      + (benimMi && o.alisFiyat ? satir('Kâr / zarar', (function(){
+            var f = deger - o.alisFiyat;
+            return '<span style="color:' + (f>0?'#7ee0a0':(f<0?'#f0a8a2':'#cbd5e1')) + '">' + (f>0?'+':'') + f + ' SL</span>';
+          })()) : '')
+      + satir('Oynadığı maç', mac ? (mac + ' maç') : 'hiç oynamadı')
+      + satir('Ortalama puan', ort != null ? (ort + ' / 10') : '—')
+      + satir('Hız · Şut · Pas', (o.hiz||0) + ' · ' + (o.sut||0) + ' · ' + (o.pas||0))
+      + (ilan ? '<div style="margin-top:12px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.4);'
+              + 'border-radius:12px;padding:10px;font-size:12.5px;text-align:center">⏳ Satışta · '
+              + '<b>' + _sureBicim(ilan.kalan) + '</b> içinde satılacak</div>' : '')
+      + '<div style="font-size:11px;opacity:.5;line-height:1.6;margin-top:12px;text-align:center">'
+      + 'Değer performansa göre hesaplanır; elle belirlenemez.</div>'
+      + '<button type="button" style="width:100%;margin-top:14px;padding:12px;border:0;border-radius:12px;'
+      + 'background:#1f2937;color:#fff;font-weight:800;font-size:14px;cursor:pointer" '
+      + 'onclick="document.getElementById(\'oyuncuDetayKutu\').style.display=\'none\'">Kapat</button>'
+      + '</div>';
+    el.style.display = 'flex';
+  }catch(e){ _sessiz(e,'oyuncuDetayAc','saha_oyun'); }
+}
+/* SATIŞ ARTIK ANINDA DEĞİL (kullanıcı talebi): oyuncu 1 saatlik bir ilana çıkar,
+   ekranda geri sayım ve iptal düğmesi görünür, süre dolunca satış tamamlanır.
+   FİYAT İLAN ANINDA KİLİTLENİR - kullanıcı ne gördüyse onu alır.
+   OYUNCU KADRODA KALIR: ilan sürerken oynamaya devam eder; satış tamamlanınca
+   kadrodan çıkarılır. Hemen çıkarmak, iptal edildiğinde diziliş bozuk kalırdı. */
 function oyuncuSat(id){
   var o = magazaHavuz[id];
   if(!o || !kayitliMi()){ return; }
   if(o.sahip !== benimUid){ mesaj('', 'Bu oyuncu senin değil', 1500); return; }
-  if(o.baslangic){ mesaj('', 'Başlangıç kadrosu satılamaz', 1800); return; }
+  if(satisIlaniniOku(o)){ mesaj('', 'Bu oyuncu zaten satışta', 1600); return; }
+  /* BAŞLANGIÇ KADROSU (kullanıcı talebi): satışa sunulabilir ama SL KAZANDIRMAZ ve
+     GERİ SAYIM YOKTUR - anında kadrodan çıkar. Geri sayım, satıştan gelecek parayı
+     beklemek için var; kazanç olmayan bir işlemde beklemenin hiçbir karşılığı olmaz
+     ve kullanıcıyı boşuna oyalardı. */
+  if(o.baslangic){ baslangicOyuncusuCikar(id); return; }
   var fiyat = satisFiyati(o);
   var kd = (benimKayit.kadro) || {};
-  var ilk11 = (kd.ilk11 || []).slice(), yedek = (kd.yedek || []).slice();
+  var ilk11 = (kd.ilk11 || []);
   if(ilk11.indexOf(id) >= 0 && ilk11.length <= 11){
     mesaj('', 'İlk 11\'deki oyuncu satılamaz - önce yerine birini koy', 2600); return;
   }
-  if(!confirm((o.ad || 'Bu oyuncu') + ' ' + fiyat + ' SL karşılığında satılsın mı?')) return;
-  // Atomik: oyuncu havuza donsun ve para ayni anda eklensin. Ayri yapilsaydi, arada
-  // baglanti koparsa oyuncu gider para gelmezdi.
+  if(!confirm((o.ad || 'Bu oyuncu') + ' satışa çıkarılsın mı?\n\n'
+    + 'Değer: ' + fiyat + ' SL (performansına göre hesaplandı)\n'
+    + '1 saat içinde satılacak. O süre boyunca iptal edebilirsin.')) return;
   var g = {};
-  g['oyuncuHavuzu/'+id+'/sahip'] = null;
-  g['oyuncuHavuzu/'+id+'/satista'] = true;
-  g['oyuncuHavuzu/'+id+'/fiyat'] = fiyat;
-  g['kullanicilar/'+benimUid+'/para'] = (benimKayit.para||0) + fiyat;
-  g['kullanicilar/'+benimUid+'/kadro/ilk11'] = ilk11.filter(function(x){ return x !== id; });
-  g['kullanicilar/'+benimUid+'/kadro/yedek'] = yedek.filter(function(x){ return x !== id; });
+  g['oyuncuHavuzu/'+id+'/satisIlan'] = { fiyat: fiyat, bitis: Date.now() + SAHA_SATIS_SURE_MS, sahip: benimUid };
   fbDb.ref().update(g)
-    .then(function(){ mesaj('SATILDI', (o.ad||'') + ' · +' + fiyat + ' SL', 2000); })
+    .then(function(){ mesaj('SATIŞA ÇIKTI', (o.ad||'') + ' · ' + fiyat + ' SL · 1 saat', 2400); magazaCiz(); })
     .catch(function(err){
       DiagSaha('oyuncuSat', err, { oyuncu:(o&&o.ad)||'', fiyat:fiyat,
-        anlami:'Oyuncu satışı reddedildi; para eklenmedi.',
-        oneri:'oyuncuHavuzu ve kullanicilar yazma kurallarını denetleyin.' });
+        anlami:'Satış ilanı yazılamadı.', oneri:'oyuncuHavuzu yazma kurallarını denetleyin.' });
       mesaj('', 'İşlem başarısız', 1600);
     });
 }
+/* Başlangıç oyuncusunu kadrodan çıkarır: oyuncu havuza döner, para EKLENMEZ. */
+function baslangicOyuncusuCikar(id){
+  var o = magazaHavuz[id];
+  if(!o || o.sahip !== benimUid) return;
+  var kd = (benimKayit.kadro) || {};
+  var ilk11 = (kd.ilk11 || []).slice(), yedek = (kd.yedek || []).slice();
+  if(ilk11.indexOf(id) >= 0 && ilk11.length <= 11){
+    mesaj('', 'İlk 11\'deki oyuncu çıkarılamaz - önce yerine birini koy', 2600); return;
+  }
+  if(!confirm((o.ad || 'Bu oyuncu') + ' kadrodan çıkarılsın mı?\n\n'
+    + 'Başlangıç kadrosundan geldiği için SL kazandırmaz. İşlem anında yapılır, geri alınamaz.')) return;
+  var g = {};
+  g['oyuncuHavuzu/'+id+'/sahip']   = null;
+  g['oyuncuHavuzu/'+id+'/satista'] = false;   // havuzda kalır ama mağazada listelenmez
+  g['kullanicilar/'+benimUid+'/kadro/ilk11'] = ilk11.filter(function(x){ return x !== id; });
+  g['kullanicilar/'+benimUid+'/kadro/yedek'] = yedek.filter(function(x){ return x !== id; });
+  fbDb.ref().update(g)
+    .then(function(){ mesaj('ÇIKARILDI', (o.ad||'') + ' · kadrodan çıktı', 2000); magazaCiz(); })
+    .catch(function(err){
+      DiagSaha('baslangicCikar', err, { oyuncu:(o&&o.ad)||'', anlami:'Oyuncu kadrodan çıkarılamadı.' });
+      mesaj('', 'İşlem başarısız', 1600);
+    });
+}
+function satisIptal(id){
+  var o = magazaHavuz[id];
+  if(!o || !satisIlaniniOku(o)) return;
+  if(o.sahip !== benimUid){ return; }
+  fbDb.ref('oyuncuHavuzu/'+id+'/satisIlan').remove()
+    .then(function(){ mesaj('İPTAL', (o.ad||'') + ' satıştan çekildi', 1800); magazaCiz(); })
+    .catch(function(){ mesaj('', 'İptal edilemedi', 1500); });
+}
+/* SÜRESİ DOLAN İLANLARI TAMAMLA
+   Sunucu tarafı iş yok (Cloud Functions yok): satış, sahibi uygulamayı açtığında
+   tamamlanır. Bu yüzden ilan süresi dolduğunda para GECİKEBİLİR ama KAYBOLMAZ.
+   Yalnızca ilanın sahibi tamamlar - başka bir oyuncunun cihazı benim satışımı
+   sonlandırmaya çalışırsa kurallar reddeder ve gereksiz yazım üretirdi. */
+window._sahaSatisTamamlandi = {};
+function satisIlanlariniTamamla(){
+  try{
+    if(!fbHazir || !fbDb || !benimUid || !kayitliMi()) return;
+    Object.keys(magazaHavuz || {}).forEach(function(id){
+      var o = magazaHavuz[id]; if(!o || o.sahip !== benimUid) return;
+      var ilan = satisIlaniniOku(o); if(!ilan || ilan.kalan > 0) return;
+      if(window._sahaSatisTamamlandi[id]) return;       // aynı ilanı iki kez işleme
+      window._sahaSatisTamamlandi[id] = true;
+      var kd = (benimKayit && benimKayit.kadro) || {};
+      var ilk11 = (kd.ilk11 || []).slice(), yedek = (kd.yedek || []).slice();
+      // Tek atomik yazım: oyuncu havuza döner, para gelir, kadrodan çıkar.
+      var g = {};
+      g['oyuncuHavuzu/'+id+'/sahip']     = null;
+      g['oyuncuHavuzu/'+id+'/satista']   = true;
+      g['oyuncuHavuzu/'+id+'/fiyat']     = ilan.fiyat;
+      g['oyuncuHavuzu/'+id+'/satisIlan'] = null;
+      g['kullanicilar/'+benimUid+'/para'] = (benimKayit.para||0) + ilan.fiyat;
+      g['kullanicilar/'+benimUid+'/kadro/ilk11'] = ilk11.filter(function(x){ return x !== id; });
+      g['kullanicilar/'+benimUid+'/kadro/yedek'] = yedek.filter(function(x){ return x !== id; });
+      fbDb.ref().update(g)
+        .then(function(){ mesaj('SATILDI', (o.ad||'') + ' · +' + ilan.fiyat + ' SL', 2400); magazaCiz(); })
+        .catch(function(err){
+          window._sahaSatisTamamlandi[id] = false;      // başarısızsa tekrar denenebilsin
+          DiagSaha('satisTamamla', err, { oyuncu:(o&&o.ad)||'', anlami:'Satış tamamlanamadı; oyuncu ve para yerinde kaldı.' });
+        });
+    });
+  }catch(e){ _sessiz(e,'satisIlanlariniTamamla','saha_ag'); }
+}
+/* Geri sayım saniyede bir tazelenir - ama SAYFA yeniden çizilmez, yalnızca sayaç
+   metni güncellenir (bkz. index.html'deki titreme düzeltmesiyle aynı gerekçe). */
+setInterval(function(){
+  try{
+    var sayaclar = document.querySelectorAll('[data-satis-sayac]');
+    if(sayaclar.length){
+      sayaclar.forEach(function(el){
+        var o = magazaHavuz[el.getAttribute('data-satis-sayac')];
+        var ilan = o && satisIlaniniOku(o);
+        el.textContent = ilan ? _sureBicim(ilan.kalan) : '0:00:00';
+      });
+    }
+    satisIlanlariniTamamla();
+  }catch(e){}
+}, 1000);
 
 // KADRO YERLESIMI - degisiklik ANINDA yazilir (kullanıcı: "anlık güncellenecek").
 // "Kaydet" dugmesi YOK: kullanici degisikligi yapip ekrandan cikinca kaydedilmemis
@@ -2911,9 +3077,13 @@ function _kadroHtml(){
               : '<span class="sh-rozet dis">Kadro dışı</span>';
     // Bir sonraki mantikli yer tek dugmede donerek sunulur: Kadro disi -> Yedek -> Ilk 11 -> Kadro disi.
     var sonraki = ilkte ? ['dis','Çıkar'] : (yedekte ? ['ilk11','İlk 11\'e al'] : ['yedek','Yedeğe al']);
-    return '<div class="sh-satir"><div class="ad">' + esc(o.ad || '')
+    var _ilan = satisIlaniniOku(o);
+    return '<div class="sh-satir"><div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">'
+      + esc(o.ad || '') + ' <span style="opacity:.45;font-size:11px">ℹ️</span>'
       + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0)
-      + (o.baslangic ? ' · başlangıç' : '') + '</div></div>'
+      + (o.baslangic ? ' · başlangıç' : '')
+      + (_ilan ? ' · <span style="color:#f0c674">satışta ' + _sureBicim(_ilan.kalan) + '</span>' : '')
+      + '</div></div>'
       + rozet
       + '<button class="sh-dug ikincil" type="button" onclick="kadroYer(\'' + id + '\',\'' + sonraki[0] + '\')">' + sonraki[1] + '</button></div>';
   }).join('');
@@ -2947,7 +3117,10 @@ function _transferHtml(){
       + ids.map(function(id){
           var o = magazaHavuz[id];
           var alinabilir = kayitliMi() && param >= (o.fiyat||0);
-          return '<div class="sh-satir"><div class="ad">' + esc(o.ad || '')
+          // Ad alanına dokunmak DETAYI açar; sağdaki düğme satın alır. İkisi ayrı
+          // hedef: yanlışlıkla satın alma en pahalı hata olurdu.
+          return '<div class="sh-satir"><div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">'
+            + esc(o.ad || '') + ' <span style="opacity:.45;font-size:11px">ℹ️</span>'
             + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0) + '</div></div>'
             + '<span class="sh-rozet">' + (o.fiyat||0) + ' SL</span>'
             + '<button class="sh-dug" type="button" ' + (alinabilir ? 'onclick="oyuncuSatinAl(\'' + id + '\')"' : 'disabled')
@@ -2956,32 +3129,73 @@ function _transferHtml(){
       + '</div>';
   }
 
-  // SAT: yalnizca SATIN ALINMIS oyuncular (baslangic kadrosu gelir getirmez).
+  // SAT: satın alınmış oyuncular (geri sayımlı, SL kazandırır) + başlangıç kadrosu
+  // (anında çıkar, SL kazandırmaz). İkisi ayrı gruplarda gösterilir ki kullanıcı ne
+  // alacağını karıştırmasın.
   var benim = Object.keys(magazaHavuz).filter(function(id){
     var o = magazaHavuz[id];
     return o && o.sahip === benimUid && !o.baslangic;
   });
-  if(!benim.length){
-    return h + '<div class="sh-bos">Satabileceğin oyuncu yok.<br>'
-      + '<span style="font-size:11px;opacity:.75">Yalnızca satın aldığın oyuncular satılabilir; başlangıç kadrosu gelir getirmez.</span></div>';
+  var baslangiclar = Object.keys(magazaHavuz).filter(function(id){
+    var o = magazaHavuz[id];
+    return o && o.sahip === benimUid && o.baslangic;
+  });
+  if(!benim.length && !baslangiclar.length){
+    return h + '<div class="sh-bos">Kadronda oyuncu yok.</div>';
   }
-  return h + '<div class="sh-kart"><div class="sh-kart-bas">Satılabilir oyuncular</div>'
-    + benim.sort(function(a,b){ return satisFiyati(magazaHavuz[b]) - satisFiyati(magazaHavuz[a]); }).map(function(id){
-        var o = magazaHavuz[id];
-        var f = satisFiyati(o);
-        var mac = o.macSayisi || 0;
-        var ort = mac ? Math.round((o.puanToplam||0)/mac*10)/10 : null;
-        var fark = f - (o.alisFiyat||0);
-        return '<div class="sh-satir"><div class="ad">' + esc(o.ad || '')
-          + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0)
-          + ' · alış ' + (o.alisFiyat||0) + ' SL · '
-          + (mac ? (mac + ' maç, ortalama ' + ort) : 'hiç maç oynamadı')
-          + '</div></div>'
-          + '<span class="sh-rozet" style="' + (fark>0?'background:rgba(63,138,69,.3);color:#a8e0b4':(fark<0?'background:rgba(216,68,58,.25);color:#f0a8a2':'')) + '">'
-          + f + ' SL</span>'
-          + '<button class="sh-dug ikincil" type="button" onclick="oyuncuSat(\'' + id + '\')">Sat</button></div>';
-      }).join('')
-    + '</div>';
+  // Satışta olanlar EN ÜSTE: kullanıcının beklediği şey orada.
+  var satista = benim.filter(function(id){ return !!satisIlaniniOku(magazaHavuz[id]); });
+  var bosta   = benim.filter(function(id){ return !satisIlaniniOku(magazaHavuz[id]); });
+  var h2 = '';
+  if(satista.length){
+    h2 += '<div class="sh-kart"><div class="sh-kart-bas">⏳ Satışta</div>'
+      + satista.map(function(id){
+          var o = magazaHavuz[id], ilan = satisIlaniniOku(o);
+          return '<div class="sh-satir"><div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">'
+            + esc(o.ad || '') + ' <span style="opacity:.45;font-size:11px">ℹ️</span>'
+            + '<div class="alt"><span data-satis-sayac="' + id + '">' + _sureBicim(ilan.kalan) + '</span>'
+            + ' içinde satılacak · ' + ilan.fiyat + ' SL</div></div>'
+            + '<button class="sh-dug ikincil" type="button" onclick="satisIptal(\'' + id + '\')">İptal</button></div>';
+        }).join('')
+      + '</div>';
+  }
+  if(bosta.length){
+    h2 += '<div class="sh-kart"><div class="sh-kart-bas">Satılabilir oyuncular</div>'
+      + bosta.sort(function(a,b){ return satisFiyati(magazaHavuz[b]) - satisFiyati(magazaHavuz[a]); }).map(function(id){
+          var o = magazaHavuz[id];
+          var f = satisFiyati(o);
+          var mac = o.macSayisi || 0;
+          var ort = mac ? Math.round((o.puanToplam||0)/mac*10)/10 : null;
+          var fark = f - (o.alisFiyat||0);
+          return '<div class="sh-satir"><div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">'
+            + esc(o.ad || '') + ' <span style="opacity:.45;font-size:11px">ℹ️</span>'
+            + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0)
+            + ' · alış ' + (o.alisFiyat||0) + ' SL · '
+            + (mac ? (mac + ' maç, ortalama ' + ort) : 'hiç maç oynamadı')
+            + '</div></div>'
+            + '<span class="sh-rozet" style="' + (fark>0?'background:rgba(63,138,69,.3);color:#a8e0b4':(fark<0?'background:rgba(216,68,58,.25);color:#f0a8a2':'')) + '">'
+            + f + ' SL</span>'
+            + '<button class="sh-dug ikincil" type="button" onclick="oyuncuSat(\'' + id + '\')">Satışa çıkar</button></div>';
+        }).join('')
+      + '<div style="font-size:11px;opacity:.5;line-height:1.6;padding:8px 2px 2px">'
+      + 'Fiyatı sen belirlemezsin: değer, oyuncunun maç performansından hesaplanır.</div>'
+      + '</div>';
+  }
+  if(baslangiclar.length){
+    h2 += '<div class="sh-kart"><div class="sh-kart-bas">Başlangıç kadrosu</div>'
+      + baslangiclar.sort(function(a,b){ return (magazaHavuz[b].guc||0) - (magazaHavuz[a].guc||0); }).map(function(id){
+          var o = magazaHavuz[id];
+          return '<div class="sh-satir"><div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">'
+            + esc(o.ad || '') + ' <span style="opacity:.45;font-size:11px">ℹ️</span>'
+            + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0) + '</div></div>'
+            + '<span class="sh-rozet">0 SL</span>'
+            + '<button class="sh-dug ikincil" type="button" onclick="oyuncuSat(\'' + id + '\')">Çıkar</button></div>';
+        }).join('')
+      + '<div style="font-size:11px;opacity:.5;line-height:1.6;padding:8px 2px 2px">'
+      + 'Başlangıç oyuncuları SL kazandırmaz; çıkarma işlemi anında yapılır, geri sayım yoktur.</div>'
+      + '</div>';
+  }
+  return h + h2;
 }
 function kadromCiz(){ sahaSayfaTazele('takim'); }
 function magazaCiz(){ sahaSayfaTazele('takim'); }
@@ -4164,7 +4378,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-26-A';
+window.APP_BUILD = '2026-09-26-B';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
