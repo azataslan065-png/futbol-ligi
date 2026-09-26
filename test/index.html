@@ -2611,7 +2611,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-G';
+window.APP_BUILD='2026-09-26-H';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -4808,6 +4808,9 @@ function ptKureselBakimDinle(){
   try{
     firebase.database().ref('globalConfig/maintenance').on('value',function(sn){
       window._ptKureselBakim=sn.val()||null;
+      // Bakım ayarı da ortak: lig belgesindeki kopyanın üzerine bindirilir ki
+      // ekranlar (ayarlar, uyarı çubuğu) iki tarafta da AYNI değeri göstersin.
+      try{ if(window._ptKureselBakim && typeof D!=='undefined') D.maintenance=window._ptKureselBakim; }catch(e){}
       // Kullanıcı içerideyken bakım açılırsa anında dışarı alınır - aksi halde
       // bakım başladığı hâlde açık kalan bir oturum veri yazmaya devam ederdi.
       try{
@@ -4824,10 +4827,16 @@ function ptKureselBakimDinle(){
   }catch(e){DiagSil('ptKureselBakimDinle',e);}
 }
 function isMaintenanceCurrentlyActive(mt){
-  // Küresel düğüm aktifse, hangi sezonda olunduğuna bakılmaksızın bakım açıktır.
+  /* BAKIM MODU TEK DÜĞÜM (kullanıcı: "bakım modu veritabanını ortak kullanacak")
+     ÖNCEKİ DAVRANIŞ VE HATASI: küresel düğüm ile sezon düğümü VEYA'lanıyordu. Sezon
+     düğümü kök ayrımıyla ikiye bölündüğü için, bakım bir taraftan açılıp ÖBÜR taraftan
+     kapatıldığında kapatılmayan kökteki sezon düğümü 'açık' kalıyor ve o taraftaki
+     kullanıcılar bakım ekranında SONSUZA KADAR kilitli kalıyordu (VEYA hiçbir zaman
+     false'a dönmez). Artık küresel düğüm VARSA tek yetkili odur; sezon düğümü yalnızca
+     küresel düğüm hiç yazılmamış eski kurulumlar için yedektir. */
   try{
     var g=window._ptKureselBakim;
-    if(g&&g!==mt&&_bakimDurumHesapla(g))return true;
+    if(g) return _bakimDurumHesapla(g);
   }catch(e){}
   return _bakimDurumHesapla(mt);
 }
@@ -5682,6 +5691,8 @@ function init(){
   ptOrtakTvDinle();
   // Tema ve görünüm modu da ortak (bkz. ptOrtakGorunumDinle).
   ptOrtakGorunumDinle();
+  // Canlı maç kartı da ortak (bkz. ptOrtakCanliDinle).
+  ptOrtakCanliDinle();
   try{ ptLoginKaynakCiz(); }catch(e){}
   // Kaynak geçişinden dönülüyorsa giriş ekranı atlanır (bkz. ptKaynakGecisTamamla).
   try{ ptKaynakGecisTamamla(); }catch(e){}
@@ -5812,6 +5823,22 @@ function ptOrtakGorunumUygula(){
       if(g[alan] !== undefined && g[alan] !== null) D[alan] = g[alan];
     });
   }catch(e){}
+}
+/* ORTAK CANLI MAÇ (kullanıcı: "SAHA'da maç oynanırken TV sekmesi bunu görmüyor")
+   TV sekmesi kullanıcının açık talebiyle ORTAK; ama canlı maç kartı, izleyicinin
+   bulunduğu kökteki fikstürden üretiliyordu - maç öbür kökte oynanırken kart hiç
+   çıkmıyordu. SAHA artık oynanan maçın küçük bir özetini ortak düğüme yazıyor
+   (bkz. saha.html/sahaOrtakCanliYaz); TV iki tarafta da buradan da okur.
+   Fikstürün tamamı ortak DEĞİL - yalnızca "şu an canlı olan" taşınıyor. */
+window._ptOrtakCanli = null;
+function ptOrtakCanliDinle(){
+  try{
+    firebase.database().ref('paylasilan/canliMaclar').on('value',function(sn){
+      window._ptOrtakCanli = sn.val() || null;
+      try{ if(typeof renderVideoScreen==='function' && document.getElementById('videoScreen')) renderVideoScreen(); }catch(e){}
+      try{ if(typeof updateVideoLinkBadge==='function') updateVideoLinkBadge(); }catch(e){}
+    },function(err){ DiagSil('ptOrtakCanliDinle',err); });
+  }catch(e){ DiagSil('ptOrtakCanliDinle',e); }
 }
 function ptOrtakTvDinle(){
   try{
@@ -22316,9 +22343,11 @@ window.openChannelLockedSheet=function(videoId){
 // _sahaIzleKareAdimla'daki "dizi tamamen boşsa dokunulmuyor" notu).
 window._ptCanliMacKanallari=function(){
   try{
-    // SAHA'ya özgü: kullanıcı "SAHA olmadan" seçtiyse bu kartlar hiç listelenmez
-    // (bkz. ptSahaGoster).
-    if(!ptSahaGoster()) return [];
+    // ORTAK canlı maçlar: hangi tarafta olursak olalım listelenir - TV sekmesi ortak.
+    var ortak = ptOrtakCanliKartlari();
+    // SAHA'ya özgü YEREL kartlar: kullanıcı "SAHA olmadan" seçtiyse kendi kökünden
+    // kart üretilmez; ortak düğümden gelenler yine görünür.
+    if(!ptSahaGoster()) return ortak;
     var teams=(window.D&&D.teams)||{};
     var matches=(window.D&&D.matches)||{};
     var lig=window._curLeagueId||'';
@@ -22349,9 +22378,27 @@ window._ptCanliMacKanallari=function(){
         category: basladi ? '⚽ Canlı Maç' : '⏳ Birazdan başlayacak',
         url:'saha.html?izle=1&lig='+encodeURIComponent(lig)+'&mac='+encodeURIComponent(m.id)
       };
-    });
+    }).concat(ortak.filter(function(o){ return !matches[o.matchId]; }));
   }catch(e){return [];}
 };
+/* Ortak düğümdeki canlı maçları TV kartına çevirir. Yerel fikstürde AYNI maç varsa
+   yereli tercih ederiz (logo, canlı top konumu gibi fazladan alanları o taşır). */
+function ptOrtakCanliKartlari(){
+  try{
+    var o = window._ptOrtakCanli; if(!o) return [];
+    return Object.keys(o).map(function(id){
+      var c = o[id] || {};
+      // 3 dakikadan eski kayıt: yazan taraf çökmüş olabilir, canlı sayılmaz.
+      if(c.t && (Date.now() - c.t) > 3*60*1000) return null;
+      return {
+        id:'match_'+id, title:(c.ev||'?')+' '+(c.evG||0)+' - '+(c.depG||0)+' '+(c.dep||'?'),
+        isLive:true, isMatchCard:true, matchId:id, macBasladi:!!c.basladi, logo:'',
+        category: c.basladi ? '⚽ Canlı Maç' : '⏳ Birazdan başlayacak',
+        url:'saha.html?izle=1&lig='+encodeURIComponent(c.lig||'')+'&mac='+encodeURIComponent(id)
+      };
+    }).filter(Boolean);
+  }catch(e){ return []; }
+}
 // TV sekmesi için "sanal maç kanalları" + admin'in eklediği GERÇEK kanallar birleşik listesi.
 // isLive=true tarafı (TV sekmesi) için kullanılır; Video sekmesi bundan etkilenmez.
 window.ptTumKanallar=function(){

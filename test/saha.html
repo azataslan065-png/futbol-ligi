@@ -451,6 +451,11 @@
 <div class="panel" id="p-shell">
   <div id="oyunArkaplan" class="bos"></div>
   <div id="shellKap">
+    <!-- MAÇ DURAKLIYKEN: kabuk maçın üstünde açılır; bu çubuk maça geri döndürür.
+         Normalde gizli (bkz. macIcindeKadroAc / macaDon). -->
+    <div id="shellMacaDon" style="display:none;background:#16a34a;color:#fff;font-weight:800;
+         font-size:13px;padding:10px 14px;text-align:center;cursor:pointer;letter-spacing:.2px"
+         onclick="macaDon()">↩ Maça dön — maç duraklatıldı</div>
     <header id="shellUst">
       <div id="shellMarka">⚽ <span>SAHA</span></div>
       <!-- PROFİL: Puan Tablosu'ndaki fotoğraf ve ad. Fotoğraf yoksa adın baş harfi. -->
@@ -503,6 +508,12 @@
     <div class="row"><span>Konsol kolu<small>Tuş atamasını düzenle</small></span><button id="sw-kol" onclick="var k=document.getElementById('kolAyar');k.style.display=k.style.display==='none'?'block':'none';kolAyarCiz();">Yok</button></div>
     <div id="kolAyar" style="display:none;margin:.1rem 0 .5rem;padding:.4rem .6rem;border-radius:10px;background:rgba(0,0,0,.22)"></div>
     <button class="btn alt" type="button" onclick="ayarKapa();degisiklikPanelAc(0);">⇄ Oyuncu değişikliği</button>
+    <!-- KULLANICI TALEBİ: kadro/diziliş düzenlemesi de duraklatma ekranından açılsın.
+         Maç DURAKLI kalır; kabuk üstündeki "↩ Maça dön" çubuğu geri getirir. -->
+    <button class="btn alt" type="button" onclick="macIcindeKadroAc()">👕 Kadro / Diziliş</button>
+    <!-- Menüye dönmek maçı YARIDA BIRAKMAKTIR: lig maçıysa geçersiz sayılır, o yüzden
+         önce açıkça onay alınır (bkz. ustMenuyeDon). -->
+    <button class="btn alt" type="button" onclick="ustMenuyeDon()">⌂ Üst menüye dön</button>
     <button class="btn" id="b-ayar-kapa">Devam et</button>
   </div>
 </div>
@@ -1732,7 +1743,8 @@ function sesBaslat(){
       window._sahaAnaKazanc = ac.createGain();
       window._sahaAnaKazanc.gain.value = (AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100;
       window._sahaAnaKazanc.connect(ac.destination);
-      tribunGain = ac.createGain(); tribunGain.gain.value = 0.035;
+      // Taban seviye 0: menüde SESSİZ. Maç başlayınca sesMacOrtami(true) ile açılır.
+      tribunGain = ac.createGain(); tribunGain.gain.value = 0;
       n.connect(f); f.connect(tribunGain); tribunGain.connect(window._sahaAnaKazanc);
       n.start();
     }
@@ -1780,14 +1792,31 @@ function sesDuduk(uzun){ ton(1500, 1350, uzun ? 0.6 : 0.22, 'square', 0.12); }
 // GERÇEKTEN OYNAYAN tarafta artar - izleyicinin kendi 3D animasyonu bunu tetiklemez.
 window._sahaVurusSayaci = 0;
 function sesVurus(g){ window._sahaVurusSayaci++; gurultu(0.09, 0.16 + g*0.2, 700 + g*900); }
+/* TRİBÜN TABAN SEVİYESİ: maç içinde 0.035, menüde 0. Tek değişkende tutulur ki
+   coşku (gol, şut) sonrası geri dönülen seviye her zaman doğru olsun - önceden
+   sabit 0.035'e dönüyordu, yani menüde bir coşku tetiklenirse uğultu menüde de
+   kalıcı olarak açılıyordu. */
+var _tribunTaban = 0;
+function sesMacOrtami(ac2){
+  _tribunTaban = ac2 ? 0.035 : 0;
+  if (!ac || !tribunGain) return;
+  try {
+    const t = ac.currentTime;
+    tribunGain.gain.cancelScheduledValues(t);
+    tribunGain.gain.setValueAtTime(tribunGain.gain.value, t);
+    tribunGain.gain.linearRampToValueAtTime(_tribunTaban, t + (ac2 ? 0.6 : 0.4));
+  } catch(e){_sessiz(e,'sesMacOrtami','saha_ses');}
+}
 function sesTribun(seviye, sure){
   if (!ac || !tribunGain || !AYAR.ses) return;
+  // Maç dışındayken (menü) coşku sesi de çalmaz - istenen şey "maça girildiğinde".
+  if (_tribunTaban <= 0) return;
   try {
     const t = ac.currentTime;
     tribunGain.gain.cancelScheduledValues(t);
     tribunGain.gain.setValueAtTime(tribunGain.gain.value, t);
     tribunGain.gain.linearRampToValueAtTime(seviye, t + 0.2);
-    tribunGain.gain.linearRampToValueAtTime(0.035, t + sure);
+    tribunGain.gain.linearRampToValueAtTime(_tribunTaban, t + sure);
   } catch(e){_sessiz(e,'sesTribun:1565','saha_ses');}
 }
 
@@ -1931,9 +1960,14 @@ var _sahaBakim = null;
 // yazmamış eski bir panelin bakımını görmezden gelmek olurdu.
 window._sahaKureselBakim = null;
 function _sahaBakimAktifMi(mt){
+  /* BAKIM MODU TEK DÜĞÜM - bkz. index.html'deki aynı başlıklı not.
+     VEYA'lamanın hatası: sezon düğümü kök ayrımıyla bölündüğü için bakım bir taraftan
+     açılıp öbür taraftan kapatıldığında, kapatılmayan kökteki sezon düğümü 'açık'
+     kalıyor ve SAHA kullanıcıları bakım ekranında kilitli kalıyordu. Küresel düğüm
+     VARSA tek yetkili odur. */
   try{
     var g = window._sahaKureselBakim;
-    if(g && g !== mt && _sahaBakimHesapla(g)) return true;
+    if(g) return _sahaBakimHesapla(g);
   }catch(e){}
   return _sahaBakimHesapla(mt);
 }
@@ -3336,6 +3370,7 @@ function odaNetBaslat(){
       // Durum yayını: 100 ms. Daha sık yazmak (60 Hz) Realtime Database için hem
       // gereksiz hem pahalı; daha seyrek yazmak topu gözle görülür şekilde zıplatıyor.
       _odaNetYazT = setInterval(odaNetDurumYaz, 100);
+      odaDuraklatDinle(kok);
     } else {
       window._sahaOdaKonuk = true; window._sahaOdaHost = false;
       var dr = fbDb.ref(kok + '/durum');
@@ -3348,11 +3383,95 @@ function odaNetBaslat(){
       // Girdi gönderimi 66 ms (15 Hz): tuşun hissedilir gecikmeyle gitmesini önlerken
       // yazma sayısını makul tutar.
       _odaNetGirdiT = setInterval(odaNetGirdiYaz, 66);
+      odaDuraklatDinle(kok);
     }
   }catch(e){ DiagSaha('odaNetBaslat', e, { anlami:'Ağ oyunu başlatılamadı.' }); }
 }
+/* ══ ARKADAŞ MAÇI: DURAKLATMA SENKRONU (kullanıcı talebi) ══════════════
+   "Bir oyuncu maçı durdurup ayar yaptığında diğer oyuncuya da ilgili uyarı
+    penceresini göster ve o kullanıcıya da kadro, oyuncu değişikliği vb. ayarları
+    yapması için buton ver."
+   YAPI: sahaOdalar/{kod}/net/duraklat/{rol} = {aktif, ad, t}. İki taraf da kendi
+   rolünü YAZAR, ikisini birden OKUR. Maç, taraflardan HERHANGİ BİRİ duraklattıysa
+   duraklıdır - tek bir "duraklı mı" bayrağı olsaydı, biri devam ederken öbürü hâlâ
+   ayardayken oyun onun altından başlardı. Devam, ikisi de kapattığında olur. */
+function odaRolum(){ return window._sahaOdaHost ? 'host' : 'konuk'; }
+function odaDuraklatYaz(aktif, sebep){
+  try{
+    if(!_odaKod || !fbHazir || !window._sahaOdaMacBasladi) return;
+    fbDb.ref('sahaOdalar/' + _odaKod + '/net/duraklat/' + odaRolum()).set({
+      aktif: !!aktif,
+      ad: (window._sahaProfil && window._sahaProfil.ad) || (benimKayit && benimKayit.ad) || 'Rakip',
+      sebep: sebep || (aktif ? 'ayar' : ''),
+      t: Date.now()
+    }).catch(function(e){ DiagSaha('odaDuraklatYaz', e, { tur:'veri' }); });
+  }catch(e){_sessiz(e,'odaDuraklatYaz','saha_ag');}
+}
+window._sahaOdaDuraklat = { host:null, konuk:null };
+function odaDuraklatUygula(){
+  try{
+    var d = window._sahaOdaDuraklat || {};
+    var benim = odaRolum();
+    var rakipRol = (benim === 'host') ? 'konuk' : 'host';
+    var rakip = d[rakipRol];
+    var rakipDurakli = !!(rakip && rakip.aktif);
+    var benimDurakli = !!(d[benim] && d[benim].aktif);
+    // Maç, iki taraftan biri duraklattıysa duraklı.
+    if(typeof running !== 'undefined' && running && !bitti) duraklat = (rakipDurakli || benimDurakli);
+    odaDuraklatEkrani(rakipDurakli, rakip);
+  }catch(e){_sessiz(e,'odaDuraklatUygula','saha_ag');}
+}
+/* Rakip duraklattığında gösterilen pencere. Kullanıcı burada bekletilmez: kendi
+   kadrosuna ve oyuncu değişikliğine buradan ulaşabilir - rakip ayar yaparken
+   ekranda öylece beklemek en can sıkıcı kısımdı. */
+function odaDuraklatEkrani(goster, bilgi){
+  try{
+    var el = document.getElementById('odaDuraklatKutu');
+    if(!goster){ if(el) el.style.display = 'none'; return; }
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'odaDuraklatKutu';
+      el.style.cssText = 'position:fixed;inset:0;z-index:2147482000;display:flex;'
+        + 'flex-direction:column;align-items:center;justify-content:center;gap:14px;'
+        + 'background:rgba(6,10,16,.86);backdrop-filter:blur(3px);text-align:center;padding:24px';
+      document.body.appendChild(el);
+    }
+    var ad = (bilgi && bilgi.ad) ? String(bilgi.ad) : 'Rakip';
+    el.innerHTML =
+        '<div style="font-size:34px">⏸</div>'
+      + '<div style="color:#fff;font-size:17px;font-weight:800">' + esc(ad) + ' maçı duraklattı</div>'
+      + '<div style="color:#cbd5e1;font-size:13px;line-height:1.6;max-width:320px">'
+      + 'Ayarlarını yapıyor. Sen de bu sırada kadronu düzenleyebilir, oyuncu değişikliği yapabilirsin.</div>'
+      + '<button type="button" id="odaDrkDegisiklik" style="min-width:230px;padding:12px 16px;border:0;border-radius:12px;'
+      + 'background:#7c3aed;color:#fff;font-weight:800;font-size:14px;cursor:pointer">⇄ Oyuncu değişikliği</button>'
+      + '<button type="button" id="odaDrkKadro" style="min-width:230px;padding:12px 16px;border:0;border-radius:12px;'
+      + 'background:#1f2937;color:#fff;font-weight:800;font-size:14px;cursor:pointer">👕 Kadro / Diziliş</button>'
+      + '<div style="color:#64748b;font-size:11.5px;margin-top:4px">Rakip devam ettiğinde maç kendiliğinden sürer.</div>';
+    el.style.display = 'flex';
+    var b1 = document.getElementById('odaDrkDegisiklik');
+    if(b1) b1.onclick = function(){ el.style.display = 'none'; try{ degisiklikPanelAc(0); }catch(e){} };
+    var b2 = document.getElementById('odaDrkKadro');
+    if(b2) b2.onclick = function(){ el.style.display = 'none'; try{ macIcindeKadroAc(); }catch(e){} };
+  }catch(e){_sessiz(e,'odaDuraklatEkrani','saha_oyun');}
+}
+function odaDuraklatDinle(kok){
+  try{
+    var dr = fbDb.ref(kok + '/duraklat');
+    var df = function(sn){
+      window._sahaOdaDuraklat = sn.val() || { host:null, konuk:null };
+      odaDuraklatUygula();
+    };
+    dr.on('value', df, function(e){ DiagSaha('odaDuraklatOku', e, {
+      anlami:'Rakibin duraklatma durumu alınamıyor; maç tek tarafta donabilir.' }); });
+    _odaNetDinleyiciler.push([dr, 'value', df]);
+    // Önceki maçtan kalan duraklatma kaydı yeni maçı anında dondururdu - temizlenir.
+    try{ fbDb.ref(kok + '/duraklat').remove().catch(function(){}); }catch(e){}
+  }catch(e){_sessiz(e,'odaDuraklatDinle','saha_ag');}
+}
 function odaNetDurdur(){
   try{
+    try{ odaDuraklatEkrani(false); }catch(e){}
+    window._sahaOdaDuraklat = { host:null, konuk:null };
     if(_odaNetYazT){ clearInterval(_odaNetYazT); _odaNetYazT = null; }
     if(_odaNetGirdiT){ clearInterval(_odaNetGirdiT); _odaNetGirdiT = null; }
     _odaNetDinleyiciler.forEach(function(d){ try{ d[0].off(d[1], d[2]); }catch(e){} });
@@ -4016,7 +4135,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-26-F';
+window.APP_BUILD = '2026-09-26-H';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -4414,6 +4533,8 @@ function degisiklikPanelAc(t){
   t = (t===1) ? 1 : 0;
   _deg = { t:t, cikan:null, giren:null, odak:0, oncekiDuraklat:duraklat };
   duraklat = true;                           // seçim yapılırken maç durur
+  // Arkadaş maçında rakip de bilsin: onun ekranı sebepsiz donmasın.
+  try{ odaDuraklatYaz(true,'degisiklik'); }catch(e){}
   let el = document.getElementById('degisiklikPanel');
   if(!el){
     el = document.createElement('div');
@@ -4432,6 +4553,7 @@ function degisiklikPanelKapat(){
   // Ayarlar paneli açık değilse maç kaldığı yerden devam eder.
   const ayarAcik = document.getElementById('p-ayar').classList.contains('on');
   duraklat = ayarAcik;
+  try{ if(!ayarAcik && !window._sahaMacDurakliKabuk) odaDuraklatYaz(false,''); odaDuraklatUygula(); }catch(e){}
 }
 function degisiklikPanelAcikMi(){ return !!_deg; }
 function _degSec(tur, deger){
@@ -4911,6 +5033,7 @@ function sahaCanliYaz(ilkYazim){
       }
     }
     _sahaCanliGonder(g);
+    try{ sahaOrtakCanliYaz(fk, hG, aG); }catch(e){}
   }catch(e){_sessiz(e,'sahaCanliYaz:3411','saha_ag');}
 }
 // ── KURAL GÜVENLİĞİ (2026-09-22-O) ─────────────────────────────────────────────────────
@@ -4923,6 +5046,29 @@ function sahaCanliYaz(ilkYazim){
 // AYRI bir yazımda gönderilir: kurala eklenmemiş yeni bir alan bir daha temel canlı
 // yazımı (skor/konum/dakika) düşüremez, en kötü ihtimalle yalnızca kendisi reddedilir.
 var _SAHA_EK_ALANLAR = /\/(tabela|izleYon|momentum)(\/|$)/;
+/* ORTAK CANLI MAÇ ÖZETİ: paylasilan/canliMaclar/{macId}
+   Yalnızca TV kartını çizmeye yetecek kadar alan taşır - fikstür ayrı kalmaya devam
+   eder. Maç bitince / geçersiz sayılınca silinir (bkz. sahaOrtakCanliSil). */
+function sahaOrtakCanliYaz(fk, hG, aG){
+  try{
+    if(!fk || !fbHazir || !fbDb) return;
+    var mac  = (sahaFikstur && sahaFikstur[fk.matchId]) || {};
+    var ev   = (sahaLigTakimlar[mac.homeId] || {}).name || 'Ev sahibi';
+    var dep  = (sahaLigTakimlar[mac.awayId] || {}).name || 'Deplasman';
+    fbDb.ref('paylasilan/canliMaclar/' + fk.matchId).set({
+      lig: fk.ligId, macId: fk.matchId,
+      ev: ev, dep: dep, evG: hG|0, depG: aG|0,
+      dk: Math.max(0, Math.min(120, Math.round(macDakika()||0))),
+      basladi: true, t: Date.now()
+    }).catch(function(e){ DiagSaha('ortakCanliYaz', e, { tur:'veri' }); });
+  }catch(e){_sessiz(e,'sahaOrtakCanliYaz','saha_ag');}
+}
+function sahaOrtakCanliSil(macId){
+  try{
+    if(!macId || !fbHazir || !fbDb) return;
+    fbDb.ref('paylasilan/canliMaclar/' + macId).remove().catch(function(){});
+  }catch(e){}
+}
 function _sahaCanliGonder(g){
   var ana = {}, ek = {}, ekVar = false;
   Object.keys(g).forEach(function(k){
@@ -5009,6 +5155,7 @@ function sahaFiksturSonucuKaydet(){
     fbDb.ref().update(g)
       .then(function(){ mesaj('KAYDEDILDI', 'Sonuc Puan Tablosuna islendi', 2200); })
       .catch(function(e){ mesaj('KAYIT HATASI', String((e&&e.message)||e).slice(0,90), 3000); });
+    try{ sahaOrtakCanliSil(fk.matchId); }catch(e){}
     window._sahaAktifFikstur = null;
   }catch(e){_sessiz(e,'sahaFiksturSonucuKaydet:3510','saha_ag');}
 }
@@ -5116,8 +5263,70 @@ function ayarUygula(){
   if (!AYAR.ses && tribunGain){ try { tribunGain.gain.value = 0; } catch(e){_sessiz(e,'ayarUygula:3612','saha_grafik');} }
   else if (AYAR.ses && tribunGain){ try { tribunGain.gain.value = 0.035; } catch(e){_sessiz(e,'ayarUygula:3613','saha_grafik');} }
 }
-function ayarAc(){ if (running && !bitti) duraklat = true; ayarUygula(); try{ kolAyarCiz(); }catch(e){_sessiz(e,'ayarAc:3615','saha_oyun');} document.getElementById('p-ayar').classList.add('on'); }
-function ayarKapa(){ _kolDinleIptal(); document.getElementById('p-ayar').classList.remove('on'); duraklat = false; }
+function ayarAc(){ if (running && !bitti){ duraklat = true; try{ odaDuraklatYaz(true,'ayar'); }catch(e){} } ayarUygula(); try{ kolAyarCiz(); }catch(e){_sessiz(e,'ayarAc:3615','saha_oyun');} document.getElementById('p-ayar').classList.add('on'); }
+function ayarKapa(){
+  _kolDinleIptal();
+  document.getElementById('p-ayar').classList.remove('on');
+  duraklat = false;
+  // Arkadaş maçı: kendi duraklatmamı kaldırdığımı bildiririm; ama RAKİP hâlâ
+  // duraklıysa oyun devam ETMEZ - odaDuraklatUygula son sözü söyler.
+  try{ odaDuraklatYaz(false,''); odaDuraklatUygula(); }catch(e){}
+}
+/* ══ MAÇ İÇİNDEN KADRO VE MENÜ (kullanıcı talebi) ══════════════════════
+   İkisi de maçın ÜSTÜNE kabuğu açar; fark, maça geri dönülüp dönülmemesi.
+   duraklat AÇIK kalır - kabuk açıkken oyun arkada ilerlerse kullanıcı kadro
+   düzenlerken gol yiyebilirdi. */
+function macIcindeKadroAc(){
+  try{
+    document.getElementById('p-ayar').classList.remove('on');
+    _kolDinleIptal();
+    duraklat = true;                               // oyun arkada İLERLEMESİN
+    window._sahaMacDurakliKabuk = true;
+    try{ odaDuraklatYaz(true,'kadro'); }catch(e){}
+    var c = document.getElementById('shellMacaDon'); if(c) c.style.display = 'block';
+    document.getElementById('p-shell').classList.add('on');
+    sahaSayfaAc('takim');
+    // Sekme değiştirilebilir (ayarlara da bakabilsin) ama "Maça dön" çubuğu durur.
+  }catch(e){_sessiz(e,'macIcindeKadroAc','saha_oyun');}
+}
+function macaDon(){
+  try{
+    window._sahaMacDurakliKabuk = false;
+    var c = document.getElementById('shellMacaDon'); if(c) c.style.display = 'none';
+    document.getElementById('p-shell').classList.remove('on');
+    // Kadro değişmiş olabilir: sahadaki isim/numara etiketleri tazelenir.
+    try{ if(typeof takimUygula === 'function') takimUygula(); }catch(e){}
+    duraklat = false;
+    try{ odaDuraklatYaz(false,''); odaDuraklatUygula(); }catch(e){}
+    try{ tamEkran(true); }catch(e){}
+  }catch(e){_sessiz(e,'macaDon','saha_oyun');}
+}
+/* ÜST MENÜYE DÖN = maçı yarıda bırakmak. Lig maçıysa geçersiz sayılır (bkz.
+   macGecersizSay), o yüzden geri alınamaz bir işlem olarak açıkça onaylatılır. */
+function ustMenuyeDon(){
+  try{
+    var ligMaci = !!window._sahaAktifFikstur;
+    var soru = ligMaci
+      ? 'Maçtan çıkılacak. Yarıda bırakılan maç GEÇERSİZ sayılır: skor kaydedilmez ve maç oynanmamış duruma döner. Çıkılsın mı?'
+      : 'Maçtan çıkılsın mı? Bu maç kaydedilmez.';
+    if(!confirm(soru)) return;
+    if(ligMaci){
+      try{ macGecersizSay(window._sahaAktifFikstur, 'menuye-donuldu'); }catch(e){}
+      window._sahaAktifFikstur = null;
+    }
+    // Arkadaş maçındaysa rakibe de bildir ve oda yayınını kapat.
+    try{ if(window._sahaOdaMacBasladi){ odaDuraklatYaz(false, 'cikti'); odaNetDurdur(); } }catch(e){}
+    try{ running = false; bitti = true; duraklat = false; }catch(e){}
+    try{ sesMacOrtami(false); }catch(e){}
+    window._sahaMacDurakliKabuk = false;
+    var c = document.getElementById('shellMacaDon'); if(c) c.style.display = 'none';
+    document.getElementById('p-ayar').classList.remove('on');
+    document.getElementById('p-end').classList.remove('on');
+    document.getElementById('p-shell').classList.add('on');
+    sahaSayfaAc('lig');
+    try{ tamEkran(false); }catch(e){}
+  }catch(e){_sessiz(e,'ustMenuyeDon','saha_oyun');}
+}
 function _kolDinleIptal(){ try{ if (typeof _kolDinle !== 'undefined') _kolDinle = null; }catch(e){_sessiz(e,'_kolDinleIptal:3617','saha_oyun');} }
 document.addEventListener('fullscreenchange', ayarUygula);
 document.addEventListener('webkitfullscreenchange', ayarUygula);
@@ -6856,6 +7065,9 @@ function bitir(){
   }catch(e){_sessiz(e,'bitir:5252','saha_oynanis');}
   try{ if(window._sahaAktifFikstur) sahaFiksturSonucuKaydet(); }catch(e){_sessiz(e,'bitir:5253','saha_oynanis');}
   bitti = true; running = false; duran = null; tekrar = null;
+  // Maç bitti: tribün ortamı kapanır. sesDuduk/sesTribun aşağıda bitiş coşkusunu
+  // çalar; o coşku bittiğinde taban artık 0 olduğu için ses tamamen susar.
+  try{ setTimeout(function(){ sesMacOrtami(false); }, 3500); }catch(e){}
   // ARKADAŞ MAÇI: bitişi rakibe bildir. Yayın döngüsü 'running' kapandığı için bir
   // daha çalışmayabilir; son durum burada elle gönderilir (bkz. odaNetDurumYaz notu).
   try{ if(window._sahaOdaHost){ odaNetDurumYaz(); setTimeout(odaNetDurdur, 1200); } }
@@ -7331,6 +7543,7 @@ function macGecersizSay(fk, sebep){
     fbDb.ref().update(g).catch(function(e){ DiagSaha('macGecersiz', e, { tur:'veri',
       anlami:'Yarıda kalan maç temizlenemedi; fikstürde canlı görünmeye devam edebilir.' }); });
     try{ fbDb.ref(yol+'/tabela').remove().catch(function(){}); }catch(e){}
+    try{ sahaOrtakCanliSil(fk.matchId); }catch(e){}
   }catch(e){_sessiz(e,'macGecersizSay','saha_ag');}
 }
 /* Açılışta (ve her fikstür güncellemesinde) çalışır: benim takımıma ait, CANLI görünen
@@ -7464,6 +7677,9 @@ try{
 
 function basla(yeniMod){
   mod = yeniMod || 'mac';
+  // Tribün ortamı MAÇLA BİRLİKTE açılır (kullanıcı: "sesler menüdeyken değil maça
+  // girildiğinde çalacak"). Menüye dönünce sesMacOrtami(false) ile susar.
+  try{ sesMacOrtami(true); }catch(e){}
   // Yönetici süre belirlediyse (uzatmalar hariç toplam, dk) o geçerli; yoksa oyuncu ayarı.
   // SÜRE ÖNCELİĞİ: arkadaş maçı (oda) > yönetici > oyuncu ayarı.
   // Oda süresi en üstte: lig maçı değil, iki kullanıcının kendi anlaştığı karşılaşma;
@@ -8081,6 +8297,9 @@ try{
       if(typeof sesBaslat === 'function') sesBaslat();
       try{ if(ac && ac.state === 'suspended' && ac.resume) ac.resume(); }catch(e){_sessiz(e,'_sahaIzleSesTetikle:6305','saha_oyun');}
       _izleSesAcik = true;
+      // SEYİRCİ: maç zaten oynanıyor, tribün ortamı açık olmalı. Normal uygulamada bu
+      // basla() içinde yapılıyor; seyircide basla() hiç çağrılmadığı için burada.
+      try{ sesMacOrtami(true); }catch(e){}
       if(window._sahaIzleModu){ try{ sesTribun(0.05, 1.5); }catch(e){_sessiz(e,'_sahaIzleSesTetikle:6307','saha_oyun');} }
     }catch(e){_sessiz(e,'_sahaIzleSesTetikle:6308','saha_oyun');}
     document.removeEventListener('pointerdown', _izleSesAc, true);
@@ -8089,6 +8308,12 @@ try{
   // document uzerindeki dinleyici, oyunun kendi tuvali olaylari yakalayip durdurdugu
   // icin ulasmiyordu. Artik window, document VE tuvalin kendisi dinleniyor; hangisi
   // once gelirse ses acilir ve digerleri kendiliginden isesiz kalir.
+  // YALNIZCA SEYİRCİ SAYFASI: normal uygulamada ses, maç başlarken (baslatDugme ->
+  // sesBaslat) kullanıcı dokunuşuyla zaten açılıyor. Bu dinleyici orada da kurulunca
+  // menüdeki ilk dokunuş ses bağlamını açıp tribünü başlatıyordu.
+  var _seyirciSayfasi = false;
+  try{ var _sp = new URLSearchParams(location.search); _seyirciSayfasi = (_sp.get('izle') === '1'); }catch(e){}
+  if(_seyirciSayfasi)
   ['pointerdown','touchstart','mousedown','click','keydown'].forEach(function(ev){
     try{ window.addEventListener(ev, _izleSesAc, true); }catch(e){_sessiz(e,'_sahaIzleSesTetikle:6316','saha_oyun');}
     try{ document.addEventListener(ev, _izleSesAc, true); }catch(e){_sessiz(e,'_sahaIzleSesTetikle:6317','saha_oyun');}
