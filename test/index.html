@@ -2634,7 +2634,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-K';
+window.APP_BUILD='2026-09-26-M';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -4013,6 +4013,37 @@ function ptOkunurYap(hex,bgHex,hedef){
   }
   return ptZeminUstuYaziRengi(bgHex);
 }
+/* ÇOK ZEMİNLİ OKUNURLUK (teşhis raporu 26.09)
+   ptOkunurYap TEK bir zemine bakar ve rengi ondan uzaklaştırır. Soluk yazı ise dört ayrı
+   yüzeyin (bg/s/s2/s3) üstünde görünüyor. Tek zemine göre düzeltmek, başka bir yüzeyde
+   kontrastı BOZABİLİYOR - "Normal" temada renk koyulaştırılınca koyu arka planda 1.9:1'e
+   düşüyordu. Bu yüzden iki yön de denenir (açığa ve koyuya) ve TÜM zeminler arasındaki
+   EN DÜŞÜK kontrastı en yükseğe çıkaran sonuç seçilir. Hedefe hiçbir yönde ulaşılamıyorsa
+   (orta grili paletlerde olabilir) mümkün olan en iyi değer kullanılır - körü körüne bir
+   yöne gitmekten her zaman daha okunur. */
+function ptCokZeminOkunur(hex, zeminler, hedef){
+  try{
+    if(!hex || hex[0]!=='#' || hex.length<7) return hex;
+    var z = (zeminler||[]).filter(function(x){ return x && x[0]==='#' && x.length>=7; });
+    if(!z.length) return hex;
+    function enDusuk(renk){
+      var m = Infinity;
+      z.forEach(function(zz){ var o = ptKontrastOrani(renk, zz); if(o < m) m = o; });
+      return m;
+    }
+    var enIyi = hex, enIyiPuan = enDusuk(hex);
+    if(enIyiPuan >= hedef) return hex;
+    [4, -4].forEach(function(adim){
+      for(var i=1;i<=48;i++){
+        var aday = lightenDarken(hex, adim*i);
+        var puan = enDusuk(aday);
+        if(puan > enIyiPuan){ enIyiPuan = puan; enIyi = aday; }
+        if(puan >= hedef){ enIyiPuan = puan; enIyi = aday; break; }
+      }
+    });
+    return enIyi;
+  }catch(e){ return hex; }
+}
 function applyTheme(){
   const th=buildTheme(_curPalette,_curMode);
   Object.entries(th).forEach(([k,v])=>{if(k!=='lcClass')document.documentElement.style.setProperty('--'+k,v);});
@@ -4039,11 +4070,19 @@ function applyTheme(){
     // Bu iki renk artık uygulanmadan ÖNCE denetlenir: zeminle kontrastı eşiğin altındaysa,
     // renk KENDİ TONUNU KORUYARAK eşiği geçene kadar açılır/koyultulur. Tema kimliği bozulmaz
     // (mor mor kalır, turuncu turuncu), sadece okunur hale gelir.
-    document.documentElement.style.setProperty('--mu',ptOkunurYap(th.mu,th.s||th.bg,4.5));
-    document.documentElement.style.setProperty('--ac3',ptOkunurYap(th.ac3||th.ac,th.s||th.bg,4.5));
+    /* DÜZELTME (teşhis raporu 26.09: kontrast 3.51:1, zemin rgb(119,108,137))
+       Denetim yalnızca --s (ana yüzey) zeminine göre yapılıyordu. Ama soluk yazının
+       gerçekte üstünde durduğu yer çoğu zaman --s2/--s3: puan tablosu sezon rozeti,
+       "Ev Sahibi/Deplasman" süzgeç düğmeleri, sohbetteki etiket düğmesi, istatistik
+       kartları... Bunlar --s'ten daha AÇIK olduğu için kontrast orada düşüyor ve
+       denetimden kaçıyordu. Artık EN KÖTÜ zemine göre düzeltiliyor: hangi yüzeyde
+       olursa olsun okunur. */
+    var _zeminler = [th.s, th.s2, th.s3, th.bg].filter(Boolean);
+    document.documentElement.style.setProperty('--mu',ptCokZeminOkunur(th.mu,_zeminler,4.5));
+    document.documentElement.style.setProperty('--ac3',ptCokZeminOkunur(th.ac3||th.ac,_zeminler,4.5));
     // --mu2 (en soluk metin) de aynı denetimden geçer. Başlık/etiket gibi küçük ama okunması
     // gereken yazılarda kullanıldığı için 4.5:1 hedeflenir.
-    document.documentElement.style.setProperty('--mu2',ptOkunurYap(th.mu2||th.mu,th.s||th.bg,4.5));
+    document.documentElement.style.setProperty('--mu2',ptCokZeminOkunur(th.mu2||th.mu,_zeminler,4.5));
     // TEŞHİS RAPORU DÜZELTMESİ ("'Mazlumspor FK' · kontrast 1.78:1 · yazı rgb(0,0,0) /
     // zemin rgb(69,52,46)"): ANA METİN rengi (--tx) bu denetimin dışında kalmıştı. Soluk
     // metin ve bağlantı renkleri denetlenirken en çok kullanılan rengin denetlenmemesi bir

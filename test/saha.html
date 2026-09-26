@@ -4164,7 +4164,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-26-J';
+window.APP_BUILD = '2026-09-26-M';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -7275,7 +7275,14 @@ var _stadEkran = (function(){
     var kamTaraf = camera.position.z >= 0 ? 1 : -1;
     E.ekranlar.forEach(function(e){ e.grup.visible = !(e.uzunKenar && e.taraf === kamTaraf); });
     if (E.kare % 15 === 0) { try{ baslikCiz(); }catch(e){_sessiz(e,'bitir:5424','saha_oynanis');} }   // saniyede ~4 kez yeterli
+    /* UYARLANABİLİR MALİYET (teşhis: guncelle() 35-45ms, eşik 25ms)
+       Bu işlev sahneyi İKİNCİ KEZ çiziyor (stadyum dev ekranındaki canlı yayın için).
+       Güçlü cihazda sorun değil ama zayıf cihazda tek başına bir kareyi ikiye katlıyor
+       ve oyun takılıyor. Özelliği kaldırmak yerine kendi maliyetini ÖLÇÜP geri çekiliyor:
+       pahalıysa daha seyrek ve daha düşük çözünürlükte çiziliyor, ucuzsa eski hâline
+       dönüyor. Ölçüm ortalama üzerinden - tek bir yavaş kare kalıcı karar vermesin. */
     var aralik = (AYAR.grafik >= 2) ? 2 : (AYAR.grafik >= 1.5 ? 3 : 4);
+    aralik += (E.yavasKademe || 0) * 2;                 // pahalıysa seyrekleştir
     if (E.kare % aralik !== 0) return;
     // Kadrajda görünen bir ekran yoksa yayın çizilmez - en büyük tasarruf burası.
     camera.updateMatrixWorld();
@@ -7293,7 +7300,23 @@ var _stadEkran = (function(){
       camera.fov = Math.max(10, Math.min(150, 2*Math.atan(tanYatay/E.basOran)*180/Math.PI));
       camera.updateProjectionMatrix();
       renderer.setRenderTarget(E.rt);
+      var _sa = (window.performance && window.performance.now) ? window.performance : null;
+      var _t0 = _sa ? _sa.now() : 0;
       renderer.render(scene, camera);
+      if(_sa){
+        var _sure = _sa.now() - _t0;
+        E.ortSure = (E.ortSure == null) ? _sure : (E.ortSure * 0.85 + _sure * 0.15);
+        if(E.ortSure > 18 && (E.yavasKademe||0) < 2){
+          E.yavasKademe = (E.yavasKademe||0) + 1;
+          E.ortSure = null;
+          // İlk kademede çözünürlük de yarıya iner: en büyük kazanç orada.
+          try{ if(E.yavasKademe === 1 && E.rt.setSize) E.rt.setSize(256, 128); }catch(e){}
+        } else if(E.ortSure < 8 && (E.yavasKademe||0) > 0){
+          E.yavasKademe--;
+          E.ortSure = null;
+          try{ if(E.yavasKademe === 0 && E.rt.setSize) E.rt.setSize(512, 256); }catch(e){}
+        }
+      }
     } finally {
       renderer.setRenderTarget(null);
       camera.aspect = eskiOran; camera.fov = eskiFov;
@@ -8739,11 +8762,22 @@ var SahaSensor = (function(){
         players.forEach(function(p){ if(!p.dis && (!isFinite(p.obj.position.x) || !isFinite(p.obj.position.z))) bozuk.push(p.ad||('no'+p.no)); });
         if(bozuk.length) k('saha_oynanis', 'hata', 'Geçersiz konum (NaN)', { nesneler:bozuk.slice(0,6).join(', '),
           anlami:'Fizik hesabı bozuldu; top ya da oyuncu ekrandan kaybolur.' });
-        // 2) Saat donması: maç akarken oyun saati ilerlemiyorsa
-        if(frozen <= 0 && mod !== 'antrenman'){
+        /* 2) Saat donması - YANLIŞ ALARM DÜZELTMESİ
+           Sensör yalnızca 'frozen'a bakıyordu; oyuncu ayarları/kadroyu açtığında ya da
+           rakip arkadaş maçını duraklattığında saat DOĞAL OLARAK durur ve sensör her
+           seferinde "Oyun saati ilerlemiyor" HATASI basıyordu. Yanlış alarm veren bir
+           sensör, hiç olmamasından daha kötü: gerçek arızayı gürültüde gizler.
+           Artık yalnızca maç GERÇEKTEN akarken (oynanıyor, duraklı değil, gol/santra
+           beklemesi yok) ölçüm yapılır. */
+        var _akiyor = running && !bitti && !duraklat && !golBekleme
+                      && !window._sahaMacDurakliKabuk && !degisiklikPanelAcikMi()
+                      && !document.getElementById('p-ayar').classList.contains('on');
+        if(frozen <= 0 && mod !== 'antrenman' && _akiyor){
           if(S.oncekiSaat !== null && saat === S.oncekiSaat) S.saatDurgunSn++; else S.saatDurgunSn = 0;
           if(S.saatDurgunSn === 3) k('saha_oynanis', 'hata', 'Oyun saati ilerlemiyor', { saat:saat, devre:devre,
             duran:(duran&&duran.tip)||null, anlami:'Maç akıyor görünüyor ama süre durmuş.' });
+        } else {
+          S.saatDurgunSn = 0;     // duraklamadan çıkınca sayaç sıfırdan başlasın
         }
         S.oncekiSaat = saat;
         // 3) Takılan duran top
