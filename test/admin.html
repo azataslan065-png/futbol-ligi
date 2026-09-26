@@ -578,14 +578,8 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
          kalmak ZORUNDA: "admin maçı onaylarsa maç, SAHA uygulaması üzerinden oynanabilir
          olacak". Onay, fikstürün bir özelliği olduğu için doğal yeri Fikstür sekmesi.
          saha-ozel: SAHA dışı tarafta hiç görünmez. -->
+    <!-- Onay artık maç satırının kendisinde (🎮 düğmesi) - ayrı liste kaldırıldı. -->
     <div class="card saha-ozel" style="margin-top:.7rem">
-      <h2>🎮 SAHA'da Oynanabilir Maçlar</h2>
-      <p class="hint">Fikstür normal şekilde oluşturulur. Bir maç SAHA uygulamasından
-        oynanabilmesi için burada onaylanmalı; onaylanmayan maç oyuncuya
-        "⏳ Onay bekliyor" olarak görünür.</p>
-      <div id="sahaMacListe"></div>
-    </div>
-    <div class="card saha-ozel">
       <h2>👤 SAHA Kullanıcıları</h2>
       <p class="hint">Hesap onayı olmadan oyuncu maçlara giremez.</p>
       <div id="onayListe" style="margin-bottom:.6rem"></div>
@@ -5002,8 +4996,31 @@ function renderMatches(){
     var scoreBtnHtml=m.isLive
       ?'<span style="font-size:.62rem;color:#34d399;font-weight:700;padding:.15rem .3rem" title="Bu maç canlı - skoru Canlı panelinden yönetin">🔴 Canlı</span>'
       :'<button class="btn bp" style="font-size:.7rem;padding:.22rem .45rem" onclick="openScoreEdit(\''+m.id+'\')" title="Skor Gir">⚽'+(_myAdminRole==='full'?'':' Skor')+'</button>';
+    /* SAHA ONAYI - satir ici (kullanıcı talebi: onay fikstür ekranında olmalı).
+       Yalnızca oynanmamış ve canlı OLMAYAN maçta anlamlı: canlı maç zaten başlamış.
+       Başlık (title) o maçı hangi SAHA oyuncusunun oynayacağını söyler - onay verirken
+       yöneticinin ayrı bir listeye bakmasına gerek kalmasın diye. */
+    var sahaOnayBtn='';
+    if(!m.isLive){
+      var _onayli=!!m.sahaOnayli;
+      var _oyuncular=[];
+      try{
+        Object.keys(_kullanicilar||{}).forEach(function(uid){
+          var kk=_kullanicilar[uid]||{};
+          if(kk.durum!=='onayli'||!kk.takimId)return;
+          if(kk.takimId===m.homeId||kk.takimId===m.awayId)_oyuncular.push(kk.ad||'(adsız)');
+        });
+      }catch(e){}
+      var _bilgi=_oyuncular.length?('Oyuncu: '+_oyuncular.join(', ')):'Bu maçta SAHA oyuncusu yok';
+      sahaOnayBtn='<button class="btn saha-ozel" style="font-size:.7rem;padding:.22rem .45rem;'
+        +(_onayli?'background:rgba(34,197,94,.18);color:#16a34a;border:1px solid rgba(34,197,94,.45)'
+                 :'background:var(--s3);color:var(--mu);border:1px solid var(--br)')+'" '
+        +'onclick="sahaMacOnayDegistir(\''+m.id+'\','+(!_onayli)+')" title="'
+        +escHtml((_onayli?'SAHA\'da oynanabilir - kaldırmak için dokun':'SAHA\'da oynanmasına izin ver')+' · '+_bilgi)
+        +'">'+(_onayli?'🎮✓':'🎮')+'</button>';
+    }
     var editDelBtns=_myAdminRole==='full'
-      ?scoreBtnHtml
+      ?sahaOnayBtn+scoreBtnHtml
        +'<button class="btn bgh" style="font-size:.7rem;padding:.22rem .45rem" onclick="openEditMatch(\''+m.id+'\')">✏️</button>'
        +'<button class="btn" style="font-size:.7rem;padding:.22rem .45rem;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)" onclick="deleteMatch(\''+m.id+'\')">✕</button>'
       :scoreBtnHtml;
@@ -7697,7 +7714,7 @@ function sahaFiksturSifirlaVeOlustur(){
 function sahaMacOnayDegistir(matchId, onayla){
   if(!_curLeagueId) return;
   db.ref('leagues/'+_curLeagueId+'/matches/'+matchId+'/sahaOnayli').set(!!onayla)
-    .then(function(){ toast(onayla ? '✅ Maç onaylandı - artık canlı oynanabilir' : '⏸ Onay kaldırıldı'); try{renderSaha();}catch(e){} })
+    .then(function(){ toast(onayla ? '✅ Maç onaylandı - SAHA\'da oynanabilir' : '⏸ Onay kaldırıldı'); try{renderMatches();}catch(e){} try{renderSaha();}catch(e){} })
     .catch(function(){ toast('İşlem başarısız','er'); });
 }
 function renderSahaMaclar(){
@@ -7734,16 +7751,16 @@ function renderSaha(){
   // SAHA sekmesi kaldırıldı. Onay ve atama kartları artık Fikstür sekmesinde duruyor,
   // bu yüzden çiziciler hâlâ çağrılıyor - ikisi de kendi kutusunu bulamazsa sessizce çıkar.
   try{ renderSahaAtama(); }catch(e){}
-  try{ renderSahaMaclar(); }catch(e){}
 }
 // Saha sekmesi acikken, kullanicinin saha.html'de oynadigi mac ilerledikce (gol/dakika)
 // skor burada da CANLI gorunsun diye hafif bir periyodik yenileme - S.matches zaten
 // Firebase dinleyicisiyle guncel tutuluyor, sadece ekrani yeniden cizmek yeterli.
+// Fikstür açıkken SAHA onay düğmeleri de tazelensin: onay/kullanıcı verisi başka bir
+// cihazdan değişmiş olabilir. renderMatches zaten veri değişmediyse DOM'a dokunmuyor.
 setInterval(function(){
   try{
-    // Kartlar artık Fikstür sekmesinde (Saha sekmesi kaldırıldı).
     var pg = qs('pg-fixture');
-    if(pg && pg.classList.contains('on')) renderSahaMaclar();
+    if(pg && pg.classList.contains('on')) renderMatches();
   }catch(e){}
 }, 4000);
 
