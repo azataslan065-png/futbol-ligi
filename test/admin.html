@@ -1938,14 +1938,34 @@ function _kokUygula(y, onek){
     window._ptGercekRef=orj;
     window._ptTestOrtami=testMi;
     // Kök öneki ÇAĞRI ANINDA okunur (yönetici kaynağı açılıştan sonra seçiyor).
+    /* ═══ KÖK SEVİYESİ TOPLU YAZIM ═══════════════════════════════════════════
+       ref('yol') sarmalamak YETMİYOR: kod birçok yerde ref().update({...}) kullanıp
+       yolu ANAHTARLARIN İÇİNDE taşıyor. Sarmalayıcı yalnızca ref'in yolunu
+       çeviriyordu; boş yol hiçbir kalıba uymadığı için anahtarlar HİÇ çevrilmiyor,
+       yazım yanlış köke gidiyordu (bkz. saha.html'deki uzun not). */
+    function _kokRefSar(ref, onek){
+      try{
+        var orjUpdate = ref.update.bind(ref);
+        ref.update = function(nesne){
+          if(nesne && typeof nesne === 'object' && !Array.isArray(nesne)){
+            var yeni = {};
+            Object.keys(nesne).forEach(function(k){
+              yeni[_kokUygula(String(k).replace(/^\/+/,''), onek)] = nesne[k];
+            });
+            nesne = yeni;
+          }
+          return orjUpdate(nesne);
+        };
+      }catch(e){}
+      return ref;
+    }
     d.ref=function(yol){
-      var y=(yol==null?'':String(yol)).replace(/^\/+/,'');
-      // ÖNEMLİ: Firebase'in '.info/connected' gibi özel '.info/...' yolları KÖKTEN
-      // ayrılmıştır ve hiçbir önekle birleştirilemez - birleştirilirse Firebase
-      // "invalid path" hatasıyla çöker. Bu yüzden bu özel yollar öneksiz bırakılır.
-      if(y.indexOf('.info/')===0||y==='.info')return orj(y);
-      y=_kokUygula(y, (admVeriKaynagi()==='saha') ? window.SAHA_KOK_ONEK : '');
-      return orj(testMi ? ('test/'+y) : y);
+      var ham=(yol==null?'':String(yol)).replace(/^\/+/,'');
+      if(ham.indexOf('.info/')===0||ham==='.info')return orj(ham);
+      var onek=(admVeriKaynagi()==='saha') ? window.SAHA_KOK_ONEK : '';
+      var y=_kokUygula(ham, onek);
+      var r=orj(testMi ? ('test/'+y) : y);
+      return (ham==='') ? _kokRefSar(r, onek) : r;
     };
   }catch(e){}
 })();
@@ -1953,7 +1973,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-H';
+window.APP_BUILD='2026-09-26-J';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -20694,7 +20714,9 @@ function admOrtakBakimUygula(){
   try{ if(window._admOrtakBakim && window.S) S.maintenance = window._admOrtakBakim; }catch(e){}
 }
 /* GÖRÜNÜM ORTAK: tema, arka plan teması, kart biçimi ve giriş ekranı teması. */
-var ADM_ORTAK_GORUNUM_ALANLARI = ['customTheme','bgTheme','cardStyle','loginScreenTheme'];
+/* Yalnızca "uygulama teması" ortak; arka plan fotoğrafı ve giriş ekranı görseli
+   her kökte AYRI kalır (kullanıcı bunların ortak olmasını istemedi). */
+var ADM_ORTAK_GORUNUM_ALANLARI = ['customTheme'];
 window._admOrtakGorunum = null;
 (function admOrtakGorunumDinle(){
   try{
@@ -20706,6 +20728,23 @@ window._admOrtakGorunum = null;
     },function(err){ DiagSil('admOrtakGorunumDinle',err); });
   }catch(e){ DiagSil('admOrtakGorunumDinle',e); setTimeout(admOrtakGorunumDinle,1400); }
 })();
+/* SOHBET ORTAK - bkz. index.html'deki aynı başlıklı not. Yönetici tarafında da lig
+   senkronu (S.generalChat = d.generalChat) ortak kopyayı eziyordu; panel ile Puan
+   Tablosu farklı mesaj listeleri gösteriyordu. */
+window._admOrtakSohbet = null;
+(function admOrtakSohbetDinle(){
+  try{
+    if(!window.firebase||!firebase.database){ setTimeout(admOrtakSohbetDinle,700); return; }
+    firebase.database().ref('paylasilan/genelSohbet').on('value',function(sn){
+      window._admOrtakSohbet = sn.val() || {};
+      admOrtakSohbetUygula();
+      try{ if(typeof renderAdminChatBubble==='function' && qs('adminChatScreen')) renderDevReplyMatchComments(); }catch(e){}
+    },function(err){ DiagSil('admOrtakSohbetDinle',err); });
+  }catch(e){ DiagSil('admOrtakSohbetDinle',e); setTimeout(admOrtakSohbetDinle,1400); }
+})();
+function admOrtakSohbetUygula(){
+  try{ if(window._admOrtakSohbet && window.S) S.generalChat = window._admOrtakSohbet; }catch(e){}
+}
 function admOrtakGorunumUygula(){
   // Ortak düğüm yoksa lig belgesindeki değerler olduğu gibi kalır.
   try{
@@ -21088,6 +21127,8 @@ function listenToLeague(leagueId){
       S.loginScreenTheme=d.loginScreenTheme||null;
       S.navOrder=d.navOrder||null;
       S.generalChat=d.generalChat||null;
+      // Ortak sohbet düğümü varsa lig belgesindeki kopyanın ÜZERİNE bindirilir.
+      try{ admOrtakSohbetUygula(); }catch(e){}
       S.premiumRequests=d.premiumRequests||null;
       S.premiumAccessCodes=d.premiumAccessCodes||null;
       S.sponsors=d.sponsors||null;

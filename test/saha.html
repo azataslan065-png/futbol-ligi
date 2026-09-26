@@ -1863,15 +1863,44 @@ try{
     window.SAHA_KOK_ONEK = 'sahaVeri/';
     var _AYRIK = /^(leagues|leaguesMeta|activeDisplayLeague)(\/|$)/;
     var _SOHBET = /^leagues\/[^\/]+\/generalChat(\/|$)/;
+    function _yolCevir(y){
+      y = (y == null ? '' : String(y)).replace(/^\/+/, '');
+      if(_SOHBET.test(y)) return 'paylasilan/genelSohbet' + y.replace(/^leagues\/[^\/]+\/generalChat/, '');
+      if(_AYRIK.test(y)) return window.SAHA_KOK_ONEK + y;
+      return y;
+    }
+    /* ═══ KÖK SEVİYESİ TOPLU YAZIM (çok ciddi kök sebep) ═══════════════════════
+       ref('yol') çağrılarını sarmak YETMİYOR: kod birçok yerde ref().update({...})
+       kullanıyor ve yolu ANAHTARLARIN İÇİNDE taşıyor:
+           fbDb.ref().update({ 'leagues/L1/matches/m1/isLive': true })
+       Sarmalayıcı yalnızca ref'in YOLUNU çeviriyordu; boş yol hiçbir kalıba uymadığı
+       için olduğu gibi geçiyor, anahtarlar da hiç çevrilmiyordu. Sonuç: SAHA fikstürü
+       'sahaVeri/leagues/...' üzerinden OKUYOR ama canlı skoru, maç sonucunu ve top
+       konumunu 'leagues/...' (SAHA DIŞI kök) üzerine YAZIYORDU. Yazılan veri hiçbir
+       yerde görünmüyordu - "maçlar TV'de canlıya girmiyor" şikayetinin kök sebebi bu.
+       Artık kök ref'in update'i anahtarları da aynı kurallardan geçiriyor. */
+    function _kokRefSar(ref){
+      try{
+        var orjUpdate = ref.update.bind(ref);
+        ref.update = function(nesne){
+          if(nesne && typeof nesne === 'object' && !Array.isArray(nesne)){
+            var yeni = {};
+            Object.keys(nesne).forEach(function(k){ yeni[_yolCevir(k)] = nesne[k]; });
+            nesne = yeni;
+          }
+          return orjUpdate(nesne);
+        };
+      }catch(e){}
+      return ref;
+    }
     fbDb.ref = function(yol){
-      var y = (yol == null ? '' : String(yol)).replace(/^\/+/, '');
-      if(y.indexOf('.info/') === 0 || y === '.info') return _orjRef(y);
-      if(_SOHBET.test(y)){
-        y = 'paylasilan/genelSohbet' + y.replace(/^leagues\/[^\/]+\/generalChat/, '');
-      } else if(_AYRIK.test(y)){
-        y = window.SAHA_KOK_ONEK + y;
-      }
-      return _orjRef(_testMi ? ('test/' + y) : y);
+      var ham = (yol == null ? '' : String(yol)).replace(/^\/+/, '');
+      if(ham.indexOf('.info/') === 0 || ham === '.info') return _orjRef(ham);
+      var y = _yolCevir(ham);
+      var r = _orjRef(_testMi ? ('test/' + y) : y);
+      // Yalnızca KÖK ref'in anahtarları çevrilir. Alt yollarda taban zaten çevrilmiş
+      // olduğundan anahtarları bir kez daha çevirmek yanlış olurdu.
+      return (ham === '') ? _kokRefSar(r) : r;
     };
   }catch(e){_sessiz(e,'sesTribun:1610','saha_ses');}
   fbHazir = true;
@@ -4135,7 +4164,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-26-H';
+window.APP_BUILD = '2026-09-26-J';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;

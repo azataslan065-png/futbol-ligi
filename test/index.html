@@ -2575,14 +2575,37 @@ function _kokUygula(y, onek){
     window._ptTestOrtami=testMi;
     // Kök öneki ÇAĞRI ANINDA okunur: kullanıcı kaynağı açılıştan sonra seçiyor.
     // (Seçim değişince sayfa yeniden yükleniyor - bkz. ptKaynakSec.)
+    /* ═══ KÖK SEVİYESİ TOPLU YAZIM ═══════════════════════════════════════════
+       ref('yol') sarmalamak YETMİYOR: kod birçok yerde ref().update({...}) kullanıp
+       yolu ANAHTARLARIN İÇİNDE taşıyor. Sarmalayıcı yalnızca ref'in yolunu
+       çeviriyordu; boş yol hiçbir kalıba uymadığı için anahtarlar HİÇ çevrilmiyor,
+       yazım yanlış köke gidiyordu (bkz. saha.html'deki uzun not). */
+    function _kokRefSar(ref, onek){
+      try{
+        var orjUpdate = ref.update.bind(ref);
+        ref.update = function(nesne){
+          if(nesne && typeof nesne === 'object' && !Array.isArray(nesne)){
+            var yeni = {};
+            Object.keys(nesne).forEach(function(k){
+              yeni[_kokUygula(String(k).replace(/^\/+/,''), onek)] = nesne[k];
+            });
+            nesne = yeni;
+          }
+          return orjUpdate(nesne);
+        };
+      }catch(e){}
+      return ref;
+    }
     d.ref=function(yol){
-      var y=(yol==null?'':String(yol)).replace(/^\/+/,'');
+      var ham=(yol==null?'':String(yol)).replace(/^\/+/,'');
       // ÖNEMLİ: Firebase'in '.info/connected' gibi özel '.info/...' yolları KÖKTEN
       // ayrılmıştır ve hiçbir önekle birleştirilemez - birleştirilirse Firebase
       // "invalid path" hatasıyla çöker. Bu yüzden bu özel yollar öneksiz bırakılır.
-      if(y.indexOf('.info/')===0||y==='.info')return orj(y);
-      y=_kokUygula(y, (ptVeriKaynagi()==='saha') ? window.SAHA_KOK_ONEK : '');
-      return orj(testMi ? ('test/'+y) : y);
+      if(ham.indexOf('.info/')===0||ham==='.info')return orj(ham);
+      var onek=(ptVeriKaynagi()==='saha') ? window.SAHA_KOK_ONEK : '';
+      var y=_kokUygula(ham, onek);
+      var r=orj(testMi ? ('test/'+y) : y);
+      return (ham==='') ? _kokRefSar(r, onek) : r;
     };
   }catch(e){}
 })();
@@ -2611,7 +2634,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-H';
+window.APP_BUILD='2026-09-26-J';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5693,6 +5716,8 @@ function init(){
   ptOrtakGorunumDinle();
   // Canlı maç kartı da ortak (bkz. ptOrtakCanliDinle).
   ptOrtakCanliDinle();
+  // Sohbet de ortak (bkz. ptOrtakSohbetDinle).
+  ptOrtakSohbetDinle();
   try{ ptLoginKaynakCiz(); }catch(e){}
   // Kaynak geçişinden dönülüyorsa giriş ekranı atlanır (bkz. ptKaynakGecisTamamla).
   try{ ptKaynakGecisTamamla(); }catch(e){}
@@ -5804,7 +5829,10 @@ window._ptOrtakGorunum = null;
    Bu alanlar lig BELGESİNİN İÇİNDE duruyor, yani kök ayrımıyla ikiye bölünürdü.
    TV listesiyle aynı çözüm: ortak bir düğümden bindiriliyor. Ortak düğüm yoksa lig
    belgesindeki değer olduğu gibi kalır - mevcut kurulum hiçbir şey kaybetmez. */
-var PT_ORTAK_GORUNUM_ALANLARI = ['customTheme','bgTheme','cardStyle','loginScreenTheme'];
+/* YALNIZCA "uygulama teması" ortak. Arka plan fotoğrafı (bgTheme) ve giriş ekranı
+   görseli (loginScreenTheme) ORTAK DEĞİL - kullanıcı bunları istemedi, her kök kendi
+   görselini kullanır. Görünüm modu (açık/koyu) zaten kullanıcı profilinde ve ortak. */
+var PT_ORTAK_GORUNUM_ALANLARI = ['customTheme'];
 function ptOrtakGorunumDinle(){
   try{
     firebase.database().ref('paylasilan/gorunum').on('value',function(sn){
@@ -5839,6 +5867,24 @@ function ptOrtakCanliDinle(){
       try{ if(typeof updateVideoLinkBadge==='function') updateVideoLinkBadge(); }catch(e){}
     },function(err){ DiagSil('ptOrtakCanliDinle',err); });
   }catch(e){ DiagSil('ptOrtakCanliDinle',e); }
+}
+/* SOHBET ORTAK - EZİLME DÜZELTMESİ (kullanıcı: "sohbetler veri tabanı ortak olmamış")
+   Yol yeniden yazma sohbeti ortak düğüme YÖNLENDİRİYORDU, ama lig senkronu her
+   tetiklendiğinde D = {...D, ...d} ile lig belgesindeki KÖKE ÖZEL generalChat kopyasını
+   üzerine yazıyordu - ortak mesajlar saniyeler içinde yerel kopyayla değişiyordu.
+   videoLinks/tema ile AYNI çözüm: ortak düğüm her senkrondan sonra yeniden bindirilir. */
+window._ptOrtakSohbet = null;
+function ptOrtakSohbetDinle(){
+  try{
+    firebase.database().ref('paylasilan/genelSohbet').on('value',function(sn){
+      window._ptOrtakSohbet = sn.val() || {};
+      ptOrtakSohbetUygula();
+      try{ if(typeof scheduleChatRenderSafely==='function') scheduleChatRenderSafely(); }catch(e){}
+    },function(err){ DiagSil('ptOrtakSohbetDinle',err); });
+  }catch(e){ DiagSil('ptOrtakSohbetDinle',e); }
+}
+function ptOrtakSohbetUygula(){
+  try{ if(window._ptOrtakSohbet && typeof D!=='undefined') D.generalChat = window._ptOrtakSohbet; }catch(e){}
 }
 function ptOrtakTvDinle(){
   try{
@@ -6120,6 +6166,7 @@ function listenToLeague(leagueId){
     // senkron ortak listeyi lig belgesindekiyle geri ezerdi.
     try{ ptOrtakTvUygula(); }catch(e){}
     try{ ptOrtakGorunumUygula(); }catch(e){}
+    try{ ptOrtakSohbetUygula(); }catch(e){}
     // KULLANICI TALEBİ: "Admin yeni bir tema, emoji ya da yazı tipi paketi eklediği zaman
     // bunu hemen kullanıcı görmeyecek. Bunun için bir havuz olacak... İsteğe bağlı puan
     // tablosu tarafında görünmesini aktifleştirebilir veya erişimi kapatabilir." - Admin'in
