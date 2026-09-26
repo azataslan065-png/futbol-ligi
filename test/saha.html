@@ -2059,9 +2059,38 @@ function _sahaBakimDinle(){
     if(!window._sahaBakimT) window._sahaBakimT = setInterval(_sahaBakimUygula, 60000);
   }catch(e){_sessiz(e,'_sahaBakimDinle:1767','saha_oyun');}
 }
+/* YEDEK LİG SEÇİMİ: activeDisplayLeague yoksa SAHA kökündeki sezon listesinden
+   en güncel (bitmemiş) sezon seçilir - Puan Tablosu'nun yaptığının aynısı. Önceden
+   SAHA'nın böyle bir yedeği yoktu; alan boşsa fikstür HİÇ yüklenmiyordu. */
+function sahaLigYedekSec(){
+  try{
+    if(!fbHazir || !fbDb || sahaLigId) return;
+    fbDb.ref('leaguesMeta').once('value').then(function(sn){
+      var meta = sn.val() || {};
+      var idler = Object.keys(meta);
+      if(!idler.length){ window._sahaLigKaynagi = 'liste-bos'; try{ maclarCiz(); }catch(e){} return; }
+      var acik = idler.filter(function(id){ return (meta[id]||{}).status !== 'finished'; });
+      var havuz = acik.length ? acik : idler;
+      // En son oluşturulan sezon: createdAt varsa ona, yoksa anahtar sırasına göre.
+      havuz.sort(function(a,b){ return ((meta[b]||{}).createdAt||0) - ((meta[a]||{}).createdAt||0); });
+      sahaLigId = havuz[0];
+      window._sahaLigKaynagi = 'yedek-liste';
+      _sahaFiksturDinle();
+      try{ maclarCiz(); }catch(e){}
+    }).catch(function(e){ DiagSaha('sahaLigYedekSec', e, { tur:'veri' }); });
+  }catch(e){_sessiz(e,'sahaLigYedekSec','saha_ag');}
+}
 function _sahaFiksturDinle(){
   try{ _sahaBakimDinle(); }catch(e){_sessiz(e,'_sahaFiksturDinle:1770','saha_ag');}
   if(!fbHazir) return;
+  // Teşhis satırında lig ADI görünsün (id değil) - yöneticinin panelde gördüğü adla
+  // birebir karşılaştırabilsin diye.
+  try{
+    fbDb.ref('leagues/'+sahaLigId+'/leagueName').on('value', function(sn){
+      window._sahaLigAdi = sn.val() || sahaLigId;
+      try{ maclarCiz(); }catch(e){}
+    }, function(){});
+  }catch(e){}
   fbDb.ref('leagues/'+sahaLigId+'/teams').on('value', function(sn){
     sahaLigTakimlar = sn.val() || {};
     maclarCiz();
@@ -2069,6 +2098,8 @@ function _sahaFiksturDinle(){
   }, function(err){ DiagSaha('fiksturTakimOkuma', err, { anlami:'Lig takımları okunamadı; takım seçimi ve maçlar açılmaz.' }); });
   fbDb.ref('leagues/'+sahaLigId+'/matches').on('value', function(sn){
     sahaFikstur = sn.val() || {};
+    // Yarıda bırakılmış maç varsa burada geçersiz sayılır (bkz. kural notu).
+    try{ sahaYarimMaclariGecersizSay(); }catch(e){}
     maclarCiz();
   }, function(err){ DiagSaha('fiksturOkuma', err, { anlami:'Fikstür okunamadı; "Maçlarım" boş kalır.',
     oneri:'leagues/{lig}/matches okuma kuralı ve giriş kimliği.' }); });
@@ -2076,10 +2107,16 @@ function _sahaFiksturDinle(){
 try{
   fbDb && fbDb.ref('activeDisplayLeague').on('value', function(sn){
     var yeniLig = sn.val();
-    if(!yeniLig){ DiagSaha('fiksturAktifLigYok', new Error('activeDisplayLeague bos'), { tur:'veri' }); return; }
+    if(!yeniLig){
+      DiagSaha('fiksturAktifLigYok', new Error('activeDisplayLeague bos'), { tur:'veri' });
+      sahaLigYedekSec();          // sessizce boş kalma - listeden en güncel sezonu seç
+      return;
+    }
     if(yeniLig === sahaLigId) return;
     sahaLigId = yeniLig;
+    window._sahaLigKaynagi = 'activeDisplayLeague';
     _sahaFiksturDinle();
+    try{ maclarCiz(); }catch(e){}
   }, function(err){ DiagSaha('fiksturAktifLigOkuma', err, { anlami:'Aktif lig okunamadı; fikstür ve takım seçimi hiç yüklenmez.' }); });
 }catch(e){_sessiz(e,'_sahaFiksturDinle:1791','saha_ag');}
 
@@ -2619,15 +2656,8 @@ function sayLigCiz(){
     k.innerHTML = h; return;
   }
 
-  // Yarim kalan mac varsa en uste - kullanicinin en olasi niyeti bu.
-  try{
-    var kayit = devamOku();
-    if(kayit){
-      h += '<div class="sh-satir"><div class="ad">▶ Yarım kalan maç'
-        + '<div class="alt">Skor ' + kayit.skorA + '-' + kayit.skorB + ' · kaldığın yerden devam</div></div>'
-        + '<button class="sh-dug" type="button" onclick="devamEt()">Devam et</button></div>';
-    }
-  }catch(e){ _sessiz(e,'sayLigCiz:devam','saha_oyun'); }
+  // "Yarım kalan maç · Devam et" satırı KALDIRILDI: maç yarıda bırakılırsa geçersiz
+  // sayılıyor, devam edilecek bir maç hiç olmuyor (bkz. macGecersizSay).
 
   if(!kayitliMi()){
     h += '<div class="sh-bos">Takım kaydın tamamlanınca maçların burada görünür.</div>';
@@ -2649,7 +2679,7 @@ function sayLigCiz(){
     + '<div style="font-size:11px;opacity:.5;margin-top:3px">Değişiklik için yöneticiye başvur.</div></div>';
 
   if(!macIdler.length){
-    h += '<div class="sh-bos">Şu an sırada bekleyen maçın yok.</div>';
+    h += '<div class="sh-bos">Şu an sırada bekleyen maçın yok.</div>' + sahaLigTeshisSatiri();
     k.innerHTML = h; return;
   }
   h += macIdler.map(function(id){
@@ -2664,7 +2694,23 @@ function sayLigCiz(){
     return '<div class="sh-satir"><div class="ad">' + (benHome ? 'Ev sahibi' : 'Deplasman') + ' · ' + esc(rakip.name || '?')
       + '<div class="alt">' + esc(bilgi || 'Tarih belirtilmedi') + '</div></div>' + aksiyon + '</div>';
   }).join('');
+  h += sahaLigTeshisSatiri();
   k.innerHTML = h;
+}
+/* BAĞLANTI ÖZETİ: "yönetici onayladı ama SAHA görmüyor" şikâyetinin tek sebebi,
+   iki tarafın FARKLI ligi işaret etmesidir. Hangi ligin dinlendiği ve kaç maçın
+   onaylı olduğu artık ekranda yazıyor - bir daha sessizce yanlış yere bakmasın. */
+function sahaLigTeshisSatiri(){
+  try{
+    var toplam = Object.keys(sahaFikstur || {}).length;
+    var onayli = 0;
+    Object.keys(sahaFikstur || {}).forEach(function(id){ if((sahaFikstur[id]||{}).sahaOnayli) onayli++; });
+    var ligAd = (window._sahaLigAdi || sahaLigId || '—');
+    return '<div style="margin-top:12px;font-size:10.5px;opacity:.45;line-height:1.6;text-align:center">'
+      + 'Lig: ' + esc(String(ligAd)) + ' · ' + toplam + ' maç · ' + onayli + ' onaylı'
+      + (toplam === 0 ? '<br>Fikstür boş görünüyor - yönetici SAHA tarafında mı çalışıyor?' : '')
+      + '</div>';
+  }catch(e){ return ''; }
 }
 function maclarCiz(){ sahaSayfaTazele('lig'); }
 function devamDugmesiTazele(){ sahaSayfaTazele('lig'); }
@@ -3970,7 +4016,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-26-E';
+window.APP_BUILD = '2026-09-26-F';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -6182,6 +6228,66 @@ const camHedef = new THREE.Vector3(), bakHedef = new THREE.Vector3();
 // Oyuncu ve izleyici AYNI islevi kullanir - onceki iki kopya ayrisip farkli kadraj
 // uretiyordu.
 var _yayinZoom = 1;
+/* DURAN TOP KAMERASI (kullanıcı: "penaltı, serbest vuruş ve korner gibi duran toplarda
+   kamera oyuncunun arkasına geçecek, vuruş yapıldıktan sonra normale dönecektir")
+   Yalnızca bu üç tip için: taç ve kale vuruşu çok sık ve çok kısa, her birinde kamerayı
+   savurmak oyunu yorar (gerçek yayınlar da onları kesmez).
+   Geçiş ANİ DEĞİL: _duranKamGuc 0→1 yumuşak yükselir, vuruştan sonra 1→0 iner. Anlık
+   geçiş, kamerayı ışınlanmış gibi gösteriyordu (bkz. kamera titremesi düzeltmesi notu).
+   Dönüş, duran==null olduğu anda kendiliğinden başlar - vuruş anında duranCalistir()
+   zaten duran'ı temizliyor, yani ayrı bir "vuruldu" bayrağına gerek yok. */
+var _duranKamGuc = 0;
+var DURAN_KAM_TIPLERI = { penalti:1, serbest:1, korner:1 };
+function duranKameraHedefi(){
+  try{
+    if(!duran || !duran.alici || !DURAN_KAM_TIPLERI[duran.tip]) return null;
+    var p = duran.alici;
+    if(!p || !p.obj) return null;
+    // Vuruşun gideceği yön: kaleye (korner'de ceza sahası ağzına) doğru.
+    var hx = p.dir * (duran.tip === 'korner' ? (HLX - 5.5) : HLX);
+    var dx = hx - ball.position.x, dz = 0 - ball.position.z;
+    var u = Math.hypot(dx, dz) || 1;
+    dx /= u; dz /= u;
+    // Kamera topun GERİSİNDE ve biraz yukarıda; atıcı ile kale arasındaki hattın üstünde.
+    var geri = (duran.tip === 'penalti') ? 9.5 : 8.5;
+    var kx = ball.position.x - dx*geri, kz = ball.position.z - dz*geri;
+    var SIN_X = HLX + 7, SIN_Z = HWZ + 7;          // stadyum cephesinin (HWZ+25) hayli içi
+    kx = Math.max(-SIN_X, Math.min(SIN_X, kx));
+    kz = Math.max(-SIN_Z, Math.min(SIN_Z, kz));
+    return {
+      pos: { x: kx, y: (duran.tip==='penalti'?4.2:4.8), z: kz },
+      bak: { x: ball.position.x + dx*14, y: 1.4,        z: ball.position.z + dz*14 }
+    };
+  }catch(e){ return null; }
+}
+/* Kamera konumunu ve bakış hedefini duran top kamerasına doğru harmanlar.
+   Harmanlama yapıldıysa true döner; çağıran o zaman kendi lookAt'ini atlamaz -
+   bakHedef zaten güncellenmiş olur. */
+function duranKameraHarmanla(dt, camHedef, bakHedef){
+  try{
+    var h = duranKameraHedefi();
+    var hedefGuc = h ? 1 : 0;
+    // Geçiş hızları AYRI: kadraja girerken yumuşak (3.2), vuruştan sonra normale
+    // dönerken daha çabuk (5.5) - oyuncu oyuna dönmek için beklememeli.
+    var hiz = h ? 3.2 : 5.5;
+    _duranKamGuc += (hedefGuc - _duranKamGuc) * Math.min(1, (dt||0.016) * hiz);
+    // Üstel iniş matematiksel olarak sıfıra ULAŞMAZ; eşiğin altında tam sıfırlanır,
+    // yoksa kamera sonsuza kadar binde birlik bir kaymayla kalırdı.
+    if(_duranKamGuc < 0.02){ _duranKamGuc = 0; window._duranKamSon = null; return false; }
+    if(h){
+      window._duranKamSon = h;                 // vuruştan sonra da buradan geri çözülür
+    }
+    var son = window._duranKamSon; if(!son) return false;
+    var g = _duranKamGuc;
+    camHedef.set(camHedef.x + (son.pos.x - camHedef.x)*g,
+                 camHedef.y + (son.pos.y - camHedef.y)*g,
+                 camHedef.z + (son.pos.z - camHedef.z)*g);
+    bakHedef.set(bakHedef.x + (son.bak.x - bakHedef.x)*g,
+                 bakHedef.y + (son.bak.y - bakHedef.y)*g,
+                 bakHedef.z + (son.bak.z - bakHedef.z)*g);
+    return true;
+  }catch(e){ _duranKamGuc = 0; return false; }
+}
 function yayinKamerasi(dt){
   // GUVENLIK: Bu islev her karede cizim dongusunden cagriliyor. Icinde bir hata olursa
   // dongu durur ve ekran siyah kalir. Hata durumunda eski sabit kadraja dusulur.
@@ -6626,13 +6732,15 @@ function update(dt){
   }catch(e){ window._kamAcil = false; }
   const _acilKilit = !!window._kamAcil;
   var _yk = yayinKamerasi(dt); camHedef.set(cx, _yk.y, _yk.z);
-  camera.position.lerp(camHedef, Math.min(1, dt * (_acilKilit ? 9.0 : 3.0)));
   // Bakis hedefi de yumusatilir: onceden kilitliyken topun Z'sine ANINDA geciyordu,
   // bu da aci kaymasi yaratiyordu. Ara degiskende tutulup lerp'lenir.
   const _bakZ = _acilKilit ? ball.position.z : ball.position.z * 0.8;
   if (window._bakZson == null) window._bakZson = _bakZ;
   window._bakZson += (_bakZ - window._bakZson) * Math.min(1, dt * (_acilKilit ? 9.0 : 4.0));
   bakHedef.set(cx + 5*dirA, 1.0, window._bakZson);
+  // DURAN TOP: atıcının arkasına geç, vuruştan sonra normale dön.
+  const _duranKam = duranKameraHarmanla(dt, camHedef, bakHedef);
+  camera.position.lerp(camHedef, Math.min(1, dt * (_duranKam ? 4.5 : (_acilKilit ? 9.0 : 3.0))));
   camera.lookAt(bakHedef);
 
   // Halka yalnizca gercekten kontrol edilen oyuncu varken ve izleyici modunda DEGILKEN.
@@ -7200,7 +7308,66 @@ function loop(){
 // konumlari da saklamak kaydi buyutur ve kazanci sinirlidir.
 // NE ZAMAN SILINIR: Mac bitince ya da kullanici yeni mac baslatinca.
 const SAHA_DEVAM_ANAHTAR = 'saha-yarim-mac';
+/* KULLANICI KURALI: "Hiçbir maç yarıda bırakılmaz; bırakıldığı zaman geçersiz sayılır."
+   Kaldığı yerden devam etme TAMAMEN kaldırıldı. Bunun yerine yarıda kalan lig maçı
+   GEÇERSİZ sayılır: fikstürdeki canlı/skor izleri silinir, maç oynanmamış duruma döner.
+   NEDEN SAYFA KAPANIRKEN YAZMIYORUZ: tarayıcı kapanırken ağ yazımı çoğu zaman
+   gönderilmeden kesilir; pil biten telefonda hiç tetiklenmez. Bu yüzden asıl temizlik
+   BİR SONRAKİ AÇILIŞTA yapılır (bkz. sahaYarimMaclariGecersizSay) - orada çalışması
+   garanti. Kapanış anındaki yazım yalnızca ek bir hızlandırıcıdır. */
+function macGecersizSay(fk, sebep){
+  try{
+    if(!fk || !fk.ligId || !fk.matchId || !fbHazir || !fbDb) return;
+    var yol = 'leagues/'+fk.ligId+'/matches/'+fk.matchId;
+    var g = {};
+    g[yol+'/isLive']    = false;
+    g[yol+'/played']    = false;   // oynanmadı sayılır - puan tablosuna işlenmez
+    g[yol+'/sahaMode']  = false;
+    g[yol+'/homeGoals'] = 0;
+    g[yol+'/awayGoals'] = 0;
+    g[yol+'/minute']    = 0;
+    g[yol+'/events']    = null;
+    g[yol+'/sahaStats'] = null;
+    fbDb.ref().update(g).catch(function(e){ DiagSaha('macGecersiz', e, { tur:'veri',
+      anlami:'Yarıda kalan maç temizlenemedi; fikstürde canlı görünmeye devam edebilir.' }); });
+    try{ fbDb.ref(yol+'/tabela').remove().catch(function(){}); }catch(e){}
+  }catch(e){_sessiz(e,'macGecersizSay','saha_ag');}
+}
+/* Açılışta (ve her fikstür güncellemesinde) çalışır: benim takımıma ait, CANLI görünen
+   ama şu an OYNANMAYAN maç = yarıda bırakılmış maç. Geçersiz sayılır.
+   Aynı maç için yazım bir kez denenir - reddedilirse her anlık görüntüde tekrar
+   denenip döngüye girmesin. */
+window._sahaGecersizDenendi = {};
+function sahaYarimMaclariGecersizSay(){
+  try{
+    if(!fbHazir || !fbDb || !sahaLigId) return;
+    if(!benimKayit || !benimKayit.takimId) return;
+    if(typeof running !== 'undefined' && running && !bitti) return;   // şu an oynuyorum
+    var bt = benimKayit.takimId, bulundu = 0;
+    Object.keys(sahaFikstur || {}).forEach(function(id){
+      var m = sahaFikstur[id]; if(!m) return;
+      if(!m.isLive || m.played) return;
+      if(m.homeId !== bt && m.awayId !== bt) return;
+      if(window._sahaAktifFikstur && window._sahaAktifFikstur.matchId === id) return;
+      if(window._sahaGecersizDenendi[id]) return;
+      window._sahaGecersizDenendi[id] = true;
+      bulundu++;
+      macGecersizSay({ ligId: sahaLigId, matchId: id }, 'yarida-birakildi');
+    });
+    if(bulundu) try{ mesaj('GEÇERSİZ', 'Yarıda kalan maç geçersiz sayıldı', 2600); }catch(e){}
+  }catch(e){_sessiz(e,'sahaYarimMaclariGecersizSay','saha_ag');}
+}
 function devamKaydet(){
+  // Devam kaydı kaldırıldı (bkz. yukarıdaki kural notu). Sayfa kapanırken yarıda kalan
+  // lig maçı için hızlı bir geçersiz-sayma denemesi yapılır; asıl garanti açılıştaki
+  // sahaYarimMaclariGecersizSay.
+  try{
+    if(!running || bitti || mod === 'antrenman') return;
+    try{ if(window._sahaAktifFikstur) macGecersizSay(window._sahaAktifFikstur, 'sayfa-kapandi'); }catch(e){}
+    return;
+  }catch(e){_sessiz(e,'devamKaydet','saha_oynanis');}
+}
+function _devamKaydetEski(){
   try{
     if(!running || bitti || mod === 'antrenman') return;
     var k = {
@@ -7219,6 +7386,11 @@ function devamKaydet(){
   }catch(e){_sessiz(e,'devamKaydet:5695','saha_oynanis');}
 }
 function devamOku(){
+  // Yarıda kalan maç kavramı kaldırıldı: hiçbir zaman devam edilecek maç yoktur.
+  try{ localStorage.removeItem(SAHA_DEVAM_ANAHTAR); }catch(e){}
+  return null;
+}
+function _devamOkuEski(){
   try{
     var h = localStorage.getItem(SAHA_DEVAM_ANAHTAR);
     if(!h) return null;
@@ -8256,11 +8428,13 @@ function _sahaIzleKareAdimla(dt){
   // Oyuncu kamerasiyla AYNI davranis (bkz. KAMERA TITREMESI DUZELTMESI): anlik sicrama
   // yok, bakis hedefi yumusatilir. Eski kopya kaldiginda izleyici kadrajı oyuncununkinden
   // farkli ve titrek gorunuyordu.
-  camera.position.lerp(camHedef, Math.min(1, dt * (_acilKilit ? 9.0 : 3.0)));
   var _izBakZ = _acilKilit ? ball.position.z : ball.position.z*0.8;
   if (window._izBakZson == null) window._izBakZson = _izBakZ;
   window._izBakZson += (_izBakZ - window._izBakZson) * Math.min(1, dt * (_acilKilit ? 9.0 : 4.0));
   bakHedef.set(cx + 5*dirA, 1.0, window._izBakZson);
+  // İzleyici de aynı duran top kadrajını görür - oyuncuyla aynı yayını izliyorlar.
+  var _izDuranKam = duranKameraHarmanla(dt, camHedef, bakHedef);
+  camera.position.lerp(camHedef, Math.min(1, dt * (_izDuranKam ? 4.5 : (_acilKilit ? 9.0 : 3.0))));
   camera.lookAt(bakHedef);
 }
 /* ══════════════════════════════════════════════════════════════════════════════════════════
