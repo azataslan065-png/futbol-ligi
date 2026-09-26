@@ -1481,6 +1481,33 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
         <button class="btn bp" onclick="gomuluMedyaTasi()" style="font-size:.76rem">🚚 Taşı</button>
       </div>
     </div>
+    <!-- SOHBET EŞİTLEME: sohbet artık ortak düğümde, ama ESKİ mesajlar hâlâ her kökün
+         kendi lig belgesinde duruyor. Bu araç ikisini de ortak düğümde birleştirir. -->
+    <div class="card">
+      <div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.05em">💬 Sohbetleri Eşitle</div>
+      <p class="hint">Sohbet artık iki taraf için ortak. Ama ayrımdan ÖNCE yazılmış mesajlar
+        hâlâ her kökün kendi lig belgesinde duruyor ve yalnızca o tarafta görünüyor. Bu araç
+        her iki köktteki eski mesajları ortak sohbete taşır. Eski kopyalar silinmez.</p>
+      <div id="sohEsitDurum" class="hint" style="margin:.35rem 0">Ölçmek için dokunun.</div>
+      <div class="g2" style="margin-top:.35rem">
+        <button class="btn bgh" onclick="sohbetEsitleOlc()" style="font-size:.76rem">📏 Ölç</button>
+        <button class="btn bp" onclick="sohbetEsitleUygula()" style="font-size:.76rem">🔄 Eşitle</button>
+      </div>
+    </div>
+    <!-- TV EŞİTLEME: sohbetle aynı durum - kanal listesi artık ortak düğümde, ama
+         ayrımdan önce eklenmiş kanallar hâlâ her kökün lig belgesinde duruyor. -->
+    <div class="card">
+      <div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.05em">📺 TV Listesini Eşitle</div>
+      <p class="hint">TV sekmesi iki taraf için ortak. Ayrımdan ÖNCE eklenmiş kanallar hâlâ
+        her kökün kendi lig belgesinde duruyor ve yalnızca o tarafta görünüyor. Bu araç
+        ikisini ortak listede birleştirir. Aynı adresli kanal iki kez eklenmez, eski
+        kopyalar silinmez.</p>
+      <div id="tvEsitDurum" class="hint" style="margin:.35rem 0">Ölçmek için dokunun.</div>
+      <div class="g2" style="margin-top:.35rem">
+        <button class="btn bgh" onclick="tvEsitleOlc()" style="font-size:.76rem">📏 Ölç</button>
+        <button class="btn bp" onclick="tvEsitleUygula()" style="font-size:.76rem">🔄 Eşitle</button>
+      </div>
+    </div>
   </div>
 </div>
 <!-- ↑ #appWrap'in GERÇEK kapanışı burada (pg-admin'in hemen ardından) - kesin kanıtlanmış kök
@@ -2003,7 +2030,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-M';
+window.APP_BUILD='2026-09-26-A';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -3349,6 +3376,10 @@ function _snapshotStandingsSettings(){
 // Değişen görsel/davranışsal lig ayarlarını, leaguesMeta'daki TÜM diğer liglere (geçmiş
 // sezonlar dahil) tek bir çoklu-yol (multi-path) Firebase güncellemesiyle uygular.
 function propagateStandingsSettingsToAllLeagues(){
+  // AYNI KİLİT (bkz. save): bu işlev S'teki ayarları kökteki DİĞER BÜTÜN liglere yazar.
+  // S bayatsa, önceki ligin ayarları bütün sezonlara yayılırdı - save()'den bile geniş
+  // bir hasar. Mühür uyuşmuyorsa hiçbir şey yayılmaz.
+  if(S.__ligId && S.__ligId !== _curLeagueId) return;
   var payload={};
   STANDINGS_SETTINGS_SYNC_FIELDS.forEach(function(f){payload[f]=S[f]!==undefined?S[f]:null;});
   db.ref('leaguesMeta').once('value').then(function(snap){
@@ -3366,6 +3397,36 @@ function propagateStandingsSettingsToAllLeagues(){
 }
 function save(){
   if(!_curLeagueId)return Promise.resolve();
+  /* ═══ ÇAPRAZ LİG YAZIM KİLİDİ (kullanıcı: "eFootball Süper Lig bir sonraki girişte
+     Saha Süper Lig olarak değişiyor") ═══════════════════════════════════════════
+     KÖK SEBEP: listenToLeague() başka bir lige geçerken S'i HEMEN sıfırlamıyor; S ancak
+     YENİ ligin ilk anlık görüntüsü GELDİĞİNDE yeniden kuruluyor. Arada kalan boşlukta S
+     hâlâ ÖNCEKİ ligin verisini taşıyor (leagueName dahil). O boşlukta herhangi bir
+     save() çalışırsa - otomatik bir bakım işi, bir ayar yayılımı, gecikmiş bir söz -
+     ÖNCEKİ ligin adını YENİ ligin belgesine yazıyor. Kök ayrımıyla birlikte bu, SAHA
+     tarafındaki ismin SAHA DIŞI lige sızması demek.
+     ÇÖZÜM: S, yüklendiği ligin kimliğiyle mühürlenir. Mühür ile o anki lig uyuşmuyorsa
+     yazım YAPILMAZ. Tek bir noktada durdurmak, her çağrı yerini tek tek aramaktan çok
+     daha güvenli - gelecekte eklenecek çağrılar da kendiliğinden korunur. */
+  if(S.__ligId && S.__ligId !== _curLeagueId){
+    try{ DiagSil('capraLigYazimEngellendi', new Error('S=' + S.__ligId + ' aktif=' + _curLeagueId)); }catch(e){}
+    /* SESSİZ KALMAZ: kilit doğru çalışsa bile yönetici "kaydettim" sanıp devam ederse
+       değişikliği kaybeder. Lig verisi henüz yüklenmediyse bu normal ve kısa sürer;
+       uzarsa (izin hatası, kopuk bağlantı) durumu görmesi gerekir. */
+    try{ setSyncBadge('⏳','s-wait'); }catch(e){}
+    try{
+      if(!window._capraUyariT){
+        window._capraUyariT = setTimeout(function(){
+          window._capraUyariT = null;
+          if(S.__ligId && S.__ligId !== _curLeagueId){
+            try{ toast('⏳ Lig verisi henüz yüklenmedi - kaydetmeyi birazdan tekrar deneyin','er'); }catch(e){}
+            try{ setSyncBadge('⚠️','s-err'); }catch(e){}
+          }
+        }, 4000);
+      }
+    }catch(e){}
+    return Promise.resolve();
+  }
   setSyncBadge('⏳','s-wait');
   // KRİTİK MİMARİ DÜZELTME (kullanıcı ısrarla bildirdi: "canlı maç olayı çok geç yükleniyor,
   // çoğu zaman yüklenmiyor" + "video yüklendikten sonra başka mesaj atılmıyor" - kapsamlı
@@ -3401,6 +3462,7 @@ function save(){
     // dokunmayacağı için, onları korumak amacıyla indirip geri yazmaya artık gerek yok.
     delete payload.visitors;
     delete payload.generalChat;
+    delete payload.__ligId;   // kimlik mührü yalnızca bellekte yaşar, veritabanına yazılmaz
     // KRİTİK HATA DÜZELTMESİ (kullanıcı bildirdi: "bazen kanallar ve videolar kendiliğinden
     // tamamen siliniyor, yöneticinin yeniden yüklemesi gerekiyor" - kapsamlı taramada
     // bulundu, AŞAĞIDAKİ comments/predictions ile TAM OLARAK AYNI kök sebep sınıfı): Bu
@@ -8286,7 +8348,9 @@ function saveLeague(){
   // ekranları hep ESKİ adı göstermeye devam ediyordu - kullanıcının bildirdiği "sezon ismi
   // güncellendiğinde ilgili bölümlerde tutarsız görünüyor" şikayetinin kök sebebi budur.
   // Artık ikisi TEK noktadan birlikte güncellenir.
-  var seasonNameSyncPromise=_curLeagueId?db.ref('leaguesMeta/'+_curLeagueId+'/name').set(S.season).catch(function(_e){DiagSil('saveLeague',_e);}):Promise.resolve();
+  // Aynı kilit sezon adı için de geçerli: bayat S, başka bir sezonun adını ezmesin.
+  var _muhurTamam = !(S.__ligId && S.__ligId !== _curLeagueId);
+  var seasonNameSyncPromise=(_curLeagueId&&_muhurTamam)?db.ref('leaguesMeta/'+_curLeagueId+'/name').set(S.season).catch(function(_e){DiagSil('saveLeague',_e);}):Promise.resolve();
   Promise.all([save(),seasonNameSyncPromise]).then(function(){
     // TEŞHİS RAPORU DÜZELTMESİ ("Titreme: span#topTitle · 3 kez / 400ms"): Üst çubuktaki lig
     // adı her veri turunda AYNI değerle yeniden yazılıyordu. textContent'e her atama, değer
@@ -21005,6 +21069,9 @@ function pickDefaultLeagueId(meta){
 }
 function listenToLeague(leagueId){
   if(!leagueId)return;
+  /* S hâlâ ÖNCEKİ ligin verisi; yeni anlık görüntü gelene kadar mühür bilerek
+     uyumsuz bırakılır, böylece aradaki her yazım save() kilidine takılır. */
+  try{ if(S && S.__ligId !== leagueId) S.__ligId = '__bekliyor__'; }catch(e){}
   if(_leagueDataListener&&_leagueDataListenerId)db.ref('leagues/'+_leagueDataListenerId).off('value',_leagueDataListener);
   _leagueDataListenerId=leagueId;
   _curLeagueId=leagueId; // çağıranlar zaten ayarlıyor; burada da garantiye alınır
@@ -21085,6 +21152,7 @@ function listenToLeague(leagueId){
     // resetten ETKİLENMEMESİ sağlanıyor.
     var _korunanVideoKategorileri=S.videoCategories,_korunanTvKategorileri=S.tvCategories;
     S={leagueName:'Lig',season:'1. Sezon',teams:{},matches:{}};
+    S.__ligId=leagueId;        // kimlik mührü - bkz. save() içindeki çapraz lig kilidi
     S.videoCategories=_korunanVideoKategorileri||[];
     S.tvCategories=_korunanTvKategorileri||[];   // aynı koruma TV listesi için de şart
     // HATA DÜZELTMESİ (kullanıcı bildirdi: "giriş yapıldığında kayıtlı takımlar
@@ -23963,6 +24031,177 @@ function openDiagBadgeMap(){
    yükleme başarısız olursa o öğe gömülü haliyle olduğu gibi bırakılır. İşlem yarıda kesilse
    bile veri tutarlıdır ve araç tekrar çalıştırılabilir (kalanları taşır).
    ═══════════════════════════════════════════════════════════════════════════════════════ */
+/* ══ SOHBET EŞİTLEME ═══════════════════════════════════════════════════════════
+   Sohbet yolu artık ortak düğüme (paylasilan/genelSohbet) yönlendiriliyor. Ama bu
+   yönlendirme ÖNCEDEN yazılmış mesajları taşımaz: onlar hâlâ her kökün kendi
+   leagues/{lig}/generalChat düğümünde duruyor ve yalnızca o taraftan görünüyor.
+   Bu araç iki kökteki bütün eski mesajları toplayıp ortak düğümde birleştirir.
+   OKUMA NEDEN HAM REF İLE: normal db.ref('leagues/../generalChat') çağrısı artık
+   ortak düğüme YÖNLENDİRİLİYOR - eski yolu okumanın tek yolu önek uygulanmamış ref.
+   GÜVENLİK: eski kopyalar SİLİNMEZ; ortak düğümde zaten olan bir mesaj ezilmez. */
+function _esitKok(){ return window._ptTestOrtami ? 'test/' : ''; }
+function _esitHam(yol){
+  if(!window._ptGercekRef) return null;
+  return window._ptGercekRef(_esitKok() + yol);
+}
+function _sohbetTopla(){
+  // İki kökün leaguesMeta'sını oku, her ligin generalChat'ini topla.
+  var kokler = [{ad:'SAHA dışı', onek:''}, {ad:'SAHA', onek:'sahaVeri/'}];
+  return Promise.all(kokler.map(function(k){
+    var r = _esitHam(k.onek + 'leaguesMeta');
+    if(!r) return Promise.resolve({kok:k, mesajlar:{}, ligSayisi:0});
+    return r.once('value').then(function(sn){
+      var idler = Object.keys(sn.val() || {});
+      if(!idler.length) return {kok:k, mesajlar:{}, ligSayisi:0};
+      return Promise.all(idler.map(function(id){
+        return _esitHam(k.onek + 'leagues/' + id + '/generalChat').once('value')
+          .then(function(s2){ return s2.val() || {}; })
+          .catch(function(){ return {}; });
+      })).then(function(listeler){
+        var hepsi = {};
+        listeler.forEach(function(l){ Object.keys(l).forEach(function(mid){ hepsi[mid] = l[mid]; }); });
+        return {kok:k, mesajlar:hepsi, ligSayisi:idler.length};
+      });
+    }).catch(function(){ return {kok:k, mesajlar:{}, ligSayisi:0}; });
+  })).then(function(sonuclar){
+    return _esitHam('paylasilan/genelSohbet').once('value').then(function(sn){
+      return { kokler:sonuclar, ortak:(sn.val() || {}) };
+    }).catch(function(){ return { kokler:sonuclar, ortak:{} }; });
+  });
+}
+function sohbetEsitleOlc(){
+  var kutu = qs('sohEsitDurum'); if(!kutu) return;
+  if(!window._ptGercekRef){ kutu.textContent = 'Veri kaynağına erişilemiyor.'; return; }
+  kutu.textContent = '⏳ Ölçülüyor...';
+  _sohbetTopla().then(function(v){
+    var ortakSayi = Object.keys(v.ortak).length, yeni = 0, satir = [];
+    v.kokler.forEach(function(r){
+      var idler = Object.keys(r.mesajlar);
+      var eksik = idler.filter(function(mid){ return !(mid in v.ortak); });
+      yeni += eksik.length;
+      satir.push('· ' + r.kok.ad + ': ' + idler.length + ' mesaj, ' + eksik.length + ' tanesi ortakta yok');
+    });
+    kutu.innerHTML = '<b>Ortak sohbette şu an ' + ortakSayi + ' mesaj var.</b>'
+      + '<div style="margin-top:.3rem;opacity:.8">' + satir.join('<br>') + '</div>'
+      + '<div style="margin-top:.3rem">' + (yeni ? ('Eşitlenince <b>' + yeni + '</b> mesaj ortak sohbete eklenecek.')
+                                                 : 'Eklenecek mesaj yok - zaten eşit.') + '</div>';
+  }).catch(function(e){ kutu.textContent = 'Ölçülemedi: ' + ((e&&e.message)||''); });
+}
+function sohbetEsitleUygula(){
+  var kutu = qs('sohEsitDurum'); if(!kutu) return;
+  if(!window._ptGercekRef){ kutu.textContent = 'Veri kaynağına erişilemiyor.'; return; }
+  dlg('🔄','Sohbetleri Eşitle',
+      'Her iki kökteki eski sohbet mesajları ortak sohbete eklenecek. Ortak sohbette zaten '
+      + 'bulunan mesajlar DEĞİŞTİRİLMEZ, eski kopyalar da SİLİNMEZ.','Eşitle','bp').then(function(ok){
+    if(!ok) return;
+    kutu.textContent = '⏳ Okunuyor...';
+    _sohbetTopla().then(function(v){
+      var guncel = {}, sayi = 0;
+      v.kokler.forEach(function(r){
+        Object.keys(r.mesajlar).forEach(function(mid){
+          if(mid in v.ortak) return;              // ortaktaki mesaj EZİLMEZ
+          if(mid in guncel) return;               // iki kökte aynı kimlik: ilki kalır
+          guncel['paylasilan/genelSohbet/' + mid] = r.mesajlar[mid];
+          sayi++;
+        });
+      });
+      if(!sayi){ kutu.textContent = '✅ Eklenecek mesaj yok - sohbetler zaten eşit.'; return; }
+      // Ham kök ref: anahtarlar tam yol taşıyor, sarmalayıcı çevirisi İSTENMİYOR.
+      window._ptGercekRef(_esitKok()).update(guncel).then(function(){
+        kutu.innerHTML = '✅ ' + sayi + ' mesaj ortak sohbete eklendi.';
+        try{ toast('💬 ' + sayi + ' mesaj eşitlendi'); }catch(e){}
+      }).catch(function(e){
+        kutu.textContent = '❌ Yazılamadı: ' + ((e&&e.message)||'');
+      });
+    }).catch(function(e){ kutu.textContent = 'Okunamadı: ' + ((e&&e.message)||''); });
+  });
+}
+/* ══ TV LİSTESİ EŞİTLEME ═══════════════════════════════════════════════════════
+   Sohbetle aynı gerekçe (bkz. yukarıdaki not): yol yönlendirmesi ESKİ kayıtları
+   taşımaz. Fark, videoLinks'in bir DİZİ olması - anahtarla değil, içerikle
+   eşleştirmek gerekiyor. Kimlik olarak önce kanalın kendi id'si, sonra adresi
+   kullanılır: aynı kanal iki kökte AYRI id'lerle eklenmiş olabilir, o durumda
+   adres tekrarı yakalar ve liste iki kopya taşımaz. */
+function _tvAnahtar(k){
+  if(!k) return '';
+  var u = String(k.url || '').trim().toLowerCase().replace(/\/+$/,'');
+  return u || ('id:' + (k.id || ''));
+}
+function _tvTopla(){
+  var kokler = [{ad:'SAHA dışı', onek:''}, {ad:'SAHA', onek:'sahaVeri/'}];
+  return Promise.all(kokler.map(function(k){
+    var r = _esitHam(k.onek + 'leaguesMeta');
+    if(!r) return Promise.resolve({kok:k, kanallar:[]});
+    return r.once('value').then(function(sn){
+      var idler = Object.keys(sn.val() || {});
+      if(!idler.length) return {kok:k, kanallar:[]};
+      return Promise.all(idler.map(function(id){
+        return _esitHam(k.onek + 'leagues/' + id + '/videoLinks').once('value')
+          .then(function(s2){ var v = s2.val(); return Array.isArray(v) ? v : (v ? Object.values(v) : []); })
+          .catch(function(){ return []; });
+      })).then(function(listeler){
+        var hepsi = [];
+        listeler.forEach(function(l){ l.forEach(function(x){ if(x) hepsi.push(x); }); });
+        return {kok:k, kanallar:hepsi};
+      });
+    }).catch(function(){ return {kok:k, kanallar:[]}; });
+  })).then(function(sonuclar){
+    return _esitHam('paylasilan/tvKanallari').once('value').then(function(sn){
+      var v = sn.val();
+      return { kokler:sonuclar, ortak:(Array.isArray(v) ? v : (v ? Object.values(v) : [])) };
+    }).catch(function(){ return { kokler:sonuclar, ortak:[] }; });
+  });
+}
+function _tvBirlestir(v){
+  var sonuc = v.ortak.slice();
+  var gorulen = {};
+  sonuc.forEach(function(k){ var a = _tvAnahtar(k); if(a) gorulen[a] = true; });
+  var eklenen = [];
+  v.kokler.forEach(function(r){
+    r.kanallar.forEach(function(k){
+      var a = _tvAnahtar(k);
+      if(!a || gorulen[a]) return;      // ortakta zaten var ya da bu turda eklendi
+      gorulen[a] = true;
+      sonuc.push(k);
+      eklenen.push(k);
+    });
+  });
+  return { liste:sonuc, eklenen:eklenen };
+}
+function tvEsitleOlc(){
+  var kutu = qs('tvEsitDurum'); if(!kutu) return;
+  if(!window._ptGercekRef){ kutu.textContent = 'Veri kaynağına erişilemiyor.'; return; }
+  kutu.textContent = '⏳ Ölçülüyor...';
+  _tvTopla().then(function(v){
+    var b = _tvBirlestir(v);
+    var satir = v.kokler.map(function(r){ return '· ' + r.kok.ad + ': ' + r.kanallar.length + ' kanal'; });
+    kutu.innerHTML = '<b>Ortak listede şu an ' + v.ortak.length + ' kanal var.</b>'
+      + '<div style="margin-top:.3rem;opacity:.8">' + satir.join('<br>') + '</div>'
+      + '<div style="margin-top:.3rem">' + (b.eklenen.length
+          ? ('Eşitlenince <b>' + b.eklenen.length + '</b> kanal eklenecek: '
+             + b.eklenen.slice(0,4).map(function(k){ return escHtml(k.title || k.url || '(adsız)'); }).join(', ')
+             + (b.eklenen.length > 4 ? '…' : ''))
+          : 'Eklenecek kanal yok - zaten eşit.') + '</div>';
+  }).catch(function(e){ kutu.textContent = 'Ölçülemedi: ' + ((e&&e.message)||''); });
+}
+function tvEsitleUygula(){
+  var kutu = qs('tvEsitDurum'); if(!kutu) return;
+  if(!window._ptGercekRef){ kutu.textContent = 'Veri kaynağına erişilemiyor.'; return; }
+  dlg('🔄','TV Listesini Eşitle',
+      'Her iki kökteki kanallar ortak TV listesine eklenecek. Ortak listede zaten bulunan '
+      + 'kanallar DEĞİŞTİRİLMEZ, eski kopyalar da SİLİNMEZ.','Eşitle','bp').then(function(ok){
+    if(!ok) return;
+    kutu.textContent = '⏳ Okunuyor...';
+    _tvTopla().then(function(v){
+      var b = _tvBirlestir(v);
+      if(!b.eklenen.length){ kutu.textContent = '✅ Eklenecek kanal yok - liste zaten eşit.'; return; }
+      _esitHam('paylasilan/tvKanallari').set(b.liste).then(function(){
+        kutu.innerHTML = '✅ ' + b.eklenen.length + ' kanal ortak listeye eklendi (toplam ' + b.liste.length + ').';
+        try{ toast('📺 ' + b.eklenen.length + ' kanal eşitlendi'); }catch(e){}
+      }).catch(function(e){ kutu.textContent = '❌ Yazılamadı: ' + ((e&&e.message)||''); });
+    }).catch(function(e){ kutu.textContent = 'Okunamadı: ' + ((e&&e.message)||''); });
+  });
+}
 /* ── ARAÇ: ölçüm ───────────────────────────────────────────────────────────────
    Lig belgesindeki gömülü ("data:") içerikleri sayar ve toplam boyutu söyler. */
 function _gmTara(dugum, yol, bulunan){
