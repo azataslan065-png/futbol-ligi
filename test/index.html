@@ -2634,7 +2634,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-26-J';
+window.APP_BUILD='2026-09-26-K';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -6117,6 +6117,62 @@ function _sahaSadeceCanliAlanDegisti(matchId,m){
     return prev!==undefined&&prev===json;
   }catch(e){ return false; }
 }
+/* ═══ TİTREME DÜZELTMESİ (kullanıcı: "butonlar birkaç sn bir kaybolup geri geliyor")
+   KÖK SEBEP: SAHA'da maç oynanırken oyun, topun ve oyuncuların konumunu saniyede
+   birkaç kez yazıyor. Lig dinleyicisi her yazımda tetikleniyor, sayfanın TAMAMI
+   (hafta düğmeleri, "Tümünü Gör", açılır kutular dahil) innerHTML ile sıfırdan
+   kuruluyordu. DOM düğümleri yok edilip yeniden yaratıldığı için düğmeler gözle
+   görülür şekilde kaybolup geri geliyordu.
+   ÇÖZÜM: Karşılaştırma imzasından SADECE sunuma ait canlı alanlar çıkarılır. Bu
+   alanlardan başka bir şey değişmediyse tam yeniden çizim YAPILMAZ; dakika ve mini
+   saha yerinde güncellenir. Gol/kart/olay gibi GERÇEK değişiklikler imzayı
+   değiştirdiği için tam çizim eskisi gibi çalışmaya devam eder. */
+var PT_CANLI_SUNUM_ALANLARI = ['ballX','ballZ','ballAttack','ballTs','homePlayers',
+                               'awayPlayers','vurus','tabela','minute'];
+function _ptRenderImzasi(d){
+  try{
+    if(!d) return 'null';
+    var k = Object.assign({}, d);
+    delete k.visitors;      // presence nabzı: PT bunu hiç göstermez
+    delete k.typing;
+    if(k.matches){
+      var m2 = {};
+      Object.keys(k.matches).forEach(function(id){
+        var mm = Object.assign({}, k.matches[id] || {});
+        PT_CANLI_SUNUM_ALANLARI.forEach(function(alan){ delete mm[alan]; });
+        m2[id] = mm;
+      });
+      k.matches = m2;
+    }
+    return JSON.stringify(k);
+  }catch(e){ return String(Math.random()); }   // şüphede kalırsak TAM çiz
+}
+/* Tam çizim atlandığında çalışan hafif güncelleme: yalnızca dakika metni ve mini
+   saha widget'ının içi. Düğme/logo düğümlerine HİÇ dokunulmaz. */
+function ptCanliHafifTazele(){
+  try{
+    document.querySelectorAll('.pt-canli-rozet').forEach(function(el){
+      var m = (D.matches||{})[el.getAttribute('data-mid')];
+      if(!m) return;
+      var dk = el.querySelector('.pt-dk');
+      var yeni = String(m.minute || 0);
+      if(dk && dk.textContent !== yeni) dk.textContent = yeni;
+    });
+    // Maç detayı açıksa mini saha da tazelenir (kendi hız sınırı var).
+    if(window._mdMatchId){
+      var mm = (D.matches||{})[window._mdMatchId];
+      var kutu = document.getElementById('sahaPitchLive_'+window._mdMatchId);
+      if(kutu && mm && mm.isLive && mm.sahaMode){
+        var simdi = Date.now();
+        if(!window._sahaPitchSonCizim) window._sahaPitchSonCizim = 0;
+        if(simdi - window._sahaPitchSonCizim >= 125){
+          window._sahaPitchSonCizim = simdi;
+          kutu.innerHTML = renderSahaPitch(mm, D.teams[mm.homeId]||{}, D.teams[mm.awayId]||{});
+        }
+      }
+    }
+  }catch(e){ DiagSil('ptCanliHafifTazele', e); }
+}
 function listenToLeague(leagueId){
   if(!leagueId)return;
   _lastDataSnapshot=null; // ÖNEMLİ: lig değişiminde önceki ligin snapshot'ı temizlenir,
@@ -6150,17 +6206,18 @@ function listenToLeague(leagueId){
     // ve TÜM sayfa gereksiz yere yeniden render edilirdi - PT hiçbir zaman 'visitors' verisini
     // göstermez, bu yüzden bu alanı karşılaştırma dışında tutarak gereksiz render'ları atlarız.
     // Büyük liglerde (20+ takım) bu, fark edilir bir gecikme azaltması sağlar.
-    if(d&&d.visitors){
-      const dWithoutVisitors=Object.assign({},d);
-      delete dWithoutVisitors.visitors;
-      const newSnapshot=JSON.stringify(dWithoutVisitors);
-      if(_lastDataSnapshot===newSnapshot){
-        return; // Sadece visitors değişti, gerçek veri aynı - render'ı atla.
-      }
-      _lastDataSnapshot=newSnapshot;
-    }
+    // Canlı maç konumu / dakika dışında hiçbir şey değişmediyse TAM çizim atlanır;
+    // D yine güncellenir ki hafif tazeleme doğru veriyi göstersin (bkz. _ptRenderImzasi).
+    const _yeniImza=_ptRenderImzasi(d);
+    const _sadeceCanliDegisti=(_lastDataSnapshot!==null&&_lastDataSnapshot===_yeniImza);
+    _lastDataSnapshot=_yeniImza;
     D={leagueName:'Futbol Ligi',season:'',teams:{},matches:{},generalChat:{},archives:[],videoLinks:[]};
     if(d)D={...D,...d};
+    if(_sadeceCanliDegisti){
+      try{ ptOrtakTvUygula(); ptOrtakGorunumUygula(); ptOrtakSohbetUygula(); }catch(e){}
+      ptCanliHafifTazele();
+      return;
+    }
     // TV listesi ORTAK: lig belgesinden gelen liste, ortak düğümle değiştirilir
     // (bkz. ptOrtakTvDinle). Her lig senkronunda uygulanmalı - aksi halde bir sonraki
     // senkron ortak listeyi lig belgesindekiyle geri ezerdi.
@@ -10770,11 +10827,21 @@ function renderResults(){
     const h=D.teams[m.homeId]||{},a=D.teams[m.awayId]||{};
     const pen=m.penaltyScore?` (P)`:'';
     const win=m.homeGoals>m.awayGoals?'home':m.awayGoals>m.homeGoals?'away':m.penaltyWinner||'draw';
-    const liveTag=m.isLive?`<span style="background:#dc2626;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;margin-left:.4rem;animation:lp 1.4s infinite">🔴 CANLI ${m.minute||0}'</span>`:'';
-    const finishedTag=(m.played&&!m.isLive)?`<span style="background:#1a1a1a;color:#d1d5db;font-size:.56rem;font-weight:700;border-radius:6px;padding:.08rem .45rem;margin-left:.4rem;border:1px solid rgba(255,255,255,.1)">Maç Sonucu</span>`:'';
-    const sahaTag=(m.sahaMode&&ptSahaGoster())?`<span style="background:#7c3aed;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;margin-left:.4rem">🎮 Saha</span>`:'';
+    // margin-left YOK: ortalanmış sütunda sol boşluk rozeti sağa kaydırırdı.
+    // data-mid + .pt-dk: dakika, TÜM kartı yeniden çizmeden yerinde güncellenir
+    // (bkz. ptCanliHafifTazele) - titremenin kök sebebi tam olarak bu yeniden çizimdi.
+    const liveTag=m.isLive?`<span class="pt-canli-rozet" data-mid="${m.id}" style="background:#dc2626;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;animation:lp 1.4s infinite;white-space:nowrap">🔴 CANLI <span class="pt-dk">${m.minute||0}</span>'</span>`:'';
+    const finishedTag=(m.played&&!m.isLive)?`<span style="background:#1a1a1a;color:#d1d5db;font-size:.56rem;font-weight:700;border-radius:6px;padding:.08rem .45rem;border:1px solid rgba(255,255,255,.1);white-space:nowrap">Maç Sonucu</span>`:'';
+    /* 🎮 Saha rozeti KALDIRILDI (kullanıcı talebi). */
     html+=`<div class="mc wide-able" onclick="showMatchDetail('${m.id}','results')" style="${m.isLive?'border:1.5px solid rgba(239,68,68,.4)':''}">
-      <div class="mc-week"><span>${m.week||0}. Hafta${m.date?' · '+m.date:''}</span>${liveTag}${finishedTag}${sahaTag}</div>
+      <!-- ÜÇ SÜTUN: sol hafta/tarih, ORTA rozet, sağ boş denge sütunu. Rozeti yalnızca
+           justify-content ile ortaya itmek yetmez - solda metin varken gerçekten
+           ortalanmaz. Yan sütunlar eşit esnediği için orta sütun kartın tam ortasına oturur. -->
+      <div class="mc-week" style="display:flex;align-items:center;gap:.3rem">
+        <span style="flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.week||0}. Hafta${m.date?' · '+m.date:''}</span>
+        <span style="flex:0 0 auto">${liveTag}${finishedTag}</span>
+        <span style="flex:1 1 0;min-width:0"></span>
+      </div>
       <div class="mc-teams">
         <div class="mc-name" style="font-weight:${win==='home'?'900':'600'};color:${win==='home'?'var(--tx)':'var(--mu)'}">${h.logo?`<img src="${h.logo}" class="mc-team-logo" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:''}${teamColorStripeHtml(h)}${h.name||'?'}</div>
         <div class="mc-score">${(window._simMode&&!m.isLive)?simScoreInputHtml(m.id,m.homeGoals,m.awayGoals):(m.homeGoals??0)+' - '+(m.awayGoals??0)+pen}</div>
