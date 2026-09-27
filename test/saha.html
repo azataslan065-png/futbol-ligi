@@ -609,6 +609,10 @@ let   HALF = 150;
 /* ---------- render ---------- */
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:"high-performance" });
 renderer.setSize(innerWidth, innerHeight);
+// 2026-09-27-V: gerçek gölge (oyuncuların çime düşen gölgesi). Güneşin castShadow'u grafik
+// ayarına bağlı: Düşük'te kapalı (yalnızca yuvarlak leke), Orta/Yüksek'te açık.
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -1025,6 +1029,41 @@ scene.add(gokIsik);
 const sun = new THREE.DirectionalLight(0xfff4e2, 0.75);
 sun.position.set(40, 90, 30);
 scene.add(sun);
+scene.add(sun.target);
+/* GÖLGE (2026-09-27-V, kullanıcı: referans görseldeki gibi "daha şık"): Oyuncuların altındaki
+   yuvarlak leke tek başına oyuncuyu yere "yapıştırmıyordu". Güneş artık gerçek gölge düşürür.
+   Gölge haritası bütün sahayı değil, yalnızca kameranın baktığı ~50 m'lik alanı kapsar ve
+   kamerayla birlikte kayar - küçük harita, keskin gölge. Kayarken titremesin diye konum
+   gölge pikseline yuvarlanır. Güneş eğik: gölgeler çimde görünür uzunlukta düşer. */
+const GOLGE_YON = new THREE.Vector3(-26, 60, 22);
+sun.shadow.camera.left = -30; sun.shadow.camera.right = 30;
+sun.shadow.camera.top = 30; sun.shadow.camera.bottom = -30;
+sun.shadow.camera.near = 20; sun.shadow.camera.far = 140;
+sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.02;
+function golgeKalite(){
+  try{
+    var k = (typeof AYAR !== 'undefined' && AYAR) ? AYAR.grafik : 2;
+    var ac = k > 1;
+    var boyut = k >= 2 ? 2048 : 1024;
+    if(sun.shadow.mapSize.x !== boyut){
+      sun.shadow.mapSize.set(boyut, boyut);
+      if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map = null; }
+    }
+    sun.castShadow = ac;
+    if(typeof golgeMat !== 'undefined') golgeMat.opacity = ac ? 0.1 : 0.26;   // leke: gerçek gölgeyle üst üste koyulaşmasın
+  }catch(e){ _sessiz(e, 'golgeKalite', 'saha_grafik'); }
+}
+function golgeTakip(){
+  try{
+    if(!sun.castShadow) return;
+    var hx = (typeof bakHedef !== 'undefined') ? bakHedef.x : 0, hz = (typeof bakHedef !== 'undefined') ? bakHedef.z : 0;
+    var adim = 60 / sun.shadow.mapSize.x * 4;
+    hx = Math.round(hx / adim) * adim; hz = Math.round(hz / adim) * adim;
+    sun.target.position.set(hx, 0, hz);
+    sun.position.set(hx + GOLGE_YON.x, GOLGE_YON.y, hz + GOLGE_YON.z);
+    sun.target.updateMatrixWorld();
+  }catch(e){}
+}
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // HAVA / GUNUN SAATI
@@ -1053,7 +1092,7 @@ function havaUygula(){
 
 /* ---------- saha ---------- */
 function pitchTexture(){
-  const U = 10;
+  const U = 14;                                   // 10 -> 14: yakın kamerada çim bulanık değil
   const c = document.createElement('canvas');
   c.width = HLX*2*U; c.height = HWZ*2*U;
   const g = c.getContext('2d');
@@ -1061,6 +1100,17 @@ function pitchTexture(){
   for (let i = 0; i < 14; i++){
     g.fillStyle = i % 2 ? '#3e8b45' : '#357d3c';
     g.fillRect(i * c.width/14, 0, c.width/14 + 1, c.height);
+  }
+  // Çim dokusu (2026-09-27-V): düz yeşil yerine ince tane tane çim. Açık/koyu küçük lekeler
+  // ve kısa çizgiler - uzaktan biçilmiş çim şeritleri korunur, yakından doku görünür.
+  {
+    const n = Math.round(c.width * c.height / 22);
+    for(let i = 0; i < n; i++){
+      const x = Math.random() * c.width, y = Math.random() * c.height;
+      const acik = Math.random() < 0.5;
+      g.fillStyle = acik ? 'rgba(170,215,120,' + (0.05 + Math.random()*0.07) + ')' : 'rgba(10,40,12,' + (0.05 + Math.random()*0.08) + ')';
+      g.fillRect(x, y, 1 + Math.random()*1.6, 1 + Math.random()*2.4);
+    }
   }
   g.strokeStyle = 'rgba(255,255,255,.85)';
   g.fillStyle   = 'rgba(255,255,255,.85)';
@@ -1090,6 +1140,7 @@ function pitchTexture(){
 const pitch = new THREE.Mesh(new THREE.PlaneGeometry(HLX*2, HWZ*2),
   new THREE.MeshLambertMaterial({ map: pitchTexture() }));
 pitch.rotation.x = -Math.PI/2;
+pitch.receiveShadow = true;
 scene.add(pitch);
 
 const cevre = new THREE.Mesh(new THREE.PlaneGeometry(HLX*2+26, HWZ*2+22),
@@ -1520,11 +1571,14 @@ const bVel = new THREE.Vector3();
 const topGolge = yeniGolge(0.55);
 
 /* ---------- oyuncular ---------- */
+/* 2026-09-27-U: Oyuncu malzemeleri Lambert -> Phong. Lambert ışığı köşe noktalarında
+   hesaplar; az parçalı yüzeylerde renk basamak basamak görünür ve oyuncu "kutu" gibi
+   durur. Phong ışığı her pikselde hesaplar: kumaşta yumuşak gölge, hafif parlaklık. */
 function kitMats(jer, shr){
   return {
-    jer: new THREE.MeshLambertMaterial({ color:jer }),
-    shr: new THREE.MeshLambertMaterial({ color:shr }),
-    skin:new THREE.MeshLambertMaterial({ color:0xc99d72 })
+    jer: new THREE.MeshPhongMaterial({ color:jer, shininess:7, specular:0x161616 }),
+    shr: new THREE.MeshPhongMaterial({ color:shr, shininess:7, specular:0x161616 }),
+    skin:new THREE.MeshPhongMaterial({ color:0xc99d72, shininess:16, specular:0x1e1a18 })
   };
 }
 const MATS = { a:kitMats(0xd8443a,0x24242a), b:kitMats(0x3d7fd4,0xf0f2f4),
@@ -1583,6 +1637,11 @@ function insanAdim(ud, dt, hiz, egilebilir){
     var f = ud.phase;
     // Salinim genligi hizla artar ama doyuma ulasir - bacak 90 dereceyi gecmemeli
     var genlik = Math.min(0.95, 0.18 + h * 0.085);
+    // ATLETİK DURUŞ (2026-09-27-V): dururken dizler hafif bükük, ağırlık öne, kollar gövdeden
+    // biraz açık - dimdik "manken" duruşu yerine maça hazır oyuncu. Yerinde bacak sallanması da
+    // kısılır (oyuncu olduğu yerde yürüyormuş gibi durmasın).
+    var dur = 1 - _yumusakAdim(0.3, 1.6, h);
+    genlik *= (1 - 0.8 * dur);
     var sw = Math.sin(f) * genlik;
 
     // KALCA: iki bacak ters fazda
@@ -1594,6 +1653,11 @@ function insanAdim(ud, dt, hiz, egilebilir){
     var dizGenlik = 0.45 + 0.80 * kk;
     ud.bacakL.diz.rotation.x = Math.max(0, -Math.sin(f)) * dizGenlik;
     ud.bacakR.diz.rotation.x = Math.max(0,  Math.sin(f)) * dizGenlik;
+    if(dur > 0){
+      ud.bacakL.kalca.rotation.x -= 0.13 * dur; ud.bacakR.kalca.rotation.x -= 0.13 * dur;
+      ud.bacakL.diz.rotation.x += 0.26 * dur;   ud.bacakR.diz.rotation.x += 0.26 * dur;
+      ud.bacakL.kalca.rotation.z = -0.05 * dur; ud.bacakR.kalca.rotation.z = 0.05 * dur;   // ayaklar omuz genişliğinde
+    } else { ud.bacakL.kalca.rotation.z = 0; ud.bacakR.kalca.rotation.z = 0; }
 
     // KOLLAR: bacaklarla ters fazda, genligi daha az (gercek kosuda kol daha kisa yay cizer)
     var kolSw = -sw * (0.55 + 0.30 * kk);
@@ -1604,12 +1668,13 @@ function insanAdim(ud, dt, hiz, egilebilir){
     ud.kolL.dirsek.rotation.x = -dirsek - Math.max(0, kolSw) * 0.4;
     ud.kolR.dirsek.rotation.x = -dirsek - Math.max(0, -kolSw) * 0.4;
     // Kollar kosarken govdeye yaklasir
-    ud.kolL.omuz.rotation.z = 0.05 + 0.07 * kk;
-    ud.kolR.omuz.rotation.z = -(0.05 + 0.07 * kk);
+    ud.kolL.omuz.rotation.z = 0.05 + 0.07 * kk - 0.17 * dur;       // dururken kollar gövdeden açılır
+    ud.kolR.omuz.rotation.z = -(0.05 + 0.07 * kk) + 0.17 * dur;
+    if(dur > 0){ ud.kolL.omuz.rotation.x -= 0.12 * dur; ud.kolR.omuz.rotation.x -= 0.12 * dur; }
 
     if(egilebilir !== false && ud.govde){
       // GOVDE EGIMI: hizlandikca one egilir. Kosucunun agirlik merkezi one kayar.
-      var egim = Math.min(0.30, h * 0.028);
+      var egim = Math.min(0.30, h * 0.028) + 0.07 * dur;   // dururken hafif öne eğik
       ud.govde.rotation.x = egim;
       if(ud.omuzParca) ud.omuzParca.rotation.x = egim;
       if(ud.bas) ud.bas.rotation.x = -egim * 0.6;   // bas dik kalir, ileri bakar
@@ -1838,23 +1903,24 @@ function _govdeParcalari(){
   if(_govdeGeo) return _govdeGeo;
   const L = (n, seg) => new THREE.LatheGeometry(n.map(p => new THREE.Vector2(p[0], p[1])), seg || 12);
   _govdeGeo = {
-    gogus:   L([[0.001,-0.30],[0.2,-0.30],[0.196,-0.2],[0.205,-0.07],[0.232,0.06],[0.252,0.16],[0.238,0.225],[0.17,0.262],[0.07,0.278],[0.001,0.28]], 14),
+    gogus:   L([[0.001,-0.36],[0.242,-0.36],[0.214,-0.27],[0.198,-0.15],[0.212,-0.03],[0.248,0.08],[0.272,0.165],[0.256,0.228],[0.18,0.264],[0.07,0.279],[0.001,0.28]], 18),
+    kasKure: new THREE.SphereGeometry(0.1, 12, 9),
     yaka:    new THREE.TorusGeometry(0.068, 0.016, 6, 16),
-    sortBel: L([[0.001,-0.12],[0.196,-0.12],[0.205,-0.04],[0.2,0.05],[0.186,0.1],[0.001,0.1]], 14),
-    omuzBasi:new THREE.SphereGeometry(0.085, 10, 8),
-    boyun:   new THREE.CylinderGeometry(0.056, 0.066, 0.13, 10),
-    sortBacak: L([[0.001,-0.25],[0.108,-0.25],[0.116,-0.19],[0.12,-0.06],[0.11,0.04],[0.001,0.05]], 12),
-    uyluk:   L([[0.06,-0.46],[0.068,-0.41],[0.086,-0.32],[0.099,-0.24]], 12),
+    sortBel: L([[0.001,-0.17],[0.2,-0.17],[0.236,-0.12],[0.228,-0.06],[0.2,0.0],[0.182,0.06],[0.001,0.08]], 16),
+    omuzBasi:new THREE.SphereGeometry(0.095, 12, 9),
+    boyun:   new THREE.CylinderGeometry(0.058, 0.07, 0.14, 12),
+    sortBacak: L([[0.001,-0.29],[0.123,-0.29],[0.129,-0.2],[0.131,-0.06],[0.118,0.04],[0.001,0.05]], 14),
+    uyluk:   L([[0.064,-0.46],[0.074,-0.41],[0.095,-0.34],[0.108,-0.28]], 14),
     diz:     new THREE.SphereGeometry(0.058, 10, 8),
-    corap:   L([[0.001,-0.43],[0.04,-0.43],[0.043,-0.36],[0.06,-0.25],[0.078,-0.15],[0.074,-0.07],[0.063,-0.03],[0.001,-0.02]], 12),
-    serit:   new THREE.CylinderGeometry(0.0755, 0.0755, 0.028, 12, 1, true),
+    corap:   L([[0.001,-0.43],[0.042,-0.43],[0.046,-0.37],[0.061,-0.28],[0.084,-0.17],[0.08,-0.08],[0.066,-0.03],[0.001,-0.02]], 14),
+    serit:   new THREE.CylinderGeometry(0.0815, 0.0815, 0.028, 14, 1, true),
     bot:     new THREE.BoxGeometry(0.098, 0.075, 0.2),
     botBurun:new THREE.SphereGeometry(0.056, 10, 8),
     taban:   new THREE.BoxGeometry(0.104, 0.018, 0.27),
-    kolluk:  L([[0.062,-0.205],[0.07,-0.13],[0.078,-0.03],[0.078,0.02],[0.05,0.06],[0.001,0.065]], 10),
-    kolAgzi: new THREE.TorusGeometry(0.063, 0.011, 5, 12),
-    pazi:    L([[0.046,-0.34],[0.052,-0.28],[0.059,-0.21],[0.062,-0.19]], 10),
-    onKol:   L([[0.001,-0.285],[0.03,-0.285],[0.033,-0.26],[0.045,-0.16],[0.053,-0.07],[0.049,0.0],[0.04,0.035],[0.001,0.04]], 10),
+    kolluk:  L([[0.067,-0.18],[0.076,-0.1],[0.084,-0.02],[0.083,0.03],[0.056,0.07],[0.001,0.075]], 12),
+    kolAgzi: new THREE.TorusGeometry(0.068, 0.011, 5, 14),
+    pazi:    L([[0.05,-0.34],[0.058,-0.28],[0.066,-0.2],[0.068,-0.16]], 12),
+    onKol:   L([[0.001,-0.285],[0.032,-0.285],[0.036,-0.26],[0.047,-0.17],[0.057,-0.08],[0.053,0.0],[0.046,0.035],[0.001,0.04]], 12),
     el:      new THREE.SphereGeometry(0.05, 8, 7)
   };
   return _govdeGeo;
@@ -1863,7 +1929,7 @@ function _govdeParcalari(){
 const KRAMPON_RENK = [0x15161a, 0xf2f2f2, 0xb8f23a, 0xff6a1f, 0x2a7bff, 0xe8e04a, 0xd03a8a];
 let _kramponMatlar = null;
 function _kramponMat(){
-  if(!_kramponMatlar) _kramponMatlar = KRAMPON_RENK.map(c => new THREE.MeshLambertMaterial({ color:c }));
+  if(!_kramponMatlar) _kramponMatlar = KRAMPON_RENK.map(c => new THREE.MeshPhongMaterial({ color:c, shininess:40, specular:0x333333 }));
   return _kramponMatlar[(Math.random()*_kramponMatlar.length)|0];
 }
 /* Aynı gruptaki AYNI malzemeli, çocuğu olmayan mesh'leri tek geometride birleştirir.
@@ -1973,13 +2039,21 @@ function makePlayer(m){
   const torso = new THREE.Group();                          // göğüs (ud.govde: eğilir, zıplar)
   torso.position.y = 1.30; g.add(torso);
   const gogus = new THREE.Mesh(GP.gogus, m.jer); gogus.scale.z = 0.6; torso.add(gogus);
+  // Göğüs: iki ayrı tümsek kadın göğsü gibi duruyordu - tek, geniş ve yassı bir hacim.
+  const pec = new THREE.Mesh(GP.kasKure, m.jer); pec.position.set(0, 0.1, 0.088); pec.scale.set(2.05, 0.72, 0.5); torso.add(pec);
+  [-1, 1].forEach(function(sx){                              // kürek kemiği hacmi
+    const kurek = new THREE.Mesh(GP.kasKure, m.jer); kurek.position.set(sx*0.085, 0.1, -0.09); kurek.scale.set(1.25, 1.0, 0.38); torso.add(kurek);
+  });
   const yaka = new THREE.Mesh(GP.yaka, m.shr); yaka.position.set(0, 0.262, 0.012); yaka.rotation.x = Math.PI/2 + 0.12; yaka.scale.set(1, 0.85, 1); torso.add(yaka);
   const bel = new THREE.Group(); bel.position.y = 1.0; g.add(bel);   // şort beli (sabit)
-  const sortBel = new THREE.Mesh(GP.sortBel, m.shr); sortBel.scale.z = 0.66; bel.add(sortBel);
+  const sortBel = new THREE.Mesh(GP.sortBel, m.shr); sortBel.scale.z = 0.62; bel.add(sortBel);
+  [-1, 1].forEach(function(sx){                              // kalça hacmi
+    const kalcaK = new THREE.Mesh(GP.kasKure, m.shr); kalcaK.position.set(sx*0.075, -0.11, -0.05); kalcaK.scale.set(1.0, 0.85, 0.72); bel.add(kalcaK);
+  });
   const omuz = new THREE.Group(); omuz.position.y = 1.47; g.add(omuz);  // omuz başları (ud.omuzParca)
   [-1, 1].forEach(function(sx){
-    const kap = new THREE.Mesh(GP.omuzBasi, m.jer); kap.position.set(sx*0.232, -0.03, 0); kap.scale.set(1.0, 0.78, 0.92); omuz.add(kap);
-    const trap = new THREE.Mesh(GP.omuzBasi, m.jer); trap.position.set(sx*0.12, 0.02, -0.01); trap.scale.set(1.3, 0.55, 0.95); omuz.add(trap);
+    const kap = new THREE.Mesh(GP.omuzBasi, m.jer); kap.position.set(sx*0.25, -0.03, 0); kap.scale.set(1.0, 0.78, 0.92); omuz.add(kap);
+    const trap = new THREE.Mesh(GP.omuzBasi, m.jer); trap.position.set(sx*0.13, 0.02, -0.015); trap.scale.set(1.35, 0.58, 0.95); omuz.add(trap);
   });
   /* YÜZ ve BAŞ (2026-09-27-S, kullanıcı: "oyuncuların yüzleri çok sıradan, insana benzet")
      ÖNCEDEN: Tek renk küre baş + herkes için aynı siyah saç kabuğu; yüz yoktu, 22 oyuncu
@@ -1989,15 +2063,15 @@ function makePlayer(m){
      saçı ve yüzü de birlikte taşır. Geometriler ortak (bir kez üretilir), yalnızca
      ten/saç malzemesi oyuncuya özel - çizim yükü küçük kalır. */
   const Y = _yuzParcalari();
-  const ten = new THREE.MeshLambertMaterial({ color: YUZ_TEN[(Math.random()*YUZ_TEN.length)|0] });
-  const tenKoyu = new THREE.MeshLambertMaterial({ color: new THREE.Color(ten.color).multiplyScalar(0.82) });
+  const ten = new THREE.MeshPhongMaterial({ color: YUZ_TEN[(Math.random()*YUZ_TEN.length)|0], shininess:16, specular:0x1e1a18 });
+  const tenKoyu = new THREE.MeshPhongMaterial({ color: new THREE.Color(ten.color).multiplyScalar(0.82), shininess:16, specular:0x1e1a18 });
   const sacRenk = YUZ_SAC[(Math.random()*YUZ_SAC.length)|0];
-  const sacMat = new THREE.MeshLambertMaterial({ color: sacRenk });
+  const sacMat = new THREE.MeshPhongMaterial({ color: sacRenk, shininess:22, specular:0x222222 });
   m = Object.assign({}, m, { skin: ten });                   // kol/bacak/boyun da aynı ten
   const boyun = new THREE.Mesh(GP.boyun, ten);
   boyun.position.y = 1.6; g.add(boyun);
   const head = new THREE.Group();                            // baş grubu (bkz. ud.bas)
-  head.position.y = 1.74; g.add(head);
+  head.position.y = 1.74; head.scale.setScalar(0.88); g.add(head);   // sporcu oranı: daha küçük baş
   const kafa = new THREE.Mesh(Y.kafa, ten); kafa.scale.set(0.93, 1.07, 0.98); head.add(kafa);
   const cene = new THREE.Mesh(Y.cene, ten); cene.position.set(0, -0.075, 0.035); cene.scale.set(1.0, 0.78, 1.05); head.add(cene);
   [-1, 1].forEach(function(sx){
@@ -2040,8 +2114,8 @@ function makePlayer(m){
     diz.position.y = -0.44;
     kalca.add(diz);
     const dizK = new THREE.Mesh(GP.diz, m.skin); dizK.position.set(0, 0.005, 0.01); diz.add(dizK);
-    diz.add(new THREE.Mesh(GP.corap, m.shr));                // çorap (baldır kavisli)
-    const serit = new THREE.Mesh(GP.serit, m.jer); serit.position.y = -0.085; diz.add(serit);
+    const corap = new THREE.Mesh(GP.corap, m.shr); corap.position.z = -0.008; diz.add(corap);   // çorap (baldır kavisli)
+    const serit = new THREE.Mesh(GP.serit, m.jer); serit.position.set(0, -0.085, -0.008); diz.add(serit);
     const bot = new THREE.Mesh(GP.bot, kramp); bot.position.set(0, -0.44, 0.035); diz.add(bot);
     const burunB = new THREE.Mesh(GP.botBurun, kramp); burunB.position.set(0, -0.447, 0.14); burunB.scale.set(0.92, 0.62, 1.0); diz.add(burunB);
     const taban = new THREE.Mesh(GP.taban, MATS.taban); taban.position.set(0, -0.478, 0.05); diz.add(taban);
@@ -2049,7 +2123,7 @@ function makePlayer(m){
     g.add(kalca);
     return { kalca, diz };
   }
-  const bacakL = bacakYap(-0.105), bacakR = bacakYap(0.105);   // X: sol/sag
+  const bacakL = bacakYap(-0.11), bacakR = bacakYap(0.11);   // X: sol/sag
 
   // ── KOLLAR: omuz eklemi -> ust kol -> dirsek -> on kol -> el ──
   const eldiven = kaleciMi ? MATS.eldiven : null;
@@ -2057,7 +2131,7 @@ function makePlayer(m){
     const omuzEk = new THREE.Group();
     omuzEk.position.set(x, 1.44, 0);             // YANAL ayrim X'te (bkz. bacakYap notu)
     omuzEk.add(new THREE.Mesh(GP.kolluk, m.jer));            // forma kolu
-    const agiz = new THREE.Mesh(GP.kolAgzi, m.shr); agiz.position.y = -0.2; agiz.rotation.x = Math.PI/2; omuzEk.add(agiz);
+    const agiz = new THREE.Mesh(GP.kolAgzi, m.shr); agiz.position.y = -0.175; agiz.rotation.x = Math.PI/2; omuzEk.add(agiz);
     omuzEk.add(new THREE.Mesh(GP.pazi, m.skin));             // kolun çıplak kısmı
     const dirsek = new THREE.Group();
     dirsek.position.y = -0.32;
@@ -2070,7 +2144,7 @@ function makePlayer(m){
     g.add(omuzEk);
     return { omuz:omuzEk, dirsek };
   }
-  const kolL = kolYap(-0.30), kolR = kolYap(0.30);          // X: sol/sag
+  const kolL = kolYap(-0.318), kolR = kolYap(0.318);          // X: sol/sag
 
   // Eski isimlerle uyum: animasyon kodu legL/armR gibi adlari kullaniyor.
   const legL = bacakL.kalca, legR = bacakR.kalca;
@@ -2083,15 +2157,15 @@ function makePlayer(m){
   // Numara SIRTA yapistirilir, isim BASIN USTUNDE sprite olarak durur - sprite her zaman
   // kameraya doner, oyuncu hangi yone bakarsa baksin isim okunur.
   const numaraTuval = document.createElement('canvas');
-  numaraTuval.width = 64; numaraTuval.height = 64;
+  numaraTuval.width = 128; numaraTuval.height = 128;
   const numaraDoku = new THREE.CanvasTexture(numaraTuval);
   const numaraMesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.34, 0.34),
+    new THREE.PlaneGeometry(0.36, 0.36),
     new THREE.MeshBasicMaterial({ map:numaraDoku, transparent:true, depthWrite:false })
   );
-  numaraMesh.position.set(0, 0.02, -0.158);     // sirt: govde ARKASI (-Z, ileri yon +Z)
+  numaraMesh.position.set(0, 0.03, -0.17);     // sirt: govde ARKASI (-Z, ileri yon +Z)
   numaraMesh.rotation.y = Math.PI;              // dokunun yuzu geriye baksin
-  numaraMesh.scale.setScalar(0.85);
+  numaraMesh.scale.setScalar(0.95);
   torso.add(numaraMesh);                        // gövdeyle birlikte eğilir
 
   // OKUNABİLİRLİK DÜZELTMESİ (2026-09-18-D, kullanıcı bildirdi: "bu yazı fontu okunamıyor"):
@@ -2102,16 +2176,17 @@ function makePlayer(m){
   // önünde yetersiz kalıyordu). Sprite dünya ölçeği de büyütülerek sahnede daha büyük görünmesi
   // sağlandı.
   const isimTuval = document.createElement('canvas');
-  isimTuval.width = 384; isimTuval.height = 96;
+  isimTuval.width = 384; isimTuval.height = 128;
   const isimDoku = new THREE.CanvasTexture(isimTuval);
   const isimSprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map:isimDoku, transparent:true, depthWrite:false })
   );
-  isimSprite.scale.set(2.3, 0.58, 1);
-  isimSprite.position.y = 2.1;
+  isimSprite.scale.set(2.55, 0.85, 1);
+  isimSprite.position.y = 2.36;
   g.add(isimSprite);
 
   _parcaBirlestir(torso); _parcaBirlestir(omuz); _parcaBirlestir(bel); _parcaBirlestir(head);
+  g.traverse(function(o){ if(o.isMesh && o !== numaraMesh) o.castShadow = true; });
   g.userData = { legL, legR, armL, armR, phase:Math.random()*6,
                  bacakL, bacakR, kolL, kolR, govde:torso, omuzParca:omuz, bas:head,
                  numaraTuval, numaraDoku, isimTuval, isimDoku, isimSprite, numaraMesh,
@@ -2123,42 +2198,52 @@ function makePlayer(m){
 function etiketYaz(p){
   try{
     const u = p.obj && p.obj.userData; if(!u) return;
-    if(u.yaziliNo !== p.no){
+    const formaHex = (p.team === 0 ? (p.gk ? MATS.ka : MATS.a) : (p.gk ? MATS.kb : MATS.b)).jer.color;
+    const acikForma = (formaHex.r*0.299 + formaHex.g*0.587 + formaHex.b*0.114) > 0.62;
+    const sirtAnahtar = p.no + '|' + p.ad + '|' + acikForma;
+    if(u.yaziliNo !== sirtAnahtar){
+      /* Sırt (2026-09-27-V): gerçek formalar gibi üstte soyad, altında büyük numara.
+         Açık renk formada lacivert, koyu formada beyaz yazı - beyaz formada numara
+         kayboluyordu. */
       const c = u.numaraTuval.getContext('2d');
-      c.clearRect(0,0,64,64);
-      c.font = 'bold 44px Arial'; c.textAlign='center'; c.textBaseline='middle';
-      c.lineWidth = 6; c.strokeStyle = 'rgba(0,0,0,.55)';
-      c.strokeText(String(p.no||''), 32, 34);
-      c.fillStyle = '#ffffff';
-      c.fillText(String(p.no||''), 32, 34);
-      u.numaraDoku.needsUpdate = true; u.yaziliNo = p.no;
+      c.clearRect(0,0,128,128);
+      const yazi = acikForma ? '#1b2340' : '#ffffff';
+      const kont = acikForma ? 'rgba(255,255,255,.35)' : 'rgba(0,0,0,.45)';
+      const soyad = (String(p.ad||'').trim().split(/\s+/).pop() || '').toLocaleUpperCase('tr-TR');
+      c.textAlign='center'; c.textBaseline='middle';
+      c.font = 'bold ' + (soyad.length > 8 ? 15 : 18) + 'px Arial';
+      c.fillStyle = yazi; c.fillText(soyad, 64, 16, 120);
+      c.font = 'bold 84px Arial';
+      c.lineWidth = 5; c.strokeStyle = kont; c.strokeText(String(p.no||''), 64, 76);
+      c.fillStyle = yazi; c.fillText(String(p.no||''), 64, 76);
+      u.numaraDoku.needsUpdate = true; u.yaziliNo = sirtAnahtar;
     }
-    if(u.yaziliAd !== p.ad){
+    const takRenk = '#' + ((p.team === 0 ? MATS.a : MATS.b).jer.color.getHexString());
+    if(u.yaziliAd !== p.ad || u.yaziliRenk !== takRenk){
+      /* 2026-09-27-V (kullanıcı: referans görseldeki gibi): ince, koyu yarı saydam hap içinde
+         soyad + altında takım renginde küçük üçgen işaret. Önceki büyük kalın etiket
+         oyuncunun üstünü kapatıyordu. */
       const c = u.isimTuval.getContext('2d');
-      c.clearRect(0,0,384,96);
-      // Soyad yeterli: tam ad kucuk olcekte okunmaz, uzun adlar tasar.
+      c.clearRect(0,0,384,128);
       const kisa = String(p.ad||'').trim().split(/\s+/).pop() || '';
-      // Kontrast şeridi: açık çim/gök zemininde ince konturlu yazı kayboluyordu - arkaya
-      // yarı saydam koyu bir kapsül eklenip yazı bunun üzerine basılıyor.
-      c.font = 'bold 46px Arial'; c.textAlign='center'; c.textBaseline='middle';
-      // NOT: c.roundRect() bazı eski WebView sürümlerinde desteklenmiyor - taşınabilirlik
-      // için köşeler elle (arc ile) çiziliyor.
-      const genislik = Math.min(376, c.measureText(kisa).width + 36);
-      const rx = 192 - genislik/2, ry = 24, rw = genislik, rh = 48, rr = 22;
-      c.fillStyle = 'rgba(0,0,0,.55)';
+      c.font = '600 40px Arial'; c.textAlign='center'; c.textBaseline='middle';
+      const genislik = Math.min(372, c.measureText(kisa).width + 40);
+      const rx = 192 - genislik/2, ry = 18, rw = genislik, rh = 58, rr = 29;
+      c.fillStyle = 'rgba(12,16,20,.62)';
       c.beginPath();
       c.moveTo(rx+rr, ry);
       c.arcTo(rx+rw, ry, rx+rw, ry+rh, rr);
       c.arcTo(rx+rw, ry+rh, rx, ry+rh, rr);
       c.arcTo(rx, ry+rh, rx, ry, rr);
       c.arcTo(rx, ry, rx+rw, ry, rr);
-      c.closePath();
-      c.fill();
-      c.lineWidth = 7; c.strokeStyle = 'rgba(0,0,0,.7)';
-      c.strokeText(kisa, 192, 50);
+      c.closePath(); c.fill();
       c.fillStyle = '#ffffff';
-      c.fillText(kisa, 192, 50);
-      u.isimDoku.needsUpdate = true; u.yaziliAd = p.ad;
+      c.fillText(kisa, 192, ry + rh/2 + 2);
+      // takım renginde aşağı bakan üçgen
+      c.beginPath(); c.moveTo(192-17, 88); c.lineTo(192+17, 88); c.lineTo(192, 112); c.closePath();
+      c.fillStyle = takRenk; c.fill();
+      c.lineWidth = 3; c.strokeStyle = 'rgba(0,0,0,.45)'; c.stroke();
+      u.isimDoku.needsUpdate = true; u.yaziliAd = p.ad; u.yaziliRenk = takRenk;
     }
   }catch(e){_sessiz(e,'etiketYaz:1399','saha_oyun');}
 }
@@ -5349,7 +5434,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-27-T';
+window.APP_BUILD = '2026-09-27-V';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -6935,6 +7020,7 @@ function ayarUygula(){
   takimUygula();
   havaUygula();
   renderer.setPixelRatio(Math.min(devicePixelRatio, AYAR.grafik));
+  golgeKalite();
   // KOK SEBEP (kullanici: "oyunda kadraja giren taraftar alani TV sekmesinde gorunmuyor"):
   // Tribunler grafik KALITESI ayarina bagliydi: 'Dusuk' secili cihazda hic cizilmiyordu.
   // Izleyici cihazinda ayar farkliysa oyuncunun gordugu kalabalik izleyicide yoktu -
@@ -9358,6 +9444,7 @@ function loop(){
   }
   // Stadyum ekranlarının canlı yayını ana çizimden ÖNCE güncellenir (bkz. _stadEkran).
   _stadEkran.guncelle();
+  golgeTakip();
   renderer.render(scene, camera);
 }
 
