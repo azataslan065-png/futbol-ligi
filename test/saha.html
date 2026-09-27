@@ -2252,6 +2252,7 @@ function hesabiDinle(){
   // magazayi gorebilmeli, yoksa "once kayit ol ama ne alacagini goremezsin" durumu olur.
   fbDb.ref('oyuncuHavuzu').on('value', function(sn){
     magazaHavuz = sn.val() || {};
+    window._sahaHavuzYuklendi = true;   // boş kadro onarımı YALNIZCA gerçek okumadan sonra
     fbDurum = 'bagli';
     sahaKadroTabloyaYazZamanla();
     try{ console.log('[saha] havuz okundu:', Object.keys(magazaHavuz).length, 'kayit'); }catch(e){_sessiz(e,'hesabiDinle:1819','saha_ag');}
@@ -3988,7 +3989,8 @@ function _odaLobiHtml(){
    yapar (bkz. admin sahaKadroEsitle); ikisinden hangisi önce çalışırsa sonuç aynıdır. */
 var _sahaSonSquadYazim = '', _sahaKadroYazT = null, _sahaKadroYazHataLog = false;
 function sahaKadroTabloyaYazZamanla(){
-  try{ clearTimeout(_sahaKadroYazT); _sahaKadroYazT = setTimeout(sahaKadroTabloyaYaz, 1200); }catch(e){}
+  try{ clearTimeout(_sahaKadroYazT);
+       _sahaKadroYazT = setTimeout(function(){ sahaBosKadroOnar(); sahaKadroTabloyaYaz(); }, 1200); }catch(e){}
 }
 function sahaKadroTabloyaYaz(){
   try{
@@ -4021,11 +4023,50 @@ function sahaKadroTabloyaYaz(){
     });
   }catch(e){ _sessiz(e, 'sahaKadroTabloyaYaz', 'saha_ag'); }
 }
-function hesapKur(takimId){
-  if(!fbHazir || !benimUid){ mesaj('', 'Bağlantı yok', 1600); return Promise.resolve(); }
+/* BOŞ KADRO ONARIMI (2026-09-27-D, kullanıcı: "SAHA uygulamasında kadro sekmesi boş")
+   KÖK SEBEP: Başlangıç kadrosu YALNIZCA hesapKur'da, yani kullanıcı takımını SAHA'da
+   kendisi seçip kayıt henüz yokken kuruluyordu. Kayıt başka yoldan oluştuysa - yönetici
+   takımı atadı/onayladı ('durum' yazıldı), test ortamında havuz boş, oyuncular havuzdan
+   silindi - kayitliMi() doğru döndüğü için hesapKur bir daha HİÇ çağrılmıyor, kullanıcı
+   tek oyuncusu olmayan bir takımla kalıyordu. Sonuç: "Kadron boş", maçta jenerik isimler,
+   puan tablosunda eski gerçek kadro.
+   ÇÖZÜM: Kayıtlı, takımı olan ama havuzda TEK oyuncusu olmayan kullanıcıya başlangıç
+   kadrosu kurulur (takımın SAHA kadrosundaki isimlerle). Kadrosunu bilerek satıp
+   boşaltan kullanıcıya ikinci kez bedava kadro verilmez: 'baslangicVerildi' damgası. */
+var _sahaKadroOnarimDenendi = false;
+function sahaBosKadroOnar(){
+  try{
+    if(_sahaKadroOnarimDenendi) return;
+    // Havuz ve kayıt GERÇEKTEN okunmadan karar verilmez: boş görünen (henüz gelmemiş)
+    // havuza bakıp ikinci bir kadro kurmak, kullanıcıya 36 oyuncu verirdi.
+    if(!fbHazir || !fbDb || !benimUid || !window._sahaHavuzYuklendi || !_benimKayitYuklendi) return;
+    if(!kayitliMi()) return;
+    var tid = benimKayit.takimId;
+    if(!tid || !sahaLigTakimlar[tid]) return;          // takım listesi henüz gelmedi
+    if(benimKayit.baslangicVerildi) return;
+    var sahipOldugum = Object.keys(magazaHavuz || {}).some(function(id){
+      return magazaHavuz[id] && magazaHavuz[id].sahip === benimUid;
+    });
+    if(sahipOldugum) return;
+    _sahaKadroOnarimDenendi = true;
+    var g = {};
+    var yeni = _baslangicOyunculariEkle(tid, g);
+    g['kullanicilar/'+benimUid+'/kadro'] = { ilk11: yeni.slice(0,11), yedek: yeni.slice(11,18) };
+    g['kullanicilar/'+benimUid+'/baslangicVerildi'] = Date.now();
+    if(!benimKayit.dizilis) g['kullanicilar/'+benimUid+'/dizilis'] = AYAR.diz || '4-4-2';
+    fbDb.ref().update(g)
+      .then(function(){ mesaj('KADRO HAZIR', '18 kişilik başlangıç kadron kuruldu', 2400); })
+      .catch(function(err){
+        _sahaKadroOnarimDenendi = false;
+        DiagSaha('bosKadroOnar', err, { takimId: tid,
+          anlami: 'Boş kadroya başlangıç oyuncuları yazılamadı; Kadro sekmesi boş kalır.',
+          oneri: 'oyuncuHavuzu ve kullanicilar/{uid} yazma kurallarını denetleyin.' });
+      });
+  }catch(e){ _sessiz(e, 'sahaBosKadroOnar', 'saha_ag'); }
+}
+// 18 kişilik başlangıç kadrosunu 'guncel' toplu yazımına ekler, oyuncu kimliklerini döner.
+function _baslangicOyunculariEkle(takimId, guncel){
   var t = sahaLigTakimlar[takimId] || {};
-  var ad = String(t.name || 'Takım');
-  var kod = String(t.short || ad.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g,'').slice(0,3) || 'TKM').toLocaleUpperCase('tr').slice(0,4);
   /* 2026-09-27-C: İsimler artık sabit KADROLAR listesinden DEĞİL, takımın puan
      tablosundaki SAHA kadrosundan (yer tutucu oyuncular) alınır - kullanıcının "Kadrom"u
      ile puan tablosu birebir aynı olsun. Takım henüz eşitlenmemişse (yönetici paneli
@@ -4040,7 +4081,7 @@ function hesapKur(takimId){
     var sq1 = sahaSablonKadro(sahaKullanilanAdlar(sahaLigTakimlar, magazaHavuz), takimId);
     sablon = sq1.starting.concat(sq1.bench);
   }
-  var guncel = {}, yeni = [];
+  var yeni = [];
   // 11 ilk 11 + 7 yedek = 18 kisilik baslangic kadrosu. Guc 30-40 (kullanici karari),
   // hepsi baslangic:true - satilinca gelir getirmez.
   for(var i=0; i<18; i++){
@@ -4059,12 +4100,22 @@ function hesapKur(takimId){
     };
     yeni.push(ref.key);
   }
+  return yeni;
+}
+function hesapKur(takimId){
+  if(!fbHazir || !benimUid){ mesaj('', 'Bağlantı yok', 1600); return Promise.resolve(); }
+  var t = sahaLigTakimlar[takimId] || {};
+  var ad = String(t.name || 'Takım');
+  var kod = String(t.short || ad.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g,'').slice(0,3) || 'TKM').toLocaleUpperCase('tr').slice(0,4);
+  var guncel = {};
+  var yeni = _baslangicOyunculariEkle(takimId, guncel);
   guncel['kullanicilar/'+benimUid] = {
     ad: ad, takimKod: kod, takimId: takimId,
     amblem: '⚽', renk: (t.color1 ? parseInt(String(t.color1).replace('#',''),16) : 0xd8443a),
     durum: 'bekliyor', para: 0,
     kadro: { ilk11: yeni.slice(0,11), yedek: yeni.slice(11,18) },
     dizilis: AYAR.diz || '4-4-2',
+    baslangicVerildi: Date.now(),
     kayitTs: Date.now()
   };
   // TEK ISLEMDE yazilir: kadro yazilip kullanici yazilamazsa sahipsiz oyuncular kalirdi.
@@ -4447,7 +4498,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-27-C';
+window.APP_BUILD = '2026-09-27-D';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
