@@ -1533,6 +1533,8 @@ const MATS = { a:kitMats(0xd8443a,0x24242a), b:kitMats(0x3d7fd4,0xf0f2f4),
 // uretmek 22 oyuncu x 2 malzeme = gereksiz GPU yuku; ortak malzeme tek cizim cagrisi.
 MATS.sac   = new THREE.MeshLambertMaterial({ color:0x2a2119 });
 MATS.kramp = new THREE.MeshLambertMaterial({ color:0x15161a });
+MATS.taban = new THREE.MeshLambertMaterial({ color:0xe9ece8 });     // krampon tabanı
+MATS.eldiven = new THREE.MeshLambertMaterial({ color:0xf4f4f0 });   // kaleci eldiveni
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // YURUYUS / KOSU ANIMASYONU (kullanici: "hareketleri gercege yakin olsun")
 // ESKI HALI: Bacaklar ve kollar tek bir sinus ile one-arkaya salliniyordu. Uc sorun vardi:
@@ -1829,6 +1831,79 @@ function modelAnimGuncelle(ud, dt, hiz){
     a.mixer.update(dt);
   }catch(e){_sessiz(e,'modelAnimGuncelle:1218','saha_oyun');}
 }
+/* Gövde parçaları: bir kez üretilir, bütün oyuncular paylaşır. Profil noktaları [yarıçap, y],
+   y aşağıdan yukarı artar (Lathe normalleri böylece dışa bakar). */
+let _govdeGeo = null;
+function _govdeParcalari(){
+  if(_govdeGeo) return _govdeGeo;
+  const L = (n, seg) => new THREE.LatheGeometry(n.map(p => new THREE.Vector2(p[0], p[1])), seg || 12);
+  _govdeGeo = {
+    gogus:   L([[0.001,-0.30],[0.2,-0.30],[0.196,-0.2],[0.205,-0.07],[0.232,0.06],[0.252,0.16],[0.238,0.225],[0.17,0.262],[0.07,0.278],[0.001,0.28]], 14),
+    yaka:    new THREE.TorusGeometry(0.068, 0.016, 6, 16),
+    sortBel: L([[0.001,-0.12],[0.196,-0.12],[0.205,-0.04],[0.2,0.05],[0.186,0.1],[0.001,0.1]], 14),
+    omuzBasi:new THREE.SphereGeometry(0.085, 10, 8),
+    boyun:   new THREE.CylinderGeometry(0.056, 0.066, 0.13, 10),
+    sortBacak: L([[0.001,-0.25],[0.108,-0.25],[0.116,-0.19],[0.12,-0.06],[0.11,0.04],[0.001,0.05]], 12),
+    uyluk:   L([[0.06,-0.46],[0.068,-0.41],[0.086,-0.32],[0.099,-0.24]], 12),
+    diz:     new THREE.SphereGeometry(0.058, 10, 8),
+    corap:   L([[0.001,-0.43],[0.04,-0.43],[0.043,-0.36],[0.06,-0.25],[0.078,-0.15],[0.074,-0.07],[0.063,-0.03],[0.001,-0.02]], 12),
+    serit:   new THREE.CylinderGeometry(0.0755, 0.0755, 0.028, 12, 1, true),
+    bot:     new THREE.BoxGeometry(0.098, 0.075, 0.2),
+    botBurun:new THREE.SphereGeometry(0.056, 10, 8),
+    taban:   new THREE.BoxGeometry(0.104, 0.018, 0.27),
+    kolluk:  L([[0.062,-0.205],[0.07,-0.13],[0.078,-0.03],[0.078,0.02],[0.05,0.06],[0.001,0.065]], 10),
+    kolAgzi: new THREE.TorusGeometry(0.063, 0.011, 5, 12),
+    pazi:    L([[0.046,-0.34],[0.052,-0.28],[0.059,-0.21],[0.062,-0.19]], 10),
+    onKol:   L([[0.001,-0.285],[0.03,-0.285],[0.033,-0.26],[0.045,-0.16],[0.053,-0.07],[0.049,0.0],[0.04,0.035],[0.001,0.04]], 10),
+    el:      new THREE.SphereGeometry(0.05, 8, 7)
+  };
+  return _govdeGeo;
+}
+// Krampon renkleri: birkaç ortak malzeme, oyuncuya rastgele biri (renk başına tek malzeme).
+const KRAMPON_RENK = [0x15161a, 0xf2f2f2, 0xb8f23a, 0xff6a1f, 0x2a7bff, 0xe8e04a, 0xd03a8a];
+let _kramponMatlar = null;
+function _kramponMat(){
+  if(!_kramponMatlar) _kramponMatlar = KRAMPON_RENK.map(c => new THREE.MeshLambertMaterial({ color:c }));
+  return _kramponMatlar[(Math.random()*_kramponMatlar.length)|0];
+}
+/* Aynı gruptaki AYNI malzemeli, çocuğu olmayan mesh'leri tek geometride birleştirir.
+   Görüntü birebir aynı kalır; çizim çağrısı sayısı düşer (22 oyuncu x onlarca parça
+   telefonda kasma yaratırdı). Grup içi konum/dönüş/ölçek geometriye işlenir. */
+function _parcaBirlestir(grp){
+  try{
+    const kume = new Map();
+    grp.children.slice().forEach(function(c){
+      if(!c.isMesh || c.children.length || !c.geometry || !c.geometry.attributes.position) return;
+      if(c.material && (c.material.transparent || c.material.map)) return;   // numara vb. dokunulmaz
+      const k = c.material.uuid;
+      if(!kume.has(k)) kume.set(k, []);
+      kume.get(k).push(c);
+    });
+    kume.forEach(function(liste){
+      if(liste.length < 2) return;
+      const pos = [], nor = [];
+      liste.forEach(function(c){
+        c.updateMatrix();
+        const geo = (c.geometry.index ? c.geometry.toNonIndexed() : c.geometry.clone());
+        geo.applyMatrix4(c.matrix);
+        pos.push(geo.attributes.position.array);
+        nor.push(geo.attributes.normal ? geo.attributes.normal.array : new Float32Array(geo.attributes.position.array.length));
+        geo.dispose();
+      });
+      const top = pos.reduce((a, b) => a + b.length, 0);
+      const P = new Float32Array(top), N = new Float32Array(top);
+      let o = 0;
+      pos.forEach(function(a, i){ P.set(a, o); N.set(nor[i], o); o += a.length; });
+      const bg = new THREE.BufferGeometry();
+      bg.setAttribute('position', new THREE.BufferAttribute(P, 3));
+      bg.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+      bg.computeBoundingSphere();
+      const yeni = new THREE.Mesh(bg, liste[0].material);
+      liste.forEach(function(c){ grp.remove(c); });
+      grp.add(yeni);
+    });
+  }catch(e){ _sessiz(e, '_parcaBirlestir', 'saha_oyun'); }
+}
 const YUZ_TEN = [0xf1c9a5, 0xe0ac86, 0xc99d72, 0xa8764f, 0x8a5a3c, 0x6b4430, 0xd8b08c];
 const YUZ_SAC = [0x1a1512, 0x2a1d14, 0x3b2716, 0x5a3a1f, 0x7a5230, 0xb08a4f, 0x141414, 0x6d2f1c];
 let _yuzGeo = null;
@@ -1883,15 +1958,29 @@ function makePlayer(m){
   // ══════════════════════════════════════════════════════════════════════════════════════
   const g = new THREE.Group();
 
-  // Govde: hafif konik gorunum icin ust ve alt ayri
-  // Govde X'te genis (omuz), Z'de ince (gogus derinligi) - ileri yon +Z.
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.52,0.46,0.28), m.jer);
+  /* GERÇEKÇİ GÖVDE (2026-09-27-T, kullanıcı: "bizim oyuncuları da bunun gibi yap" -
+     referans: gerçek oranlı, animasyonlu bir futbolcu modeli)
+     ÖNCEDEN: Kutulardan oluşan gövde, kol ve bacak; köşeli, oyuncak gibi bir siluet.
+     ŞİMDİ: Parçalar LATHE (döndürülmüş profil) ile üretiliyor - göğüs V şeklinde genişler,
+     bel daralır, baldır ve pazı kas kavisi taşır. Forma iki renkli: gövde+kol forma rengi,
+     yaka/kol ağzı/şort/çorap şort rengi, çorapta forma renginde şerit. Kramponlar
+     oyuncuya göre farklı renk, kalecide eldiven.
+     Eklem yapısı (kalça-diz, omuz-dirsek) ve animasyon arayüzü AYNEN korundu; koşu, şut,
+     taç, değişiklik sarılması değişmeden çalışır. Aynı malzemeli parçalar her eklemde tek
+     çizime birleştirilir (bkz. _parcaBirlestir) - daha çok ayrıntı, daha az çizim çağrısı. */
+  const GP = _govdeParcalari();
+  const kaleciMi = (m === MATS.ka || m === MATS.kb);
+  const torso = new THREE.Group();                          // göğüs (ud.govde: eğilir, zıplar)
   torso.position.y = 1.30; g.add(torso);
-  const bel = new THREE.Mesh(new THREE.BoxGeometry(0.44,0.22,0.26), m.jer);
-  bel.position.y = 1.00; g.add(bel);
-  // Omuzlar: govdeyi genisletip insan siluetine yaklastirir
-  const omuz = new THREE.Mesh(new THREE.BoxGeometry(0.62,0.14,0.29), m.jer);
-  omuz.position.y = 1.47; g.add(omuz);
+  const gogus = new THREE.Mesh(GP.gogus, m.jer); gogus.scale.z = 0.6; torso.add(gogus);
+  const yaka = new THREE.Mesh(GP.yaka, m.shr); yaka.position.set(0, 0.262, 0.012); yaka.rotation.x = Math.PI/2 + 0.12; yaka.scale.set(1, 0.85, 1); torso.add(yaka);
+  const bel = new THREE.Group(); bel.position.y = 1.0; g.add(bel);   // şort beli (sabit)
+  const sortBel = new THREE.Mesh(GP.sortBel, m.shr); sortBel.scale.z = 0.66; bel.add(sortBel);
+  const omuz = new THREE.Group(); omuz.position.y = 1.47; g.add(omuz);  // omuz başları (ud.omuzParca)
+  [-1, 1].forEach(function(sx){
+    const kap = new THREE.Mesh(GP.omuzBasi, m.jer); kap.position.set(sx*0.232, -0.03, 0); kap.scale.set(1.0, 0.78, 0.92); omuz.add(kap);
+    const trap = new THREE.Mesh(GP.omuzBasi, m.jer); trap.position.set(sx*0.12, 0.02, -0.01); trap.scale.set(1.3, 0.55, 0.95); omuz.add(trap);
+  });
   /* YÜZ ve BAŞ (2026-09-27-S, kullanıcı: "oyuncuların yüzleri çok sıradan, insana benzet")
      ÖNCEDEN: Tek renk küre baş + herkes için aynı siyah saç kabuğu; yüz yoktu, 22 oyuncu
      birbirinin kopyasıydı. ŞİMDİ: Her oyuncuya kendi ten rengi, saç rengi ve saç modeli
@@ -1905,8 +1994,8 @@ function makePlayer(m){
   const sacRenk = YUZ_SAC[(Math.random()*YUZ_SAC.length)|0];
   const sacMat = new THREE.MeshLambertMaterial({ color: sacRenk });
   m = Object.assign({}, m, { skin: ten });                   // kol/bacak/boyun da aynı ten
-  const boyun = new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.075,0.10,6), ten);
-  boyun.position.y = 1.58; g.add(boyun);
+  const boyun = new THREE.Mesh(GP.boyun, ten);
+  boyun.position.y = 1.6; g.add(boyun);
   const head = new THREE.Group();                            // baş grubu (bkz. ud.bas)
   head.position.y = 1.74; g.add(head);
   const kafa = new THREE.Mesh(Y.kafa, ten); kafa.scale.set(0.93, 1.07, 0.98); head.add(kafa);
@@ -1941,46 +2030,47 @@ function makePlayer(m){
   // +Z (rotation.y = atan2(dx,dz)). Yani iki bacak yan yana DEGIL, biri onde biri
   // arkada duruyordu - figur kendi yuruyus yonune DIK bakiyor gibi gorunuyordu.
   // DOGRUSU: Yanal ayrim X ekseninde, ileri yon +Z'de. Ayak ucu da +Z'ye bakar.
+  const kramp = _kramponMat();
   function bacakYap(x){
     const kalca = new THREE.Group();
     kalca.position.set(x, 0.92, 0);              // eklem noktasi: kalca hizasi, YANAL ayrim X'te
-    const ust = new THREE.Mesh(new THREE.BoxGeometry(0.17,0.44,0.19), m.shr);
-    ust.position.y = -0.22;                       // mesh eklemden ASAGI sarkar
-    kalca.add(ust);
+    kalca.add(new THREE.Mesh(GP.sortBacak, m.shr));          // şort paçası
+    kalca.add(new THREE.Mesh(GP.uyluk, m.skin));             // uyluk (şorttan aşağısı)
     const diz = new THREE.Group();
     diz.position.y = -0.44;
     kalca.add(diz);
-    const alt = new THREE.Mesh(new THREE.BoxGeometry(0.15,0.42,0.17), m.skin);
-    alt.position.y = -0.21;
-    diz.add(alt);
-    const ayak = new THREE.Mesh(new THREE.BoxGeometry(0.16,0.09,0.27), MATS.kramp);
-    ayak.position.set(0,-0.44,0.05);
-    diz.add(ayak);
+    const dizK = new THREE.Mesh(GP.diz, m.skin); dizK.position.set(0, 0.005, 0.01); diz.add(dizK);
+    diz.add(new THREE.Mesh(GP.corap, m.shr));                // çorap (baldır kavisli)
+    const serit = new THREE.Mesh(GP.serit, m.jer); serit.position.y = -0.085; diz.add(serit);
+    const bot = new THREE.Mesh(GP.bot, kramp); bot.position.set(0, -0.44, 0.035); diz.add(bot);
+    const burunB = new THREE.Mesh(GP.botBurun, kramp); burunB.position.set(0, -0.447, 0.14); burunB.scale.set(0.92, 0.62, 1.0); diz.add(burunB);
+    const taban = new THREE.Mesh(GP.taban, MATS.taban); taban.position.set(0, -0.478, 0.05); diz.add(taban);
+    _parcaBirlestir(diz); _parcaBirlestir(kalca);
     g.add(kalca);
     return { kalca, diz };
   }
-  const bacakL = bacakYap(-0.13), bacakR = bacakYap(0.13);   // X: sol/sag
+  const bacakL = bacakYap(-0.105), bacakR = bacakYap(0.105);   // X: sol/sag
 
   // ── KOLLAR: omuz eklemi -> ust kol -> dirsek -> on kol -> el ──
+  const eldiven = kaleciMi ? MATS.eldiven : null;
   function kolYap(x){
     const omuzEk = new THREE.Group();
     omuzEk.position.set(x, 1.44, 0);             // YANAL ayrim X'te (bkz. bacakYap notu)
-    const ust = new THREE.Mesh(new THREE.BoxGeometry(0.12,0.32,0.13), m.jer);
-    ust.position.y = -0.16;
-    omuzEk.add(ust);
+    omuzEk.add(new THREE.Mesh(GP.kolluk, m.jer));            // forma kolu
+    const agiz = new THREE.Mesh(GP.kolAgzi, m.shr); agiz.position.y = -0.2; agiz.rotation.x = Math.PI/2; omuzEk.add(agiz);
+    omuzEk.add(new THREE.Mesh(GP.pazi, m.skin));             // kolun çıplak kısmı
     const dirsek = new THREE.Group();
     dirsek.position.y = -0.32;
     omuzEk.add(dirsek);
-    const on = new THREE.Mesh(new THREE.BoxGeometry(0.10,0.30,0.11), m.skin);
-    on.position.y = -0.15;
-    dirsek.add(on);
-    const el = new THREE.Mesh(new THREE.BoxGeometry(0.11,0.12,0.12), m.skin);
-    el.position.y = -0.34;
+    dirsek.add(new THREE.Mesh(GP.onKol, m.skin));
+    const el = new THREE.Mesh(GP.el, eldiven || m.skin); el.position.set(0, -0.31, 0.005);
+    if(eldiven) el.scale.set(1.3, 1.2, 1.3); else el.scale.set(0.78, 1.15, 0.95);
     dirsek.add(el);
+    _parcaBirlestir(dirsek); _parcaBirlestir(omuzEk);
     g.add(omuzEk);
     return { omuz:omuzEk, dirsek };
   }
-  const kolL = kolYap(-0.33), kolR = kolYap(0.33);          // X: sol/sag
+  const kolL = kolYap(-0.30), kolR = kolYap(0.30);          // X: sol/sag
 
   // Eski isimlerle uyum: animasyon kodu legL/armR gibi adlari kullaniyor.
   const legL = bacakL.kalca, legR = bacakR.kalca;
@@ -1999,9 +2089,10 @@ function makePlayer(m){
     new THREE.PlaneGeometry(0.34, 0.34),
     new THREE.MeshBasicMaterial({ map:numaraDoku, transparent:true, depthWrite:false })
   );
-  numaraMesh.position.set(0, 1.30, -0.15);      // sirt: govde ARKASI (-Z, ileri yon +Z)
+  numaraMesh.position.set(0, 0.02, -0.158);     // sirt: govde ARKASI (-Z, ileri yon +Z)
   numaraMesh.rotation.y = Math.PI;              // dokunun yuzu geriye baksin
-  g.add(numaraMesh);
+  numaraMesh.scale.setScalar(0.85);
+  torso.add(numaraMesh);                        // gövdeyle birlikte eğilir
 
   // OKUNABİLİRLİK DÜZELTMESİ (2026-09-18-D, kullanıcı bildirdi: "bu yazı fontu okunamıyor"):
   // Doku 256x64 iken üzerine 30px yazı basılıyordu; oyuncu kameradan uzaklaştığında (geniş
@@ -2020,6 +2111,7 @@ function makePlayer(m){
   isimSprite.position.y = 2.1;
   g.add(isimSprite);
 
+  _parcaBirlestir(torso); _parcaBirlestir(omuz); _parcaBirlestir(bel); _parcaBirlestir(head);
   g.userData = { legL, legR, armL, armR, phase:Math.random()*6,
                  bacakL, bacakR, kolL, kolR, govde:torso, omuzParca:omuz, bas:head,
                  numaraTuval, numaraDoku, isimTuval, isimDoku, isimSprite, numaraMesh,
@@ -5257,7 +5349,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-27-S';
+window.APP_BUILD = '2026-09-27-T';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
