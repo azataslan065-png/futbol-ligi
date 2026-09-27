@@ -3714,7 +3714,10 @@ function _kadroHtml(){
   if(!benim.length) return h + '<div class="sh-bos">Kadron boş. Transferler sekmesinden oyuncu al.</div>';
 
   h += _kadroSahaHtml();
-  h += '<div class="sh-kart"><div class="sh-kart-bas">Tüm oyuncular · İlk 11: ' + ilk11.length + '/11 · Yedek: ' + yedek.length + '/7</div>';
+  // Kısa tutuldu (2026-09-27-J): liste varsayılan KAPALI ve açılınca kendi içinde kayar -
+  // saha düzeni zaten her şeyi gösteriyor, bu liste yalnızca bilgi/satış için.
+  h += '<details class="sh-kart"><summary class="sh-kart-bas" style="cursor:pointer">Tüm oyuncular (' + benim.length + ') · İlk 11: ' + ilk11.length + '/11 · Yedek: ' + yedek.length + '/7</summary>'
+    + '<div style="max-height:320px;overflow-y:auto;overscroll-behavior:contain;margin-top:6px">';
   h += benim.sort(function(a,b){ return (magazaHavuz[b].guc||0) - (magazaHavuz[a].guc||0); }).map(function(id){
     var o = magazaHavuz[id]; if(!o) return '';
     var ilkte = ilk11.indexOf(id) >= 0, yedekte = yedek.indexOf(id) >= 0;
@@ -3733,7 +3736,7 @@ function _kadroHtml(){
       + rozet
       + '<button class="sh-dug ikincil" type="button" onclick="kadroYer(\'' + id + '\',\'' + sonraki[0] + '\')">' + sonraki[1] + '</button></div>';
   }).join('');
-  return h + '</div>';
+  return h + '</div></details>';
 }
 
 function _transferHtml(){
@@ -4760,17 +4763,27 @@ function hesapKur(takimId){
   var t = sahaLigTakimlar[takimId] || {};
   var ad = String(t.name || 'Takım');
   var kod = String(t.short || ad.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g,'').slice(0,3) || 'TKM').toLocaleUpperCase('tr').slice(0,4);
-  var guncel = {};
-  var yeni = _baslangicOyunculariEkle(takimId, guncel);
-  guncel['kullanicilar/'+benimUid] = {
-    ad: ad, takimKod: kod, takimId: takimId,
-    amblem: '⚽', renk: (t.color1 ? parseInt(String(t.color1).replace('#',''),16) : 0xd8443a),
-    durum: 'bekliyor', para: 0,
-    kadro: { ilk11: yeni.slice(0,11), yedek: yeni.slice(11,18) },
-    dizilis: AYAR.diz || '4-4-2',
-    baslangicVerildi: Date.now(),
-    kayitTs: Date.now()
-  };
+  /* KAYIT EZİLMESİ (2026-09-27-J, kullanıcı: "admin takıma para gönderiyor fakat hesaba
+     yatmıyor"): Önceden bu işlev kullanicilar/{uid} düğümünün TAMAMINI yeniden yazıyordu
+     (para:0 dahil). Kayıt, kullanıcı takımını seçmeden önce de oluşabiliyor (yönetici takım
+     atadığında ya da para gönderdiğinde) - kullanıcı SAHA'da takımını seçer seçmez bu yazım
+     yöneticinin gönderdiği parayı SIFIRLIYORDU. Artık alanlar tek tek yazılır; var olan
+     para, onay durumu ve kadro korunur. */
+  var mevcut = benimKayit || {};
+  var guncel = {}, kok = 'kullanicilar/' + benimUid + '/';
+  var sahipOldugu = Object.keys(magazaHavuz || {}).some(function(id){ var o = magazaHavuz[id]; return o && o.sahip === benimUid; });
+  if(!sahipOldugu && !mevcut.baslangicVerildi){
+    var yeni = _baslangicOyunculariEkle(takimId, guncel);
+    guncel[kok+'kadro'] = { ilk11: yeni.slice(0,11), yedek: yeni.slice(11,18) };
+    guncel[kok+'baslangicVerildi'] = Date.now();
+  }
+  guncel[kok+'ad'] = ad; guncel[kok+'takimKod'] = kod; guncel[kok+'takimId'] = takimId;
+  if(!mevcut.amblem) guncel[kok+'amblem'] = '⚽';
+  guncel[kok+'renk'] = (t.color1 ? parseInt(String(t.color1).replace('#',''),16) : 0xd8443a);
+  if(!mevcut.durum) guncel[kok+'durum'] = 'bekliyor';
+  if(mevcut.para == null) guncel[kok+'para'] = 0;
+  if(!mevcut.dizilis) guncel[kok+'dizilis'] = AYAR.diz || '4-4-2';
+  if(!mevcut.kayitTs) guncel[kok+'kayitTs'] = Date.now();
   // TEK ISLEMDE yazilir: kadro yazilip kullanici yazilamazsa sahipsiz oyuncular kalirdi.
   return fbDb.ref().update(guncel)
     .then(function(){ mesaj('TAKIM HAZIR', 'Yönetici onayı bekleniyor', 2400); })
@@ -5151,7 +5164,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-27-I';
+window.APP_BUILD = '2026-09-27-J';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
