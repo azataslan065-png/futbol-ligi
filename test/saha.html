@@ -5197,7 +5197,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-27-P';
+window.APP_BUILD = '2026-09-27-Q';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -5832,6 +5832,135 @@ function oyuncuDegistir(t, sahadaki, yedekIdx){
   }catch(e){ _sessiz(e, 'oyuncuDegistir', 'saha_oynanis'); return false; }
 }
 // Değişiklik tuşu (klavye R, kol, dokunmatik ⇄): artık doğrudan değiştirmez, seçim ekranını açar.
+/* ══ DEVRE ARASI MENÜSÜ ve SAHA KENARINDA DEĞİŞİKLİK (2026-09-27-Q) ═══════════════════════
+   KULLANICI TALEBİ: "İlk yarı bitince oyuncu değişikliği ve maç ayarı için tam ekran bir menü
+   açılsın; kadro/ayar ekranlarına 'İkinci yarıya başla' ve 'Önceki menü' düğmeleri gelsin.
+   Oyuncu değişikliği saha kenarında gerçekleşsin; maç içinde yapılan değişiklik de duran
+   top, taç, faul gibi anlarda aynı şekilde işlesin."
+   ÖNCEDEN: Devre arası 2.4 sn'lik bir yazıydı ve ikinci yarı kendiliğinden başlıyordu.
+   Değişiklik anında, top oyundayken bile, sahadaki oyuncunun adı değişerek yapılıyordu.
+   ŞİMDİ:
+   · Devre arasında maç durur, tam ekran menü açılır: Oyuncu değişikliği · Maç ayarları ·
+     İkinci yarıya başla. Alt ekranlarda "← Önceki menü" ve "▶ İkinci yarıya başla" var.
+   · Seçilen değişiklik SIRAYA alınır. Top oyundaysa ilk ölü topta (taç, faul, korner, kale
+     vuruşu, gol sonrası santra, devre arası) uygulanır: çıkan oyuncu saha kenarına yürür,
+     orada değişiklik olur, giren oyuncu kenardan yerine koşar. Bu sürede duran top
+     kullanılamaz, oyun başlamaz.
+   · Arkadaş maçında (iki cihaz) devre arası menüsü açılmaz - iki cihazın aynı anda
+     beklemesi ayrı bir eşleşme gerektirir; orada ikinci yarı eskisi gibi kendiliğinden başlar. */
+window._devreMenusu = false;
+let degisimKuyrugu = [];                      // [{ t, p, yedekAd }]
+function degisimSuruyor(){ try{ return players.some(p => !!p.degAnim); }catch(e){ return false; } }
+function degisimBekleyen(t){ return degisimKuyrugu.filter(k => k.t === t); }
+function _devreMenusuUygun(){
+  return !window._sahaOdaHost && !window._sahaOdaKonuk && mod !== 'antrenman' && !window._sahaIzleModu;
+}
+function devreMenusuAc(){
+  try{
+    window._devreMenusu = true;
+    duraklat = true;
+    let el = document.getElementById('devreMenu');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'devreMenu';
+      el.style.cssText = 'position:fixed;inset:0;z-index:2147479000;display:flex;align-items:center;justify-content:center;'
+        + 'background:radial-gradient(ellipse at center,rgba(20,42,28,.96),rgba(4,8,6,.98));color:#eef2ee;font-family:inherit;'
+        + 'padding:calc(12px + env(safe-area-inset-top,0px)) 14px calc(12px + env(safe-area-inset-bottom,0px))';
+      document.body.appendChild(el);
+    }
+    const A = takA(), B = takB();
+    const dg = (t) => { const n = degisimBekleyen(t).length; return n ? ' <small style="opacity:.75">(' + n + ' değişiklik sırada)</small>' : ''; };
+    const dug = (ikon, yazi, alt, fn, ana) => '<button type="button" onclick="' + fn + '" style="display:flex;align-items:center;gap:12px;width:100%;'
+      + 'padding:14px 16px;margin-bottom:10px;border-radius:14px;font:inherit;text-align:left;cursor:pointer;color:inherit;'
+      + (ana ? 'background:#2fae7a;color:#06140d;border:0;font-weight:900' : 'background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);font-weight:800')
+      + '"><span style="font-size:24px">' + ikon + '</span><span style="flex:1"><span style="font-size:16px">' + yazi + '</span>'
+      + (alt ? '<br><small style="opacity:.7;font-weight:600">' + alt + '</small>' : '') + '</span></button>';
+    el.innerHTML = '<div style="width:min(520px,100%)">'
+      + '<div style="text-align:center;margin-bottom:16px"><div style="font-size:13px;letter-spacing:.2em;opacity:.7;font-weight:800">DEVRE ARASI</div>'
+      + '<div style="font-size:30px;font-weight:900;margin-top:4px"><span style="color:' + hx(A.jer) + '">' + (document.querySelector('#board .kod.a')||{}).textContent + '</span> '
+      + skorA + ' - ' + skorB + ' <span style="color:' + hx(B.jer) + '">' + (document.querySelector('#board .kod.b')||{}).textContent + '</span></div></div>'
+      + dug('⇄', 'Oyuncu değişikliği', 'Kalan hak: ' + Math.max(0, (degisiklikHakki[0]||0) - degisimBekleyen(0).length) + dg(0), 'devreKadroAc()')
+      + dug('⚙️', 'Maç ayarları', 'Diziliş, taktik, ses, görüntü', 'devreAyarAc()')
+      + dug('▶', 'İkinci yarıya başla', '', 'ikinciYariyaBasla()', true)
+      + '</div>';
+    el.style.display = 'flex';
+  }catch(e){ _sessiz(e, 'devreMenusuAc', 'saha_oyun'); }
+}
+function devreMenusuGoster(){ const el = document.getElementById('devreMenu'); if(el && window._devreMenusu){ devreMenusuAc(); } }
+function devreKadroAc(){
+  const el = document.getElementById('devreMenu'); if(el) el.style.display = 'none';
+  degisiklikPanelAc(0);
+}
+function devreAyarAc(){
+  const el = document.getElementById('devreMenu'); if(el) el.style.display = 'none';
+  ayarAc();
+  try{
+    const kart = document.querySelector('#p-ayar .card');
+    let d = document.getElementById('devreAyarDug');
+    if(!d && kart){ d = document.createElement('div'); d.id = 'devreAyarDug'; kart.appendChild(d); }
+    if(d){
+      d.style.cssText = 'display:flex;gap:8px;margin-top:12px';
+      d.innerHTML = '<button type="button" onclick="ayarKapa()" style="flex:1;padding:11px;border-radius:10px;font:inherit;font-weight:800;'
+        + 'background:transparent;color:inherit;border:1px solid rgba(255,255,255,.3)">← Önceki menü</button>'
+        + '<button type="button" onclick="ikinciYariyaBasla()" style="flex:1.4;padding:11px;border-radius:10px;font:inherit;font-weight:900;'
+        + 'background:#2fae7a;color:#06140d;border:0">▶ İkinci yarıya başla</button>';
+    }
+  }catch(e){ _sessiz(e, 'devreAyarAc', 'saha_oyun'); }
+}
+function ikinciYariyaBasla(){
+  try{
+    window._devreMenusu = false;
+    ['devreMenu','degisiklikPanel'].forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
+    _deg = null;
+    try{ _kolDinleIptal(); }catch(e){}
+    document.getElementById('p-ayar').classList.remove('on');
+    const d = document.getElementById('devreAyarDug'); if(d) d.remove();
+    duraklat = false;
+    try{ odaDuraklatYaz(false,''); odaDuraklatUygula(); }catch(e){}
+    if (!bitti){ kickoff(1); frozen = 2.6; }     // kickoff sıradaki değişiklikleri de başlatır
+  }catch(e){ _sessiz(e, 'ikinciYariyaBasla', 'saha_oyun'); }
+}
+// Sıradaki değişiklikleri başlatır: çıkan oyuncu saha kenarına yürür (bkz. degisimAnimAdim).
+function degisimKuyruguIsle(){
+  try{
+    if(!degisimKuyrugu.length || window._devreMenusu) return;
+    const liste = degisimKuyrugu; degisimKuyrugu = [];
+    liste.forEach((k, i) => {
+      const p = k.p;
+      if(!p || p.dis || p.degAnim) return;
+      // Kenar: kameraya yakın taç çizgisi, orta çizginin kendi yarısı tarafında (yedek kulübesi).
+      const yan = (k.t === 0 ? -1 : 1) * dirA;
+      p.degAnim = { faz:'cik', t:0, yedekAd:k.yedekAd,
+                    hedef:{ x: yan * (3 + i*1.6), z: HWZ + 0.6 } };
+    });
+    if(players.some(p => p.degAnim)) mesaj('DEĞİŞİKLİK', 'Oyuncular saha kenarında', 1600);
+  }catch(e){ _sessiz(e, 'degisimKuyruguIsle', 'saha_oynanis'); }
+}
+// Değişiklik yürüyüşü (oyuncu hareketinin yerini alır - bkz. update içindeki çağrı).
+function degisimAnimAdim(p, dt){
+  const a = p.degAnim; a.t += dt;
+  p.tcd = Math.max(p.tcd, 0.4); p.cd = Math.max(p.cd, 0.4);   // yürürken topa dokunmaz
+  const hedef = (a.faz === 'cik') ? a.hedef : { x: p.home.x, z: p.home.z };
+  const dx = hedef.x - p.obj.position.x, dz = hedef.z - p.obj.position.z, uz = Math.hypot(dx, dz);
+  const hiz = (a.faz === 'cik') ? 5.2 : 6.4;                  // çıkan yürür, giren koşar
+  if(uz > 0.05){
+    const s = Math.min(uz, hiz * dt);
+    p.obj.position.x += dx/uz*s; p.obj.position.z += dz/uz*s;
+    p.obj.rotation.y = Math.atan2(dx, dz);
+  }
+  p.gx = uz > 0.05 ? dx/uz*hiz : 0; p.gz = uz > 0.05 ? dz/uz*hiz : 0;
+  p.vel.set(p.gx, 0, p.gz);
+  if(a.faz === 'cik' && (uz < 0.6 || a.t > 9)){
+    const t = p.team, idx = (yedekler[t]||[]).findIndex(y => y.ad === a.yedekAd);
+    if(idx >= 0) oyuncuDegistir(t, p, idx);
+    a.faz = 'gir'; a.t = 0;
+  } else if(a.faz === 'gir' && (uz < 1.5 || a.t > 7)){
+    delete p.degAnim;
+  }
+  p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
+  try{ insanAdim(p.obj.userData, dt, uz > 0.05 ? hiz : 0, true); }catch(e){}
+}
+
 function degisiklikYap(o){
   const t = (o===1) ? 1 : 0;
   if(!running || bitti) return;
@@ -5861,6 +5990,7 @@ function degisiklikPanelAc(t){
 }
 function degisiklikPanelKapat(){
   const el = document.getElementById('degisiklikPanel'); if(el) el.style.display = 'none';
+  if(window._devreMenusu){ _deg = null; duraklat = true; devreMenusuGoster(); return; }   // devre arası: menüye dön
   const once = _deg ? _deg.oncekiDuraklat : false;
   _deg = null;
   // Ayarlar paneli açık değilse maç kaldığı yerden devam eder.
@@ -5883,10 +6013,16 @@ function _degOnayla(){
   if(!_deg || !_deg.cikan || _deg.giren == null) return;
   const t = _deg.t, p = _deg.cikan, y = (yedekler[t]||[])[_deg.giren];
   if(p.gk && y && y.mevki && y.mevki !== 'KL' && !confirm('Kalecinin yerine kaleci olmayan ' + y.ad + ' girsin mi?')) return;
-  if(oyuncuDegistir(t, p, _deg.giren)){
-    _deg.cikan = null; _deg.giren = null; _deg.odak = 0;
-    if((degisiklikHakki[t]||0) <= 0){ degisiklikPanelKapat(); return; }
-  } else mesaj('', 'Değişiklik yapılamadı', 1400);
+  // SIRAYA AL (2026-09-27-Q): değişiklik ölü topta saha kenarında yapılır (bkz. degisimKuyruguIsle).
+  if((degisiklikHakki[t]||0) - degisimBekleyen(t).length <= 0){ mesaj('', 'Değişiklik hakkı kalmadı', 1400); return; }
+  if(p.dis || degisimKuyrugu.some(k => k.p === p) || p.degAnim){ mesaj('', 'Bu oyuncu için değişiklik zaten sırada', 1400); return; }
+  degisimKuyrugu.push({ t:t, p:p, yedekAd:y.ad });
+  _deg.cikan = null; _deg.giren = null; _deg.odak = 0;
+  const topOyunda = !duran && !golBekleme && !window._devreMenusu && frozen <= 0;
+  mesaj('DEĞİŞİKLİK HAZIR', window._devreMenusu ? 'İkinci yarı başlarken yapılacak'
+    : (topOyunda ? 'Top oyundan çıkınca saha kenarında yapılacak' : 'Saha kenarında yapılıyor'), 2000);
+  if(!topOyunda && !window._devreMenusu) degisimKuyruguIsle();
+  if((degisiklikHakki[t]||0) - degisimBekleyen(t).length <= 0 && !window._devreMenusu){ degisiklikPanelKapat(); return; }
   degisiklikPanelCiz();
 }
 function degisiklikPanelCiz(){
@@ -5905,16 +6041,18 @@ function degisiklikPanelCiz(){
   const kondRenk = k => k > 70 ? '#2fae7a' : (k > 45 ? '#e4b23c' : '#d8443a');
   const sol = sahada.map(o => {
     const p = o.p, k = Math.round(p.kond != null ? p.kond : 100);
-    const pasif = !!p.dis;
+    const sirada = degisimKuyrugu.some(k => k.p === p) || !!p.degAnim;
+    const pasif = !!p.dis || sirada;
     return satir(_deg.cikan === p, pasif,
       '<b style="min-width:26px;opacity:.7">'+esc(p.no||'')+'</b>'
       + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.ad)
-        + (p.gk?' <small style="opacity:.6">KL</small>':'') + (p.sari?' 🟨':'') + (p.dis?' 🟥':'') + '</span>'
+        + (p.gk?' <small style="opacity:.6">KL</small>':'') + (p.sari?' 🟨':'') + (p.dis?' 🟥':'') + (sirada?' <small style="color:#f0c14b">⇄ sırada</small>':'') + '</span>'
       + '<span title="Kondisyon" style="font-size:11px;font-weight:800;color:'+kondRenk(k)+'">'+k+'</span>',
       "_degSec('cikan',"+o.i+")", 'c'+o.i);
   }).join('');
   const yed = (yedekler[t]||[]);
-  const sag = yed.length ? yed.map((y,i) => satir(_deg.giren === i, false,
+  const _bekAd = degisimBekleyen(t).map(k => k.yedekAd);
+  const sag = yed.length ? yed.map((y,i) => satir(_deg.giren === i, _bekAd.indexOf(y.ad) >= 0,
       '<b style="min-width:26px;opacity:.7">'+esc(y.no)+'</b>'
       + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(y.ad)+'</span>'
       + (y.mevki ? '<small style="opacity:.6">'+esc(MEVKI_KISA[y.mevki]||y.mevki)+'</small>' : ''),
@@ -5926,7 +6064,7 @@ function degisiklikPanelCiz(){
     + 'color:#eef2ee;border:1px solid rgba(255,255,255,.16);border-radius:14px;overflow:hidden">'
     + '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.1)">'
     + '<b style="flex:1">⇄ Oyuncu değişikliği · '+esc(tak.ad||tak.kod||'')+'</b>'
-    + '<span style="font-size:12px;opacity:.75">Kalan hak: <b>'+(degisiklikHakki[t]||0)+'</b></span></div>'
+    + '<span style="font-size:12px;opacity:.75">Kalan hak: <b>'+Math.max(0,(degisiklikHakki[t]||0)-degisimBekleyen(t).length)+'</b></span></div>'
     + '<div style="display:flex;gap:10px;padding:10px 12px;flex:1;min-height:0;overflow:hidden">'
     + '<div style="flex:1;min-width:0;display:flex;flex-direction:column"><div style="font-size:11px;font-weight:800;opacity:.7;margin-bottom:5px">ÇIKACAK · SAHADA</div>'
     + '<div style="overflow-y:auto;flex:1;min-height:0;overscroll-behavior:contain">'+sol+'</div></div>'
@@ -5937,7 +6075,9 @@ function degisiklikPanelCiz(){
     + '</div></div></div>'
     + '<div style="display:flex;gap:8px;padding:9px 12px;border-top:1px solid rgba(255,255,255,.1)">'
     + '<button type="button" data-nav="kapat" onclick="degisiklikPanelKapat()" style="flex:1;padding:10px;border-radius:10px;font:inherit;font-weight:700;'
-      + 'background:transparent;color:inherit;border:1px solid rgba(255,255,255,.25)">Oyuna dön</button>'
+      + 'background:transparent;color:inherit;border:1px solid rgba(255,255,255,.25)">'+(window._devreMenusu ? '← Önceki menü' : 'Oyuna dön')+'</button>'
+    + (window._devreMenusu ? '<button type="button" data-nav="basla" onclick="ikinciYariyaBasla()" style="flex:1.3;padding:10px;border-radius:10px;font:inherit;font-weight:900;'
+      + 'border:0;background:#2fae7a;color:#06140d">▶ İkinci yarıya başla</button>' : '')
     + '<button type="button" data-nav="onay" '+(hazir?'':'disabled ')+'onclick="_degOnayla()" style="flex:2;padding:10px;border-radius:10px;font:inherit;font-weight:800;'
       + 'border:0;background:'+(hazir?'#2fae7a':'rgba(255,255,255,.1)')+';color:'+(hazir?'#06140d':'rgba(255,255,255,.4)')+'">'
       + (hazir ? esc(_deg.cikan.ad) + ' çıkar · ' + esc(yed[_deg.giren].ad) + ' girer' : 'Çıkacak ve girecek oyuncuyu seç') + '</button></div></div>';
@@ -6122,7 +6262,14 @@ function _sahaTopKonumu(fk){
     // "A takımı ileri gidiyorsa pozitif" sabit çerçevesine indirgiyoruz, sonra home/away'e çeviriyoruz.
     var aIleri = (ball.position.x * dirA) / HLX;              // -1..1, A'nın ileri yönü sabit
     var homeX = fk.benTarafHome ? aIleri : -aIleri;            // home perspektifine çevir
-    var homeZ = ball.position.z / HWZ;                          // en (sağ/sol) - dirA'dan etkilenmez
+    /* AYNA HATASI (2026-09-27-Q, kullanıcı: "canlı görsel anlatımda top ve oyuncu konumları doğru
+       gösterilmiyor"): x ev sahibi perspektifine çevrilirken (hücum yönü ters ise işaret
+       değişimi) z olduğu gibi bırakılıyordu. Bu bir DÖNDÜRME değil AYNALAMA: ev sahibi -x'e
+       hücum ederken (deplasmandaki oyuncu ya da ikinci yarı) sahanın sağı solu yer değiştiriyor,
+       sağ kanattaki top/oyuncu mini sahada sol kanatta görünüyordu. Artık x ile birlikte z de
+       aynı işaretle çevrilir (180° döndürme). İzleyici tarafı da aynı çarpanla geri çevirir. */
+    var _zYon = (dirA < 0 ? -1 : 1) * (fk.benTarafHome ? 1 : -1);
+    var homeZ = (ball.position.z / HWZ) * _zYon;
     var dokunanA = (sonDokunan === 0);                          // topa son dokunan A takımı mı
     var dokunanHome = fk.benTarafHome ? dokunanA : !dokunanA;
     return {
@@ -6143,7 +6290,7 @@ function _sahaTopKonumu(fk){
 function _sahaOyuncuKonumu(p, benTarafHome){
   var aIleri = (p.obj.position.x * dirA) / HLX;
   var homeX = benTarafHome ? aIleri : -aIleri;
-  var homeZ = p.obj.position.z / HWZ;
+  var homeZ = (p.obj.position.z / HWZ) * (dirA < 0 ? -1 : 1) * (benTarafHome ? 1 : -1);   // bkz. AYNA HATASI notu
   return [
     Math.round(Math.max(-1, Math.min(1, homeX)) * 100) / 100,
     Math.round(Math.max(-1, Math.min(1, homeZ)) * 100) / 100
@@ -6504,6 +6651,7 @@ function kickoff(byTeam){
   sonDokunan = byTeam; sonDokunanOyuncu = null;
   OYN.forEach(o => { o.c = 0; o.ch = false; });
   kayit.length = 0;
+  try{ degisimKuyruguIsle(); }catch(e){}      // santra ölü toptur: sıradaki değişiklikler yapılır
 }
 
 /* ---------- ayarlar ---------- */
@@ -6585,6 +6733,8 @@ function ayarAc(){ if (running && !bitti){ duraklat = true; try{ odaDuraklatYaz(
 function ayarKapa(){
   _kolDinleIptal();
   document.getElementById('p-ayar').classList.remove('on');
+  const _dd = document.getElementById('devreAyarDug'); if(_dd) _dd.remove();
+  if(window._devreMenusu){ duraklat = true; devreMenusuGoster(); return; }   // devre arası: menüye dön
   duraklat = false;
   // Arkadaş maçı: kendi duraklatmamı kaldırdığımı bildiririm; ama RAKİP hâlâ
   // duraklıysa oyun devam ETMEZ - odaDuraklatUygula son sözü söyler.
@@ -7408,8 +7558,10 @@ function duranBaslat(tip, takim, x, z, sec){
   if (alici){ alici.cd = 0; alici.tcd = 0; }
   if (takim === 0 && alici) ctrl = alici;
   mesaj('', (duran.dolayli ? 'Endirekt serbest vuruş' : ETIKET[tip]) + (takim === 0 ? ' — sende' : ''), 1300);
+  try{ degisimKuyruguIsle(); }catch(e){}      // top oyun dışında: sıradaki değişiklikler yapılır
 }
 function duranCalistir(){
+  if (degisimSuruyor()){ mesaj('', 'Oyuncu değişikliği sürüyor', 900); return; }
   if (!duran || !duran.alici){ duran = null; return; }
   const p = duran.alici, tip = duran.tip;
   const kaleUzak = p.obj.position.distanceTo(new THREE.Vector3(p.dir*HLX, 0, 0));
@@ -7954,6 +8106,7 @@ function update(dt){
   // hazırlanırken top oyunda değil. Taç ve kale vuruşu SAYILMAZ: çok sık ve kısa,
   // gerçek hakemler de bunları uzatmaya eklemez. Devre başı/santra donması da sayılmaz.
   const oyunDurdu = golBekleme || (duran && (duran.tip === 'serbest' || duran.tip === 'penalti' || duran.tip === 'korner'));
+  if (!duran && degisimSuruyor()) frozen = Math.max(frozen, 0.25);   // santra: değişiklik bitmeden başlamaz
   if (frozen > 0){
     frozen -= dt;
     // Gol kutlamasında saat artık işler (futbolda saat durmaz); duran süre uzatmaya yazılır.
@@ -8058,6 +8211,7 @@ function update(dt){
     p._kapT = Math.max(0, (p._kapT || 0) - dt);
     p.toparlan = Math.max(0, p.toparlan - dt);
     if (p.dalisT > 0) p.dalisT -= dt;
+    if (p.degAnim){ degisimAnimAdim(p, dt); return; }     // saha kenarına yürüyen/dönen oyuncu
     if (kaymaKontrol(p, dt)){
       p.obj.position.x = Math.max(-HLX-1.5, Math.min(HLX+1.5, p.obj.position.x));
       p.obj.position.z = Math.max(-HWZ-1.5, Math.min(HWZ+1.5, p.obj.position.z));
@@ -8190,7 +8344,8 @@ function update(dt){
     // oyun kilitli kalmasin (sekme arka plana alinmis, telefon birakilmis olabilir).
     const _elleTac = (duran.tip === 'tac' && duran.takim === 0);
     if (_elleTac && !duran._ipucu){ duran._ipucu = true; mesaj('TAÇ', 'Pas tuşuyla at', 2200); }
-    if ((duran.takim === 1 && duran.hazir > 0.3)
+    if (degisimSuruyor()){ duran.hazir = 0; duran.omur = Math.min(duran.omur, 5); }   // değişiklik bitmeden oyun başlamaz
+    else if ((duran.takim === 1 && duran.hazir > 0.3)
         || (!_elleTac && duran.hazir > 6)
         || duran.omur > (_elleTac ? 60 : 14)) duranCalistir();
   } else if (frozen <= 0){
@@ -8423,7 +8578,8 @@ function devreArasi(){
   saat = HALF; uzatmaHesapla();
   sesDuduk(true);
   mesaj('DEVRE ARASI', 'Saha değişti — hücum yönün yine sağa', 2400);
-  setTimeout(() => { if (!bitti) kickoff(1); }, 2400);
+  if (_devreMenusuUygun()) setTimeout(() => { if (!bitti) devreMenusuAc(); }, 1500);   // menü: ikinci yarıyı kullanıcı başlatır
+  else setTimeout(() => { if (!bitti) kickoff(1); }, 2400);
 }
 function istatTablo(){
   const yuzde = () => {
@@ -9161,6 +9317,8 @@ function basla(yeniMod){
        : AYAR.sure;
   durma = { 1:0, 2:0 }; uzatmaVerildi = false; golBekleme = false;
   skorA = 0; skorB = 0; saat = 0; devre = 1; dirA = 1;
+  degisimKuyrugu = []; window._devreMenusu = false;
+  try{ players.forEach(p => { delete p.degAnim; }); const _dm = document.getElementById('devreMenu'); if(_dm) _dm.style.display = 'none'; }catch(e){}
   // Yeni maç: olay listesi sıfırlanır. Temizlenmezse önceki maçın golleri yenisine
   // karışır ve Puan Tablosu'na yanlış veri gider.
   olaylar = [];
@@ -10059,7 +10217,7 @@ function _sahaIzleTakimUygula(pool, arr, lerp, dt, xYon){
     var p = pool[i];
     var pt = arr[i];
     if(pt && typeof pt[0]==='number' && typeof pt[1]==='number'){
-      var wx = pt[0]*HLX*xYon, wz = pt[1]*HWZ;
+      var wx = pt[0]*HLX*xYon, wz = pt[1]*HWZ*xYon;   // z de ev perspektifinden döndürülür (bkz. AYNA HATASI)
       p.obj.visible = true; p.golge.visible = true;
       var oncekiX = p.obj.position.x, oncekiZ = p.obj.position.z;
       p.obj.position.x += (wx - p.obj.position.x)*lerp;
@@ -10096,7 +10254,7 @@ function _sahaIzleKareAdimla(dt){
   var xYon = 1;
   try{ if(h.yon) xYon = (h.yon.benHome ? 1 : -1) * (h.yon.dirA < 0 ? -1 : 1); }catch(e){_sessiz(e,'_sahaIzleKareAdimla:6603','saha_izle');}
   if(h.top){
-    var bx = h.top.x*HLX*xYon, bz = h.top.z*HWZ;
+    var bx = h.top.x*HLX*xYon, bz = h.top.z*HWZ*xYon;
     var oncekiBX = ball.position.x, oncekiBZ = ball.position.z;
     ball.position.x += (bx-ball.position.x)*lerp;
     ball.position.z += (bz-ball.position.z)*lerp;
