@@ -240,6 +240,13 @@
   .sh-bos{opacity:.5;font-size:12.5px;line-height:1.7;text-align:center;padding:24px 10px}
 
   /* Izgara dugmeler - antrenman ve arkadas mACI bolumlerinde kullanilir */
+  /* Diziliş seçici (2026-09-27-M, kullanıcı: "diziliş butonu çok kaba"): büyük kartlar yerine ince hap düğmeler */
+  .dz-satir{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 10px}
+  .dz-satir .et{font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;opacity:.7;margin-right:4px}
+  .dz-cip{padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:800;line-height:1.2;cursor:pointer;
+    border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#e9eef2}
+  .dz-cip.on{background:#3f8a45;border-color:#63be78;color:#fff}
+  .kd-uyum{font-size:8.5px;font-weight:800;line-height:1;color:#ffb35c;white-space:nowrap}
   .sh-izgara{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:9px}
   .sh-bul{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:14px;
     border:1px solid rgba(255,255,255,.12);border-radius:12px;background:rgba(255,255,255,.05);
@@ -3480,6 +3487,18 @@ function _kdKadro(){
   }).sort(function(a,b){ return (magazaHavuz[b].guc||0) - (magazaHavuz[a].guc||0); });
   return { ilk:ilk, yed:yed, dis:dis };
 }
+/* MEVKİ UYUMU (2026-09-27-M, kullanıcı: "bir oyuncu sahaya alındığında kart ona göre değişsin"):
+   Kart artık oyuncunun O YERDEKİ gücünü gösterir. Kendi mevkisinde tam güç; aynı hatta
+   (ör. sağ kanat -> forvet) %95; başka hatta %80; kaleci sahada / saha oyuncusu kalede %50.
+   Mevkisi farklıysa kartın altında kendi mevkisi -> oynadığı yer yazar. Otomatik dizilim
+   de aynı uyumu kullanır. */
+function sahaUyum(mevki, slot){
+  var m = String(mevki||'').replace(/[0-9]/g,''), s = String(slot||'').replace(/[0-9]/g,'');
+  if(!s || m === s) return 1;
+  var gm = sahaMevkiGrup(m), gs = sahaMevkiGrup(s);
+  if(gm === 0 || gs === 0) return 0.5;
+  return gm === gs ? 0.95 : 0.8;
+}
 function _kdKart(id, anahtar, slotKod, kucuk){
   var o = id ? magazaHavuz[id] : null;
   var sec = (_kdSec === anahtar) ? ' kd-sec' : '';
@@ -3492,10 +3511,16 @@ function _kdKart(id, anahtar, slotKod, kucuk){
   var ad = String(o.ad || '').trim().split(/\s+/);
   var kisa = ad.length > 1 ? ad[ad.length-1] : ad[0];
   var ilan = satisIlaniniOku(o);
-  return '<div class="kd-kart' + sec + (kucuk ? ' kd-kucuk' : '') + '" data-kd="' + anahtar + '" style="--kd:' + renk + '">'
-    + '<div class="kd-ust"><span class="kd-kod">' + esc(kod) + '</span><span class="kd-guc">' + (o.guc||0) + '</span></div>'
+  var kendi = String(o.mevki || '').replace(/[0-9]/g,'');
+  var uyum = slotKod ? sahaUyum(kendi, slotKod) : 1;
+  var gucG = Math.round((o.guc||0) * uyum);
+  return '<div class="kd-kart' + sec + (kucuk ? ' kd-kucuk' : '') + '" data-kd="' + anahtar + '" style="--kd:' + renk + '"'
+    + (uyum < 1 ? ' title="Kendi mevkisi ' + esc(kendi) + ' - bu yerde güç ' + gucG + '"' : '') + '>'
+    + '<div class="kd-ust"><span class="kd-kod">' + esc(kod) + '</span><span class="kd-guc"' + (uyum < 1 ? ' style="color:#ffb35c"' : '') + '>' + gucG + '</span></div>'
     + '<div class="kd-foto">' + _oyuncuAvatarHtml(o, kucuk ? 30 : 34, 2) + '</div>'
-    + '<div class="kd-ad">' + esc(kisa) + (ilan ? ' 🏷️' : '') + '</div></div>';
+    + '<div class="kd-ad">' + esc(kisa) + (ilan ? ' 🏷️' : '') + '</div>'
+    + (uyum < 1 ? '<div class="kd-uyum">' + esc(kendi) + ' → ' + esc(String(slotKod).replace(/[0-9]/g,'')) + '</div>' : '')
+    + '</div>';
 }
 function _kadroSahaHtml(){
   var k = _kdKadro();
@@ -3554,20 +3579,25 @@ function kdOtomatikDizilim(){
     if(!ids.length) return;
     var kul = {}, ilk = ['','','','','','','','','','',''];
     function mv(id){ return String(magazaHavuz[id].mevki || '').replace(/[0-9]/g,''); }
-    function uyar(id, k, tur){
-      var m = mv(id), s = slot[k].replace(/[0-9]/g,'');
-      if(tur === 0) return m === s;
-      if(tur === 1) return sahaMevkiGrup(m) === sahaMevkiGrup(s);
-      return k === 0 || m !== 'KL';                  // son çare: kaleci sahaya sürülmez
+    // GÜCE GÖRE (2026-09-27-M): her (yer, oyuncu) çifti için "o yerdeki güç" = güç × uyum
+    // hesaplanır ve en yüksek çiftten başlanarak yerleştirilir. Önceki sürüm önce birebir
+    // mevki eşleşmesine bakıyordu: 31 güçlü bir OOS, 40 güçlü bir SLK'nın önüne geçiyordu.
+    var ciftler = [];
+    for(var k=0;k<11;k++){
+      ids.forEach(function(id){
+        var m = mv(id);
+        if(k === 0 && m !== 'KL') return;                  // kalede yalnızca kaleci
+        if(k !== 0 && m === 'KL') return;                  // kaleci sahaya sürülmez
+        ciftler.push({ k:k, id:id, p:(magazaHavuz[id].guc||0) * sahaUyum(m, slot[k]) });
+      });
     }
-    [0,1,2].forEach(function(tur){
-      for(var k=0;k<11;k++){
-        if(ilk[k]) continue;
-        for(var i=0;i<ids.length;i++){
-          if(!kul[ids[i]] && uyar(ids[i], k, tur)){ ilk[k] = ids[i]; kul[ids[i]] = 1; break; }
-        }
-      }
-    });
+    ciftler.sort(function(a,b){ return b.p - a.p; });
+    ciftler.forEach(function(c){ if(!ilk[c.k] && !kul[c.id]){ ilk[c.k] = c.id; kul[c.id] = 1; } });
+    // Kaleci ya da mevki yetmediyse boş kalan yerler en güçlü kalanlarla doldurulur.
+    for(var k2=0;k2<11;k2++){
+      if(ilk[k2]) continue;
+      for(var q=0;q<ids.length;q++){ if(!kul[ids[q]]){ ilk[k2] = ids[q]; kul[ids[q]] = 1; break; } }
+    }
     var kalan = ids.filter(function(id){ return !kul[id]; }), yed = [];
     var ykl = kalan.filter(function(id){ return mv(id) === 'KL'; })[0];
     if(ykl) yed.push(ykl);
@@ -3703,14 +3733,11 @@ function _kadroHtml(){
   var dizler = [];
   dizler = SAHA_TABLO_DIZILIS.slice();
   var _dzSecili = sahaKayitDizilis(benimKayit);   // kayıttaki diziliş (fikstüre giden)
-  h += '<div class="sh-kart"><div class="sh-kart-bas">Saha dizilişi</div><div class="sh-izgara">'
+  h += '<div class="dz-satir"><span class="et">Diziliş</span>'
     + dizler.map(function(d){
-        return '<button type="button" class="sh-bul" onclick="dizilisSec(\'' + d + '\')" '
-          + 'style="' + (_dzSecili === d ? 'background:rgba(63,138,69,.24);border-color:rgba(99,190,120,.5)' : '') + '">'
-          + '<span class="b">' + d + '</span>'
-          + '<span class="a">' + (_dzSecili === d ? 'Seçili' : 'Seç') + '</span></button>';
+        return '<button type="button" class="dz-cip' + (_dzSecili === d ? ' on' : '') + '" onclick="dizilisSec(\'' + d + '\')">' + d + '</button>';
       }).join('')
-    + '</div></div>';
+    + '</div>';
   if(!benim.length) return h + '<div class="sh-bos">Kadron boş. Transferler sekmesinden oyuncu al.</div>';
 
   h += _kadroSahaHtml();
@@ -5164,7 +5191,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-27-L';
+window.APP_BUILD = '2026-09-27-M';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -5497,16 +5524,17 @@ function adSapma(ad){
    (g01) çevrilir ve her beceri bu ölçekle büyür. Havuzda olmayan (antrenman/jenerik)
    oyuncular başlangıç kadrosu düzeyinde (38) sayılır. */
 var SAHA_VARSAYILAN_GUC = 38;
-function oyuncuGucuBul(ad){
+function oyuncuHavuzKaydi(ad){
   try{
     const k = sahaAdAnahtar(ad); if(!k) return null;
     if(typeof magazaHavuz === 'undefined' || !magazaHavuz) return null;
-    for (const id in magazaHavuz){
-      const o = magazaHavuz[id];
-      if (o && o.ad && sahaAdAnahtar(o.ad) === k) return Math.max(1, Math.min(99, Number(o.guc) || SAHA_VARSAYILAN_GUC));
-    }
+    for (const id in magazaHavuz){ const o = magazaHavuz[id]; if (o && o.ad && sahaAdAnahtar(o.ad) === k) return o; }
   }catch(e){}
   return null;
+}
+function oyuncuGucuBul(ad){
+  const o = oyuncuHavuzKaydi(ad);
+  return o ? Math.max(1, Math.min(99, Number(o.guc) || SAHA_VARSAYILAN_GUC)) : null;
 }
 function nitelikAta(p, idx){
   try{
@@ -5515,6 +5543,15 @@ function nitelikAta(p, idx){
     const sp = 0.985 + (adSapma(p.ad) - 0.94) * 0.25;
     const guc = oyuncuGucuBul(p.ad);
     p.guc = (guc != null) ? guc : SAHA_VARSAYILAN_GUC;
+    // Mevki uyumu (2026-09-27-M): kendi takımında oyuncu KENDİ mevkisi dışında bir yerde
+    // oynuyorsa Kadro ekranında gördüğü "o yerdeki güç" ile oynar (bkz. sahaUyum).
+    try{
+      const hk = oyuncuHavuzKaydi(p.ad);
+      if (hk && p.team === 0 && typeof benimKayit !== 'undefined' && benimKayit){
+        const yerKod = (SAHA_SLOT[sahaKayitDizilis(benimKayit)] || [])[idx];
+        if (yerKod) p.guc = Math.max(1, Math.round(p.guc * sahaUyum(hk.mevki, yerKod)));
+      }
+    }catch(e){}
     const g = p.guc / 99;
     const L = (lo, hi) => lo + (hi - lo) * g;
     p.g01  = g;

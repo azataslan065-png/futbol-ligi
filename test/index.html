@@ -820,9 +820,9 @@ body.ticker-on{--ticker-h:38px}
 .td-tab.active{background:var(--ac);color:var(--ac-tx,var(--md-on-ac,#fff))}
 
 /* ── FORMATION PICKER ── */
-.formation-picker{display:flex;gap:.35rem;overflow-x:auto;margin-bottom:.7rem;padding-bottom:.15rem;touch-action:pan-x}
+.formation-picker{display:flex;align-items:center;gap:.35rem;overflow-x:auto;margin-bottom:.7rem;padding-bottom:.15rem;touch-action:pan-x}
 .formation-picker::-webkit-scrollbar{display:none}
-.formation-btn{flex-shrink:0;padding:.32rem .7rem;border-radius:20px;font-size:.72rem;font-weight:700;background:transparent;border:1.5px solid var(--br);color:var(--mu);cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif;white-space:nowrap}
+.formation-btn{flex:0 0 auto;align-self:center;height:auto;min-height:0;line-height:1.2;padding:.28rem .65rem;border-radius:20px;font-size:.7rem;font-weight:700;background:transparent;border:1.5px solid var(--br);color:var(--mu);cursor:pointer;font-family:var(--font-family,'Outfit'),sans-serif;white-space:nowrap}
 .formation-btn.active{background:var(--ac);border-color:var(--ac);color:var(--ac-tx,#fff)}
 
 /* ── PITCH VIEW ── */
@@ -2634,7 +2634,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-27-L';
+window.APP_BUILD='2026-09-27-M';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -6359,6 +6359,8 @@ function listenToLeague(leagueId){
     _lastDataSnapshot=_yeniImza;
     D={leagueName:'Futbol Ligi',season:'',teams:{},matches:{},generalChat:{},archives:[],videoLinks:[]};
     if(d)D={...D,...d};
+    // SAHA: kadrolar kullanıcının canlı SAHA kadrosundan (bkz. CANLI SAHA KADROSU).
+    try{ ptSahaCanliBaslat(); ptSahaCanliUygula(); }catch(e){}
     if(_sadeceCanliDegisti){
       try{ ptOrtakTvUygula(); ptOrtakGorunumUygula(); ptOrtakSohbetUygula(); }catch(e){}
       ptCanliHafifTazele();
@@ -17774,6 +17776,227 @@ window.DeviceBack=(function(){
 })();
 
 
+/* ══ SAHA KADRO EŞİTLEME (2026-09-27-C) ════════════════════════════════════════════════
+   KULLANICI TALEBİ: "Puan tablosundaki SAHA tarafı için tüm oyuncuları SAHA uygulamasındaki
+   oyuncularla aynı yap; admin gerçek oyuncuları satışa koyduğunda satın alındıktan sonra
+   kadrolarında görünecek; şimdilik onların yerine farklı oyuncular koy."
+   KÖK SEBEP: İki ayrı oyuncu listesi vardı. Puan tablosu (sahaVeri/leagues/../teams/../squad)
+   yöneticinin girdiği GERÇEK kadroyu, SAHA ise kullanıcının oyuncuHavuzu'ndaki kadrosunu
+   gösteriyordu; fikstür maçında sahaya gerçek isimler çıkıyor, "Kadrom" başka isimler
+   gösteriyordu. Ayrıca başlangıç kadroları sabit bir listeden üretildiği için farklı
+   takımlarda AYNI isimler oluşabiliyordu (gol kralı ada göre eşleştiği için karışırdı).
+   ÇÖZÜM: SAHA tarafında takımın squad'ı = SAHA kadrosu (tek kaynak).
+     · Sahibi olan takım : kullanıcının ilk 11 + yedekleri (havuzId ile bağlı).
+     · Sahipsiz takım    : takıma özel, ligde benzersiz yer tutucu oyuncular (yerTutucu:true).
+       Kullanıcı o takımı seçince başlangıç kadrosu BU isimlerle kurulur - iki taraf aynı kalır.
+     · Gerçek kadro silinmez: 'squadGercek' alanına bir kez arşivlenir; yönetici
+       "Lig Oyuncuları (A–Z)" listesinden satışa sunar, satın alan kullanıcının kadrosunda
+       (dolayısıyla puan tablosunda) görünür.
+   Bu blok admin.html ve saha.html'de BİREBİR aynıdır - biri değişirse diğeri de değişmeli. */
+var SAHA_AD_ON = ['Ahmet','Ali','Alp','Aras','Atakan','Aykut','Batuhan','Berat','Berkay','Bora',
+  'Burak','Can','Caner','Cengiz','Cihan','Çağan','Doğukan','Egemen','Emirhan','Enes','Erdem','Erkan',
+  'Ersin','Eymen','Fatih','Ferhat','Gökay','Gökhan','Güney','Hakan','Halit','Harun','İlker','İsmail',
+  'Kaan','Kayra','Kemal','Koray','Kutay','Mert','Metin','Mirza','Nazım','Necati','Oğuz','Orhan',
+  'Osman','Özgür','Rıza','Samet','Sefa','Selçuk','Semih','Serdar','Taha','Talha','Taner','Tayfun',
+  'Tuna','Tuğra','Uğur','Utku','Vedat','Yağız','Yasin','Yavuz','Zafer','Ziya','Oktay','Arda'];
+var SAHA_AD_SOY = ['Akbaş','Akgül','Aktaş','Alkan','Altun','Avcı','Aydemir','Bayram','Bektaş',
+  'Bozkurt','Coşkun','Çakmak','Çınar','Demirci','Dinç','Duman','Durmaz','Ekinci','Eroğlu','Genç',
+  'Gündoğdu','Güler','Gürbüz','Işıkçı','İnce','Kahraman','Karaca','Karakaya','Kartal','Kavak',
+  'Keskin','Kılınç','Kocabaş','Korkut','Kurtoğlu','Oral','Orhon','Özbek','Özdemir','Özkan','Öztaş',
+  'Parlak','Sağlam','Sarıkaya','Sevim','Soydan','Sönmez','Şahinler','Taşkın','Tekin','Temiz',
+  'Toprakçı','Tosun','Uysal','Varol','Yalın','Yaman','Yavuzer','Yener','Yıldırım','Yurt','Zengin',
+  'Akyol','Ateşoğlu','Balcı','Cömert','Dalkılıç','Erbil','Gezer','Kalkan'];
+var SAHA_SABLON_MEVKI = ['KL','SLB','STP1','STP2','SĞB','SLK','DOS','OOS','SĞK','SF','GF',
+                         'KL','STP1','SĞB','DOS','OOS','SĞK','SF'];
+var SAHA_SABLON_NO    = [1,3,4,5,2,11,6,8,7,9,10,12,13,14,15,16,17,18];
+var SAHA_NO_TERCIH = {'KL':1,'SĞB':2,'SLB':3,'STP1':4,'STP2':5,'DOS':6,'SĞK':7,'OOS':8,'GÖ':8,'SF':9,'GF':10,'SLK':11};
+var SAHA_GECERLI_MEVKI = ['KL','SĞB','SLB','STP1','STP2','GÖ','DOS','OOS','SĞK','SLK','SF','GF'];
+function sahaAdAnahtar(ad){ return String(ad||'').trim().toLocaleLowerCase('tr'); }
+// Anahtarları sıralı JSON - Firebase nesneleri alfabetik sırayla döndürdüğü için düz
+// JSON.stringify "aynı kadro"yu farklı sanıp her seferinde yeniden yazardı.
+function sahaKanonik(v){
+  if(v === undefined || v === null) return 'null';
+  if(Array.isArray(v)) return '[' + v.map(sahaKanonik).join(',') + ']';
+  if(typeof v === 'object'){
+    return '{' + Object.keys(v).sort().filter(function(k){ return v[k] !== undefined && v[k] !== null && v[k] !== ''; })
+      .map(function(k){ return JSON.stringify(k) + ':' + sahaKanonik(v[k]); }).join(',') + '}';
+  }
+  return JSON.stringify(v);
+}
+function sahaDizi(v){ return Array.isArray(v) ? v : (v && typeof v === 'object' ? Object.keys(v).map(function(k){ return v[k]; }) : []); }
+function sahaSquadTum(sq){ sq = sq || {}; return sahaDizi(sq.starting).concat(sahaDizi(sq.bench)).filter(function(p){ return p && p.name; }); }
+// Ligde kullanılan bütün isimler: kadrolar, arşivlenmiş gerçek kadrolar ve havuz.
+function sahaKullanilanAdlar(takimlar, havuz){
+  var k = {};
+  Object.keys(takimlar || {}).forEach(function(tid){
+    var t = takimlar[tid] || {};
+    sahaSquadTum(t.squad).concat(sahaSquadTum(t.squadGercek)).forEach(function(p){ k[sahaAdAnahtar(p.name)] = true; });
+  });
+  Object.keys(havuz || {}).forEach(function(id){ var o = havuz[id]; if(o && o.ad) k[sahaAdAnahtar(o.ad)] = true; });
+  return k;
+}
+// yerel (isteğe bağlı): aynı takım içinde ad ya da soyadı tekrar etmesin diye tutulan küme.
+function sahaYeniAdUret(kullanilan, tohum, yerel){
+  var h = 7, t = String(tohum || '');
+  for(var i=0;i<t.length;i++) h = (Math.imul(h, 31) + t.charCodeAt(i)) >>> 0;
+  var n1 = SAHA_AD_ON.length, n2 = SAHA_AD_SOY.length;
+  for(var d=0; d<n1*n2; d++){
+    h ^= h << 13; h >>>= 0; h ^= h >>> 17; h ^= h << 5; h >>>= 0;   // xorshift32
+    if(!h) h = 2463534242;
+    var on = SAHA_AD_ON[h % n1], soy = SAHA_AD_SOY[Math.floor(h / n1) % n2], ad = on + ' ' + soy;
+    if(yerel && d < 400 && (yerel['o:'+on] || yerel['s:'+soy])) continue;
+    if(!kullanilan[sahaAdAnahtar(ad)]){
+      kullanilan[sahaAdAnahtar(ad)] = true;
+      if(yerel){ yerel['o:'+on] = true; yerel['s:'+soy] = true; }
+      return ad;
+    }
+  }
+  var s = 1; while(kullanilan[sahaAdAnahtar('Oyuncu ' + s)]) s++;
+  kullanilan[sahaAdAnahtar('Oyuncu ' + s)] = true; return 'Oyuncu ' + s;
+}
+// Sahipsiz takım için 18 kişilik yer tutucu kadro (11 ilk + 7 yedek).
+function sahaSablonKadro(kullanilan, tohum){
+  var sq = { starting:[], bench:[] }, yerel = {};
+  for(var i=0;i<18;i++){
+    var p = { name: sahaYeniAdUret(kullanilan, tohum + ':' + i, yerel), number: String(SAHA_SABLON_NO[i]),
+              position: SAHA_SABLON_MEVKI[i], yerTutucu: true };
+    (i < 11 ? sq.starting : sq.bench).push(p);
+  }
+  return sq;
+}
+function sahaYerTutucuMu(sq){
+  var tum = sahaSquadTum(sq);
+  return tum.length >= 11 && tum.every(function(p){ return p.yerTutucu; });
+}
+function sahaMevkiGrup(m){
+  m = String(m||'').replace(/[0-9]/g,'');
+  if(m === 'KL') return 0;
+  if(m === 'STP' || m === 'SĞB' || m === 'SLB') return 1;
+  if(m === 'SF' || m === 'GF') return 3;
+  return 2;
+}
+// SAHA kadrosundan (kullanicilar/{uid}/kadro) puan tablosu squad'ı üretir.
+// eski: mevcut squad - yöneticinin oyuncuya verdiği durum (sakat, cezalı...) korunur.
+// uid verilirse yalnızca o kullanıcıya ait oyuncular alınır (satılmış oyuncu kalmasın).
+function sahaSquadKur(kadro, havuz, eski, uid, diz){
+  kadro = kadro || {}; havuz = havuz || {};
+  var eskiler = sahaSquadTum(eski), stp = 0, noKul = {};
+  function giris(id, i){
+    var o = havuz[id]; if(!o || !o.ad) return null;
+    if(uid && o.sahip !== uid) return null;
+    var m = String(o.mevki||'').trim(), g = sahaMevkiGrup(m), pos;
+    if(m === 'STP' || m === 'STP1' || m === 'STP2') pos = (stp++ % 2 === 0) ? 'STP1' : 'STP2';
+    else if(SAHA_GECERLI_MEVKI.indexOf(m) >= 0) pos = m;
+    else pos = ['KL','STP1','OOS','SF'][g];
+    return { id:id, o:o, pos:pos, g:g, i:i };
+  }
+  var slot = diz && SAHA_SLOT[diz];
+  // ilk11 BOŞLUKLU olabilir ('' = boş yer, 2026-09-27-F): oyuncu kullanıcının koyduğu
+  // yerde kalır, yer bilgisi dizideki İNDİSTİR - boşluklar atlanırken indis korunur.
+  var ilk = [];
+  sahaDizi(kadro.ilk11).forEach(function(id, k){
+    var x = id ? giris(id, k) : null; if(!x) return;
+    if(slot && slot[k]){ x.pos = slot[k]; x.g = sahaMevkiGrup(slot[k]); x.yer = k; }
+    ilk.push(x);
+  });
+  if(slot){
+    // Sıra = saha yeri; mevki slottan gelir (bkz. SAHA_SLOT notu).
+  } else {
+    ilk.sort(function(a,b){ return (a.g - b.g) || (a.i - b.i); });
+  }
+  var yed = sahaDizi(kadro.yedek).map(giris).filter(Boolean);
+  function numara(pos){
+    var n = pos && SAHA_NO_TERCIH[pos];
+    if(n && !noKul[n]){ noKul[n] = 1; return n; }
+    n = 12; while(noKul[n]) n++; noKul[n] = 1; return n;
+  }
+  function cikti(x, yedekMi){
+    var ek = null;
+    for(var j=0;j<eskiler.length;j++){
+      var e = eskiler[j];
+      if(e.havuzId === x.id || (!e.yerTutucu && sahaAdAnahtar(e.name) === sahaAdAnahtar(x.o.ad))){ ek = e; break; }
+    }
+    var r = {};
+    if(ek){ Object.keys(ek).forEach(function(k){ if(ek[k] !== undefined && ek[k] !== null) r[k] = ek[k]; }); }
+    delete r.yerTutucu;
+    r.name = String(x.o.ad).trim();
+    r.number = String(numara(yedekMi ? null : x.pos));
+    r.position = x.pos;
+    r.havuzId = x.id;
+    // Sahadaki yer (0 kaleci, 1-10 diziliş sırası, soldan sağa) - puan tablosu oyuncuyu
+    // mevki koduna göre tahmin etmek yerine TAM bu yere çizer (2026-09-27-L).
+    if(!yedekMi && x.yer != null) r.yer = x.yer; else delete r.yer;
+    r.photo = x.o.foto || (ek && ek.photo) || '';
+    return r;
+  }
+  return { starting: ilk.map(function(x){ return cikti(x, false); }),
+           bench:    yed.map(function(x){ return cikti(x, true); }) };
+}
+// Kullanıcı kararı (2026-09-27-F): YALNIZCA bu beş diziliş.
+var SAHA_TABLO_DIZILIS = ['4-4-2','5-3-2','4-3-3','4-2-3-1','4-3-2-1'];
+/* DİZİLİŞ SLOTLARI (2026-09-27-E, sürükle-bırak kadro): kadro.ilk11 dizisinin SIRASI
+   artık sahadaki YERDİR - 0 kaleci, 1-10 saha.html DIZILISLER koordinatlarıyla aynı sıra
+   (defans soldan sağa, orta saha soldan sağa, forvet). Kullanıcı bir oyuncuyu sol beke
+   sürüklediyse puan tablosunda da sol bek (SLB) olarak görünür - oyuncunun kendi mevkisi
+   değil, OYNADIĞI YER yazılır. Kod sırası DIZILISLER ile birebir aynı olmalı. */
+// Kadronun hangi dizilişle yerleştiği: kayıttaki diziliş, geçersizse 4-4-2.
+// admin ve saha AYNI kuralı kullanmalı - farklı kural iki tarafın kadroyu sırayla
+// birbirinin üstüne yazması (sonsuz yazım döngüsü) demek.
+function sahaKayitDizilis(kayit){ var d = kayit && kayit.dizilis; return (d && SAHA_SLOT[d]) ? d : '4-4-2'; }
+var SAHA_SLOT = {
+  '4-4-2': ['KL','SLB','STP1','STP2','SĞB','SLK','DOS','OOS','SĞK','SF','GF'],
+  '4-3-3': ['KL','SLB','STP1','STP2','SĞB','OOS','DOS','OOS','GF','SF','GF'],
+  '5-3-2': ['KL','SLB','STP1','STP2','STP1','SĞB','OOS','DOS','OOS','SF','GF'],
+  '4-2-3-1': ['KL','SLB','STP1','STP2','SĞB','DOS','DOS','SLK','OOS','SĞK','SF'],
+  '4-3-2-1': ['KL','SLB','STP1','STP2','SĞB','OOS','DOS','OOS','SLK','SĞK','SF']
+};
+/* ══ /ortak blok ══ */
+/* CANLI SAHA KADROSU (2026-09-27-M, kullanıcı: "puan tablosu takım bölümündeki diziliş doğru
+   hesaplanmıyor")
+   KÖK SEBEP: Puan tablosu takımın kadrosunu YALNIZCA lig kaydından (teams/{id}/squad)
+   okuyordu. Bu kayıt SAHA'dan ya da yönetici panelinden yazıldığında güncelleniyor; SAHA'nın
+   yazımı veritabanı kuralına takılırsa ya da yönetici paneli açılmamışsa eski kalıyordu -
+   SAHA'da 4-3-3 kurulu takım puan tablosunda eski 4-4-2 kadrosuyla görünüyordu.
+   ÇÖZÜM: SAHA tarafında puan tablosu, takımın kullanıcısının kadrosunu ve dizilişini DOĞRUDAN
+   kaynaktan (kullanicilar + oyuncuHavuzu) okuyup SAHA ile aynı hesapla (sahaSquadKur) kurar.
+   Lig kaydı yalnızca kullanıcısı olmayan takımlar için kullanılır. */
+window._ptSahaHavuz=null; window._ptSahaKull=null; window._ptSahaCanliKuruldu=false;
+function ptSahaCanliUygula(){
+  try{
+    if(ptVeriKaynagi()!=='saha'||!window._ptSahaHavuz||!window._ptSahaKull||!D||!D.teams)return false;
+    const K=window._ptSahaKull, H=window._ptSahaHavuz;
+    let degisti=false;
+    Object.keys(K).forEach(uid=>{
+      const k=K[uid]; if(!k||!k.takimId||!k.kadro)return;
+      const t=D.teams[k.takimId]; if(!t)return;
+      const diz=sahaKayitDizilis(k);
+      const sq=sahaSquadKur(k.kadro,H,t._sahaSquadHam||t.squad,uid,diz);
+      if(!sq.starting.length)return;
+      if(!t._sahaSquadHam)t._sahaSquadHam=t.squad;          // durum rozetleri (sakat vb.) için ilk kayıt
+      const eskiImza=sahaKanonik(t.squad||{})+'|'+(t.formation||'');
+      t.squad=sq; t.formation=diz;
+      if(eskiImza!==sahaKanonik(sq)+'|'+diz)degisti=true;
+    });
+    return degisti;
+  }catch(e){ try{DiagSil('ptSahaCanliUygula',e);}catch(_e){} return false; }
+}
+function ptSahaCanliTazele(){
+  if(!ptSahaCanliUygula())return;
+  try{
+    const sw=document.getElementById('sheetWrap'), acik=sw&&sw.classList.contains('open');
+    if(acik&&_tdTid&&typeof renderTeamDetailContent==='function'){ _tdFormation=(D.teams[_tdTid]||{}).formation||_tdFormation; withHScrollPreserved(renderTeamDetailContent); }
+    else if(acik&&typeof _mdMatchId!=='undefined'&&_mdMatchId&&typeof renderMatchDetailContent==='function') renderMatchDetailContent();
+  }catch(e){}
+}
+function ptSahaCanliBaslat(){
+  if(window._ptSahaCanliKuruldu||ptVeriKaynagi()!=='saha')return;
+  window._ptSahaCanliKuruldu=true;
+  try{
+    firebase.database().ref('oyuncuHavuzu').on('value',sn=>{ window._ptSahaHavuz=sn.val()||{}; ptSahaCanliTazele(); },e=>DiagSil('ptSahaCanli:havuz',e));
+    firebase.database().ref('kullanicilar').on('value',sn=>{ window._ptSahaKull=sn.val()||{}; ptSahaCanliTazele(); },e=>DiagSil('ptSahaCanli:kullanicilar',e));
+  }catch(e){ window._ptSahaCanliKuruldu=false; }
+}
+
 /* SAHA DİZİLİŞ YERLERİ (2026-09-27-L, kullanıcı: "oyuncu sağ kanat olarak kayıtlı fakat
    sola taşınıyor; kullanıcı takım bölümünde kendi dizilişini uyguluyor fakat olmuyor")
    KÖK SEBEPLER:
@@ -17841,7 +18064,7 @@ function startTeamDetailDirectListener(tid){
   _teamDetailDirectListenerTid=tid;
   _teamDetailDirectListener=firebase.database().ref('leagues/'+_curLeagueId+'/teams/'+tid).on('value',function(snap){
     const freshTeam=snap.val();
-    if(freshTeam)D.teams[tid]=freshTeam;
+    if(freshTeam){ D.teams[tid]=freshTeam; try{ ptSahaCanliUygula(); }catch(e){} }
     if(_tdTid===tid)renderTeamDetailContent();
   });
 }
@@ -18459,8 +18682,10 @@ function renderTdSquad(tid,t){
 
   const formationBtns=Object.keys(FORMATIONS).map(fid=>
     `<button class="formation-btn${_tdFormation===fid?' active':''}" onclick="setFormation('${fid}')">${FORMATIONS[fid].label}</button>`
-  ).join('')+(ptVeriKaynagi()==='saha'
-    ?`<div style="width:100%;font-size:.62rem;color:var(--mu);margin-top:.3rem">${window._ptBenimSahaTakim===tid
+  ).join('');
+  // İpucu düğme satırının DIŞINDA (önceden aynı esnek satırdaydı ve düğmeleri dev boyuta şişiriyordu).
+  const formationHint=(ptVeriKaynagi()==='saha'
+    ?`<div style="font-size:.62rem;color:var(--mu);margin:-.35rem 0 .55rem">${window._ptBenimSahaTakim===tid
         ?'✅ Seçtiğin diziliş takımına kaydedilir (SAHA ve fikstür)'
         :'👁 Önizleme - takımın dizilişini yalnızca takımın kullanıcısı değiştirebilir'}${_tdFormation!==(t.formation||'4-4-2')?' · kayıtlı: <b>'+(t.formation||'4-4-2')+'</b>':''}</div>`
     :'');
@@ -18478,7 +18703,7 @@ function renderTdSquad(tid,t){
 
   const unassignedHtml=UNASSIGNED.length?`<div style="font-size:.68rem;color:var(--mu);margin:.5rem 0;padding:.5rem;background:var(--s2);border-radius:9px">⚠️ Pozisyonu atanmamış: ${UNASSIGNED.map(p=>p.name).join(', ')} (sahada gösterilemiyor)</div>`:'';
 
-  return `<div class="formation-picker">${formationBtns}</div>
+  return `<div class="formation-picker">${formationBtns}</div>${formationHint}
     <div class="pitch-wrap">
       <svg class="pitch-lines" viewBox="0 0 680 560" preserveAspectRatio="none">
         <rect x="8" y="8" width="664" height="544" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="2.5"/>
