@@ -2085,7 +2085,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-27-B';
+window.APP_BUILD='2026-09-27-C';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -7458,6 +7458,7 @@ function transferDinle(){
       transferTeshisCiz();
       havuzCiz();
       try{ ligOyunculariCiz(); }catch(e){}   // "mağazada" işaretleri güncel kalsın
+      try{ sahaKadrolariSenkronizeEt(); }catch(e){}
     }, function(err){
       _tDurum.havuz = 'REDDEDILDI';
       _tDurum.hata = (err && err.message) || 'okuma hatasi';
@@ -7475,6 +7476,7 @@ function transferDinle(){
       transferTeshisCiz();
       onayCiz();
       try{ if(typeof renderSaha==='function') renderSaha(); }catch(e){}
+      try{ sahaKadrolariSenkronizeEt(); }catch(e){}
     }, function(err){
       _tDurum.kullanici = 'REDDEDILDI';
       _tDurum.hata = (err && err.message) || 'okuma hatasi';
@@ -7855,9 +7857,59 @@ function sahaTakimAta(uid, takimId){
       window._takimSahipleriA = sn.val() || {};
       window._takimSahipleriYuklendi = true;
       try{ renderSahaAtama(); }catch(e){}
+      try{ sahaKadrolariSenkronizeEt(); }catch(e){}
     });
   }catch(e){ setTimeout(takimSahipleriDinleAdmin, 1500); }
 })();
+// ══════════════════════════════════════════════════════════════════════════════════════════
+// PUAN TABLOSU KADROSU = SAHA SAHİPLİK VERİSİ (KULLANICI TALEBİ): SAHA'da bir kullanıcıya
+// atanmış (takimSahipleri) takımların Puan Tablosu kadrosu artık statik/varsayılan liste
+// DEĞİL - o kullanıcının SAHA'da SAHİP OLDUĞU TÜM oyunculardan (oyuncuHavuzu/{id}/sahip)
+// CANLI olarak üretilir. Oyuncu satın alınınca (bir sonraki senkronda, admin paneli açıkken)
+// o takımın Puan Tablosu kadrosunda görünür; hiç oyuncusu yoksa kadro boş gösterilir.
+// Sahibi olmayan takımlara bu fonksiyon HİÇ dokunmaz, eski/statik kadrolarını korurlar.
+// GÜVENLİK: Üç veri kaynağı da (havuz/kullanicilar/takimSahipleri) en az bir kez GERÇEKTEN
+// gelmeden çalıştırılmaz - aksi halde ilk yüklemede henüz boş olan _havuz yüzünden gerçekte
+// dolu olan kadrolar yanlışlıkla boşaltılabilirdi.
+function sahaKadrolariSenkronizeEt(){
+  try{
+    if(!window.S || !S.teams || !_curLeagueId) return;
+    if(_tDurum.havuz==='-' || _tDurum.kullanici==='-' || !window._takimSahipleriYuklendi) return;
+    var sahipler = window._takimSahipleriA || {};
+    Object.keys(sahipler).forEach(function(tid){
+      var uid = sahipler[tid]; if(!uid) return;
+      var takim = S.teams[tid]; if(!takim) return;   // bu ligde yok - dokunma
+      var sahipOlduklari = Object.keys(_havuz||{}).filter(function(pid){
+        return _havuz[pid] && _havuz[pid].sahip === uid;
+      });
+      var kadro = (_kullanicilar[uid]||{}).kadro || {};
+      var sira = [].concat(kadro.ilk11||[], kadro.yedek||[]);
+      sahipOlduklari.sort(function(a,b){
+        var ia=sira.indexOf(a), ib=sira.indexOf(b);
+        if(ia<0) ia=999; if(ib<0) ib=999;
+        if(ia!==ib) return ia-ib;
+        return String((_havuz[a]||{}).ad||'').localeCompare(String((_havuz[b]||{}).ad||''),'tr');
+      });
+      // SAHA'da tek "STP" mevkisi var, Puan Tablosu iki stoperi (STP1/STP2) ayırıyor -
+      // sırayla ikisine bölüştürülür; grup mantığı (savunma) ikisini de aynı kabul ettiği
+      // için görsel etiket dışında bir etkisi yok.
+      var stpSayaci = 0;
+      var oyuncular = sahipOlduklari.map(function(pid, i){
+        var o = _havuz[pid] || {};
+        var mevki = o.mevki || 'SF';
+        if(mevki === 'STP'){ stpSayaci++; mevki = (stpSayaci % 2 === 1) ? 'STP1' : 'STP2'; }
+        return { name: o.ad || '', number: String(i+1), position: mevki, photo: o.foto || '' };
+      });
+      var starting = oyuncular.slice(0, 11);
+      while(starting.length < 11) starting.push({name:'', number:'', position:''});
+      var bench = oyuncular.slice(11);
+      var yeniKadro = { starting: starting, bench: bench };
+      if(JSON.stringify(takim.squad || {}) === JSON.stringify(yeniKadro)) return;   // değişiklik yok
+      firebase.database().ref('leagues/'+_curLeagueId+'/teams/'+tid+'/squad').set(yeniKadro)
+        .catch(function(e){ try{ DiagSil('sahaKadrolariSenkronizeEt', e, {takimId:tid}); }catch(_d){} });
+    });
+  }catch(e){ try{ DiagSil('sahaKadrolariSenkronizeEt', e); }catch(_d){} }
+}
 // İLK GİRİŞTE TAKIM SEÇİMİ ayarı (bkz. HTML'deki kart ve saha.html/takimSecimAyarDinle).
 window._sahaTakimSecimiAcikA = true;
 (function sahaTakimSecimiDinle(){
@@ -21724,6 +21776,7 @@ function listenToLeague(leagueId){
     if(!window._admSadeceCanli){
       try{renderTeams();}catch(errT){console.error('renderTeams hatası:',errT);}
       try{ ligOyunculariCiz(); }catch(e){}   // kadrolar değişince A-Z listesi tazelensin
+      try{ sahaKadrolariSenkronizeEt(); }catch(e){}   // lig değişince/yenilenince SAHA sahipli takımların kadrosu tazelensin
       try{updateLgLogo();}catch(errL){console.error('updateLgLogo hatası:',errL);}
       try{fillSelects();}catch(errF){console.error('fillSelects hatası:',errF);}
     }
