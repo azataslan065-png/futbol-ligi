@@ -2634,7 +2634,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-27-J';
+window.APP_BUILD='2026-09-27-L';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -13882,12 +13882,15 @@ function renderMdKadro(id,m,h,a){
       return {pitchHtml:'',benchHtml:'<div style="font-size:.7rem;color:var(--mu);text-align:center;padding:.5rem">Kadro girilmedi</div>',count:0};
     }
     const formationId=t.formation||'4-4-2';
-    const lineGroups=groupByLine(starting,formationId);
+    // Yer bilgisi varsa (SAHA kadrosu) oyuncular SAHA'daki yerlerine; yoksa mevki koduyla.
+    const yerHat=ptYerHatlari(starting,formationId);
+    const lineGroups=yerHat||groupByLine(starting,formationId).map(ptYanSirala);
     const totalLines=lineGroups.length;
-
+    // Takımın solu: alttaki/soldaki takım için ekranın solu (yatayda üstü); karşı yarıda aynalanır.
+    const aynala=(side==='top'||side==='right');
     lineGroups.forEach(group=>{
       const n=group.length;
-      group.forEach((p,i)=>{p._cross=n>0?((i+1)/(n+1))*100:50;}); // çizgi boyunca konum (dik: x ekseni, yatay: y ekseni)
+      group.forEach((p,i)=>{ if(!p)return; const k=aynala?(n-1-i):i; p._cross=n>0?((k+1)/(n+1))*100:50; });
     });
 
     function getLinePos(li,total){
@@ -13916,6 +13919,7 @@ function renderMdKadro(id,m,h,a){
     lineGroups.forEach((group,li)=>{
       const linePos=getLinePos(li,totalLines);
       group.forEach(p=>{
+        if(!p)return;                                       // boş yer (SAHA kadrosunda boşluk)
         const c=PC[p.position]||'#cbd5e1';
         const origIdx=startIdxMap.has(p)?startIdxMap.get(p):0;
         // Sahaya değişiklikle girmiş bir oyuncuya tıklanınca, çıkan oyuncunun eski yerine değil,
@@ -17769,6 +17773,50 @@ window.DeviceBack=(function(){
   setTimeout(lockBgLayerHeight,1500);
 })();
 
+
+/* SAHA DİZİLİŞ YERLERİ (2026-09-27-L, kullanıcı: "oyuncu sağ kanat olarak kayıtlı fakat
+   sola taşınıyor; kullanıcı takım bölümünde kendi dizilişini uyguluyor fakat olmuyor")
+   KÖK SEBEPLER:
+   1) Saha çizimi oyuncuları yalnızca mevki koduna göre hatlara ayırıp hat içinde KADRO
+      SIRASIYLA soldan sağa diziyordu: sağ kanat (SĞK) listede önce geliyorsa sola düşüyordu;
+      üstteki (rakip) yarıda ise takımın sağı ekranın soluna düşmesi gerekirken hiç
+      aynalanmıyordu.
+   2) SAHA kadrolarında oyuncunun sahadaki YERİ belli (0 kaleci, 1-10 diziliş sırası) ama
+      çizim bunu kullanmıyor, kodlardan tahmin ediyordu.
+   ÇÖZÜM: Kadro kaydında 'yer' varsa oyuncu tam o yere (SAHA uygulamasındaki sahayla aynı
+   hat ve sıra) çizilir; yoksa hat içinde mevkinin sol/sağ bilgisine göre sıralanır.
+   Rakip yarı sahada sıra aynalanır. SAHA_HATLAR ve PT_SAHA_SLOT, saha.html'deki
+   DIZILISLER/SAHA_SLOT ile birebir aynı sırada olmalı. */
+const PT_SAHA_HATLAR={
+  '4-4-2':[[0],[1,2,3,4],[5,6,7,8],[9,10]],
+  '4-3-3':[[0],[1,2,3,4],[5,6,7],[8,9,10]],
+  '5-3-2':[[0],[1,2,3,4,5],[6,7,8],[9,10]],
+  '4-2-3-1':[[0],[1,2,3,4],[5,6],[7,8,9],[10]],
+  '4-3-2-1':[[0],[1,2,3,4],[5,6,7],[8,9],[10]]
+};
+const PT_SAHA_SLOT={
+  '4-4-2':['KL','SLB','STP1','STP2','SĞB','SLK','DOS','OOS','SĞK','SF','GF'],
+  '4-3-3':['KL','SLB','STP1','STP2','SĞB','OOS','DOS','OOS','GF','SF','GF'],
+  '5-3-2':['KL','SLB','STP1','STP2','STP1','SĞB','OOS','DOS','OOS','SF','GF'],
+  '4-2-3-1':['KL','SLB','STP1','STP2','SĞB','DOS','DOS','SLK','OOS','SĞK','SF'],
+  '4-3-2-1':['KL','SLB','STP1','STP2','SĞB','OOS','DOS','OOS','SLK','SĞK','SF']
+};
+// Yer bilgisiyle hatlar (her hatta sabit sayıda KONUM; boş yerler null). Uygun değilse null.
+function ptYerHatlari(starting,formationId){
+  const hat=PT_SAHA_HATLAR[formationId];
+  if(!hat||!starting.length||!starting.every(p=>p&&p.yer!=null))return null;
+  const byYer={};starting.forEach(p=>{byYer[p.yer]=p;});
+  return hat.map(h=>h.map(y=>byYer[y]||null));
+}
+// Hat içi soldan sağa sıra (takımın kendi bakışıyla): sol bek/kanat solda, sağ bek/kanat sağda.
+const PT_YAN_SIRA={SLB:0,SLK:0,STP1:1,STP2:3,SĞB:4,SĞK:4};
+function ptYanSirala(grup){
+  return grup.map((p,i)=>({p,i})).sort((a,b)=>{
+    const ra=PT_YAN_SIRA[a.p.position], rb=PT_YAN_SIRA[b.p.position];
+    return ((ra==null?2:ra)-(rb==null?2:rb))||(a.i-b.i);
+  }).map(x=>x.p);
+}
+
 // TEAM DETAIL
 let _tdTab='info',_tdTid='',_tdFormation='';
 const FORMATIONS={
@@ -17810,7 +17858,10 @@ window.showTeamDetail=function(tid){
   // takım ekranının üzerine o maçın skorunu yazabiliyordu (kesin kanıtlanmış kök sebep).
   _mdMatchId='';
   const t=D.teams[tid];if(!t)return;
-  if(!_tdFormation)_tdFormation=t.formation||'4-4-2';
+  // Her takım KENDİ kayıtlı dizilişiyle açılır. Önceden _tdFormation yalnızca boşken
+  // atanıyordu: bir takımda seçilen diziliş diğer bütün takımlarda da görünüyordu.
+  _tdFormation=(FORMATIONS[t.formation]?t.formation:'4-4-2');
+  try{ ptSahaTakimimOku().then(()=>{ if(_tdTid===tid) withHScrollPreserved(renderTeamDetailContent); }); }catch(e){}
   renderTeamDetailContent();
   if(window.PTSheetNav)PTSheetNav.mark('sheet@9778');
   document.getElementById('sheetWrap').classList.add('open');
@@ -18354,7 +18405,8 @@ function renderTdSquad(tid,t){
     return groups.filter(g=>g.length>0); // [GK, DEF, MID(s), FWD] -> y ekseninde aşağıdan yukarıya sıralı
   }
 
-  const lineGroups=placePlayersOnLines();
+  // SAHA kadrosunda oyuncunun yeri belli: SAHA'daki sahayla aynı hat ve sıra (bkz. PT_SAHA_HATLAR).
+  const lineGroups=ptYerHatlari(starting,_tdFormation)||placePlayersOnLines().map(ptYanSirala);
   const totalLines=lineGroups.length;
 
   function playerDot(p,xPct,yPct,idx){
@@ -18374,7 +18426,7 @@ function renderTdSquad(tid,t){
   // Her satırdaki oyuncuları x ekseninde eşit dağıt
   lineGroups.forEach(group=>{
     const n=group.length;
-    group.forEach((p,i)=>{p._x=n>0?((i+1)/(n+1))*100:50;});
+    group.forEach((p,i)=>{ if(p) p._x=n>0?((i+1)/(n+1))*100:50; });
   });
 
   // Y pozisyonları: kaleci sahanın en altında (94%), forvet en üstte (rakip kaleye yakın, 10%)
@@ -18399,6 +18451,7 @@ function renderTdSquad(tid,t){
   lineGroups.forEach((group,li)=>{
     const y=yPositions[li]!=null?yPositions[li]:50;
     group.forEach(p=>{
+      if(!p)return;                                         // boş yer
       const origIdx=startingIdxMap.has(p)?startingIdxMap.get(p):0;
       pitchHtml+=playerDot(p,p._x,y,origIdx);
     });
@@ -18406,7 +18459,11 @@ function renderTdSquad(tid,t){
 
   const formationBtns=Object.keys(FORMATIONS).map(fid=>
     `<button class="formation-btn${_tdFormation===fid?' active':''}" onclick="setFormation('${fid}')">${FORMATIONS[fid].label}</button>`
-  ).join('');
+  ).join('')+(ptVeriKaynagi()==='saha'
+    ?`<div style="width:100%;font-size:.62rem;color:var(--mu);margin-top:.3rem">${window._ptBenimSahaTakim===tid
+        ?'✅ Seçtiğin diziliş takımına kaydedilir (SAHA ve fikstür)'
+        :'👁 Önizleme - takımın dizilişini yalnızca takımın kullanıcısı değiştirebilir'}${_tdFormation!==(t.formation||'4-4-2')?' · kayıtlı: <b>'+(t.formation||'4-4-2')+'</b>':''}</div>`
+    :'');
 
   const benchHtml=bench.length?bench.map(p=>{
     const c=PC[p.position]||'var(--br)';
@@ -18597,7 +18654,34 @@ window.showPlayerDetail=function(teamId,section,idx){
 window.setFormation=function(fid){
   _tdFormation=fid;
   withHScrollPreserved(renderTeamDetailContent);
+  // SAHA tarafında takımın KENDİ kullanıcısı dizilişi seçerse kalıcı kaydedilir (2026-09-27-L).
+  // Önceden bu düğmeler yalnızca ekrandaki görünümü değiştiriyordu - hiçbir yere yazılmıyor,
+  // kullanıcı "uyguladım ama olmadı" diyordu. Kayıt kullanıcının SAHA hesabına (dizilis) ve
+  // takımın puan tablosu kaydına (formation + kadro yerleri) gider; SAHA aynı değeri okur.
+  try{ ptSahaDizilisKaydet(_tdTid, fid); }catch(e){ DiagSil('setFormation:kaydet', e); }
 };
+function ptSahaTakimimOku(){
+  if(ptVeriKaynagi()!=='saha'||!_curVisitorId)return Promise.resolve(null);
+  return firebase.database().ref('kullanicilar/'+_curVisitorId+'/takimId').once('value')
+    .then(sn=>{ window._ptBenimSahaTakim=sn.val()||null; return window._ptBenimSahaTakim; })
+    .catch(()=>null);
+}
+function ptSahaDizilisKaydet(tid, fid){
+  if(ptVeriKaynagi()!=='saha'||!PT_SAHA_SLOT[fid])return;
+  ptSahaTakimimOku().then(benim=>{
+    if(!benim||benim!==tid)return;                           // başkasının takımı: yalnızca önizleme
+    const t=D.teams[tid]||{}, sq=t.squad||{}, slot=PT_SAHA_SLOT[fid];
+    // Kadro yerleri korunur, mevkiler yeni dizilişin yerlerinden gelir (SAHA ile aynı kural).
+    const starting=(sq.starting||[]).map(p=>(p&&p.yer!=null&&slot[p.yer])?Object.assign({},p,{position:slot[p.yer]}):p);
+    const g={};
+    g['kullanicilar/'+_curVisitorId+'/dizilis']=fid;
+    g['leagues/'+_curLeagueId+'/teams/'+tid+'/formation']=fid;
+    g['leagues/'+_curLeagueId+'/teams/'+tid+'/squad/starting']=starting;
+    firebase.database().ref().update(g)
+      .then(()=>{ t.formation=fid; if(t.squad)t.squad.starting=starting; showToast('✅ Diziliş kaydedildi: '+fid); withHScrollPreserved(renderTeamDetailContent); })
+      .catch(e=>{ showToast('❌ Diziliş kaydedilemedi'); DiagSil('ptSahaDizilisKaydet', e); });
+  });
+}
 
 // SHARE
 window.shareMatch=function(id){

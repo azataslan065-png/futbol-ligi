@@ -2122,7 +2122,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-27-J';
+window.APP_BUILD='2026-09-27-L';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -7245,7 +7245,15 @@ function openKadro(tid){
   function makeFormationSection(){
     var curFormation=t.formation||'4-4-2';
     var starting=sq.starting.filter(function(p){return p&&p.name;});
-    var lineGroups=groupByLineAdmin(starting,curFormation);
+    // Hat içinde soldan sağa: sol bek/kanat solda, sağ bek/kanat sağda (2026-09-27-L) - önceden
+    // kadro sırasıyla diziliyordu, sağ kanat listede önceyse sola düşüyordu.
+    var _YAN={SLB:0,SLK:0,STP1:1,STP2:3,'SĞB':4,'SĞK':4};
+    var lineGroups=groupByLineAdmin(starting,curFormation).map(function(gr){
+      return gr.map(function(p,i){ return {p:p,i:i}; }).sort(function(a,b){
+        var ra=_YAN[a.p.position], rb=_YAN[b.p.position];
+        return ((ra==null?2:ra)-(rb==null?2:rb)) || (a.i-b.i);
+      }).map(function(x){ return x.p; });
+    });
     var totalLines=Math.max(lineGroups.length,1);
     var pitchH=Math.max(560,totalLines*150);
     var pitchHtml='';
@@ -7677,7 +7685,7 @@ function sahaSquadKur(kadro, havuz, eski, uid, diz){
   var ilk = [];
   sahaDizi(kadro.ilk11).forEach(function(id, k){
     var x = id ? giris(id, k) : null; if(!x) return;
-    if(slot && slot[k]){ x.pos = slot[k]; x.g = sahaMevkiGrup(slot[k]); }
+    if(slot && slot[k]){ x.pos = slot[k]; x.g = sahaMevkiGrup(slot[k]); x.yer = k; }
     ilk.push(x);
   });
   if(slot){
@@ -7704,6 +7712,9 @@ function sahaSquadKur(kadro, havuz, eski, uid, diz){
     r.number = String(numara(yedekMi ? null : x.pos));
     r.position = x.pos;
     r.havuzId = x.id;
+    // Sahadaki yer (0 kaleci, 1-10 diziliş sırası, soldan sağa) - puan tablosu oyuncuyu
+    // mevki koduna göre tahmin etmek yerine TAM bu yere çizer (2026-09-27-L).
+    if(!yedekMi && x.yer != null) r.yer = x.yer; else delete r.yer;
     r.photo = x.o.foto || (ek && ek.photo) || '';
     return r;
   }
@@ -8374,6 +8385,72 @@ function slTopluIslem(islem){
       .catch(function(e){ toast('❌ Yazılamadı: ' + ((e&&e.message)||''),'er'); });
   });
 }
+/* ESKİ (KAYITLI OLMAYAN) HESAPLAR (2026-09-27-K, kullanıcı: "kayıtlı olmayan oyuncular için
+   sil ve ekle"): SAHA hesabı artık isimden türetilen 'v_…' anahtarını kullanıyor; eski
+   sürümlerden kalan anonim kimlikli kayıtlar SAHA'da hiç okunmuyor. Bu kayda gönderilen para
+   ve satın alınmış oyuncular kullanıcıya ulaşmıyordu.
+   · "Asıl kayda ekle ve sil": aynı isimli 'v_…' kaydı bulunur; eski kaydın parası ona
+     EKLENİR, satın alınmış oyuncuları ona geçer (kadro dışı olarak), eski başlangıç kadrosu
+     ve eski kayıt silinir, takım kilidi asıl kayda devredilir.
+   · "Sil": eski kayıt ve başlangıç kadrosu silinir; satın alınmış oyuncular mağazaya
+     (satışa kapalı) döner - yönetici isterse yeniden satışa açar. */
+function _eskiKayitHedef(uid){
+  var ad = String(((_kullanicilar||{})[uid]||{}).ad||'').toLocaleLowerCase('tr');
+  var aday = Object.keys(_kullanicilar||{}).filter(function(u){
+    return u !== uid && u.indexOf('v_') === 0 && String((_kullanicilar[u]||{}).ad||'').toLocaleLowerCase('tr') === ad;
+  });
+  return aday.length === 1 ? aday[0] : null;
+}
+function _eskiKayitTemizlikYazimi(uid, hedef){
+  var g = {}, tasinan = 0, silinen = 0;
+  Object.keys(_havuz||{}).forEach(function(id){
+    var o = _havuz[id]; if(!o || o.sahip !== uid) return;
+    if(o.baslangic){ g['oyuncuHavuzu/'+id] = null; silinen++; }
+    else if(hedef){ g['oyuncuHavuzu/'+id+'/sahip'] = hedef; tasinan++; }
+    else { g['oyuncuHavuzu/'+id+'/sahip'] = null; g['oyuncuHavuzu/'+id+'/satista'] = false; tasinan++; }
+  });
+  Object.keys(_takimSahipleriA||{}).forEach(function(t){
+    if(_takimSahipleriA[t] !== uid) return;
+    var hedefTakim = hedef && (_kullanicilar[hedef]||{}).takimId;
+    g['takimSahipleri/'+t] = (hedef && (!hedefTakim || hedefTakim === t)) ? hedef : null;
+    if(hedef && !hedefTakim) g['kullanicilar/'+hedef+'/takimId'] = t;
+  });
+  g['kullanicilar/'+uid] = null;
+  return { g:g, tasinan:tasinan, silinen:silinen };
+}
+function eskiKayitAktar(uid){
+  var k = (_kullanicilar||{})[uid]; if(!k) return;
+  var hedef = _eskiKayitHedef(uid);
+  if(!hedef){ toast('❌ "' + (k.ad||'') + '" adına tek bir SAHA kaydı bulunamadı - önce kullanıcı SAHA\'ya girmeli','er'); return; }
+  var para = Math.max(0, Number(k.para)||0), hk = _kullanicilar[hedef] || {};
+  var yeniPara = Math.max(0, Number(hk.para)||0) + para;
+  ptOnay('<b>' + escHtml(k.ad||'') + '</b> eski kaydı asıl kayda eklenip silinecek.<br><br>'
+    + '• ' + para + ' SL asıl kasaya eklenir (' + (Number(hk.para)||0) + ' → ' + yeniPara + ' SL)<br>'
+    + '• Satın alınmış oyuncuları asıl kayda geçer, eski başlangıç kadrosu silinir.',
+    {baslik:'Asıl Kayda Ekle', ikon:'🔀', tamamYazi:'Ekle ve sil'}).then(function(ok){
+    if(!ok) return;
+    var t = _eskiKayitTemizlikYazimi(uid, hedef);
+    t.g['kullanicilar/'+hedef+'/para'] = yeniPara;
+    firebase.database().ref().update(t.g)
+      .then(function(){
+        toast('🔀 Eklendi: +' + para + ' SL · ' + t.tasinan + ' oyuncu taşındı · eski kayıt silindi');
+        logAction('🔀 Eski SAHA kaydı birleştirildi: ' + (k.ad||uid) + ' (+' + para + ' SL, ' + t.tasinan + ' oyuncu)');
+      })
+      .catch(function(e){ toast('❌ İşlem başarısız: ' + ((e&&e.message)||''),'er'); });
+  });
+}
+function eskiKayitSil(uid){
+  var k = (_kullanicilar||{})[uid]; if(!k) return;
+  ptOnay('<b>' + escHtml(k.ad||'') + '</b> eski kaydı silinsin mi?<br><br>'
+    + 'Kasasındaki ' + (Math.max(0, Number(k.para)||0)) + ' SL kaybolur; satın alınmış oyuncuları mağazaya (satışa kapalı) döner, başlangıç kadrosu silinir.',
+    {baslik:'Eski Kaydı Sil', ikon:'🗑', tehlikeli:true, tamamYazi:'Sil'}).then(function(ok){
+    if(!ok) return;
+    var t = _eskiKayitTemizlikYazimi(uid, null);
+    firebase.database().ref().update(t.g)
+      .then(function(){ toast('🗑 Eski kayıt silindi'); logAction('🗑 Eski SAHA kaydı silindi: ' + (k.ad||uid)); })
+      .catch(function(e){ toast('❌ Silinemedi: ' + ((e&&e.message)||''),'er'); });
+  });
+}
 function slListeCiz(){
   var kutu = qs('slListe'); if(!kutu) return;
   var uidler = Object.keys(_kullanicilar || {});
@@ -8404,6 +8481,12 @@ function slListeCiz(){
         + (k.durum==='onayli' ? '' : ' · onay bekliyor') + '</span>'
         + ((cift || eskiAnahtar) ? '<div style="font-size:.6rem;color:#d97706">⚠️ ' + (eskiAnahtar ? 'eski kayıt - SAHA bu kaydı kullanmıyor' : 'aynı isimde başka kayıt var')
             + ' <span style="opacity:.7">(' + escHtml(uid) + ')</span></div>' : '')
+        + (eskiAnahtar
+            ? '<div style="display:flex;gap:.3rem;margin-top:.3rem;flex-wrap:wrap">'
+              + '<button class="btn bp" style="font-size:.62rem" onclick="eskiKayitAktar(\''+uid+'\')">🔀 Asıl kayda ekle ve sil</button>'
+              + '<button class="btn" style="font-size:.62rem;background:rgba(239,68,68,.15);color:#dc2626;border:1px solid rgba(239,68,68,.45)" onclick="eskiKayitSil(\''+uid+'\')">🗑 Sil</button>'
+              + '</div>'
+            : '')
         + '</div>'
         + '<button class="btn bp" style="min-height:32px;padding:.3rem .55rem;font-size:.68rem" onclick="slTekliIslem(\''+uid+'\',\'ekle\')">➕</button>'
         + '<button class="btn bgh" style="min-height:32px;padding:.3rem .55rem;font-size:.68rem" onclick="slTekliIslem(\''+uid+'\',\'dus\')">➖</button>'
