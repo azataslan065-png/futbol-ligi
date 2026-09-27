@@ -2157,6 +2157,7 @@ function _sahaFiksturDinle(){
   fbDb.ref('leagues/'+sahaLigId+'/teams').on('value', function(sn){
     sahaLigTakimlar = sn.val() || {};
     maclarCiz();
+    sahaKadroTabloyaYazZamanla();
     try{ takimSecimKontrol(); takimSecimCiz(); hesapDurumCiz(); }catch(e){_sessiz(e,'_sahaFiksturDinle:1775','saha_ag');}
   }, function(err){ DiagSaha('fiksturTakimOkuma', err, { anlami:'Lig takımları okunamadı; takım seçimi ve maçlar açılmaz.' }); });
   fbDb.ref('leagues/'+sahaLigId+'/matches').on('value', function(sn){
@@ -2234,6 +2235,7 @@ function hesabiDinle(){
   fbDb.ref('kullanicilar/'+benimUid).on('value', function(sn){
     benimKayit = sn.val();
     _benimKayitYuklendi = true;
+    sahaKadroTabloyaYazZamanla();
     hesapDurumCiz(); magazaCiz(); maclarCiz();
     try{ menuGoster(); }catch(e){_sessiz(e,'hesabiDinle:1803','saha_ag');}
     try{ takimSecimKontrol(); }catch(e){_sessiz(e,'hesabiDinle:1804','saha_ag');}
@@ -2251,6 +2253,7 @@ function hesabiDinle(){
   fbDb.ref('oyuncuHavuzu').on('value', function(sn){
     magazaHavuz = sn.val() || {};
     fbDurum = 'bagli';
+    sahaKadroTabloyaYazZamanla();
     try{ console.log('[saha] havuz okundu:', Object.keys(magazaHavuz).length, 'kayit'); }catch(e){_sessiz(e,'hesabiDinle:1819','saha_ag');}
     magazaCiz();
   }, function(err){
@@ -3979,23 +3982,77 @@ function _odaLobiHtml(){
    kodu ve rengi yöneticinin lig takımından gelir. Kullanıcıdan ikinci kez ad/renk
    istemek, zaten seçtiği takımın bilgisini tekrar yazdırmak olurdu.
    ══════════════════════════════════════════════════════════════════════════════════ */
+/* SAHA KADROSU → PUAN TABLOSU (2026-09-27-C)
+   Kullanıcının kadrosu değiştikçe (satın alma, satış, ilk 11/yedek değişikliği, diziliş)
+   takımının puan tablosundaki kadrosu da ANINDA aynı olur. Yönetici paneli de aynı işi
+   yapar (bkz. admin sahaKadroEsitle); ikisinden hangisi önce çalışırsa sonuç aynıdır. */
+var _sahaSonSquadYazim = '', _sahaKadroYazT = null, _sahaKadroYazHataLog = false;
+function sahaKadroTabloyaYazZamanla(){
+  try{ clearTimeout(_sahaKadroYazT); _sahaKadroYazT = setTimeout(sahaKadroTabloyaYaz, 1200); }catch(e){}
+}
+function sahaKadroTabloyaYaz(){
+  try{
+    if(!fbHazir || !fbDb || !sahaLigId || !benimUid || !kayitliMi()) return;
+    var tid = benimKayit.takimId; if(!tid) return;
+    var t = sahaLigTakimlar[tid]; if(!t) return;
+    var kd = benimKayit.kadro || {};
+    if(!sahaDizi(kd.ilk11).length || !Object.keys(magazaHavuz || {}).length) return;
+    var sq = sahaSquadKur(kd, magazaHavuz, t.squad, benimUid);
+    if(!sq.starting.length) return;
+    var diz = (SAHA_TABLO_DIZILIS.indexOf(benimKayit.dizilis) >= 0) ? benimKayit.dizilis : null;
+    var yeni = sahaKanonik(sq) + '|' + (diz || '');
+    var mevcut = sahaKanonik(t.squad || {}) + '|' + (diz ? (t.formation || '') : '');
+    if(t.squadKaynak === 'saha' && yeni === mevcut) return;
+    if(yeni === _sahaSonSquadYazim) return;
+    _sahaSonSquadYazim = yeni;
+    var kok = 'leagues/' + sahaLigId + '/teams/' + tid + '/', g = {};
+    g[kok + 'squad'] = sq;
+    g[kok + 'squadKaynak'] = 'saha';
+    // Gerçek kadro bir kez arşivlenir - yönetici oradan mağazaya sunar.
+    if(t.squadKaynak !== 'saha' && !t.squadGercek && sahaSquadTum(t.squad).length) g[kok + 'squadGercek'] = t.squad;
+    if(diz) g[kok + 'formation'] = diz;
+    fbDb.ref().update(g).catch(function(err){
+      _sahaSonSquadYazim = '';
+      if(_sahaKadroYazHataLog) return;
+      _sahaKadroYazHataLog = true;
+      DiagSaha('kadroTabloyaYaz', err, { takimId: tid,
+        anlami: 'SAHA kadrosu puan tablosuna yazılamadı; yönetici paneli açılınca eşitlenir.',
+        oneri: 'sahaVeri/leagues/{lig}/teams yazma kuralını denetleyin.' });
+    });
+  }catch(e){ _sessiz(e, 'sahaKadroTabloyaYaz', 'saha_ag'); }
+}
 function hesapKur(takimId){
   if(!fbHazir || !benimUid){ mesaj('', 'Bağlantı yok', 1600); return Promise.resolve(); }
   var t = sahaLigTakimlar[takimId] || {};
   var ad = String(t.name || 'Takım');
   var kod = String(t.short || ad.replace(/[^A-Za-zÇĞİÖŞÜçğıöşü]/g,'').slice(0,3) || 'TKM').toLocaleUpperCase('tr').slice(0,4);
-  var kadro = KADROLAR[kod] || [];
-  var yedekAdlar = KADROLAR['ŞMŞ'] || [];
+  /* 2026-09-27-C: İsimler artık sabit KADROLAR listesinden DEĞİL, takımın puan
+     tablosundaki SAHA kadrosundan (yer tutucu oyuncular) alınır - kullanıcının "Kadrom"u
+     ile puan tablosu birebir aynı olsun. Takım henüz eşitlenmemişse (yönetici paneli
+     açılmadıysa) ligde benzersiz yeni isimler üretilir; KADROLAR'daki sabit isimler farklı
+     takımlarda aynı oyuncuları doğuruyordu. Bkz. SAHA KADRO EŞİTLEME notu. */
+  var sablon = null;
+  if(t.squadKaynak === 'saha' && sahaYerTutucuMu(t.squad)){
+    var sq0 = t.squad || {};
+    sablon = sahaDizi(sq0.starting).concat(sahaDizi(sq0.bench)).filter(function(p){ return p && p.name; });
+  }
+  if(!sablon || sablon.length < 11){
+    var sq1 = sahaSablonKadro(sahaKullanilanAdlar(sahaLigTakimlar, magazaHavuz), takimId);
+    sablon = sq1.starting.concat(sq1.bench);
+  }
   var guncel = {}, yeni = [];
   // 11 ilk 11 + 7 yedek = 18 kisilik baslangic kadrosu. Guc 30-40 (kullanici karari),
   // hepsi baslangic:true - satilinca gelir getirmez.
   for(var i=0; i<18; i++){
-    var oad = kadro[i] || yedekAdlar[i] || ('Oyuncu ' + (i+1));
+    var sb = sablon[i] || null;
+    var oad = (sb && sb.name) || ('Oyuncu ' + (i+1));
+    var omevki = sb ? String(sb.position || '').replace(/[0-9]/g,'') : '';
+    if(!omevki) omevki = (i===0?'KL':(i<5?'STP':(i<9?'OOS':'SF')));
     var guc = 30 + Math.floor(Math.random()*11);
     var c = 0.80 + (guc/99)*0.45;
     var ref = fbDb.ref('oyuncuHavuzu').push();
     guncel['oyuncuHavuzu/'+ref.key] = {
-      ad: oad, mevki: (i===0?'KL':(i<5?'STP':(i<9?'OOS':'SF'))), guc: guc,
+      ad: oad, mevki: omevki, guc: guc,
       hiz: Math.round(c*100)/100, sut: Math.round(c*100)/100, pas: Math.round(c*100)/100,
       sahip: benimUid, baslangic: true, alisFiyat: 0,
       satista: false, fiyat: 0, macSayisi: 0, puanToplam: 0
@@ -4390,7 +4447,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-27-B';
+window.APP_BUILD = '2026-09-27-C';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -4491,6 +4548,150 @@ function bekleyenKartlariGoster(){
   liste.forEach(k => { try{ if (k.p && !k.p.dis) kartVer(k.p, k.agir); }catch(e){_sessiz(e,'bekleyenKartlariGoster:2808','saha_oyun');} });
 }
 
+/* ══ SAHA KADRO EŞİTLEME (2026-09-27-C) ════════════════════════════════════════════════
+   KULLANICI TALEBİ: "Puan tablosundaki SAHA tarafı için tüm oyuncuları SAHA uygulamasındaki
+   oyuncularla aynı yap; admin gerçek oyuncuları satışa koyduğunda satın alındıktan sonra
+   kadrolarında görünecek; şimdilik onların yerine farklı oyuncular koy."
+   KÖK SEBEP: İki ayrı oyuncu listesi vardı. Puan tablosu (sahaVeri/leagues/../teams/../squad)
+   yöneticinin girdiği GERÇEK kadroyu, SAHA ise kullanıcının oyuncuHavuzu'ndaki kadrosunu
+   gösteriyordu; fikstür maçında sahaya gerçek isimler çıkıyor, "Kadrom" başka isimler
+   gösteriyordu. Ayrıca başlangıç kadroları sabit bir listeden üretildiği için farklı
+   takımlarda AYNI isimler oluşabiliyordu (gol kralı ada göre eşleştiği için karışırdı).
+   ÇÖZÜM: SAHA tarafında takımın squad'ı = SAHA kadrosu (tek kaynak).
+     · Sahibi olan takım : kullanıcının ilk 11 + yedekleri (havuzId ile bağlı).
+     · Sahipsiz takım    : takıma özel, ligde benzersiz yer tutucu oyuncular (yerTutucu:true).
+       Kullanıcı o takımı seçince başlangıç kadrosu BU isimlerle kurulur - iki taraf aynı kalır.
+     · Gerçek kadro silinmez: 'squadGercek' alanına bir kez arşivlenir; yönetici
+       "Lig Oyuncuları (A–Z)" listesinden satışa sunar, satın alan kullanıcının kadrosunda
+       (dolayısıyla puan tablosunda) görünür.
+   Bu blok admin.html ve saha.html'de BİREBİR aynıdır - biri değişirse diğeri de değişmeli. */
+var SAHA_AD_ON = ['Ahmet','Ali','Alp','Aras','Atakan','Aykut','Batuhan','Berat','Berkay','Bora',
+  'Burak','Can','Caner','Cengiz','Cihan','Çağan','Doğukan','Egemen','Emirhan','Enes','Erdem','Erkan',
+  'Ersin','Eymen','Fatih','Ferhat','Gökay','Gökhan','Güney','Hakan','Halit','Harun','İlker','İsmail',
+  'Kaan','Kayra','Kemal','Koray','Kutay','Mert','Metin','Mirza','Nazım','Necati','Oğuz','Orhan',
+  'Osman','Özgür','Rıza','Samet','Sefa','Selçuk','Semih','Serdar','Taha','Talha','Taner','Tayfun',
+  'Tuna','Tuğra','Uğur','Utku','Vedat','Yağız','Yasin','Yavuz','Zafer','Ziya','Oktay','Arda'];
+var SAHA_AD_SOY = ['Akbaş','Akgül','Aktaş','Alkan','Altun','Avcı','Aydemir','Bayram','Bektaş',
+  'Bozkurt','Coşkun','Çakmak','Çınar','Demirci','Dinç','Duman','Durmaz','Ekinci','Eroğlu','Genç',
+  'Gündoğdu','Güler','Gürbüz','Işıkçı','İnce','Kahraman','Karaca','Karakaya','Kartal','Kavak',
+  'Keskin','Kılınç','Kocabaş','Korkut','Kurtoğlu','Oral','Orhon','Özbek','Özdemir','Özkan','Öztaş',
+  'Parlak','Sağlam','Sarıkaya','Sevim','Soydan','Sönmez','Şahinler','Taşkın','Tekin','Temiz',
+  'Toprakçı','Tosun','Uysal','Varol','Yalın','Yaman','Yavuzer','Yener','Yıldırım','Yurt','Zengin',
+  'Akyol','Ateşoğlu','Balcı','Cömert','Dalkılıç','Erbil','Gezer','Kalkan'];
+var SAHA_SABLON_MEVKI = ['KL','SĞB','STP1','STP2','SLB','SĞK','DOS','OOS','SLK','GF','SF',
+                         'KL','STP1','SĞB','DOS','OOS','SĞK','SF'];
+var SAHA_SABLON_NO    = [1,2,4,5,3,7,6,8,11,10,9,12,13,14,15,16,17,18];
+var SAHA_NO_TERCIH = {'KL':1,'SĞB':2,'SLB':3,'STP1':4,'STP2':5,'DOS':6,'SĞK':7,'OOS':8,'GÖ':8,'SF':9,'GF':10,'SLK':11};
+var SAHA_GECERLI_MEVKI = ['KL','SĞB','SLB','STP1','STP2','GÖ','DOS','OOS','SĞK','SLK','SF','GF'];
+function sahaAdAnahtar(ad){ return String(ad||'').trim().toLocaleLowerCase('tr'); }
+// Anahtarları sıralı JSON - Firebase nesneleri alfabetik sırayla döndürdüğü için düz
+// JSON.stringify "aynı kadro"yu farklı sanıp her seferinde yeniden yazardı.
+function sahaKanonik(v){
+  if(v === undefined || v === null) return 'null';
+  if(Array.isArray(v)) return '[' + v.map(sahaKanonik).join(',') + ']';
+  if(typeof v === 'object'){
+    return '{' + Object.keys(v).sort().filter(function(k){ return v[k] !== undefined && v[k] !== null && v[k] !== ''; })
+      .map(function(k){ return JSON.stringify(k) + ':' + sahaKanonik(v[k]); }).join(',') + '}';
+  }
+  return JSON.stringify(v);
+}
+function sahaDizi(v){ return Array.isArray(v) ? v : (v && typeof v === 'object' ? Object.keys(v).map(function(k){ return v[k]; }) : []); }
+function sahaSquadTum(sq){ sq = sq || {}; return sahaDizi(sq.starting).concat(sahaDizi(sq.bench)).filter(function(p){ return p && p.name; }); }
+// Ligde kullanılan bütün isimler: kadrolar, arşivlenmiş gerçek kadrolar ve havuz.
+function sahaKullanilanAdlar(takimlar, havuz){
+  var k = {};
+  Object.keys(takimlar || {}).forEach(function(tid){
+    var t = takimlar[tid] || {};
+    sahaSquadTum(t.squad).concat(sahaSquadTum(t.squadGercek)).forEach(function(p){ k[sahaAdAnahtar(p.name)] = true; });
+  });
+  Object.keys(havuz || {}).forEach(function(id){ var o = havuz[id]; if(o && o.ad) k[sahaAdAnahtar(o.ad)] = true; });
+  return k;
+}
+// yerel (isteğe bağlı): aynı takım içinde ad ya da soyadı tekrar etmesin diye tutulan küme.
+function sahaYeniAdUret(kullanilan, tohum, yerel){
+  var h = 7, t = String(tohum || '');
+  for(var i=0;i<t.length;i++) h = (Math.imul(h, 31) + t.charCodeAt(i)) >>> 0;
+  var n1 = SAHA_AD_ON.length, n2 = SAHA_AD_SOY.length;
+  for(var d=0; d<n1*n2; d++){
+    h ^= h << 13; h >>>= 0; h ^= h >>> 17; h ^= h << 5; h >>>= 0;   // xorshift32
+    if(!h) h = 2463534242;
+    var on = SAHA_AD_ON[h % n1], soy = SAHA_AD_SOY[Math.floor(h / n1) % n2], ad = on + ' ' + soy;
+    if(yerel && d < 400 && (yerel['o:'+on] || yerel['s:'+soy])) continue;
+    if(!kullanilan[sahaAdAnahtar(ad)]){
+      kullanilan[sahaAdAnahtar(ad)] = true;
+      if(yerel){ yerel['o:'+on] = true; yerel['s:'+soy] = true; }
+      return ad;
+    }
+  }
+  var s = 1; while(kullanilan[sahaAdAnahtar('Oyuncu ' + s)]) s++;
+  kullanilan[sahaAdAnahtar('Oyuncu ' + s)] = true; return 'Oyuncu ' + s;
+}
+// Sahipsiz takım için 18 kişilik yer tutucu kadro (11 ilk + 7 yedek).
+function sahaSablonKadro(kullanilan, tohum){
+  var sq = { starting:[], bench:[] }, yerel = {};
+  for(var i=0;i<18;i++){
+    var p = { name: sahaYeniAdUret(kullanilan, tohum + ':' + i, yerel), number: String(SAHA_SABLON_NO[i]),
+              position: SAHA_SABLON_MEVKI[i], yerTutucu: true };
+    (i < 11 ? sq.starting : sq.bench).push(p);
+  }
+  return sq;
+}
+function sahaYerTutucuMu(sq){
+  var tum = sahaSquadTum(sq);
+  return tum.length >= 11 && tum.every(function(p){ return p.yerTutucu; });
+}
+function sahaMevkiGrup(m){
+  m = String(m||'').replace(/[0-9]/g,'');
+  if(m === 'KL') return 0;
+  if(m === 'STP' || m === 'SĞB' || m === 'SLB') return 1;
+  if(m === 'SF' || m === 'GF') return 3;
+  return 2;
+}
+// SAHA kadrosundan (kullanicilar/{uid}/kadro) puan tablosu squad'ı üretir.
+// eski: mevcut squad - yöneticinin oyuncuya verdiği durum (sakat, cezalı...) korunur.
+// uid verilirse yalnızca o kullanıcıya ait oyuncular alınır (satılmış oyuncu kalmasın).
+function sahaSquadKur(kadro, havuz, eski, uid){
+  kadro = kadro || {}; havuz = havuz || {};
+  var eskiler = sahaSquadTum(eski), stp = 0, noKul = {};
+  function giris(id, i){
+    var o = havuz[id]; if(!o || !o.ad) return null;
+    if(uid && o.sahip !== uid) return null;
+    var m = String(o.mevki||'').trim(), g = sahaMevkiGrup(m), pos;
+    if(m === 'STP' || m === 'STP1' || m === 'STP2') pos = (stp++ % 2 === 0) ? 'STP1' : 'STP2';
+    else if(SAHA_GECERLI_MEVKI.indexOf(m) >= 0) pos = m;
+    else pos = ['KL','STP1','OOS','SF'][g];
+    return { id:id, o:o, pos:pos, g:g, i:i };
+  }
+  var ilk = sahaDizi(kadro.ilk11).map(giris).filter(Boolean)
+    .sort(function(a,b){ return (a.g - b.g) || (a.i - b.i); });
+  var yed = sahaDizi(kadro.yedek).map(giris).filter(Boolean);
+  function numara(pos){
+    var n = pos && SAHA_NO_TERCIH[pos];
+    if(n && !noKul[n]){ noKul[n] = 1; return n; }
+    n = 12; while(noKul[n]) n++; noKul[n] = 1; return n;
+  }
+  function cikti(x, yedekMi){
+    var ek = null;
+    for(var j=0;j<eskiler.length;j++){
+      var e = eskiler[j];
+      if(e.havuzId === x.id || (!e.yerTutucu && sahaAdAnahtar(e.name) === sahaAdAnahtar(x.o.ad))){ ek = e; break; }
+    }
+    var r = {};
+    if(ek){ Object.keys(ek).forEach(function(k){ if(ek[k] !== undefined && ek[k] !== null) r[k] = ek[k]; }); }
+    delete r.yerTutucu;
+    r.name = String(x.o.ad).trim();
+    r.number = String(numara(yedekMi ? null : x.pos));
+    r.position = x.pos;
+    r.havuzId = x.id;
+    r.photo = x.o.foto || (ek && ek.photo) || '';
+    return r;
+  }
+  return { starting: ilk.map(function(x){ return cikti(x, false); }),
+           bench:    yed.map(function(x){ return cikti(x, true); }) };
+}
+var SAHA_TABLO_DIZILIS = ['4-4-2','4-3-3','4-2-3-1','3-5-2','3-4-3','5-3-2'];
+/* ══ /SAHA KADRO EŞİTLEME ortak blok ══════════════════════════════════════════════════ */
+
 /* ---------- takımlar ---------- */
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // KADROLAR (Puan Tablosu entegrasyonu için eklendi)
@@ -4560,7 +4761,13 @@ const hx = c => '#' + c.toString(16).padStart(6, '0');
 function gercekIlk11(takimId){
   try{
     const t = sahaLigTakimlar[takimId];
-    const starting = (t && t.squad && t.squad.starting) || [];
+    let starting = (t && t.squad && t.squad.starting) || [];
+    // Kendi takımım: puan tablosuna yazımı beklemeden doğrudan SAHA kadromdan (en güncel).
+    if (benimKayit && benimKayit.takimId === takimId && benimKayit.kadro){
+      const benim = sahaSquadKur(benimKayit.kadro, magazaHavuz, null, benimUid).starting;
+      if (benim.length >= 11) starting = benim;
+    }
+    starting = sahaDizi(starting);
     const isimli = starting.filter(p => p && p.name && String(p.name).trim());
     if (isimli.length < 11) return null;
     const gk = isimli.find(p => p.position === 'KL');
@@ -4694,14 +4901,20 @@ let cikanlar = { 0:[], 1:[] };               // takım -> oyundan çıkan oyuncu
 function gercekYedekler(takimId){
   try{
     const t = sahaLigTakimlar[takimId];
-    if(!t || !t.squad) return null;
+    let sq = t && t.squad;
+    // Kendi takımım: gercekIlk11 ile aynı kaynak - doğrudan SAHA kadrom (2026-09-27-C).
+    if (benimKayit && benimKayit.takimId === takimId && benimKayit.kadro){
+      const benim = sahaSquadKur(benimKayit.kadro, magazaHavuz, null, benimUid);
+      if (benim.starting.length >= 11) sq = benim;
+    }
+    if(!sq) return null;
     const ad = x => x && x.name && String(x.name).trim();
-    const ilk = (t.squad.starting || []).filter(ad);
+    const ilk = sahaDizi(sq.starting).filter(ad);
     // gercekIlk11 ile aynı seçim: kaleci önde, ilk 11 - geri kalan kadro oyuncusu yedektir.
     const gk = ilk.find(x => x.position === 'KL');
     const sirali = (gk ? [gk] : []).concat(ilk.filter(x => x !== gk));
     const artan = sirali.slice(11);
-    const bench = (t.squad.bench || []).filter(ad);
+    const bench = sahaDizi(sq.bench).filter(ad);
     const l = artan.concat(bench).map(x => ({ ad:String(x.name).trim(),
       no:(x.number !== '' && x.number != null) ? x.number : '', mevki:x.position || '' }));
     return l.length ? l : null;
