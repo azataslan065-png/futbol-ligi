@@ -2096,7 +2096,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-27-D';
+window.APP_BUILD='2026-09-27-E';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -7555,9 +7555,9 @@ var SAHA_AD_SOY = ['Akbaş','Akgül','Aktaş','Alkan','Altun','Avcı','Aydemir',
   'Parlak','Sağlam','Sarıkaya','Sevim','Soydan','Sönmez','Şahinler','Taşkın','Tekin','Temiz',
   'Toprakçı','Tosun','Uysal','Varol','Yalın','Yaman','Yavuzer','Yener','Yıldırım','Yurt','Zengin',
   'Akyol','Ateşoğlu','Balcı','Cömert','Dalkılıç','Erbil','Gezer','Kalkan'];
-var SAHA_SABLON_MEVKI = ['KL','SĞB','STP1','STP2','SLB','SĞK','DOS','OOS','SLK','GF','SF',
+var SAHA_SABLON_MEVKI = ['KL','SLB','STP1','STP2','SĞB','SLK','DOS','OOS','SĞK','SF','GF',
                          'KL','STP1','SĞB','DOS','OOS','SĞK','SF'];
-var SAHA_SABLON_NO    = [1,2,4,5,3,7,6,8,11,10,9,12,13,14,15,16,17,18];
+var SAHA_SABLON_NO    = [1,3,4,5,2,11,6,8,7,9,10,12,13,14,15,16,17,18];
 var SAHA_NO_TERCIH = {'KL':1,'SĞB':2,'SLB':3,'STP1':4,'STP2':5,'DOS':6,'SĞK':7,'OOS':8,'GÖ':8,'SF':9,'GF':10,'SLK':11};
 var SAHA_GECERLI_MEVKI = ['KL','SĞB','SLB','STP1','STP2','GÖ','DOS','OOS','SĞK','SLK','SF','GF'];
 function sahaAdAnahtar(ad){ return String(ad||'').trim().toLocaleLowerCase('tr'); }
@@ -7627,7 +7627,7 @@ function sahaMevkiGrup(m){
 // SAHA kadrosundan (kullanicilar/{uid}/kadro) puan tablosu squad'ı üretir.
 // eski: mevcut squad - yöneticinin oyuncuya verdiği durum (sakat, cezalı...) korunur.
 // uid verilirse yalnızca o kullanıcıya ait oyuncular alınır (satılmış oyuncu kalmasın).
-function sahaSquadKur(kadro, havuz, eski, uid){
+function sahaSquadKur(kadro, havuz, eski, uid, diz){
   kadro = kadro || {}; havuz = havuz || {};
   var eskiler = sahaSquadTum(eski), stp = 0, noKul = {};
   function giris(id, i){
@@ -7639,8 +7639,14 @@ function sahaSquadKur(kadro, havuz, eski, uid){
     else pos = ['KL','STP1','OOS','SF'][g];
     return { id:id, o:o, pos:pos, g:g, i:i };
   }
-  var ilk = sahaDizi(kadro.ilk11).map(giris).filter(Boolean)
-    .sort(function(a,b){ return (a.g - b.g) || (a.i - b.i); });
+  var slot = diz && SAHA_SLOT[diz];
+  var ilk = sahaDizi(kadro.ilk11).map(giris).filter(Boolean);
+  if(slot){
+    // Sıra = saha yeri; mevki slottan gelir (bkz. SAHA_SLOT notu).
+    ilk.forEach(function(x, k){ if(slot[k]){ x.pos = slot[k]; x.g = sahaMevkiGrup(slot[k]); } });
+  } else {
+    ilk.sort(function(a,b){ return (a.g - b.g) || (a.i - b.i); });
+  }
   var yed = sahaDizi(kadro.yedek).map(giris).filter(Boolean);
   function numara(pos){
     var n = pos && SAHA_NO_TERCIH[pos];
@@ -7667,6 +7673,20 @@ function sahaSquadKur(kadro, havuz, eski, uid){
            bench:    yed.map(function(x){ return cikti(x, true); }) };
 }
 var SAHA_TABLO_DIZILIS = ['4-4-2','4-3-3','4-2-3-1','3-5-2','3-4-3','5-3-2'];
+/* DİZİLİŞ SLOTLARI (2026-09-27-E, sürükle-bırak kadro): kadro.ilk11 dizisinin SIRASI
+   artık sahadaki YERDİR - 0 kaleci, 1-10 saha.html DIZILISLER koordinatlarıyla aynı sıra
+   (defans soldan sağa, orta saha soldan sağa, forvet). Kullanıcı bir oyuncuyu sol beke
+   sürüklediyse puan tablosunda da sol bek (SLB) olarak görünür - oyuncunun kendi mevkisi
+   değil, OYNADIĞI YER yazılır. Kod sırası DIZILISLER ile birebir aynı olmalı. */
+// Kadronun hangi dizilişle yerleştiği: kayıttaki diziliş, geçersizse 4-4-2.
+// admin ve saha AYNI kuralı kullanmalı - farklı kural iki tarafın kadroyu sırayla
+// birbirinin üstüne yazması (sonsuz yazım döngüsü) demek.
+function sahaKayitDizilis(kayit){ var d = kayit && kayit.dizilis; return (d && SAHA_SLOT[d]) ? d : '4-4-2'; }
+var SAHA_SLOT = {
+  '4-4-2': ['KL','SLB','STP1','STP2','SĞB','SLK','DOS','OOS','SĞK','SF','GF'],
+  '4-3-3': ['KL','SLB','STP1','STP2','SĞB','OOS','DOS','OOS','GF','SF','GF'],
+  '5-3-2': ['KL','SLB','STP1','STP2','STP1','SĞB','OOS','DOS','OOS','SF','GF']
+};
 /* ══ /SAHA KADRO EŞİTLEME ortak blok ══════════════════════════════════════════════════ */
 
 /* YÖNETİCİ TARAFI EŞİTLEME: SAHA kökündeki lig açıkken kendiliğinden (5 sn'de bir, yalnızca
@@ -7733,7 +7753,7 @@ function sahaKadroEsitle(elle){
       var t = teams[tid] || {}, kok = 'leagues/' + _curLeagueId + '/teams/' + tid + '/';
       var uid = sahip[tid], k = uid ? _kullanicilar[uid] : null, sq = null, diz = null;
       if(k && k.kadro && sahaDizi(k.kadro.ilk11).length){
-        sq = sahaSquadKur(k.kadro, havuz, t.squad, uid);
+        sq = sahaSquadKur(k.kadro, havuz, t.squad, uid, sahaKayitDizilis(k));
         if(!sq.starting.length) sq = null;
         if(SAHA_TABLO_DIZILIS.indexOf(k.dizilis) >= 0) diz = k.dizilis;
       }
