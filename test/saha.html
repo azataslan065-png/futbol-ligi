@@ -5197,7 +5197,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-27-Q';
+window.APP_BUILD = '2026-09-27-R';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -5850,7 +5850,7 @@ function oyuncuDegistir(t, sahadaki, yedekIdx){
      beklemesi ayrı bir eşleşme gerektirir; orada ikinci yarı eskisi gibi kendiliğinden başlar. */
 window._devreMenusu = false;
 let degisimKuyrugu = [];                      // [{ t, p, yedekAd }]
-function degisimSuruyor(){ try{ return players.some(p => !!p.degAnim); }catch(e){ return false; } }
+function degisimSuruyor(){ try{ return !!_degAktif || players.some(p => !!p.degAnim); }catch(e){ return false; } }
 function degisimBekleyen(t){ return degisimKuyrugu.filter(k => k.t === t); }
 function _devreMenusuUygun(){
   return !window._sahaOdaHost && !window._sahaOdaKonuk && mod !== 'antrenman' && !window._sahaIzleModu;
@@ -5920,47 +5920,111 @@ function ikinciYariyaBasla(){
     if (!bitti){ kickoff(1); frozen = 2.6; }     // kickoff sıradaki değişiklikleri de başlatır
   }catch(e){ _sessiz(e, 'ikinciYariyaBasla', 'saha_oyun'); }
 }
-// Sıradaki değişiklikleri başlatır: çıkan oyuncu saha kenarına yürür (bkz. degisimAnimAdim).
+/* DEĞİŞİKLİK SAHNESİ (2026-09-27-R, kullanıcı: "değişiklik sırasında kamera değişikliği
+   göstersin; giren ve çıkan oyuncu iki eliyle beşlik atıp sarıldıktan sonra değişiklik olsun")
+   Değişiklikler SIRAYLA (her seferinde bir tane) oynatılır ki kamera tek bir sahneye odaklansın:
+     cik    : çıkan oyuncu kameraya yakın taç çizgisindeki buluşma noktasına yürür; giren
+              oyuncu (geçici bir model) çizginin hemen dışında bekler.
+     bes    : yüz yüze, iki el havada beşlik (el çırpma sesi).
+     saril  : birbirlerine yaklaşıp sarılırlar.
+     gir    : değişiklik işlenir - sahadaki oyuncu artık girendir ve mevkisine koşar; geçici
+              model (artık çıkan oyuncu) kulübeye yürüyüp kaybolur.
+   Kamera bu süre boyunca sahanın içinden taç çizgisine, iki oyuncuya bakar; giren oyuncu
+   koşmaya başlayınca normal yayın açısına döner. */
+let _degAktif = null;                          // şu an oynatılan değişiklik sahnesi
 function degisimKuyruguIsle(){
   try{
-    if(!degisimKuyrugu.length || window._devreMenusu) return;
-    const liste = degisimKuyrugu; degisimKuyrugu = [];
-    liste.forEach((k, i) => {
-      const p = k.p;
-      if(!p || p.dis || p.degAnim) return;
-      // Kenar: kameraya yakın taç çizgisi, orta çizginin kendi yarısı tarafında (yedek kulübesi).
-      const yan = (k.t === 0 ? -1 : 1) * dirA;
-      p.degAnim = { faz:'cik', t:0, yedekAd:k.yedekAd,
-                    hedef:{ x: yan * (3 + i*1.6), z: HWZ + 0.6 } };
-    });
-    if(players.some(p => p.degAnim)) mesaj('DEĞİŞİKLİK', 'Oyuncular saha kenarında', 1600);
+    if(window._devreMenusu || _degAktif || !degisimKuyrugu.length) return;
+    let k = null;
+    while(degisimKuyrugu.length && !k){ const c = degisimKuyrugu.shift(); if(c && c.p && !c.p.dis) k = c; }
+    if(!k) return;
+    const p = k.p;
+    const sKam = (camera.position.z >= 0) ? 1 : -1;            // kameraya yakın taç çizgisi
+    const T = { x: Math.max(-HLX+8, Math.min(HLX-8, (k.t === 0 ? -1 : 1) * dirA * 4)), z: sKam * (HWZ + 0.1) };
+    // Giren oyuncu: aynı forma ile geçici model, çizginin dışında.
+    let gecici = null;
+    try{
+      gecici = makePlayer(p.gk ? (k.t === 0 ? MATS.ka : MATS.kb) : (k.t === 0 ? MATS.a : MATS.b));
+      gecici.position.set(T.x, 0, T.z + sKam*0.55);
+      gecici.rotation.y = Math.atan2(0, -sKam);                // sahaya bakar
+      scene.add(gecici);
+    }catch(e){ gecici = null; }
+    p.degAnim = { faz:'cik', t:0, yedekAd:k.yedekAd, cikanAd:p.ad, T:T, s:sKam, gecici:gecici };
+    _degAktif = p;
+    window._degKam = { x:T.x, z:T.z, s:sKam };
+    mesaj('DEĞİŞİKLİK', p.ad + ' ⇄ ' + k.yedekAd, 2200);
   }catch(e){ _sessiz(e, 'degisimKuyruguIsle', 'saha_oynanis'); }
 }
-// Değişiklik yürüyüşü (oyuncu hareketinin yerini alır - bkz. update içindeki çağrı).
+// Kol pozu (yalnızca kutu modelde uzuvlar var; hazır modelde hareketin kendisi yeterli).
+function _degKolPoz(ud, x, zIc){
+  try{
+    if(!ud || !ud.kolL || !ud.kolR) return;
+    ud.kolL.omuz.rotation.x = x; ud.kolR.omuz.rotation.x = x;
+    ud.kolL.omuz.rotation.z = zIc; ud.kolR.omuz.rotation.z = -zIc;
+    ud.kolL.dirsek.rotation.x = -0.25; ud.kolR.dirsek.rotation.x = -0.25;
+  }catch(e){}
+}
+function _degYuru(obj, hx, hz, hiz, dt){
+  const dx = hx - obj.position.x, dz = hz - obj.position.z, uz = Math.hypot(dx, dz);
+  if(uz > 0.03){
+    const st = Math.min(uz, hiz*dt);
+    obj.position.x += dx/uz*st; obj.position.z += dz/uz*st;
+    obj.rotation.y = Math.atan2(dx, dz);
+  }
+  return uz;
+}
 function degisimAnimAdim(p, dt){
   const a = p.degAnim; a.t += dt;
-  p.tcd = Math.max(p.tcd, 0.4); p.cd = Math.max(p.cd, 0.4);   // yürürken topa dokunmaz
-  const hedef = (a.faz === 'cik') ? a.hedef : { x: p.home.x, z: p.home.z };
-  const dx = hedef.x - p.obj.position.x, dz = hedef.z - p.obj.position.z, uz = Math.hypot(dx, dz);
-  const hiz = (a.faz === 'cik') ? 5.2 : 6.4;                  // çıkan yürür, giren koşar
-  if(uz > 0.05){
-    const s = Math.min(uz, hiz * dt);
-    p.obj.position.x += dx/uz*s; p.obj.position.z += dz/uz*s;
-    p.obj.rotation.y = Math.atan2(dx, dz);
+  p.tcd = Math.max(p.tcd, 0.4); p.cd = Math.max(p.cd, 0.4);   // sahnede topa dokunmaz
+  const g = a.gecici, s = a.s, T = a.T;
+  const bulus = { x: T.x, z: T.z - s*0.5 };                    // çıkanın duracağı yer (çizginin içi)
+  let hiz = 0;
+  if(a.faz === 'cik'){
+    const uz = _degYuru(p.obj, bulus.x, bulus.z, 5.2, dt); hiz = uz > 0.03 ? 5.2 : 0;
+    if(g){ g.rotation.y = Math.atan2(p.obj.position.x - g.position.x, p.obj.position.z - g.position.z); }
+    if(uz < 0.08 || a.t > 12){ a.faz = 'bes'; a.t = 0; }
+  } else if(a.faz === 'bes'){
+    // Yüz yüze, iki el havada beşlik.
+    if(g) p.obj.rotation.y = Math.atan2(g.position.x - p.obj.position.x, g.position.z - p.obj.position.z);
+    if(g) g.rotation.y = Math.atan2(p.obj.position.x - g.position.x, p.obj.position.z - g.position.z);
+    if(!a.cirp && a.t > 0.45){ a.cirp = true; try{ gurultu(0.06, 0.22, 2200); }catch(e){} }
+    if(a.t > 1.0){ a.faz = 'saril'; a.t = 0; }
+  } else if(a.faz === 'saril'){
+    // Birbirlerine yaklaşıp sarılırlar (orta noktaya doğru).
+    const mx = T.x, mz = T.z;
+    _degYuru(p.obj, mx, mz - s*0.21, 1.2, dt);
+    if(g) _degYuru(g, mx, mz + s*0.21, 1.2, dt);
+    if(g){ p.obj.rotation.y = Math.atan2(g.position.x - p.obj.position.x, g.position.z - p.obj.position.z);
+           g.rotation.y = Math.atan2(p.obj.position.x - g.position.x, p.obj.position.z - g.position.z); }
+    if(a.t > 1.3){
+      // DEĞİŞİKLİK İŞLENİR: sahadaki oyuncu artık girendir.
+      const t = p.team, idx = (yedekler[t]||[]).findIndex(y => y.ad === a.yedekAd);
+      if(idx >= 0) oyuncuDegistir(t, p, idx);
+      a.faz = 'gir'; a.t = 0;
+    }
+  } else if(a.faz === 'gir'){
+    const uz = _degYuru(p.obj, p.home.x, p.home.z, 6.6, dt); hiz = uz > 0.03 ? 6.6 : 0;
+    if(g){                                                     // çıkan kulübeye yürür
+      const gu = _degYuru(g, T.x + (T.x >= 0 ? 4 : -4), T.z + s*5, 4.2, dt);
+      try{ insanAdim(g.userData, dt, gu > 0.03 ? 4.2 : 0, true); }catch(e){}
+      if(gu < 0.3 && !a.gSil){ a.gSil = true; scene.remove(g); a.gecici = null; }
+    }
+    if(a.t > 1.2) window._degKam = null;                        // kamera oyuna döner
+    if(uz < 1.5 || a.t > 8){
+      if(a.gecici){ scene.remove(a.gecici); a.gecici = null; }
+      delete p.degAnim; _degAktif = null; window._degKam = null;
+      degisimKuyruguIsle();                                     // sıradaki değişiklik
+      return;
+    }
   }
-  p.gx = uz > 0.05 ? dx/uz*hiz : 0; p.gz = uz > 0.05 ? dz/uz*hiz : 0;
-  p.vel.set(p.gx, 0, p.gz);
-  if(a.faz === 'cik' && (uz < 0.6 || a.t > 9)){
-    const t = p.team, idx = (yedekler[t]||[]).findIndex(y => y.ad === a.yedekAd);
-    if(idx >= 0) oyuncuDegistir(t, p, idx);
-    a.faz = 'gir'; a.t = 0;
-  } else if(a.faz === 'gir' && (uz < 1.5 || a.t > 7)){
-    delete p.degAnim;
-  }
+  p.gx = 0; p.gz = 0; p.vel.set(0, 0, 0);
   p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
-  try{ insanAdim(p.obj.userData, dt, uz > 0.05 ? hiz : 0, true); }catch(e){}
+  try{ insanAdim(p.obj.userData, dt, hiz, true); }catch(e){}
+  if(g && a.faz !== 'gir'){ try{ insanAdim(g.userData, dt, 0, true); }catch(e){} }
+  // Pozlar insanAdim'dan SONRA uygulanır (yoksa yürüyüş salınımı ezerdi).
+  if(a.faz === 'bes'){ const kx = -2.35 - Math.sin(Math.min(1, a.t/0.45)*Math.PI)*0.25; _degKolPoz(p.obj.userData, kx, 0.15); if(g) _degKolPoz(g.userData, kx, 0.15); }
+  if(a.faz === 'saril'){ _degKolPoz(p.obj.userData, -1.45, -0.55); if(g) _degKolPoz(g.userData, -1.45, -0.55); }
 }
-
 function degisiklikYap(o){
   const t = (o===1) ? 1 : 0;
   if(!running || bitti) return;
@@ -8106,6 +8170,8 @@ function update(dt){
   // hazırlanırken top oyunda değil. Taç ve kale vuruşu SAYILMAZ: çok sık ve kısa,
   // gerçek hakemler de bunları uzatmaya eklemez. Devre başı/santra donması da sayılmaz.
   const oyunDurdu = golBekleme || (duran && (duran.tip === 'serbest' || duran.tip === 'penalti' || duran.tip === 'korner'));
+  // Top oyun dışındaysa (duran top, gol sonrası, santra) sıradaki değişiklik başlatılır.
+  if ((duran || golBekleme || frozen > 0) && !_degAktif && degisimKuyrugu.length && !window._devreMenusu) degisimKuyruguIsle();
   if (!duran && degisimSuruyor()) frozen = Math.max(frozen, 0.25);   // santra: değişiklik bitmeden başlamaz
   if (frozen > 0){
     frozen -= dt;
@@ -8530,7 +8596,13 @@ function update(dt){
   bakHedef.set(cx + 5*dirA, 1.0, window._bakZson);
   // DURAN TOP: atıcının arkasına geç, vuruştan sonra normale dön.
   const _duranKam = duranKameraHarmanla(dt, camHedef, bakHedef);
-  camera.position.lerp(camHedef, Math.min(1, dt * (_duranKam ? 4.5 : (_acilKilit ? 9.0 : 3.0))));
+  // DEĞİŞİKLİK KAMERASI (2026-09-27-R): sahanın içinden taç çizgisindeki iki oyuncuya bakar.
+  const _dk = window._degKam;
+  if (_dk){
+    camHedef.set(_dk.x + 3.2, 2.7, _dk.z - _dk.s*7.5);
+    bakHedef.set(_dk.x, 1.25, _dk.z);
+  }
+  camera.position.lerp(camHedef, Math.min(1, dt * (_dk ? 2.6 : (_duranKam ? 4.5 : (_acilKilit ? 9.0 : 3.0)))));
   camera.lookAt(bakHedef);
 
   // Halka yalnizca gercekten kontrol edilen oyuncu varken ve izleyici modunda DEGILKEN.
@@ -9317,7 +9389,9 @@ function basla(yeniMod){
        : AYAR.sure;
   durma = { 1:0, 2:0 }; uzatmaVerildi = false; golBekleme = false;
   skorA = 0; skorB = 0; saat = 0; devre = 1; dirA = 1;
-  degisimKuyrugu = []; window._devreMenusu = false;
+  degisimKuyrugu = []; window._devreMenusu = false; window._degKam = null;
+  try{ if(_degAktif && _degAktif.degAnim && _degAktif.degAnim.gecici) scene.remove(_degAktif.degAnim.gecici); }catch(e){}
+  _degAktif = null;
   try{ players.forEach(p => { delete p.degAnim; }); const _dm = document.getElementById('devreMenu'); if(_dm) _dm.style.display = 'none'; }catch(e){}
   // Yeni maç: olay listesi sıfırlanır. Temizlenmezse önceki maçın golleri yenisine
   // karışır ve Puan Tablosu'na yanlış veri gider.
