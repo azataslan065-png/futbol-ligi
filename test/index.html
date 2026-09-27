@@ -2634,7 +2634,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-27-R';
+window.APP_BUILD='2026-09-27-S';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -6257,7 +6257,7 @@ function _sahaSadeceCanliAlanDegisti(matchId,m){
     // etiketi) - bu yüzden artık 'çekirdek' karşılaştırmasının DIŞINDA tutuluyor;
     // sadece dakika değiştiğinde de artık TAM yeniden çizim değil, mini widget
     // güncellemesi yapılır.
-    delete core.minute;
+    delete core.minute;delete core.sahiplik;delete core.momentum;
     const json=JSON.stringify(core);
     const prev=window._sahaCoreSnapshots[matchId];
     window._sahaCoreSnapshots[matchId]=json;
@@ -6280,7 +6280,30 @@ function _sahaSadeceCanliAlanDegisti(matchId,m){
 // imzadan çıkarılır.
 var PT_CANLI_SUNUM_ALANLARI = ['ballX','ballZ','ballAttack','ballTs','homePlayers',
                                'awayPlayers','vurus','tabela','minute','sahaCanliTs','sahaOynayan',
-                               'ekranOran','izleYon'];
+                               'ekranOran','izleYon','sahiplik','momentum'];
+// 2026-09-27-S (kullanıcı: "veri kesilmesi devam ediyor"): 'sahiplik' ve 'momentum' da oyun
+// tarafından HER saniye güncelleniyor; imzada kaldıkları için her yazım yine TAM çizime
+// düşüyordu. Artık onlar da çıkarıldı - Baskımetre kendi kutusunda yerinde tazelenir
+// (bkz. ptBaskimetreTazele). Gol/kart/olay (events) imzada kaldığı için gerçek olaylar
+// eskisi gibi tam çizimi tetikler.
+function _ptBaskiImza(bm){
+  var sh = bm.sahiplik && typeof bm.sahiplik === 'object' ? Object.keys(bm.sahiplik).length + ':' + JSON.stringify(bm.sahiplik[Object.keys(bm.sahiplik).pop()]||null) : '';
+  return JSON.stringify({mom:bm.momentum||null,ev:(bm.events||[]).length,dk:Math.round(bm.minute||0),sh:sh});
+}
+function ptBaskimetreTazele(){
+  try{
+    var id = window._mdMatchId; if(!id) return;
+    var bm = (D.matches||{})[id]; if(!bm || !bm.isLive) return;
+    var el = document.getElementById('baskimetreLive_'+id); if(!el) return;
+    var simdi = Date.now();
+    if(simdi - (window._baskiSonCizim||0) < 900) return;
+    window._baskiMetreSnap = window._baskiMetreSnap || {};
+    var sig = _ptBaskiImza(bm);
+    if(window._baskiMetreSnap[id] === sig) return;
+    window._baskiMetreSnap[id] = sig; window._baskiSonCizim = simdi;
+    el.innerHTML = renderBaskimetre(bm);
+  }catch(e){ DiagSil('ptBaskimetreTazele', e); }
+}
 function _ptRenderImzasi(d){
   try{
     if(!d) return 'null';
@@ -6322,6 +6345,7 @@ function ptCanliHafifTazele(){
           kutu.innerHTML = renderSahaPitch(mm, D.teams[mm.homeId]||{}, D.teams[mm.awayId]||{});
         }
       }
+      ptBaskimetreTazele();
     }
   }catch(e){ DiagSil('ptCanliHafifTazele', e); }
 }
@@ -6657,7 +6681,7 @@ function listenToLeague(leagueId){
       try{
         const _bm=D.matches[_mdMatchId];
         if(_bm&&_bm.isLive&&_mdTab==='detay'){
-          const _bmSig=JSON.stringify({mom:_bm.momentum||null,ev:(_bm.events||[]).length,dk:Math.round(_bm.minute||0)});
+          const _bmSig=_ptBaskiImza(_bm);
           if(window._baskiMetreSnap[_mdMatchId]!==_bmSig){
             window._baskiMetreSnap[_mdMatchId]=_bmSig;
             const _bkEl=document.getElementById('baskimetreLive_'+_mdMatchId);

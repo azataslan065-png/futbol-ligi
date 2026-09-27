@@ -1829,6 +1829,31 @@ function modelAnimGuncelle(ud, dt, hiz){
     a.mixer.update(dt);
   }catch(e){_sessiz(e,'modelAnimGuncelle:1218','saha_oyun');}
 }
+const YUZ_TEN = [0xf1c9a5, 0xe0ac86, 0xc99d72, 0xa8764f, 0x8a5a3c, 0x6b4430, 0xd8b08c];
+const YUZ_SAC = [0x1a1512, 0x2a1d14, 0x3b2716, 0x5a3a1f, 0x7a5230, 0xb08a4f, 0x141414, 0x6d2f1c];
+let _yuzGeo = null;
+function _yuzParcalari(){
+  if(_yuzGeo) return _yuzGeo;
+  _yuzGeo = {
+    kafa: new THREE.SphereGeometry(0.16, 14, 12),
+    cene: new THREE.SphereGeometry(0.1, 12, 8),
+    gozAk: new THREE.SphereGeometry(0.021, 10, 8),
+    gozBebek: new THREE.SphereGeometry(0.011, 8, 6),
+    kas: new THREE.BoxGeometry(0.055, 0.012, 0.012),
+    kulak: new THREE.SphereGeometry(0.04, 8, 6),
+    burun: new THREE.CylinderGeometry(0.008, 0.022, 0.055, 6),
+    dudak: new THREE.BoxGeometry(0.056, 0.012, 0.012),
+    sacKisa: new THREE.SphereGeometry(0.168, 14, 10, 0, Math.PI*2, 0, Math.PI*0.52),
+    sacKazi: new THREE.SphereGeometry(0.163, 14, 10, 0, Math.PI*2, 0, Math.PI*0.45),
+    sacKivir: new THREE.SphereGeometry(0.19, 12, 10, 0, Math.PI*2, 0, Math.PI*0.5),
+    ense: new THREE.BoxGeometry(0.26, 0.14, 0.08),
+    sakal: new THREE.BoxGeometry(0.17, 0.07, 0.14),
+    beyaz: new THREE.MeshLambertMaterial({ color:0xf4f1ea }),
+    bebek: new THREE.MeshLambertMaterial({ color:0x2a1c12 }),
+    dudakMat: new THREE.MeshLambertMaterial({ color:0x9b4a3e })
+  };
+  return _yuzGeo;
+}
 function makePlayer(m){
   // Hazir insan modeli varsa onu kullan; yoksa asagidaki kutu modeline dus.
   var hazir = insanModelKopyala(m);
@@ -1867,13 +1892,48 @@ function makePlayer(m){
   // Omuzlar: govdeyi genisletip insan siluetine yaklastirir
   const omuz = new THREE.Mesh(new THREE.BoxGeometry(0.62,0.14,0.29), m.jer);
   omuz.position.y = 1.47; g.add(omuz);
-  const boyun = new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.075,0.10,6), m.skin);
+  /* YÜZ ve BAŞ (2026-09-27-S, kullanıcı: "oyuncuların yüzleri çok sıradan, insana benzet")
+     ÖNCEDEN: Tek renk küre baş + herkes için aynı siyah saç kabuğu; yüz yoktu, 22 oyuncu
+     birbirinin kopyasıydı. ŞİMDİ: Her oyuncuya kendi ten rengi, saç rengi ve saç modeli
+     (kısa, kazıtılmış, kıvırcık, uzunca), yüz (göz akı ve bebeği, kaş, burun, dudak,
+     kulak, çene) ve bazılarına sakal. Baş tek bir grup: koşudaki baş hareketi (insanAdim)
+     saçı ve yüzü de birlikte taşır. Geometriler ortak (bir kez üretilir), yalnızca
+     ten/saç malzemesi oyuncuya özel - çizim yükü küçük kalır. */
+  const Y = _yuzParcalari();
+  const ten = new THREE.MeshLambertMaterial({ color: YUZ_TEN[(Math.random()*YUZ_TEN.length)|0] });
+  const tenKoyu = new THREE.MeshLambertMaterial({ color: new THREE.Color(ten.color).multiplyScalar(0.82) });
+  const sacRenk = YUZ_SAC[(Math.random()*YUZ_SAC.length)|0];
+  const sacMat = new THREE.MeshLambertMaterial({ color: sacRenk });
+  m = Object.assign({}, m, { skin: ten });                   // kol/bacak/boyun da aynı ten
+  const boyun = new THREE.Mesh(new THREE.CylinderGeometry(0.065,0.075,0.10,6), ten);
   boyun.position.y = 1.58; g.add(boyun);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17,12,10), m.skin);
+  const head = new THREE.Group();                            // baş grubu (bkz. ud.bas)
   head.position.y = 1.74; g.add(head);
-  // Sac: basin ust yarisini orten ince kabuk - yuz yonu belli olur
-  const sac = new THREE.Mesh(new THREE.SphereGeometry(0.175,12,8,0,Math.PI*2,0,Math.PI*0.62), MATS.sac);
-  sac.position.y = 1.75; g.add(sac);
+  const kafa = new THREE.Mesh(Y.kafa, ten); kafa.scale.set(0.93, 1.07, 0.98); head.add(kafa);
+  const cene = new THREE.Mesh(Y.cene, ten); cene.position.set(0, -0.075, 0.035); cene.scale.set(1.0, 0.78, 1.05); head.add(cene);
+  [-1, 1].forEach(function(sx){
+    const ak = new THREE.Mesh(Y.gozAk, Y.beyaz); ak.position.set(sx*0.056, 0.022, 0.14); ak.scale.set(1.25, 0.8, 0.55); head.add(ak);
+    const bebek = new THREE.Mesh(Y.gozBebek, Y.bebek); bebek.position.set(sx*0.056, 0.022, 0.148); bebek.scale.set(1, 1, 0.5); head.add(bebek);
+    const kas = new THREE.Mesh(Y.kas, sacMat); kas.position.set(sx*0.06, 0.072, 0.15); kas.rotation.z = -sx*0.12; head.add(kas);
+    const kulak = new THREE.Mesh(Y.kulak, ten); kulak.position.set(sx*0.158, 0.0, 0.0); kulak.scale.set(0.45, 1, 0.8); head.add(kulak);
+  });
+  const burun = new THREE.Mesh(Y.burun, tenKoyu); burun.position.set(0, -0.018, 0.158); burun.rotation.x = -0.25; burun.scale.set(1, 1, 0.8); head.add(burun);
+  const dudak = new THREE.Mesh(Y.dudak, Y.dudakMat); dudak.position.set(0, -0.07, 0.142); head.add(dudak);
+  // Saç modeli
+  const stil = (Math.random()*4)|0;
+  if(stil === 0){          // kısa
+    const sc = new THREE.Mesh(Y.sacKisa, sacMat); sc.position.set(0, 0.012, -0.008); sc.rotation.x = -0.38; sc.scale.set(0.97, 1.06, 1.0); head.add(sc);
+  } else if(stil === 1){   // kazıtılmış: ince, başa yapışık
+    const sc = new THREE.Mesh(Y.sacKazi, sacMat); sc.position.set(0, 0.006, -0.006); sc.rotation.x = -0.42; sc.scale.set(0.95, 1.04, 0.99); head.add(sc);
+  } else if(stil === 2){   // kıvırcık / hacimli
+    const sc = new THREE.Mesh(Y.sacKivir, sacMat); sc.position.set(0, 0.03, -0.02); sc.rotation.x = -0.35; sc.scale.set(1.0, 0.95, 1.0); head.add(sc);
+  } else {                 // uzunca: tepe + ense
+    const sc = new THREE.Mesh(Y.sacKisa, sacMat); sc.position.set(0, 0.014, -0.008); sc.rotation.x = -0.34; sc.scale.set(0.99, 1.08, 1.02); head.add(sc);
+    const ense = new THREE.Mesh(Y.ense, sacMat); ense.position.set(0, -0.045, -0.1); head.add(ense);
+  }
+  if(Math.random() < 0.3){ // sakal
+    const sk = new THREE.Mesh(Y.cene, sacMat); sk.position.set(0, -0.082, 0.034); sk.scale.set(1.06, 0.74, 1.1); head.add(sk);
+  }
 
   // ── BACAKLAR: kalca eklemi -> ust bacak -> diz eklemi -> alt bacak -> ayak ──
   // KOK SEBEP (kullanici: "oyuncular topu surerken yan gidiyor"):
@@ -5197,7 +5257,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-27-R';
+window.APP_BUILD = '2026-09-27-S';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -6573,7 +6633,8 @@ function sahaCanliYaz(ilkYazim){
 // ÇÖZÜM: Kurallar güncellendi (database.rules.json). Ek olarak, sonradan eklenen alanlar
 // AYRI bir yazımda gönderilir: kurala eklenmemiş yeni bir alan bir daha temel canlı
 // yazımı (skor/konum/dakika) düşüremez, en kötü ihtimalle yalnızca kendisi reddedilir.
-var _SAHA_EK_ALANLAR = /\/(tabela|izleYon|momentum)(\/|$)/;
+// 2026-09-27-S: sahaCanliTs/sahaOynayan da ayrı yazımda - kuralda yoksa ana canlı veri düşmez.
+var _SAHA_EK_ALANLAR = /\/(tabela|izleYon|momentum|sahaCanliTs|sahaOynayan)(\/|$)/;
 /* ORTAK CANLI MAÇ ÖZETİ: paylasilan/canliMaclar/{macId}
    Yalnızca TV kartını çizmeye yetecek kadar alan taşır - fikstür ayrı kalmaya devam
    eder. Maç bitince / geçersiz sayılınca silinir (bkz. sahaOrtakCanliSil). */
@@ -8598,12 +8659,24 @@ function update(dt){
   const _duranKam = duranKameraHarmanla(dt, camHedef, bakHedef);
   // DEĞİŞİKLİK KAMERASI (2026-09-27-R): sahanın içinden taç çizgisindeki iki oyuncuya bakar.
   const _dk = window._degKam;
+  /* 2026-09-27-S (kullanıcı: "kamera sadece bir oyuncuyu gösteriyor"): ÖNCEDEN kamera
+     sahanın içinden taç çizgisine DİK bakıyordu; çıkan oyuncu içeride, giren dışarıda
+     durduğu için ikisi aynı bakış hattına diziliyor, öndeki arkadakini örtüyordu.
+     ŞİMDİ kamera taç çizgisi BOYUNCA, hafif içeriden (3/4 profil) bakar: iki oyuncu
+     yan yana görünür. Bakış noktası da yumuşak geçişli ve sabit tutulur - görüntü
+     titremez, ani dönmez. */
   if (_dk){
-    camHedef.set(_dk.x + 3.2, 2.7, _dk.z - _dk.s*7.5);
-    bakHedef.set(_dk.x, 1.25, _dk.z);
+    const kx = _dk.x > 0 ? -1 : 1;                           // saha ortasına doğru taraftan
+    camHedef.set(_dk.x + kx*5.2, 2.1, _dk.z - _dk.s*3.4);
+    bakHedef.set(_dk.x, 1.15, _dk.z);
   }
-  camera.position.lerp(camHedef, Math.min(1, dt * (_dk ? 2.6 : (_duranKam ? 4.5 : (_acilKilit ? 9.0 : 3.0)))));
-  camera.lookAt(bakHedef);
+  camera.position.lerp(camHedef, Math.min(1, dt * (_dk ? 1.8 : (_duranKam ? 4.5 : (_acilKilit ? 9.0 : 3.0)))));
+  if (!window._kamBak) window._kamBak = bakHedef.clone();
+  if (_dk || window._kamBakGecis > 0){
+    window._kamBak.lerp(bakHedef, Math.min(1, dt * 2.2));    // değişiklik kamerası: yumuşak bakış
+    window._kamBakGecis = _dk ? 1.0 : Math.max(0, window._kamBakGecis - dt);
+  } else window._kamBak.copy(bakHedef);
+  camera.lookAt(window._kamBak);
 
   // Halka yalnizca gercekten kontrol edilen oyuncu varken ve izleyici modunda DEGILKEN.
   ring.visible = !!ctrl && !window._sahaIzleModu && !(ctrl.dis);
