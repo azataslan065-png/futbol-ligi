@@ -1730,7 +1730,7 @@ function insanAdim(ud, dt, hiz, egilebilir){
                 kaleci plonjonu ...). 3,6 MB olduğu için sayfaya gömülmedi; saha.html'in YANINDA
                 ayrı dosya olarak durur ve oyun açılınca indirilir. Dosya yoksa oyun hafif
                 modelle sorunsuz çalışır.
-   Hangisi kullanılır: Grafik 'Orta'/'Yüksek' ise detaylı, 'Düşük' ise hafif (bkz. _aktifModel).
+   Hangisi kullanılır: detaylı yüklendiyse her zaman o; yüklenemezse hafif (bkz. _aktifModel).
    2026-09-28-Y: detaylı model de artık sayfaya gömülü (ayrı dosya klasör farkı yüzünden bulunamıyordu).
    Grafik ayarı değişince sahadaki oyuncular yerinde yeni modele geçer. */
 window._sahaModeller = {};
@@ -1766,11 +1766,23 @@ function _modelHazirla(gltf, ad){
   window._sahaModelDurum = 'hazir';
   return M;
 }
+// Ayarlar sayfasındaki sürüm rozetine oyuncu modelinin durumu yazılır - telefonda konsol
+// olmadan hangi modelin çalıştığı görülebilsin.
+function _modelRozet(){
+  try{
+    var el = document.getElementById('surumRozet'); if(!el) return;
+    var R = window._sahaModeller || {}, d = window._sahaDetayliModel;
+    var durum = R.detayli ? 'Gerçekçi' : (d && d !== 'yukleniyor' ? 'Basit (gerçekçi model yüklenemedi: ' + d + ')' : (R.hafif ? 'Basit (gerçekçi yükleniyor…)' : 'yükleniyor…'));
+    el.textContent = 'Yüklü sürüm: ' + (window.APP_BUILD || '—') + ' · Oyuncu modeli: ' + durum;
+  }catch(e){}
+}
 function _aktifModel(){
   var R = window._sahaModeller || {};
-  var yuksek = true;
-  try{ yuksek = AYAR.grafik >= 1.5; }catch(e){}        // Orta ve Yüksek: detaylı; Düşük: hafif
-  if(R.detayli && yuksek) return R.detayli;
+  // 2026-09-28-Z: KÖK SEBEP (kullanıcı: "glb yüklememişsin" - telefonda hâlâ basit model):
+  // detaylı model grafik ayarına bağlıydı; kayıtlı ayar "Düşük" (ya da eski 0 değeri) olan
+  // cihazda hiç kullanılmıyordu. Artık detaylı model yüklendiyse HER ayarda o kullanılır;
+  // hafif model yalnızca detaylı yüklenemezse devreye girer.
+  if(R.detayli) return R.detayli;
   return R.hafif || R.detayli || null;
 }
 (function insanModeliYukle(){
@@ -1780,10 +1792,11 @@ function _aktifModel(){
     function hazirOl(ad){
       return function(gltf){
         try{
-          if(!_modelHazirla(gltf, ad)) return;
+          if(!_modelHazirla(gltf, ad)){ if(ad === 'detayli') window._sahaDetayliModel = 'boş sahne'; _modelRozet(); return; }
+          _modelRozet();
           // Model EZAMANSIZ gelir; oyuncular çoktan kurulmuş olabilir - yerinde değiştirilir.
           try{ oyunculariModeleGecir(); }catch(e){_sessiz(e,'insanAdim:1076','saha_oyun');}
-        }catch(e){ _sessiz(e, 'insanModeliYukle:' + ad, 'saha_oyun'); }
+        }catch(e){ if(ad === 'detayli') window._sahaDetayliModel = String(e && e.message || e).slice(0, 80); _modelRozet(); _sessiz(e, 'insanModeliYukle:' + ad, 'saha_oyun'); }
       };
     }
     // 1) Gömülü hafif model
@@ -1799,12 +1812,16 @@ function _aktifModel(){
       if(window.SAHA_OYUNCU_GLB){
         var ham2 = atob(window.SAHA_OYUNCU_GLB), buf2 = new Uint8Array(ham2.length);
         for(var i2 = 0; i2 < ham2.length; i2++) buf2[i2] = ham2.charCodeAt(i2);
-        new THREE.GLTFLoader().parse(buf2.buffer, '', hazirOl('detayli'), function(){ window._sahaDetayliModel = 'hata'; });
+        window._sahaDetayliModel = 'yukleniyor';
+        new THREE.GLTFLoader().parse(buf2.buffer, '', hazirOl('detayli'), function(err){
+          window._sahaDetayliModel = String(err && err.message || err || 'hata').slice(0, 80); _modelRozet();
+          try{ DiagSaha('detayliModel', err instanceof Error ? err : new Error(String(err)), { tur:'uyari' }); }catch(e){}
+        });
       } else {
         new THREE.GLTFLoader().load('saha_oyuncu.glb?v=' + encodeURIComponent(window.APP_BUILD || ''), hazirOl('detayli'), undefined,
           function(){ window._sahaDetayliModel = 'dosya-yok'; });
       }
-    }catch(e){ _sessiz(e, 'detayliModel', 'saha_oyun'); }
+    }catch(e){ window._sahaDetayliModel = String(e && e.message || e).slice(0, 80); _modelRozet(); _sessiz(e, 'detayliModel', 'saha_oyun'); }
     // 3) Eski yol: oyuncu.glb (varsa hafifin yerine geçer)
     if(!window.SAHA_FUTBOLCU_GLB) yukleyici.load('oyuncu.glb', hazirOl('hafif'), undefined, function(){ window._sahaModelDurum = 'dosya-yok'; });
   }catch(e){ window._sahaModelDurum = 'hata'; }
@@ -5578,10 +5595,11 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-28-Y';
+window.APP_BUILD = '2026-09-28-Z';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
+  _modelRozet();
 }catch(e){_sessiz(e,'sahaKareOlc:2714','saha_oyun');}
 
 // Giris ekraninda kadro onizlemesi. Sahadaki oyunculardan DEGIL, KADROLAR tablosundan
