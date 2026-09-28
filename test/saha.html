@@ -1719,61 +1719,83 @@ function insanAdim(ud, dt, hiz, egilebilir){
 // NEDEN ELLE MODEL YAZILMADI: Insan formu, kavisli yuzeyler ve duzgun agirlik boyama
 // ister; elle yazilan geometri 22 oyuncuda hem poligon maliyeti hem de kotu siluet
 // demek olurdu. Hazir model bu isin dogru araci.
-window._sahaInsanModeli = null;      // yuklenen sahne (klonlanacak)
+/* İKİ MODEL (2026-09-28-X):
+   · 'hafif'  : saha_futbolcu.glb - sayfaya gömülü, 5 bin üçgen. Her zaman var.
+   · 'detayli': saha_oyuncu.glb - kullanıcının gönderdiği gerçekçi Mixamo futbolcusu
+                (48 bin üçgen, dokulu yüz/forma, 18 animasyon: şut, kafa, taç, kayarak müdahale,
+                kaleci plonjonu ...). 3,6 MB olduğu için sayfaya gömülmedi; saha.html'in YANINDA
+                ayrı dosya olarak durur ve oyun açılınca indirilir. Dosya yoksa oyun hafif
+                modelle sorunsuz çalışır.
+   Hangisi kullanılır: Grafik 'Yüksek' ise detaylı, 'Orta'/'Düşük' ise hafif (bkz. _aktifModel).
+   Grafik ayarı değişince sahadaki oyuncular yerinde yeni modele geçer. */
+window._sahaModeller = {};
 window._sahaModelDurum = 'aranıyor';
+window._sahaInsanModeli = null;      // geriye uyum: son hazırlanan modelin sahnesi
+function _modelHazirla(gltf, ad){
+  var kok = gltf.scene || (gltf.scenes && gltf.scenes[0]);
+  if(!kok) return null;
+  // Boy normalizasyonu: model hangi olcekte gelirse gelsin oyun olcegine oturur.
+  var kutu = new THREE.Box3().setFromObject(kok);
+  var boy = kutu.max.y - kutu.min.y;
+  if(boy > 0.01) kok.scale.multiplyScalar(1.8 / boy);
+  kok.traverse(function(o){ if(o.isMesh){ o.castShadow = true; o.receiveShadow = false; } });
+  // Sırt numarasının yeri: göğüs hizasında (boyun %72'si) ortadaki köşelerin en geridekisi.
+  var sirt = { y: 1.3, z: -0.14 };
+  try{
+    kok.updateMatrixWorld(true);
+    var sirtY = 1.8 * 0.72, enGeri = 0, v = new THREE.Vector3();
+    kok.traverse(function(o){
+      if(!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
+      var ps = o.geometry.attributes.position;
+      for(var i = 0; i < ps.count; i++){
+        v.fromBufferAttribute(ps, i).applyMatrix4(o.matrixWorld);
+        if(Math.abs(v.y - sirtY) < 0.08 && Math.abs(v.x) < 0.07 && v.z < enGeri) enGeri = v.z;
+      }
+    });
+    sirt = { y: sirtY, z: (enGeri || -0.12) - 0.012 };
+  }catch(e){}
+  // Animasyon klipleri PAYLAŞILIR (kopyalanmaz); her oyuncu kendi mixer'ını kurar.
+  var M = { ad: ad, kok: kok, klipler: gltf.animations || [], sirt: sirt };
+  window._sahaModeller[ad] = M;
+  window._sahaInsanModeli = kok;
+  window._sahaModelDurum = 'hazir';
+  return M;
+}
+function _aktifModel(){
+  var R = window._sahaModeller || {};
+  var yuksek = true;
+  try{ yuksek = AYAR.grafik >= 2; }catch(e){}          // AYAR henüz tanımlanmamış olabilir (açılış)
+  if(R.detayli && yuksek) return R.detayli;
+  return R.hafif || R.detayli || null;
+}
 (function insanModeliYukle(){
   try{
     if(!window.THREE || !THREE.GLTFLoader){ window._sahaModelDurum = 'yukleyici-yok'; return; }
-    var yol = 'oyuncu.glb';
     var yukleyici = new THREE.GLTFLoader();
-    var basarili = function(gltf){
+    function hazirOl(ad){
+      return function(gltf){
         try{
-          var kok = gltf.scene || (gltf.scenes && gltf.scenes[0]);
-          if(!kok){ window._sahaModelDurum = 'bos-model'; return; }
-          // Boy normalizasyonu: model hangi olcekte gelirse gelsin oyun olcegine oturur.
-          var kutu = new THREE.Box3().setFromObject(kok);
-          var boy = kutu.max.y - kutu.min.y;
-          if(boy > 0.01) kok.scale.multiplyScalar(1.8 / boy);
-          kok.traverse(function(o){ if(o.isMesh){ o.castShadow = true; o.receiveShadow = false; } });
-          // Sırt numarasının yeri: göğüs hizasında (boyun %72'si) ortadaki köşelerin en geridekisi.
-          try{
-            kok.updateMatrixWorld(true);
-            var sirtY = 1.8 * 0.72, enGeri = 0, v = new THREE.Vector3();
-            kok.traverse(function(o){
-              if(!o.isMesh || !o.geometry || !o.geometry.attributes.position) return;
-              var ps = o.geometry.attributes.position;
-              for(var i = 0; i < ps.count; i++){
-                v.fromBufferAttribute(ps, i).applyMatrix4(o.matrixWorld);
-                if(Math.abs(v.y - sirtY) < 0.08 && Math.abs(v.x) < 0.07 && v.z < enGeri) enGeri = v.z;
-              }
-            });
-            window._sahaModelSirt = { y: sirtY, z: (enGeri || -0.12) - 0.012 };
-          }catch(e){ window._sahaModelSirt = { y: 1.3, z: -0.14 }; }
-          window._sahaInsanModeli = kok;
-          // Animasyon klipleri saklanir: her oyuncu kendi AnimationMixer'ini kurup
-          // bu ortak kliplere baglanir. Klip verisi PAYLASILIR (kopyalanmaz) - 22 ayri
-          // kopya bellekte gereksiz yer kaplardi.
-          window._sahaModelKlipler = gltf.animations || [];
-          window._sahaModelDurum = 'hazir';
-          // KOK SEBEP (kullanici: "oyuncular icin gelistirme olmamis"): Model EZAMANSIZ
-          // yukleniyor; oyuncular ise sayfa acilirken kuruluyor. Model geldiginde oyuncular
-          // coktan KUTU olarak kurulmus oluyordu ve hic degistirilmiyordu - yani yeni model,
-          // animasyonlar ve sut hareketleri hic gorunmuyordu.
-          // COZUM: Model hazir olunca sahadaki her oyuncu yerinde yeni govdeyle degistirilir.
+          if(!_modelHazirla(gltf, ad)) return;
+          // Model EZAMANSIZ gelir; oyuncular çoktan kurulmuş olabilir - yerinde değiştirilir.
           try{ oyunculariModeleGecir(); }catch(e){_sessiz(e,'insanAdim:1076','saha_oyun');}
-        }catch(e){ window._sahaModelDurum = 'hata'; _sessiz(e, 'insanModeliYukle', 'saha_oyun'); }
+        }catch(e){ _sessiz(e, 'insanModeliYukle:' + ad, 'saha_oyun'); }
       };
-    // Önce sayfaya gömülü model (bkz. SAHA_FUTBOLCU_GLB); yoksa yandaki oyuncu.glb dosyası.
+    }
+    // 1) Gömülü hafif model
     if(window.SAHA_FUTBOLCU_GLB){
       try{
         var ham = atob(window.SAHA_FUTBOLCU_GLB), buf = new Uint8Array(ham.length);
         for(var i = 0; i < ham.length; i++) buf[i] = ham.charCodeAt(i);
-        yukleyici.parse(buf.buffer, '', basarili, function(){ window._sahaModelDurum = 'hata'; });
-        return;
+        yukleyici.parse(buf.buffer, '', hazirOl('hafif'), function(){});
       }catch(e){ _sessiz(e, 'gomuluModel', 'saha_oyun'); }
     }
-    yukleyici.load(yol, basarili, undefined,
-      function(){ window._sahaModelDurum = 'dosya-yok'; });   // 404: normal durum
+    // 2) Detaylı model: saha.html'in yanındaki dosya (yoksa sessizce atlanır)
+    try{
+      new THREE.GLTFLoader().load('saha_oyuncu.glb?v=' + encodeURIComponent(window.APP_BUILD || ''), hazirOl('detayli'), undefined,
+        function(){ window._sahaDetayliModel = 'dosya-yok'; });
+    }catch(e){}
+    // 3) Eski yol: oyuncu.glb (varsa hafifin yerine geçer)
+    if(!window.SAHA_FUTBOLCU_GLB) yukleyici.load('oyuncu.glb', hazirOl('hafif'), undefined, function(){ window._sahaModelDurum = 'dosya-yok'; });
   }catch(e){ window._sahaModelDurum = 'hata'; }
 })();
 // Takım rengi değişince hazır modellerin forma/şort parçalarını yeniden boyar.
@@ -1782,7 +1804,7 @@ function hazirRenkSenk(){
     if(typeof players === 'undefined' || !players) return;
     players.forEach(function(p){
       if(!p.obj || !p.obj.userData || !p.obj.userData.hazirModel) return;
-      p.obj.traverse(function(o){ if(o.material && o.material.userData && o.material.userData.kaynakRenk) o.material.color.copy(o.material.userData.kaynakRenk); });
+      p.obj.traverse(function(o){ if(o.material && o.material.userData && o.material.userData.kaynakRenk) o.material.color.copy(o.material.userData.kaynakRenk).multiplyScalar(o.material.userData.parlak || 1); });
     });
   }catch(e){ _sessiz(e, 'hazirRenkSenk', 'saha_oyun'); }
 }
@@ -1793,8 +1815,12 @@ function oyunculariModeleGecir(){
   players.forEach(function(p){
     try{
       var mat = p.gk ? (p.team === 0 ? MATS.ka : MATS.kb) : (p.team === 0 ? MATS.a : MATS.b);
+      var hedef = _aktifModel();
+      if(!hedef) return;                                         // model yoksa dokunma
+      if(p.obj && p.obj.userData && p.obj.userData.modelAd === hedef.ad) return;   // zaten bu modelde
+      if(p.degAnim) return;                                      // değişiklik sahnesindeki oyuncuya dokunma
       var yeni = makePlayer(mat);
-      if(!yeni.userData || !yeni.userData.hazirModel) return;   // model yoksa dokunma
+      if(!yeni.userData || !yeni.userData.hazirModel) return;
       yeni.position.copy(p.obj.position);
       yeni.rotation.copy(p.obj.rotation);
       yeni.visible = p.obj.visible;
@@ -1806,9 +1832,14 @@ function oyunculariModeleGecir(){
   });
 }
 // Yuklenen modelden bir oyuncu govdesi uretir. Model yoksa null doner.
-function insanModelKopyala(m){
+// Dokulu (detaylı) modelde ten ve saç rengi doku ÇARPANI ile değiştirilir: doku zaten
+// gerçek ten/saç rengini taşır, düz renk vermek yüzü plastik yapardı.
+const TEN_CARPAN = [1.0, 0.93, 0.84, 0.72, 0.58, 0.46];
+const SAC_CARPAN = [0xffffff, 0x8a8a8a, 0x555555, 0xffe2b8, 0xd9a878, 0x3a3a3a];
+function insanModelKopyala(m, M){
   try{
-    var kaynak = window._sahaInsanModeli;
+    M = M || _aktifModel();
+    var kaynak = M && M.kok;
     if(!kaynak) return null;
     // ISKELETLI model icin SkeletonUtils SART (bkz. betik etiketindeki not).
     var kopya = (THREE.SkeletonUtils && THREE.SkeletonUtils.clone)
@@ -1816,14 +1847,15 @@ function insanModelKopyala(m){
     // FORMA RENGI: Yalnizca GIYSI malzemeleri boyanir. Ten, goz ve kas malzemelerini
     // boyamak oyuncuyu tek renk bir heykele cevirirdi. Model malzemeleri adlandirilmis
     // ('Skin', 'Eye', 'Eyebrows' ...), bu yuzden ada gore ayirmak guvenilir.
-    var tenSayilan = ['skin','eye','eyebrow','hair','teeth','mouth','goz','göz'];
+    var tenSayilan = ['skin','eye','eyebrow','hair','teeth','mouth','goz','göz','kirpik'];
     /* 2026-09-28-W: saha_futbolcu.glb malzemeleri Türkçe adlı. Her parça kendi rengini alır:
        Forma/Tozluk -> forma rengi, Sort/Forma_Detay -> şort rengi, Ten -> oyuncuya özel ten,
        Sac -> oyuncuya özel saç rengi, Krampon -> oyuncuya özel krampon rengi, Goz -> aynen.
        Takım rengine bağlı parçalar kaynak rengi hatırlar (userData.kaynakRenk): takım
        değişince hazirRenkSenk() hepsini yeniden boyar. */
-    var tenRenk = YUZ_TEN[(Math.random()*YUZ_TEN.length)|0];
-    var sacRenk = YUZ_SAC[(Math.random()*YUZ_SAC.length)|0];
+    var tenIdx = (Math.random()*YUZ_TEN.length)|0, sacIdx = (Math.random()*YUZ_SAC.length)|0;
+    var tenRenk = YUZ_TEN[tenIdx];
+    var sacRenk = YUZ_SAC[sacIdx];
     var botRenk = KRAMPON_RENK[(Math.random()*KRAMPON_RENK.length)|0];
     kopya.traverse(function(o){
       if(!o.isMesh || !o.material) return;
@@ -1832,10 +1864,17 @@ function insanModelKopyala(m){
         var k = mt.clone();                       // paylasimli malzeme = tum takimlar ayni renk
         var ad = String(mt.name || '').toLowerCase();
         if(k.metalness != null) k.metalness = 0;
-        if(ad === 'forma' || ad === 'tozluk'){ k.userData.kaynakRenk = m.jer.color; k.color.copy(m.jer.color); }
-        else if(ad === 'sort' || ad === 'forma_detay'){ k.userData.kaynakRenk = m.shr.color; k.color.copy(m.shr.color); }
-        else if(ad === 'ten'){ k.color.setHex(tenRenk); if(k.roughness != null) k.roughness = 0.6; }
-        else if(ad === 'sac'){ k.color.setHex(sacRenk); }
+        // Dokulu modelde doku açık gridir; renk doğrudan çarpılınca forma koyulaşıyordu -> 1.18 kat parlatılır.
+        var parlak = k.map ? 1.18 : 1;
+        if(ad === 'forma' || ad === 'tozluk'){ k.userData.kaynakRenk = m.jer.color; k.userData.parlak = parlak; k.color.copy(m.jer.color).multiplyScalar(parlak); }
+        else if(ad === 'sort' || ad === 'forma_detay'){ k.userData.kaynakRenk = m.shr.color; k.userData.parlak = parlak; k.color.copy(m.shr.color).multiplyScalar(parlak); }
+        else if(ad === 'ten'){
+          if(k.map){ var c = TEN_CARPAN[tenIdx % TEN_CARPAN.length]; k.color.setRGB(c, c*0.97, c*0.95); }
+          else k.color.setHex(tenRenk);
+          if(k.roughness != null) k.roughness = 0.6;
+        }
+        else if(ad === 'sac'){ if(k.map) k.color.setHex(SAC_CARPAN[sacIdx % SAC_CARPAN.length]); else k.color.setHex(sacRenk); }
+        else if(ad === 'kirpik'){ /* aynen */ }
         else if(ad === 'krampon'){ k.color.setHex(botRenk); if(k.roughness != null) k.roughness = 0.45; }
         else {
           var tenMi = tenSayilan.some(function(x){ return ad.indexOf(x) >= 0; });
@@ -1856,9 +1895,9 @@ function insanModelKopyala(m){
 // atlar ve bu goze carpar.
 // Hangi klip: 0-0.4 m/s durus, 0.4-3.2 yuruyus, ustu kosu. Esikler insanAdim'daki
 // kutu-model esikleriyle ayni tutuldu ki iki model ayni hizda ayni sey yapsin.
-function modelAnimKur(grup){
+function modelAnimKur(grup, M, kaleci){
   try{
-    var klipler = window._sahaModelKlipler;
+    var klipler = (M && M.klipler) || [];
     if(!klipler || !klipler.length) return null;
     var mixer = new THREE.AnimationMixer(grup);
     function bul(ad){
@@ -1868,14 +1907,22 @@ function modelAnimKur(grup){
       }
       return null;
     }
-    var k = { idle:bul('Idle')||bul('Bekleme'), walk:bul('Walk')||bul('Yurume'), run:bul('Run')||bul('Kosu'), sprint:bul('Sprint') };
+    var k = { idle: (kaleci && bul('Kaleci_Bekleme')) || bul('Idle')||bul('Bekleme')||bul('Atak_Bekleme'),
+              walk:bul('Walk')||bul('Yurume'), run:bul('Run')||bul('Kosu'), sprint:bul('Sprint') };
+    // Yürüme klibi yoksa (detaylı model) koşu klibinin YAVAŞ oynatılan kopyası kullanılır.
+    var walkKosudan = false;
+    if(!k.walk && k.run){ k.walk = k.run.clone(); k.walk.name = 'Yurume_kosudan'; walkKosudan = true; }
     // TEK SEFERLIK KLIPLER (kullanici: "sut ve kaleci animasyonlari"):
     //   sutSag/sutSol : Kick_Right / Kick_Left - sut ve pas
     //   plonjon       : Roll - kalecinin yana atlayisi (modelde ozel kaleci klibi yok,
     //                   Roll yana yuvarlanma oldugu icin en yakin hareket)
     // LoopOnce: bir kez oynar ve biter; bitince yuruyus/kosu karisimina geri donulur.
-    var tek = { sutSag:bul('Kick_Right')||bul('Sut'), sutSol:bul('Kick_Left')||bul('Sut'), plonjon:bul('Roll'),
-                pas:bul('Pas'), sevinc:bul('Sevinc') };
+    var tek = { sutSag:bul('Kick_Right')||bul('Sut')||bul('Sut_1'), sutSol:bul('Kick_Left')||bul('Sut')||bul('Sut_2'),
+                gucluSut:bul('Kosarak_Sut'), plonjon:bul('Roll')||bul('Kaleci_Plonjon_1'),
+                plonjonSol:bul('Kaleci_Plonjon_1'), plonjonSag:bul('Kaleci_Plonjon_2'),
+                pas:bul('Pas'), sevinc:bul('Sevinc'), kafa:bul('Kafa_1'), tac:bul('Tac_Atisi'),
+                kayma:bul('Kayarak_Mudahale_1'), dusme:bul('Faul_Dusme'), tutma:bul('Kaleci_Tutma_1'),
+                elleAtis:bul('Kaleci_Elle_Atis') };
     var tekEylem = {};
     Object.keys(tek).forEach(function(ad){
       if(!tek[ad]) return;
@@ -1892,7 +1939,7 @@ function modelAnimKur(grup){
         eylem[ad].setEffectiveWeight(ad === 'idle' ? 1 : 0);
       }
     });
-    return { mixer: mixer, eylem: eylem, suanki: 'idle', tek: tekEylem, tekBitis: 0 };
+    return { mixer: mixer, eylem: eylem, suanki: 'idle', tek: tekEylem, tekBitis: 0, walkKosudan: walkKosudan };
   }catch(e){ return null; }
 }
 // Tek seferlik hareketi oynatir (sut, pas, plonjon). Bittiginde modelAnimGuncelle
@@ -1901,6 +1948,8 @@ function modelTekSefer(ud, ad, hiz){
   try{
     var a = ud && ud.anim; if(!a || !a.tek) return;
     if(!a.tek[ad] && ad === 'pas') ad = 'sutSag';     // pas klibi yoksa vuruş klibi
+    if(!a.tek[ad] && ad === 'gucluSut') ad = 'sutSag';
+    if(!a.tek[ad] && (ad === 'plonjonSol' || ad === 'plonjonSag')) ad = 'plonjon';
     if(!a.tek[ad]) return;
     var e = a.tek[ad];
     e.reset();
@@ -1941,6 +1990,7 @@ function modelAnimGuncelle(ud, dt, hiz){
     // Klip hızı gerçek hızla orantılı ("paten kayma" olmasın) - karışım bölgesinde iki
     // klip AYNI adım hızında oynar ve fazları eşitlenir, ayaklar birbirine karışmaz.
     var rS = Math.max(0.55, Math.min(1.8, hiz/5.5)), wS = Math.max(0.6, Math.min(1.6, hiz/1.8));
+    if(a.walkKosudan) wS = Math.max(0.32, Math.min(0.7, hiz/5.0));   // koşu klibinden yürüyüş: yavaş
     if(a.eylem.run && a.eylem.walk && wRun > 0.02 && wWalk > 0.02){
       var rd = a.eylem.run.getClip().duration, wd = a.eylem.walk.getClip().duration;
       var ortak = (wRun*rS/rd + wWalk*wS/wd) / (wRun + wWalk);          // ortak adım frekansı
@@ -2054,13 +2104,15 @@ function _yuzParcalari(){
 }
 function makePlayer(m){
   // Hazir insan modeli varsa onu kullan; yoksa asagidaki kutu modeline dus.
-  var hazir = insanModelKopyala(m);
+  var _M = _aktifModel();
+  var hazir = insanModelKopyala(m, _M);
   if(hazir){
     var gg = new THREE.Group();
     gg.add(hazir);
+    var _kaleci = (m === MATS.ka || m === MATS.kb);
     // Kutu modelin animasyon arayuzu (bacakL/kolR ...) burada YOK; insanAdim bunu
     // kontrol edip sessizce atlar. Rigli iskelet animasyonu ayri bir adim.
-    gg.userData = { phase: Math.random()*6, hazirModel: true, anim: modelAnimKur(hazir) };
+    gg.userData = { phase: Math.random()*6, hazirModel: true, modelAd: _M.ad, anim: modelAnimKur(hazir, _M, _kaleci) };
     /* İSİM ETİKETİ ve SIRT NUMARASI (2026-09-28-W): hazır modelde hiç yoktu - etiketYaz
        boşa dönüyordu. Numara göğüs kemiğine bağlanır: oyuncu eğilince, dönünce numara da
        sırtla birlikte hareket eder. */
@@ -2069,11 +2121,15 @@ function makePlayer(m){
       var nd = new THREE.CanvasTexture(nt);
       var nm = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.3),
         new THREE.MeshBasicMaterial({ map:nd, transparent:true, depthWrite:false }));
-      var sirt = window._sahaModelSirt || { y:1.3, z:-0.14 };
-      nm.position.set(0, sirt.y, sirt.z); nm.rotation.y = Math.PI;
+      var sirt = _M.sirt || { y:1.3, z:-0.14 };
+      // Sırttan biraz geride: animasyonda sırt kasları hafif şiştiğinde numara gövdeye gömülmesin.
+      nm.position.set(0, sirt.y - 0.05, sirt.z - 0.05); nm.rotation.y = Math.PI;
       gg.add(nm); gg.updateMatrixWorld(true);
       var gogusK = null;
-      hazir.traverse(function(o){ if(!gogusK && o.isBone && /chest|spine2|spine1/i.test(o.name)) gogusK = o; });
+      [/chest/i, /spine2/i, /spine1/i, /spine/i].some(function(re){
+        hazir.traverse(function(o){ if(!gogusK && o.isBone && re.test(o.name)) gogusK = o; });
+        return !!gogusK;
+      });
       if(gogusK) gogusK.attach(nm);
       var it = document.createElement('canvas'); it.width = 384; it.height = 128;
       var idk = new THREE.CanvasTexture(it);
@@ -5511,7 +5567,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-28-W';
+window.APP_BUILD = '2026-09-28-X';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -7101,6 +7157,8 @@ function ayarUygula(){
   havaUygula();
   renderer.setPixelRatio(Math.min(devicePixelRatio, AYAR.grafik));
   golgeKalite();
+  // Grafik değişince oyuncu modeli de değişebilir (Yüksek: detaylı, diğerleri: hafif).
+  if(window._sonGrafik !== AYAR.grafik){ window._sonGrafik = AYAR.grafik; try{ oyunculariModeleGecir(); }catch(e){} }
   // KOK SEBEP (kullanici: "oyunda kadraja giren taraftar alani TV sekmesinde gorunmuyor"):
   // Tribunler grafik KALITESI ayarina bagliydi: 'Dusuk' secili cihazda hic cizilmiyordu.
   // Izleyici cihazinda ayar farkliysa oyuncunun gordugu kalabalik izleyicide yoktu -
@@ -7435,6 +7493,8 @@ function sut(o){
       var _yanX = (ball.position.x - p.obj.position.x)*Math.cos(p.obj.rotation.y)
                 - (ball.position.z - p.obj.position.z)*Math.sin(p.obj.rotation.y);
       modelTekSefer(p.obj.userData, _yanX >= 0 ? 'sutSag' : 'sutSol', 1.3 + g*0.6);
+    } else if(kafa && p.obj.userData.hazirModel){
+      modelTekSefer(p.obj.userData, 'kafa', 1.6);                 // kafa vuruşu klibi (varsa)
     }
   }catch(e){_sessiz(e,'sut:3842','saha_oynanis');}
   if (kafa){
@@ -7541,6 +7601,7 @@ function kay(o){                                         // kayarak müdahale
   OYN[o].mc = 1.6;
   p.kayma = 0.55; p.kaymaVurdu = false;
   p.kaymaYon = vurusYonu(p, o).clone();
+  try{ if(p.obj.userData.hazirModel) modelTekSefer(p.obj.userData, 'kayma', 1.6); }catch(e){}
   gurultu(0.18, 0.12, 380);
 }
 function kaymaKontrol(p, dt){
@@ -7550,7 +7611,9 @@ function kaymaKontrol(p, dt){
   p.vel.set(p.kaymaYon.x*hiz, 0, p.kaymaYon.z*hiz);
   p.obj.position.x += p.vel.x * dt;
   p.obj.position.z += p.vel.z * dt;
-  p.obj.rotation.x = -1.15;
+  // Hazır modelde kayarak müdahale klibi varsa gövde klibe bırakılır (yatırmak iki kez yatırırdı).
+  const _kk = p.obj.userData && p.obj.userData.anim && p.obj.userData.anim.tek && p.obj.userData.anim.tek.kayma;
+  p.obj.rotation.x = _kk ? 0 : -1.15;
   if (!p.kaymaVurdu){
     const s = topSahibi();
     if (s && s.team !== p.team && !s.gk && s.obj.position.distanceTo(p.obj.position) < 2.0){
@@ -7962,7 +8025,6 @@ function duranCalistir(){
   } else if (tip === 'penalti'){
     const savGK = (p.team === 0 ? teamB : teamA)[0];
     // KALECI PLONJONU: Roll klibi kalecinin yana atlayisini temsil ediyor.
-    try{ if (savGK && savGK.obj.userData.hazirModel) modelTekSefer(savGK.obj.userData, 'plonjon', 1.6); }catch(e){_sessiz(e,'duranCalistir:4302','saha_oynanis');}
     // PENALTI GÜCE BAĞLI (2026-09-27-G): atıcının isabeti vuruşun direğe ne kadar
     // yakın/dışarı gittiğini, kalecinin gücü doğru köşeyi okuma olasılığını belirler.
     const _isb = nit(p,'nIsb',0.4);
@@ -7973,6 +8035,12 @@ function duranCalistir(){
       const _dogru = Math.random() < 0.28 + _kk*0.42;
       const _taraf = _dogru ? Math.sign(_pz) : -Math.sign(_pz);
       savGK.dalis = _taraf * Math.min(3.4, Math.abs(_pz) * (0.8 + Math.random()*0.35)); savGK.dalisT = 1.3;
+      // Plonjon yönü: kalecinin SOL eli dünyada (-sin(ry)) z yönüne bakar; dalış o yöndeyse
+      // sola atlama klibi (Kaleci_Plonjon_1), değilse sağa (Kaleci_Plonjon_2).
+      try{ if (savGK && savGK.obj.userData.hazirModel){
+        const _solZ = -Math.sin(savGK.obj.rotation.y);
+        modelTekSefer(savGK.obj.userData, (savGK.dalis || 0) * _solZ >= 0 ? 'plonjonSol' : 'plonjonSag', 1.6);
+      } }catch(e){_sessiz(e,'duranCalistir:4302','saha_oynanis');}
     }
     const d = h.sub(ball.position).setY(0).normalize();
     bVel.set(d.x*30, 1.5, d.z*30);
@@ -8074,6 +8142,7 @@ function kartVer(p, agir){
 }
 function faul(magdur, ihlalci, agir){
   faulCd = 8;
+  try{ if(magdur && magdur.obj && magdur.obj.userData.hazirModel) modelTekSefer(magdur.obj.userData, 'dusme', 1.1); }catch(e){}
   const ist = (magdur.team === 0 ? istat.b : istat.a);   // faul rakibin hanesine
   ist.faul++;
   const x = magdur.obj.position.x, z = magdur.obj.position.z, d = magdur.dir;
@@ -8717,7 +8786,9 @@ function update(dt){
         ball.position.x = _ap.x + Math.sin(_ry)*0.12;   // hafif onde: basin ustunde, gogus hizasinin onunde
         ball.position.z = _ap.z + Math.cos(_ry)*0.12;
         ball.position.y = 2.05;
-        duran.alici.obj.userData.tacZaman = performance.now();
+        var _tud = duran.alici.obj.userData, _tsimdi = performance.now();
+        if(_tud.hazirModel && (!_tud.tacZaman || _tsimdi - _tud.tacZaman > 400)) modelTekSefer(_tud, 'tac', 0.9);   // yeni taç: klip bir kez
+        _tud.tacZaman = _tsimdi;
       }
     }
     topGolge.position.set(ball.position.x, 0.02, ball.position.z);
