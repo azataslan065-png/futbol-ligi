@@ -5308,7 +5308,7 @@ function yagmurGuncelle(dt){
 function yagmurSesi(ac2){
   try{
     if(!ac){ return; }
-    if(ac2 && AYAR.ses && !HAVA_FX.yagmurSes){
+    if(ac2 && _sesUret() && !HAVA_FX.yagmurSes){
       var b = ac.createBuffer(1, ac.sampleRate*2, ac.sampleRate), d = b.getChannelData(0);
       for(var i = 0; i < d.length; i++) d[i] = Math.random()*2 - 1;
       var src = ac.createBufferSource(); src.buffer = b; src.loop = true;
@@ -5316,7 +5316,7 @@ function yagmurSesi(ac2){
       var g = ac.createGain(); g.gain.value = 0.02;
       src.connect(f); f.connect(g); g.connect(sesCikis()); src.start();
       HAVA_FX.yagmurSes = { src:src, g:g };
-    } else if((!ac2 || !AYAR.ses) && HAVA_FX.yagmurSes){
+    } else if((!ac2 || !_sesUret()) && HAVA_FX.yagmurSes){
       try{ HAVA_FX.yagmurSes.src.stop(); }catch(e){}
       HAVA_FX.yagmurSes = null;
     }
@@ -6975,8 +6975,23 @@ function resmiListesi(){ try{ return [hakem].concat(yanHakemler); }catch(e){ ret
 
 /* ---------- ses (Web Audio, dosyasız) ---------- */
 let ac = null, tribunGain = null;
+/* SES YOLU (2026-09-28-AF, kullanıcı: "bazı sesler TV sekmesine aktarılmıyor"):
+   KÖK SEBEPLER: (1) Yayın, oyuncunun SES DÜZEYİ uygulanmış çıkıştan alınıyordu - oyuncu sesi
+   kısınca izleyicinin sesi de kısılıyordu. (2) Oyuncu sesi KAPALIYSA oyun hiç ses üretmiyordu,
+   yayına da ses gitmiyordu. (3) Spiker (konuşma sentezi) videoya alınamaz.
+   ŞİMDİ: Bütün sesler önce "yayın hattına" (_sahaYayinHat, düzey 1) gider; buradan hem yayına
+   hem oyuncunun hoparlörüne (düzey ayarlı; ses kapalıysa 0) dağılır. Yayın sürerken oyuncunun
+   sesi kapalı olsa bile sesler üretilir - izleyici hepsini duyar, oyuncu duymaz.
+   Spiker metni ayrıca gönderilir; izleyici cihazı seslendirir ve ekranda altyazı olarak gösterir. */
+function _sesUret(){ try{ return !!AYAR.ses || (typeof YAYIN !== 'undefined' && YAYIN.rol === 'yayinci'); }catch(e){ return !!AYAR.ses; } }
+function _sesHatKur(){
+  if(!ac) return;
+  if(!window._sahaAnaKazanc){ window._sahaAnaKazanc = ac.createGain(); window._sahaAnaKazanc.connect(ac.destination); }
+  if(!window._sahaYayinHat){ window._sahaYayinHat = ac.createGain(); window._sahaYayinHat.gain.value = 1; window._sahaYayinHat.connect(window._sahaAnaKazanc); }
+  window._sahaAnaKazanc.gain.value = AYAR.ses ? ((AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100) : 0;
+}
 function sesBaslat(){
-  if (!AYAR.ses) return;
+  if (!_sesUret()) return;
   try {
     if (!ac){
       const C = window.AudioContext || window.webkitAudioContext;
@@ -6992,22 +7007,20 @@ function sesBaslat(){
       // ANA ÇIKIŞ (MADDE 2.7 - ses düzeyi): bütün sesler tek bir kazanç düğümünden
       // geçer. Her tonu ayrı ölçeklemek, yeni bir ses eklendiğinde düzeyi uygulamayı
       // unutmayı kaçınılmaz kılardı.
-      window._sahaAnaKazanc = ac.createGain();
-      window._sahaAnaKazanc.gain.value = (AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100;
-      window._sahaAnaKazanc.connect(ac.destination);
+      _sesHatKur();
       // Taban seviye 0: menüde SESSİZ. Maç başlayınca sesMacOrtami(true) ile açılır.
       tribunGain = ac.createGain(); tribunGain.gain.value = 0;
-      n.connect(f); f.connect(tribunGain); tribunGain.connect(window._sahaAnaKazanc);
+      n.connect(f); f.connect(tribunGain); tribunGain.connect(window._sahaYayinHat);
       n.start();
     }
     if (ac.state === 'suspended') ac.resume();
   } catch(e){ ac = null; }
 }
 function sesCikis(){
-  try{ return window._sahaAnaKazanc || ac.destination; }catch(e){ return ac.destination; }
+  try{ return window._sahaYayinHat || window._sahaAnaKazanc || ac.destination; }catch(e){ return ac.destination; }
 }
 function ton(f0, f1, sure, tip, ses){
-  if (!ac || !AYAR.ses) return;
+  if (!ac || !_sesUret()) return;
   try {
     const o = ac.createOscillator(), g = ac.createGain();
     o.type = tip || 'square';
@@ -7020,7 +7033,7 @@ function ton(f0, f1, sure, tip, ses){
   } catch(e){_sessiz(e,'ton:1530','saha_oyun');}
 }
 function gurultu(sure, ses, frek){
-  if (!ac || !AYAR.ses) return;
+  if (!ac || !_sesUret()) return;
   try {
     const b = ac.createBuffer(1, Math.ceil(ac.sampleRate*sure), ac.sampleRate);
     const d = b.getChannelData(0);
@@ -7057,24 +7070,273 @@ var _tribunTaban = 0;
    · Tezahürat: Web Audio ile üretilir - ritmik alkış (gürültü patlamaları) ve "o-le o-le"
      benzeri tribün nakaratı (formant süzgeçli testere dalgaları). Maç boyunca 25-45 sn'de
      bir kısa tezahürat; golden hemen sonra coşkulu tezahürat. Ses ayarı kapalıysa hiçbiri çalmaz. */
+
+/* ══ CANLI GÖRÜNTÜ + SES YAYINI (WebRTC) (2026-09-28-AE) ══════════════════════════════════
+   KULLANICI TALEBİ: "Kullanıcı maçı oynarken görüntü ve ses eksiksiz olarak TV sekmesindeki
+   canlı yayına iletilsin."
+   ÖNCEDEN: TV'deki izleyici sayfası maçı Firebase'deki konum verisinden KENDİSİ yeniden
+   çiziyordu - ses yoktu; tören, gol sevinci, tekrar ve kamera açıları oyuncunun gördüğüyle
+   aynı değildi.
+   ŞİMDİ: Oyuncunun cihazı oyun ekranını (3B sahne) ve oyun sesini (tribün, düdük, anons zili,
+   tezahürat) canlı video olarak doğrudan izleyiciye gönderir (WebRTC, cihazdan cihaza).
+   · Bağlantı kurulumu (teklif/cevap) Firebase üzerinden: sahaOdalar/yayin_{lig}_{maç}.
+   · Oyuncu başına en fazla 4 izleyici doğrudan görüntü alır (her izleyici oyuncunun
+     internetinden ayrı yükleme demek); 5. ve sonrası eskisi gibi veriden çizilen görüntüyü izler.
+   · Video 24 kare/sn, en fazla ~960 px genişlik ve 0,9 Mbit/sn ile sınırlı: oyuncunun
+     telefonunu ve internetini yormasın.
+   · Spiker (telefonun konuşma sesi) videoya giremez: anons metni ayrıca gönderilir, izleyicinin
+     cihazı da aynı cümleyi seslendirir.
+   · Bağlantı kurulamazsa (bazı mobil operatör ağları doğrudan bağlantıya izin vermez) izleyici
+     otomatik olarak eski yönteme (veriden çizim) düşer ve 30 sn sonra tekrar dener. */
+var YAYIN = { rol:null, kok:null, akis:null, pcler:{}, dinle:[], pc:null, vid:null, video:null, sonAnons:0 };
+var YAYIN_ICE = { iceServers:[{ urls:['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }] };
+function _yayinKok(lig, mac){
+  var t = function(x){ return String(x || '').replace(/[.#$\[\]\/]/g, '_'); };
+  return 'sahaOdalar/yayin_' + t(lig) + '_' + t(mac);
+}
+function _iceBekle(pc, ms){
+  return new Promise(function(res){
+    if(pc.iceGatheringState === 'complete') return res();
+    var t = setTimeout(res, ms);
+    pc.addEventListener('icegatheringstatechange', function(){ if(pc.iceGatheringState === 'complete'){ clearTimeout(t); res(); } });
+  });
+}
+function _yayinDinleKapat(){
+  YAYIN.dinle.forEach(function(d){ try{ d[0].off(d[1], d[2]); }catch(e){} });
+  YAYIN.dinle = [];
+}
+function yayinBaslat(){
+  try{
+    var fk = window._sahaAktifFikstur;
+    if(!fk || window._sahaIzleModu || !window.RTCPeerConnection || !fbHazir || !fbDb) return;
+    var cv = renderer.domElement; if(!cv.captureStream) return;
+    yayinDurdur();
+    var akis = cv.captureStream(24);
+    YAYIN.rol = 'yayinci';                          // ses kapalı oyuncuda da sesler üretilsin (bkz. _sesUret)
+    try{ sesBaslat(); _sesHatKur(); sesMacOrtami(true); }catch(e){}
+    try{
+      if(ac && window._sahaYayinHat && ac.createMediaStreamDestination){
+        var d = ac.createMediaStreamDestination();
+        window._sahaYayinHat.connect(d); YAYIN.sesHedef = d;
+        d.stream.getAudioTracks().forEach(function(t){ akis.addTrack(t); });
+      }
+    }catch(e){ _sessiz(e, 'yayinSes', 'saha_izle'); }
+    YAYIN.rol = 'yayinci'; YAYIN.akis = akis; YAYIN.kok = _yayinKok(fk.ligId, fk.matchId);
+    var kok = YAYIN.kok;
+    fbDb.ref(kok + '/izleyiciler').remove().catch(function(){});
+    var yr = fbDb.ref(kok + '/yayinci');
+    yr.set({ uid: benimUid || '', ts: Date.now(), aktif: true }).catch(function(e){
+      DiagSaha('yayinBaslat', e, { anlami:'Görüntülü yayın kaydı yazılamadı; izleyiciler veriden çizilen görüntüyü izler.',
+        oneri:'Kurallarda sahaOdalar altına yazma izni olmalı.' });
+    });
+    try{ yr.onDisconnect().remove(); }catch(e){}
+    YAYIN.nabiz = setInterval(function(){ fbDb.ref(kok + '/yayinci/ts').set(Date.now()).catch(function(){}); }, 4000);
+    var ir = fbDb.ref(kok + '/izleyiciler');
+    var f = function(sn){
+      var vid = sn.key, v = sn.val() || {};
+      if(v.offer && !YAYIN.pcler[vid] && !v.answer && !v.dolu) _yayinCevapla(vid, v.offer);
+    };
+    ir.on('child_added', f); ir.on('child_changed', f);
+    YAYIN.dinle.push([ir, 'child_added', f], [ir, 'child_changed', f]);
+  }catch(e){ _sessiz(e, 'yayinBaslat', 'saha_izle'); }
+}
+function _yayinCevapla(vid, offer){
+  var kok = YAYIN.kok;
+  if(Object.keys(YAYIN.pcler).length >= 4){ fbDb.ref(kok + '/izleyiciler/' + vid + '/dolu').set(true).catch(function(){}); return; }
+  var pc = new RTCPeerConnection(YAYIN_ICE); YAYIN.pcler[vid] = pc;
+  var kapat = function(){
+    try{ pc.close(); }catch(e){}
+    if(YAYIN.pcler[vid] === pc) delete YAYIN.pcler[vid];
+    fbDb.ref(kok + '/izleyiciler/' + vid).remove().catch(function(){});
+  };
+  pc.onconnectionstatechange = function(){
+    var d = pc.connectionState;
+    if(d === 'failed' || d === 'closed') kapat();
+    else if(d === 'disconnected') setTimeout(function(){ if(pc.connectionState === 'disconnected') kapat(); }, 5000);
+  };
+  YAYIN.akis.getTracks().forEach(function(t){ pc.addTrack(t, YAYIN.akis); });
+  pc.setRemoteDescription(offer)
+    .then(function(){ return pc.createAnswer(); })
+    .then(function(c){ return pc.setLocalDescription(c); })
+    .then(function(){ return _iceBekle(pc, 2500); })
+    .then(function(){
+      try{
+        pc.getSenders().forEach(function(snd){
+          if(!snd.track || snd.track.kind !== 'video' || !snd.getParameters) return;
+          var p = snd.getParameters(); if(!p.encodings || !p.encodings.length) p.encodings = [{}];
+          p.encodings[0].maxBitrate = 900000;
+          var w = renderer.domElement.width; if(w > 960) p.encodings[0].scaleResolutionDownBy = w / 960;
+          snd.setParameters(p).catch(function(){});
+        });
+      }catch(e){}
+      return fbDb.ref(kok + '/izleyiciler/' + vid + '/answer').set({ type: pc.localDescription.type, sdp: pc.localDescription.sdp });
+    })
+    .catch(function(e){ _sessiz(e, 'yayinCevapla', 'saha_izle'); kapat(); });
+}
+function yayinDurdur(){
+  try{
+    if(YAYIN.rol !== 'yayinci') return;
+    Object.keys(YAYIN.pcler).forEach(function(k){ try{ YAYIN.pcler[k].close(); }catch(e){} });
+    YAYIN.pcler = {};
+    _yayinDinleKapat();
+    if(YAYIN.nabiz){ clearInterval(YAYIN.nabiz); YAYIN.nabiz = null; }
+    try{ if(YAYIN.sesHedef && window._sahaYayinHat) window._sahaYayinHat.disconnect(YAYIN.sesHedef); }catch(e){}
+    try{ YAYIN.akis.getTracks().forEach(function(t){ t.stop(); }); }catch(e){}
+    if(YAYIN.kok) fbDb.ref(YAYIN.kok).remove().catch(function(){});
+    YAYIN.rol = null; YAYIN.akis = null; YAYIN.kok = null; YAYIN.sesHedef = null;
+  }catch(e){ _sessiz(e, 'yayinDurdur', 'saha_izle'); }
+}
+addEventListener('pagehide', function(){ try{ yayinDurdur(); }catch(e){} });
+// Spiker metni izleyiciye (konuşma sesi videoya giremez).
+function yayinAnonsGonder(metin){
+  try{ if(YAYIN.rol === 'yayinci' && YAYIN.kok) fbDb.ref(YAYIN.kok + '/anons').set({ m: String(metin).slice(0, 200), t: Date.now() }).catch(function(){}); }catch(e){}
+}
+// ── İZLEYİCİ TARAFI ──
+function izleYayinDinle(lig, mac){
+  if(!fbHazir || !fbDb){ setTimeout(function(){ izleYayinDinle(lig, mac); }, 300); return; }
+  try{
+    if(!window.RTCPeerConnection) return;
+    var kok = _yayinKok(lig, mac);
+    YAYIN.rol = 'izleyici'; YAYIN.kok = kok;
+    var yr = fbDb.ref(kok + '/yayinci');
+    var f = function(sn){
+      var v = sn.val();
+      var aktif = !!(v && v.aktif && (Date.now() - Number(v.ts || 0)) < 20000);
+      if(aktif && !YAYIN.pc && !YAYIN.bekle) _izleBaglan();
+      if(!v && YAYIN.pc) _izleKes(false);
+    };
+    yr.on('value', f); YAYIN.dinle.push([yr, 'value', f]);
+    var ar = fbDb.ref(kok + '/anons');
+    var af = function(sn){
+      var v = sn.val();
+      if(v && v.t && v.t > YAYIN.sonAnons && (Date.now() - v.t) < 10000){
+        YAYIN.sonAnons = v.t;
+        if(YAYIN.videoAktif){ _anonsKonus(v.m); _izleAltyazi(v.m); }
+      }
+    };
+    ar.on('value', af); YAYIN.dinle.push([ar, 'value', af]);
+  }catch(e){ _sessiz(e, 'izleYayinDinle', 'saha_izle'); }
+}
+function _izleBaglan(){
+  try{
+    var kok = YAYIN.kok;
+    YAYIN.vid = 'v' + Math.random().toString(36).slice(2, 10);
+    var pc = new RTCPeerConnection(YAYIN_ICE); YAYIN.pc = pc;
+    pc.addTransceiver('video', { direction:'recvonly' }); pc.addTransceiver('audio', { direction:'recvonly' });
+    var ms = new MediaStream();
+    pc.ontrack = function(e){ ms.addTrack(e.track); _izleVideoGoster(ms); };
+    pc.onconnectionstatechange = function(){
+      var d = pc.connectionState;
+      if(d === 'failed' || d === 'closed') _izleKes(true);
+      else if(d === 'disconnected') setTimeout(function(){ if(YAYIN.pc === pc && pc.connectionState === 'disconnected') _izleKes(true); }, 6000);
+    };
+    var vr = fbDb.ref(kok + '/izleyiciler/' + YAYIN.vid);
+    YAYIN.vr = vr;
+    pc.createOffer()
+      .then(function(o){ return pc.setLocalDescription(o); })
+      .then(function(){ return _iceBekle(pc, 2500); })
+      .then(function(){
+        try{ vr.onDisconnect().remove(); }catch(e){}
+        return vr.set({ offer:{ type: pc.localDescription.type, sdp: pc.localDescription.sdp }, ts: Date.now() });
+      })
+      .then(function(){
+        var cf = function(sn){
+          var v = sn.val(); if(!v || YAYIN.pc !== pc) return;
+          if(v.dolu){ _izleKes(true); return; }
+          if(v.answer && pc.signalingState === 'have-local-offer') pc.setRemoteDescription(v.answer).catch(function(e){ _sessiz(e, 'izleCevap', 'saha_izle'); });
+        };
+        vr.on('value', cf); YAYIN.vrDinle = cf;
+      })
+      .catch(function(e){ _sessiz(e, 'izleBaglan', 'saha_izle'); _izleKes(true); });
+    YAYIN.zamanAsimi = setTimeout(function(){ if(YAYIN.pc === pc && !YAYIN.videoAktif) _izleKes(true); }, 25000);
+  }catch(e){ _sessiz(e, 'izleBaglan', 'saha_izle'); }
+}
+function _izleKes(tekrarDene){
+  try{
+    if(YAYIN.zamanAsimi){ clearTimeout(YAYIN.zamanAsimi); YAYIN.zamanAsimi = null; }
+    if(YAYIN.vr){ try{ if(YAYIN.vrDinle) YAYIN.vr.off('value', YAYIN.vrDinle); YAYIN.vr.remove().catch(function(){}); }catch(e){} }
+    YAYIN.vr = null; YAYIN.vrDinle = null;
+    if(YAYIN.pc){ try{ YAYIN.pc.close(); }catch(e){} }
+    YAYIN.pc = null;
+    _izleVideoGizle();
+    if(tekrarDene){ YAYIN.bekle = true; setTimeout(function(){ YAYIN.bekle = false; try{ fbDb.ref(YAYIN.kok + '/yayinci').once('value').then(function(sn){ var v = sn.val(); if(v && v.aktif && !YAYIN.pc) _izleBaglan(); }); }catch(e){} }, 30000); }
+  }catch(e){ _sessiz(e, 'izleKes', 'saha_izle'); }
+}
+function _izleVideoGoster(ms){
+  try{
+    var v = YAYIN.video;
+    if(!v){
+      v = document.createElement('video'); v.id = 'yayinVideo';
+      v.setAttribute('playsinline', ''); v.playsInline = true; v.autoplay = true;
+      v.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000;z-index:2;pointer-events:none';
+      var cv = renderer.domElement;
+      if(cv.parentNode) cv.parentNode.insertBefore(v, cv.nextSibling); else document.body.appendChild(v);
+      YAYIN.video = v;
+    }
+    if(v.srcObject !== ms) v.srcObject = ms;
+    v.style.display = 'block';
+    YAYIN.videoAktif = true; window._yayinVideoAktif = true;
+    if(YAYIN.zamanAsimi){ clearTimeout(YAYIN.zamanAsimi); YAYIN.zamanAsimi = null; }
+    v.muted = false;
+    var p = v.play();
+    if(p && p.catch) p.catch(function(){
+      // Tarayıcı sesli otomatik oynatmayı engelledi: sessiz başlat, "Sesi aç" düğmesi göster.
+      v.muted = true; v.play().catch(function(){});
+      var b = document.getElementById('yayinSesAc');
+      if(!b){
+        b = document.createElement('button'); b.id = 'yayinSesAc'; b.type = 'button'; b.textContent = '🔊 Sesi aç';
+        b.style.cssText = 'position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);'
+          + 'z-index:2147478500;padding:10px 20px;border-radius:22px;border:1px solid rgba(255,255,255,.4);'
+          + 'background:rgba(10,14,18,.8);color:#fff;font:700 15px/1 inherit;cursor:pointer';
+        b.onclick = function(){ try{ v.muted = false; v.play().catch(function(){}); }catch(e){} b.remove(); };
+        document.body.appendChild(b);
+      }
+    });
+  }catch(e){ _sessiz(e, 'izleVideoGoster', 'saha_izle'); }
+}
+// Spiker cümlesi izleyici ekranında altyazı olarak da görünür (tarayıcı konuşmayı engellese bile).
+function _izleAltyazi(metin){
+  try{
+    var a = document.getElementById('yayinAltyazi');
+    if(!a){
+      a = document.createElement('div'); a.id = 'yayinAltyazi';
+      a.style.cssText = 'position:fixed;left:50%;bottom:calc(64px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);'
+        + 'z-index:2147478400;max-width:86%;padding:8px 14px;border-radius:10px;background:rgba(8,12,18,.78);color:#fff;'
+        + 'font:700 15px/1.35 inherit;text-align:center;pointer-events:none;transition:opacity .4s';
+      document.body.appendChild(a);
+    }
+    a.textContent = '📢 ' + metin; a.style.opacity = '1';
+    clearTimeout(a._t); a._t = setTimeout(function(){ a.style.opacity = '0'; }, 5000);
+  }catch(e){}
+}
+function _izleVideoGizle(){
+  try{
+    YAYIN.videoAktif = false; window._yayinVideoAktif = false;
+    if(YAYIN.video){ YAYIN.video.style.display = 'none'; YAYIN.video.srcObject = null; }
+    var b = document.getElementById('yayinSesAc'); if(b) b.remove();
+  }catch(e){}
+}
 function stadyumZil(){
   try{ ton(784, 0, 0.55, 'sine', 0.09); setTimeout(function(){ ton(622, 0, 0.8, 'sine', 0.08); }, 420); }catch(e){}
 }
+function _anonsKonus(metin){
+  try{
+    var ss = window.speechSynthesis; if(!ss || !window.SpeechSynthesisUtterance) return;
+    var u = new SpeechSynthesisUtterance(metin);
+    u.lang = 'tr-TR'; u.rate = 1.02; u.pitch = 0.92; u.volume = 1;
+    var sesler = ss.getVoices ? ss.getVoices() : [];
+    var tr = sesler.find(function(v){ return /^tr/i.test(v.lang); });
+    if(tr) u.voice = tr;
+    ss.cancel(); ss.speak(u);
+  }catch(e){}
+}
 function stadyumAnons(metin, zil){
   try{
-    if(!AYAR.ses || window._sahaIzleModu) return;
+    if(!_sesUret() || window._sahaIzleModu) return;
     if(zil !== false) stadyumZil();
-    var ss = window.speechSynthesis; if(!ss || !window.SpeechSynthesisUtterance) return;
-    setTimeout(function(){
-      try{
-        var u = new SpeechSynthesisUtterance(metin);
-        u.lang = 'tr-TR'; u.rate = 1.02; u.pitch = 0.92; u.volume = 1;
-        var sesler = ss.getVoices ? ss.getVoices() : [];
-        var tr = sesler.find(function(v){ return /^tr/i.test(v.lang); });
-        if(tr) u.voice = tr;
-        ss.cancel(); ss.speak(u);
-      }catch(e){}
-    }, zil !== false ? 1100 : 0);
+    // Görüntülü yayındaki izleyici de duysun: zil videoda gider, konuşma metni ayrıca.
+    setTimeout(function(){ yayinAnonsGonder(metin); }, zil !== false ? 1100 : 0);
+    if(AYAR.ses) setTimeout(function(){ _anonsKonus(metin); }, zil !== false ? 1100 : 0);
   }catch(e){ _sessiz(e, 'stadyumAnons', 'saha_ses'); }
 }
 function _alkis(t, ses){
@@ -7100,7 +7362,7 @@ function _nakaratNota(t, frek, sure, ses){
 }
 function tezahurat(coskulu){
   try{
-    if(!ac || !AYAR.ses || window._sahaIzleModu) return;
+    if(!ac || !_sesUret() || window._sahaIzleModu) return;
     if(typeof _tribunTaban !== 'undefined' && _tribunTaban <= 0) return;   // maç dışında (menü) çalmaz
     var t0 = ac.currentTime + 0.05, vurus = 0.5, ses = coskulu ? 0.07 : 0.045;
     // "O-le, o-le o-le o-le" + alkış: 2 tur
@@ -7155,7 +7417,7 @@ function sesMacOrtami(ac2){
   } catch(e){_sessiz(e,'sesMacOrtami','saha_ses');}
 }
 function sesTribun(seviye, sure){
-  if (!ac || !tribunGain || !AYAR.ses) return;
+  if (!ac || !tribunGain || !_sesUret()) return;
   // Maç dışındayken (menü) coşku sesi de çalmaz - istenen şey "maça girildiğinde".
   if (_tribunTaban <= 0) return;
   try {
@@ -9027,12 +9289,7 @@ function ayarDokunmaHassas(v){
 function sesSeviyeUygula(){
   try{
     if(!ac) return;
-    var s = (AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100;
-    if(!window._sahaAnaKazanc){
-      window._sahaAnaKazanc = ac.createGain();
-      window._sahaAnaKazanc.connect(ac.destination);
-    }
-    window._sahaAnaKazanc.gain.value = s;
+    _sesHatKur();                                   // düzey + ses kapalıysa 0 (yayın hattı etkilenmez)
   }catch(e){ _sessiz(e,'sesSeviyeUygula','saha_ses'); }
 }
 function kolAyarShellCiz(){
@@ -10173,7 +10430,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-28-AD';
+window.APP_BUILD = '2026-09-28-AG';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -11868,6 +12125,16 @@ function sahaCanliYaz(ilkYazim){
 // AYRI bir yazımda gönderilir: kurala eklenmemiş yeni bir alan bir daha temel canlı
 // yazımı (skor/konum/dakika) düşüremez, en kötü ihtimalle yalnızca kendisi reddedilir.
 // 2026-09-27-S: sahaCanliTs/sahaOynayan da ayrı yazımda - kuralda yoksa ana canlı veri düşmez.
+// Firebase'e gidecek değeri temizler: undefined -> null (dizilerde), nesnelerde undefined alan
+// atılır; NaN/Infinity -> 0. (bkz. sahaCanliYaz notu)
+function _fbTemiz(v){
+  if(v === undefined) return null;
+  if(typeof v === 'number') return isFinite(v) ? v : 0;
+  if(v === null || typeof v !== 'object') return v;
+  if(Array.isArray(v)) return v.map(function(x){ var t = _fbTemiz(x); return t === undefined ? null : t; });
+  var o = {}; Object.keys(v).forEach(function(k){ if(v[k] !== undefined) o[k] = _fbTemiz(v[k]); });
+  return o;
+}
 var _SAHA_EK_ALANLAR = /\/(tabela|izleYon|momentum|sahaCanliTs|sahaOynayan|sahaUzatma)(\/|$)/;
 /* ORTAK CANLI MAÇ ÖZETİ: paylasilan/canliMaclar/{macId}
    Yalnızca TV kartını çizmeye yetecek kadar alan taşır - fikstür ayrı kalmaya devam
@@ -11898,18 +12165,30 @@ function _sahaCanliGonder(g){
     if(_SAHA_EK_ALANLAR.test(k)){ ek[k] = g[k]; ekVar = true; } else ana[k] = g[k];
   });
   var _t0 = performance.now();
-  fbDb.ref().update(ana)
-    .then(function(){ try{ if(window.SahaSensor) SahaSensor.yazim(true, performance.now() - _t0); }catch(_e){} })
-    .catch(function(e){ try{ console.error('[saha] canli yazim hatasi', e);
+  /* 2026-09-28-AE (kullanıcı: "bazı maçlar canlıya alınmıyor"): Firebase, içinde TEK bir
+     'undefined' değer olan yazımı çağrı anında (catch'e bile düşmeden) reddeder. Bir olayın
+     boş bir alanı (ör. oyuncu adı) bütün canlı yazımı - isLive dahil - sessizce düşürüyor,
+     o maç Puan Tablosu'nda hiç canlıya geçmiyordu. Artık değerler yazımdan önce temizlenir
+     (undefined -> null) ve yazım başarısız olursa oyuncuya bir kez sebebiyle gösterilir. */
+  try{ Object.keys(ana).forEach(function(k){ ana[k] = _fbTemiz(ana[k]); }); }catch(_e){}
+  var _yazimHata = function(e){ try{ console.error('[saha] canli yazim hatasi', e);
       if(window.SahaSensor) SahaSensor.yazim(false, performance.now() - _t0, e);
-      else if(window.DiagSaha) DiagSaha('canliYazim', e); }catch(_e){} });
+      else if(window.DiagSaha) DiagSaha('canliYazim', e);
+      if(!window._canliHataGosterildi){ window._canliHataGosterildi = true;
+        mesaj('CANLI YAYIN', 'Maç Puan Tablosu\'na yazılamadı: ' + String(e && (e.code || e.message) || e).slice(0, 60), 4200); }
+    }catch(_e){} };
+  try{
+    fbDb.ref().update(ana)
+      .then(function(){ window._canliHataGosterildi = false; try{ if(window.SahaSensor) SahaSensor.yazim(true, performance.now() - _t0); }catch(_e){} })
+      .catch(_yazimHata);
+  }catch(eSenk){ _yazimHata(eSenk); }
   /* 2026-09-28-AC (kullanıcı: "canlı veri kesilip geri geliyor"): Ek alanlar TEK bir yazımda
      gidiyordu; kurallarda tanımlı olmayan TEK bir alan (ör. sahaCanliTs) bütün yazımı
      düşürüyordu - "maçı şu an ben oynuyorum" damgası (sahaCanliTs / sahaOynayan) hiç
      ulaşmıyor, rakibin SAHA'sı maçı "yarıda kalmış" sanıp sıfırlıyordu. Artık her ek alan
      AYRI yazılır: biri reddedilse diğerleri yine ulaşır. */
   if(ekVar) Object.keys(ek).forEach(function(k){
-    var tek = {}; tek[k] = ek[k];
+    var tek = {}; tek[k] = _fbTemiz(ek[k]);
     fbDb.ref().update(tek).catch(function(e){ try{
       var alan = k.split('/').slice(-1)[0] || k;
       if(!window._sahaEkRed) window._sahaEkRed = {};
@@ -11940,7 +12219,14 @@ setInterval(function(){
     // senkronu) YOK demektir - periyodik yazım burada DURDURULMAZSA, gönderilen
     // update() SİLİNEN maçı SESSİZCE YENİDEN OLUŞTURURDU (Firebase'de bir yol altına
     // yazmak, o yol yoksa onu yaratır). O yüzden önce varlığı kontrol edilir.
+    // 2026-09-28-AF: fikstür dinleyicisi yeniden bağlanırken liste bir an BOŞ/eksik gelebilir;
+    // bunu "maç silindi" sanıp canlı yazımı kalıcı durdurmak yayını koparıyordu. Artık maç
+    // 8 sn boyunca kesintisiz yoksa (ve fikstür boş değilse) silinmiş sayılır.
+    if(fk && sahaFikstur && sahaFikstur[fk.matchId]) window._sahaMacYokSn = 0;
     if(fk && sahaFikstur && !sahaFikstur[fk.matchId]){
+      if(!Object.keys(sahaFikstur).length) return;
+      window._sahaMacYokSn = (window._sahaMacYokSn || 0) + 0.15;
+      if(window._sahaMacYokSn < 8) return;
       window._sahaAktifFikstur=null;
       try{ mesaj('MAÇ İPTAL', 'Bu fikstür maçı yönetici tarafından silindi', 3000); }catch(e){_sessiz(e,'_sahaCanliGonder:3461','saha_ag');}
       return;
@@ -11954,15 +12240,23 @@ setInterval(function(){
     var dk=Math.round(macDakika()||0);
     var now=Date.now();
     var son=_sahaSonYazim;
+    /* 2026-09-28-AF (kullanıcı: "canlı veri akışı kopuyor, sonra geri geliyor"): yazım yalnızca
+       TOP oynayınca ya da saat ilerleyince yapılıyordu. Top ve saat durduğu anlarda (tünel çıkışı,
+       ısınma, gol sevinci, tekrar, değişiklik, devre arası yürüyüşü, duran top hazırlığı)
+       oyuncular hareket etse bile veri 2 sn'de bir gidiyordu - Puan Tablosu'nda oyuncular
+       donup sonra zıplıyordu. Artık oyuncuların toplam yer değişimi de izlenir; nabız 1 sn. */
+    var oyImza=0;
+    try{ for(var _i=0;_i<players.length;_i++){ var _o=players[_i].obj.position; oyImza+=_o.x*(1+_i*0.37)+_o.z*(1.7+_i*0.21); } }catch(_e){}
     var degisti=!son
       || Math.abs(son.x-top.x)>0.02 || Math.abs(son.z-top.z)>0.02   // top gözle görülür şekilde oynadı
       || son.attack!==top.attack                                     // hücum eden taraf değişti
       || son.min!==dk                                                 // dakika ilerledi
-      || son.sn!==Math.floor(saat);                                   // tabela saati (izleyici birebir görsün)
-    var nabizZamani=!son || (now-son.ts)>2000;                        // top dursa bile 2sn'de bir "canlı" imzası
+      || son.sn!==Math.floor(saat)                                    // tabela saati (izleyici birebir görsün)
+      || Math.abs((son.oy||0)-oyImza)>0.6;                            // oyuncular yer değiştirdi (top dursa da)
+    var nabizZamani=!son || (now-son.ts)>1000;                        // hiçbir şey değişmese bile 1sn'de bir "canlı" imzası
     if(degisti||nabizZamani){
       sahaCanliYaz(false);
-      _sahaSonYazim={x:top.x,z:top.z,attack:top.attack,min:dk,sn:Math.floor(saat),ts:now};
+      _sahaSonYazim={x:top.x,z:top.z,attack:top.attack,min:dk,sn:Math.floor(saat),ts:now,oy:oyImza};
     }
   }catch(e){_sessiz(e,'_sahaCanliGonder:3483','saha_ag');}
 }, 150);
@@ -12100,8 +12394,9 @@ function ayarUygula(){
   // Grafik ayari PERFORMANS icindir (piksel yogunlugu); sahnenin ICERIGINI degistirmemeli.
   // Kalabalik zaten ucuz (dokulu kutular), her kalitede gorunur.
   tribunler.forEach(m => m.visible = true);
-  if (!AYAR.ses && tribunGain){ try { tribunGain.gain.value = 0; } catch(e){_sessiz(e,'ayarUygula:3612','saha_grafik');} }
-  else if (AYAR.ses && tribunGain){ try { tribunGain.gain.value = 0.035; } catch(e){_sessiz(e,'ayarUygula:3613','saha_grafik');} }
+  if (!_sesUret() && tribunGain){ try { tribunGain.gain.value = 0; } catch(e){_sessiz(e,'ayarUygula:3612','saha_grafik');} }
+  else if (tribunGain){ try { tribunGain.gain.value = _tribunTaban; } catch(e){_sessiz(e,'ayarUygula:3613','saha_grafik');} }
+  try{ _sesHatKur(); }catch(e){}
 }
 function ayarAc(){ if (running && !bitti){ duraklat = true; try{ odaDuraklatYaz(true,'ayar'); }catch(e){} } ayarUygula(); try{ kolAyarCiz(); }catch(e){_sessiz(e,'ayarAc:3615','saha_oyun');} document.getElementById('p-ayar').classList.add('on'); }
 function ayarKapa(){
@@ -14152,7 +14447,10 @@ function bitir(){
   macOzetiCiz();
   // TÖREN: kazanan taraftarıyla kutlar, kaybeden (berabere: iki takım) soyunma odasına gider;
   // bitince maç sonu ekranı açılır. "Geç ▶" ile hemen açılabilir.
-  const _sonEkran = function(){ document.getElementById('p-end').classList.add('on'); };
+  const _sonEkran = function(){
+    document.getElementById('p-end').classList.add('on');
+    setTimeout(function(){ try{ yayinDurdur(); }catch(e){} }, 6000);   // yayın maç sonu ekranından kısa süre sonra kapanır
+  };
   if (_torenUygun()){
     torenBaslat('son', null, _sonEkran, { kazanan: skorA > skorB ? 0 : (skorB > skorA ? 1 : -1) });
   } else _sonEkran();
@@ -14605,6 +14903,7 @@ function loop(){
   }
   // Stadyum ekranlarının canlı yayını ana çizimden ÖNCE güncellenir (bkz. _stadEkran).
   _stadEkran.guncelle();
+  if (window._sahaIzleModu && window._yayinVideoAktif) return;   // görüntülü yayın ekranda: 3B çizime gerek yok
   lodGuncelle();
   yagmurGuncelle(ham);
   golgeTakip();
@@ -14877,6 +15176,8 @@ function basla(yeniMod){
   } else _baslaMesaj();
   window._torenAtla = false;
   try{ if(window._sahaAktifFikstur) sahaCanliYaz(true); }catch(e){_sessiz(e,'basla:5795','saha_oynanis');}
+  // Görüntülü + sesli canlı yayın (bkz. CANLI GÖRÜNTÜ + SES YAYINI)
+  try{ if(window._sahaAktifFikstur && !window._sahaIzleModu) yayinBaslat(); else yayinDurdur(); }catch(e){}
 }
 function baslatDugme(m){
   return () => {
@@ -15995,6 +16296,7 @@ SahaTeshis.hepsiniSar();   // bütün fonksiyonlar ve _stadEkran tanımlandıkta
   _sahaIzlePTKoprusu();
   _sahaIzleFirebaseDinle(mod);
   _sahaIzleRozetGlobalDinle();
+  try{ izleYayinDinle(mod.ligId, mod.matchId); }catch(e){}   // görüntülü yayın varsa onu göster
 })();
 
 loop();
