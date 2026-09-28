@@ -2122,7 +2122,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-28-AA';
+window.APP_BUILD='2026-09-28-AB';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -3633,7 +3633,7 @@ function save(){
           var _em=existingMatches[mid];
           if(_em.sahaMode&&_em.isLive&&_em.sahaCanliTs&&(Date.now()-Number(_em.sahaCanliTs))<60000){
             ['isLive','played','sahaMode','homeGoals','awayGoals','minute','events','sahaStats','tabela',
-             'homeJer','awayJer','vurus','ekranOran','sahaCanliTs','sahaOynayan'].forEach(function(k){
+             'homeJer','awayJer','vurus','ekranOran','sahaCanliTs','sahaOynayan','sahaUzatma'].forEach(function(k){
               if(_em[k]!==undefined)preserve[k]=_em[k];
             });
           }
@@ -5239,6 +5239,10 @@ function renderMatches(){
         +escHtml((_onayli?'SAHA\'da oynanabilir - kaldırmak için dokun':'SAHA\'da oynanmasına izin ver')+' · '+_bilgi)
         +'">'+(_onayli?'🎮✓':'🎮')+'</button>';
     }
+    // 2026-09-28-AB (kullanıcı: "admin SAHA maçını fikstür sekmesinden değil, canlı sekmesinden
+    // başlatacak"): 🎮 düğmesi fikstürden kaldırıldı, Canlı sekmesindeki maç kartlarına taşındı
+    // (bkz. renderLivePicker). Fikstürde yalnızca durum rozeti kalır.
+    sahaOnayBtn=(!m.isLive&&m.sahaOnayli)?'<span style="font-size:.6rem;color:#16a34a;font-weight:800;padding:.15rem .3rem" title="SAHA\'da başlatıldı - Canlı sekmesinden yönetilir">🎮✓</span>':'';
     var editDelBtns=_myAdminRole==='full'
       ?sahaOnayBtn+scoreBtnHtml
        +'<button class="btn bgh" style="font-size:.7rem;padding:.22rem .45rem" onclick="openEditMatch(\''+m.id+'\')">✏️</button>'
@@ -5820,6 +5824,43 @@ function renderLivePicker(){
 
       // Away
       card.appendChild(makeLogo(a));
+
+      /* SAHA'DA BAŞLAT (2026-09-28-AB): SAHA oyuncusu olan maçlarda kartın altında düğme.
+         Basınca maç SAHA'da oynanabilir olur (sahaOnayli); oyuncu maçı açtığı anda canlıya
+         geçer. Tekrar basınca geri alınır. Kartın geri kalanı eskisi gibi normal canlı başlatır. */
+      var _sahaOyuncu=[];
+      try{
+        Object.keys(_kullanicilar||{}).forEach(function(uid){
+          var kk=_kullanicilar[uid]||{};
+          if(kk.durum!=='onayli'||!kk.takimId)return;
+          if(kk.takimId===m.homeId||kk.takimId===m.awayId)_sahaOyuncu.push(kk.ad||'(adsız)');
+        });
+      }catch(e){}
+      if(_sahaOyuncu.length){
+        var sar=document.createElement('div');
+        sar.style.cssText='display:flex;flex-direction:column;gap:.3rem;width:100%';
+        var ust=document.createElement('div');
+        ust.style.cssText='display:flex;align-items:center;gap:.65rem';
+        while(card.firstChild) ust.appendChild(card.firstChild);
+        sar.appendChild(ust);
+        var sbtn=document.createElement('button');
+        var _on=!!m.sahaOnayli;
+        sbtn.className='btn';
+        sbtn.style.cssText='width:100%;font-size:.72rem;font-weight:800;padding:.4rem;border-radius:9px;'
+          +(_on?'background:rgba(34,197,94,.18);color:#16a34a;border:1px solid rgba(34,197,94,.45)'
+               :'background:rgba(99,102,241,.15);color:#818cf8;border:1px solid rgba(99,102,241,.4)');
+        sbtn.textContent=_on?('🎮✓ SAHA\'da başlatıldı · '+_sahaOyuncu.join(', ')+' (geri almak için dokun)')
+                            :('🎮 SAHA\'da canlı başlat · '+_sahaOyuncu.join(', '));
+        sbtn.addEventListener('click',function(ev){
+          ev.stopPropagation();
+          if(_on){ sahaMacOnayDegistir(m.id,false); return; }
+          dlg('🎮','SAHA\'da canlı başlat',(h.name||'?')+' vs '+(a.name||'?')+' SAHA\'da oynanabilir olsun mu? Oyuncu ('+_sahaOyuncu.join(', ')+') maçı açtığında canlı yayına geçer.','Başlat','dop')
+            .then(function(ok){ if(ok) sahaMacOnayDegistir(m.id,true); });
+        });
+        sar.appendChild(sbtn);
+        card.style.flexDirection='column';
+        card.appendChild(sar);
+      }
 
       card.addEventListener('click',function(){selectMatchForLive(this.dataset.mid);});
       picker.appendChild(card);
@@ -8686,7 +8727,9 @@ function sahaMacOnayDegistir(matchId, onayla){
     try{ db.ref('activeDisplayLeague').set(_curLeagueId).catch(function(e){ DiagSil('onayAktifLig', e); }); }catch(e){}
   }
   db.ref('leagues/'+_curLeagueId+'/matches/'+matchId+'/sahaOnayli').set(!!onayla)
-    .then(function(){ toast(onayla ? '✅ Maç onaylandı - SAHA\'da oynanabilir' : '⏸ Onay kaldırıldı'); try{renderMatches();}catch(e){} try{renderSaha();}catch(e){} })
+    .then(function(){ toast(onayla ? '✅ Maç onaylandı - SAHA\'da oynanabilir' : '⏸ Onay kaldırıldı');
+      try{ if(S.matches&&S.matches[matchId]) S.matches[matchId].sahaOnayli=!!onayla; }catch(e){}
+      try{renderMatches();}catch(e){} try{renderSaha();}catch(e){} try{renderLive();}catch(e){} })
     .catch(function(){ toast('İşlem başarısız','er'); });
 }
 function renderSahaMaclar(){
