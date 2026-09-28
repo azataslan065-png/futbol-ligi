@@ -2634,7 +2634,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-28-AG';
+window.APP_BUILD='2026-09-28-AH';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -23072,17 +23072,45 @@ function ptMacKartGorsel(v, oran, logoBoy){
     +'</div>';
 }
 function ptMacKartAd(v){ return escAttr((v.evAd||'?')+' - '+(v.depAd||'?')); }
-// Takım adları TEK SATIRA sığsın (2026-09-28-AG): taşan yazının punto boyutu, sığana kadar
-// adım adım küçültülür (en az ~%55'i); yine sığmazsa sonda "…" ile kesilir.
+// Takım adları TEK SATIRA sığsın.
+// KÖK SEBEP (AG'de hâlâ "Fehimsp..." kesiliyordu): ölçmeden önce el.style.fontSize='' yapılıyordu;
+// bu, satır içi .66rem'i de siliyor, taban punto kalıtılan büyük değere (~14-16px) çıkıyordu.
+// %55 alt sınırı da o büyük değerin %55'i olduğundan yazı hiç yeterince küçülmüyordu. Ayrıca
+// liste gizliyken (genişlik 0) çalışan ölçüm hiçbir şey yapmıyordu.
+// ŞİMDİ: taban punto data-fs'de sabit; CSS önce karakter sayısına göre kutu genişliğinden
+// (cqw) küçültür - JS hiç çalışmasa bile tek satır; JS sonra gerçek genişliğe göre ince ayar
+// yapar ve kutu görünür olduğunda/boyutu değiştiğinde (ResizeObserver) yeniden ölçer.
+function ptMacAdHtml(v, fs){
+  var ad = (v.evAd||'?')+' - '+(v.depAd||'?');
+  var n = Math.max(8, ad.length);
+  return '<span class="pt-mac-ad-y" data-fs="'+fs+'" style="display:inline-block;white-space:nowrap;font-size:min('+fs+'px, calc(100cqw / '+(n*0.56).toFixed(2)+'))">'+escAttr(ad)+'</span>';
+}
+var _ptMacAdGoz = null;
+function _ptMacAdOlc(el){
+  var y = el.querySelector('.pt-mac-ad-y'); if(!y) return;
+  var cs = getComputedStyle(el);
+  var w = el.clientWidth - (parseFloat(cs.paddingLeft)||0) - (parseFloat(cs.paddingRight)||0) - 1;   // içerik genişliği (dolgu hariç)
+  if(w <= 0) return;                                        // gizli: görününce ResizeObserver tekrar çağırır
+  var bas = parseFloat(y.getAttribute('data-fs')) || 11;
+  y.style.fontSize = bas + 'px';
+  var gw = y.scrollWidth;
+  if(gw > w){ y.style.fontSize = Math.max(5.5, Math.floor(bas * w / gw * 10) / 10) + 'px'; }
+}
 function ptMacAdSigdir(kok){
   try{
     (kok||document).querySelectorAll('.pt-mac-ad').forEach(function(el){
-      el.style.fontSize = ''; var bas = parseFloat(getComputedStyle(el).fontSize) || 11, f = bas;
-      while(el.scrollWidth > el.clientWidth && f > bas * 0.55){ f -= 0.5; el.style.fontSize = f + 'px'; }
+      _ptMacAdOlc(el);
+      try{
+        if(window.ResizeObserver){
+          if(!_ptMacAdGoz) _ptMacAdGoz = new ResizeObserver(function(l){ l.forEach(function(g){ _ptMacAdOlc(g.target); }); });
+          if(!el._ptGoz){ el._ptGoz = 1; _ptMacAdGoz.observe(el); }
+        }
+      }catch(e){}
     });
   }catch(e){}
 }
 window.addEventListener('resize', function(){ ptMacAdSigdir(); });
+try{ if(document.fonts && document.fonts.ready) document.fonts.ready.then(function(){ ptMacAdSigdir(); }); }catch(e){}
 // TV sekmesi için "sanal maç kanalları" + admin'in eklediği GERÇEK kanallar birleşik listesi.
 // isLive=true tarafı (TV sekmesi) için kullanılır; Video sekmesi bundan etkilenmez.
 window.ptTumKanallar=function(){
@@ -23382,7 +23410,7 @@ function renderVideoScreenList(){
       if(v.isMatchCard&&_videoGorunum==='izgara'&&!reordering){
         return `<div onclick="ptKanalAc('${v.id}')" style="cursor:pointer;border:1px solid var(--br);border-radius:14px;overflow:hidden;position:relative;background:var(--s2)">
           ${ptMacKartGorsel(v,'aspect-ratio:1','38%')}
-          <div class="pt-mac-ad" style="font-size:.66rem;font-weight:800;line-height:1.25;padding:.4rem .3rem;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ptMacKartAd(v)}</div>
+          <div class="pt-mac-ad" style="container-type:inline-size;font-weight:800;line-height:1.25;padding:.4rem .3rem;text-align:center;white-space:nowrap;overflow:hidden">${ptMacAdHtml(v,10.5)}</div>
           <button onclick="ptFavToggle(event,'${escAttr(v.id)}')" title="Favori" style="position:absolute;top:.25rem;right:.25rem;background:rgba(0,0,0,.35);border:none;border-radius:7px;padding:.1rem .25rem;font-size:.7rem;cursor:pointer;line-height:1">${ptFavMi(v.id)?'⭐':'☆'}</button>
         </div>`;
       }
@@ -23392,7 +23420,7 @@ function renderVideoScreenList(){
           <div style="width:96px;flex-shrink:0;border-radius:11px;overflow:hidden">${ptMacKartGorsel(v,'aspect-ratio:16/10','34%')}</div>
           <div style="flex:1;min-width:0">
             <div style="display:flex;align-items:center;gap:.4rem">
-              <div class="pt-mac-ad" style="flex:1;min-width:0;font-size:.9rem;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ptMacKartAd(v)}</div>
+              <div class="pt-mac-ad" style="container-type:inline-size;flex:1;min-width:0;font-weight:800;white-space:nowrap;overflow:hidden">${ptMacAdHtml(v,14.4)}</div>
               <button onclick="ptFavToggle(event,'${escAttr(v.id)}')" title="Favori" style="flex-shrink:0;background:transparent;border:none;cursor:pointer;font-size:1rem;line-height:1;padding:.25rem;min-width:32px;min-height:32px">${ptFavMi(v.id)?'⭐':'☆'}</button>
             </div>
             <div style="font-size:.68rem;color:var(--mu);margin-top:.15rem">🔴 Canlı Maç</div>

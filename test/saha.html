@@ -6990,8 +6990,17 @@ function _sesHatKur(){
   if(!window._sahaYayinHat){ window._sahaYayinHat = ac.createGain(); window._sahaYayinHat.gain.value = 1; window._sahaYayinHat.connect(window._sahaAnaKazanc); }
   window._sahaAnaKazanc.gain.value = AYAR.ses ? ((AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100) : 0;
 }
-function sesBaslat(){
-  if (!_sesUret()) return;
+/* KÖK SEBEP (kullanıcı: "maçı oynayan sesi kısarsa ses izleyiciye gitmiyor"):
+   Ses kapalı oyuncuda maç başlarken (dokunuş anında) sesBaslat() hemen dönüyordu; ses motoru
+   hiç kurulmuyordu. Yayın başlayınca motor dokunuş OLMADAN kuruluyordu - tarayıcı böyle bir
+   motoru "askıda" başlatır ve dokunuş gelmeden açmaz. Sonrasında da dokunuşlar sesBaslat'ı
+   çağırmadığı için motor hiç çalışmıyor, yayına sessizlik gidiyordu. Oyun sırasında ses
+   kapatılınca/Android ses odağını alınca askıya düşen motor da geri açılmıyordu.
+   ŞİMDİ: (1) Maç başlarken (dokunuşla) motor ses kapalı olsa bile kurulur; oyuncunun
+   hoparlörüne 0 düzeyle bağlıdır, yani oyuncu yine bir şey duymaz. (2) Yayın sürerken her
+   dokunuşta ve motor askıya düştüğünde yeniden açılır. */
+function sesBaslat(zorla){
+  if (!_sesUret() && !zorla) return;
   try {
     if (!ac){
       const C = window.AudioContext || window.webkitAudioContext;
@@ -7013,9 +7022,23 @@ function sesBaslat(){
       n.connect(f); f.connect(tribunGain); tribunGain.connect(window._sahaYayinHat);
       n.start();
     }
-    if (ac.state === 'suspended') ac.resume();
+    if (ac.state !== 'running' && ac.state !== 'closed') ac.resume().catch(function(){});
+    if (!ac._yayinDinle){
+      ac._yayinDinle = 1;
+      ac.addEventListener('statechange', function(){
+        try{ if(ac && ac.state !== 'running' && ac.state !== 'closed' && YAYIN.rol === 'yayinci') ac.resume().catch(function(){}); }catch(e){}
+      });
+    }
   } catch(e){ ac = null; }
 }
+// Yayın sürerken her dokunuşta askıdaki ses motorunu aç (tarayıcı yalnızca dokunuşla izin verir).
+try{
+  ['pointerdown','touchstart','keydown'].forEach(function(t){
+    addEventListener(t, function(){
+      try{ if(typeof YAYIN !== 'undefined' && YAYIN.rol === 'yayinci' && ac && ac.state !== 'running' && ac.state !== 'closed') ac.resume().catch(function(){}); }catch(e){}
+    }, { capture:true, passive:true });
+  });
+}catch(e){}
 function sesCikis(){
   try{ return window._sahaYayinHat || window._sahaAnaKazanc || ac.destination; }catch(e){ return ac.destination; }
 }
@@ -10430,7 +10453,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-09-28-AG';
+window.APP_BUILD = '2026-09-28-AH';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -15044,7 +15067,7 @@ function devamEt(){
     // baslatiyor ama MENU PANELINI kapatmiyordu - oyun arkada calisiyor, kullanici
     // menuye bakiyordu. Normal mac baslatmada bu iki satir zaten var (bkz. baslatDugme).
     // Ses ve tam ekran da ayni yerde tetiklenir: kullanici dokunusu burada gerceklesiyor.
-    try{ sesBaslat(); tamEkran(true); }catch(e){_sessiz(e,'devamEt:5721','saha_oynanis');}
+    try{ sesBaslat(!!window._sahaAktifFikstur && !window._sahaIzleModu); tamEkran(true); }catch(e){_sessiz(e,'devamEt:5721','saha_oynanis');}
     document.getElementById('p-start').classList.remove('on');
     // Uygulama kabugu da kapanmali - yoksa mac arkasinda menu acik kalir ve
     // dokunuslar oyuna degil menuye giderdi.
@@ -15184,7 +15207,7 @@ function baslatDugme(m){
     // Oda maçı DEĞİLSE oda süresi sıfırlanır: bir arkadaş maçından sonra bütün lig
     // maçlarının o süreyle oynanması, fark edilmesi zor bir hata olurdu.
     try{ if(!window._sahaOdaMacBasladi) window._sahaOdaSuresiDk = 0; }catch(e){}
-    sesBaslat(); tamEkran(true);
+    sesBaslat(!!window._sahaAktifFikstur && !window._sahaIzleModu); tamEkran(true);
     document.getElementById('p-start').classList.remove('on');
     // Uygulama kabugu da kapanmali - yoksa mac arkasinda menu acik kalir ve
     // dokunuslar oyuna degil menuye giderdi.
