@@ -7468,7 +7468,10 @@ function _izleVideoGoster(ms){
   }catch(e){ _sessiz(e, 'izleVideoGoster', 'saha_izle'); }
 }
 // Spiker cümlesi izleyici ekranında altyazı olarak da görünür (tarayıcı konuşmayı engellese bile).
-function _izleAltyazi(metin){
+// ALTYAZI TAMAMEN KAPALI (2026-10-02-F, kullanıcı: "maç izlerken, özetler dahil, altyazı hiç kullanılmasın").
+// İşlev geriye uyum için duruyor ama hiçbir şey çizmez; ekranda kalmış eski bir altyazı varsa kaldırılır.
+function _izleAltyazi(metin){ try{ var a = document.getElementById('yayinAltyazi'); if(a) a.remove(); }catch(e){} }
+function _izleAltyaziEski(metin){
   try{
     var a = document.getElementById('yayinAltyazi');
     if(!a){
@@ -11009,7 +11012,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-02-D';
+window.APP_BUILD = '2026-10-02-F';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -12813,7 +12816,7 @@ function _fbTemiz(v){
   var o = {}; Object.keys(v).forEach(function(k){ if(v[k] !== undefined) o[k] = _fbTemiz(v[k]); });
   return o;
 }
-var _SAHA_EK_ALANLAR = /\/(tabela|izleYon|momentum|sahaCanliTs|sahaOynayan|sahaUzatma)(\/|$)/;
+var _SAHA_EK_ALANLAR = /\/(tabela|izleYon|momentum|sahaCanliTs|sahaOynayan|sahaUzatma|sahaTerkTs)(\/|$)/;
 /* ORTAK CANLI MAÇ ÖZETİ: paylasilan/canliMaclar/{macId}
    Yalnızca TV kartını çizmeye yetecek kadar alan taşır - fikstür ayrı kalmaya devam
    eder. Maç bitince / geçersiz sayılınca silinir (bkz. sahaOrtakCanliSil). */
@@ -13057,8 +13060,14 @@ function sahaFiksturSonucuKaydet(){
     // edilen oyuncu geçmiş maçlardan puan alıyor, maçta oynayıp sonra satılan/yedeğe alınan
     // oyuncunun maçı ise hiç sayılmıyordu.
     var _kadroMac = null;
-    try{ _kadroMac = sahaMacKadrosu(fk.benTarafHome); g[yol+'/sahaKadro'] = _kadroMac; }catch(e){ _sessiz(e,'sahaMacKadrosu','saha_ag'); }
-    g[yol+'/sahaBitisTs'] = Date.now();
+    // EK ALANLAR AYRI YAZILIR (2026-10-02-F): sahaKadro / sahaBitisTs yeni alanlar; kurallarda
+    // eksik kalırsa çekirdek sonuç yazımını (skor, played) atomik olarak düşürmesin.
+    var _sonEk = {};
+    try{ _kadroMac = sahaMacKadrosu(fk.benTarafHome); _sonEk[yol+'/sahaKadro'] = _fbTemiz(_kadroMac); }catch(e){ _sessiz(e,'sahaMacKadrosu','saha_ag'); }
+    _sonEk[yol+'/sahaBitisTs'] = Date.now();
+    Object.keys(_sonEk).forEach(function(k){ var t1 = {}; t1[k] = _sonEk[k];
+      try{ fbDb.ref().update(t1).catch(function(e){ DiagSaha('sonucEkAlan', e, { tur:'veri', alan:k.split('/').pop(),
+        anlami:'Ek maç alanı yazılamadı; skor yine kaydedildi.', oneri:'Kurallarda matches/$macId altına bu alanı ekleyin.' }); }); }catch(e){} });
     // Canlı tabela yalnızca maç sürerken geçerli - AYRI yazımda silinir (bkz. _sahaCanliGonder):
     // kurala eklenmemişse maç SONUCUNUN kaydını düşürmesin.
     try{ fbDb.ref(yol+'/tabela').remove().catch(function(e){ DiagSaha('sonucTabelaSil', e, { tur:'veri' }); }); }catch(e){_sessiz(e,'sahaFiksturSonucuKaydet:3505','saha_ag');}
@@ -16086,7 +16095,8 @@ function macGecersizSay(fk, sebep){
     g[yol+'/minute']    = 0;
     g[yol+'/events']    = null;
     g[yol+'/sahaStats'] = null;
-    g[yol+'/sahaTerkTs'] = Date.now();   // Puan Tablosu TV kartı: terk edilen maç "birazdan başlayacak" diye kalmasın
+    // sahaTerkTs AYRI yazılır: kurallarda eksikse maçın geçersiz sayılmasını engellemesin.
+    try{ fbDb.ref(yol+'/sahaTerkTs').set(Date.now()).catch(function(){}); }catch(e){}   // Puan Tablosu TV kartı: terk edilen maç "birazdan başlayacak" diye kalmasın
     fbDb.ref().update(g).catch(function(e){ DiagSaha('macGecersiz', e, { tur:'veri',
       anlami:'Yarıda kalan maç temizlenemedi; fikstürde canlı görünmeye devam edebilir.' }); });
     try{ fbDb.ref(yol+'/tabela').remove().catch(function(){}); }catch(e){}
