@@ -2648,7 +2648,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-02-A';
+window.APP_BUILD='2026-10-02-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -13136,6 +13136,64 @@ function ptMacOzetHtml(id,m,h,a){
       +serit+izle+'</div>';
   }catch(e){DiagSil('ptMacOzetHtml',e);return '';}
 }
+/* SAHA SPİKER/YORUMCU SESİ (2026-10-02-B, kullanıcı: "maçı canlı izleyen kişi spiker seslerini
+   duyamıyor"). SAHA izleme sayfası TV oynatıcısının çerçevesinde açılır; tarayıcı konuşma sentezini
+   dokunulmamış çerçevede çalıştırmaz. Çerçeve cümleyi buraya iletir (event:'sahaKonus'), bu sayfa
+   (kullanıcının dokunduğu sayfa) seslendirir. Erkek ses tercih edilir; cihazda yoksa perde düşürülür
+   (saha.html'deki seçimle aynı kural). Cümleler sıraya girer; 6 sn'den bayat olanlar atlanır. */
+(function ptSahaKonusKur(){
+  var ERKEK=/(male|erkek|tolga|ahmet|mehmet|cem|kerem|tr-tr-x-(mfm|tmc|efu)|#male)/i;
+  var KADIN=/(female|kad[ıi]n|filiz|seda|yelda|emel|zeynep|ay[sş]e|tr-tr-x-(cfs|ama))/i;
+  var sira=[], konusuyor=false;
+  function sesler(){
+    try{
+      var l=(window.speechSynthesis&&speechSynthesis.getVoices())||[];
+      var tr=l.filter(function(v){return /^tr/i.test(v.lang);});
+      var puan=function(v){var ad=(v.name||'')+' '+(v.voiceURI||'');return ERKEK.test(ad)?2:(KADIN.test(ad)?0:1);};
+      return tr.sort(function(a,b){return puan(b)-puan(a);}).map(function(v){return {v:v,erkek:puan(v)===2};});
+    }catch(e){return [];}
+  }
+  function siradaki(){
+    if(konusuyor)return;
+    // Oynatıcı kapandıysa (SAHA çerçevesi yok) bekleyen cümleler okunmaz.
+    if(!document.querySelector('iframe[src*="saha.html"]')){sira=[];return;}
+    var simdi=Date.now();
+    while(sira.length){
+      var x=sira.shift();
+      if(simdi-x.ts>6000)continue;
+      try{
+        var u=new SpeechSynthesisUtterance(x.m); u.lang='tr-TR';
+        var l=sesler(), er=l.filter(function(y){return y.erkek;});
+        var sec=(x.r==='yorumcu'?(er[1]||er[0]):er[0])||l[0];
+        if(sec)u.voice=sec.v;
+        var dus=er.length?0:0.28;
+        if(x.r==='yorumcu'){u.rate=0.97;u.pitch=0.82-dus;}else if(x.r==='spiker'){u.rate=1.1;u.pitch=0.98-dus;}else{u.rate=1.02;u.pitch=0.92-dus;}
+        konusuyor=true;
+        var bitti=false,son=function(){if(bitti)return;bitti=true;konusuyor=false;setTimeout(siradaki,200);};
+        u.onend=son;u.onerror=son;setTimeout(son,9000);
+        speechSynthesis.speak(u);
+      }catch(e){konusuyor=false;}
+      return;
+    }
+  }
+  window.ptSahaKonus=function(m,r){
+    try{
+      if(!window.speechSynthesis||!window.SpeechSynthesisUtterance||!m)return;
+      if(sira.length>=3)sira.shift();
+      sira.push({m:String(m),r:r||'anons',ts:Date.now()});
+      siradaki();
+    }catch(e){}
+  };
+  window.addEventListener('message',function(e){
+    try{
+      var d=typeof e.data==='string'?JSON.parse(e.data):e.data;
+      if(!d||d.event!=='sahaKonus')return;
+      // Yalnızca kendi sitemizdeki SAHA çerçevesinden gelen mesaj kabul edilir.
+      if(e.origin&&e.origin!==location.origin&&e.origin!=='null')return;
+      window.ptSahaKonus(d.m,d.r);
+    }catch(err){}
+  });
+})();
 window._ptOzetKanallar=[];
 window.ptOzetIzle=function(mid){
   try{

@@ -2125,7 +2125,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-02-A';
+window.APP_BUILD='2026-10-02-B';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -8106,13 +8106,31 @@ function ligOyunculariTopla(){
   liste.sort(function(a,b){ return a.ad.localeCompare(b.ad, 'tr'); });
   return liste;
 }
-function _lgoMagazadaMi(ad){
-  var hedef = String(ad||'').trim().toLocaleLowerCase('tr');
-  return Object.keys(_havuz || {}).some(function(id){
+/* TEKRAR SATIŞA ÇIKARMA (2026-10-02-B, kullanıcı: "admin oyuncuyu satışa sunduktan sonra aynı oyuncuyu
+   tekrar satışa çıkaramıyor"). KÖK SEBEP: "mağazada mı" kontrolü, havuzda o ADDA HERHANGİ bir kayıt
+   varsa evet diyordu - kayıt satıştan kaldırılmış (⛔), bir kullanıcının kadrosundan çıkarılıp havuza
+   dönmüş ya da satıştan çekilmiş olsa bile. Satır kilitleniyor, oyuncu bir daha seçilemiyordu.
+   ŞİMDİ üç durum ayrılır:
+     · satışta (sahibi yok, 🟢)        → kilitli: zaten mağazada
+     · bir takımda (sahibi var)         → kilitli: önce o takımdan çıkması gerekir
+     · havuzda ama satışta değil        → seçilebilir; "Mağazaya sun" mevcut kaydı yeniden satışa açar
+                                          (yeni kopya oluşturmaz - aynı oyuncu iki kez olmasın). */
+function _lgoHavuzKaydi(ad){
+  var hedef = String(ad||'').trim().toLocaleLowerCase('tr'), bulunan = null;
+  Object.keys(_havuz || {}).some(function(id){
     var o = _havuz[id];
-    return o && String(o.ad||'').trim().toLocaleLowerCase('tr') === hedef;
+    if(o && String(o.ad||'').trim().toLocaleLowerCase('tr') === hedef){ bulunan = { id:id, o:o }; return true; }
+    return false;
   });
+  return bulunan;
 }
+function _lgoDurum(ad){
+  var k = _lgoHavuzKaydi(ad);
+  if(!k) return 'yok';
+  if(k.o.sahip && (_kullanicilar||{})[k.o.sahip]) return 'takimda';
+  return k.o.satista ? 'satista' : 'pasif';
+}
+function _lgoMagazadaMi(ad){ var d = _lgoDurum(ad); return d === 'satista' || d === 'takimda'; }
 function ligOyuncuSuzgecDegistir(){
   window._lgoSadeceYeni = !window._lgoSadeceYeni;
   var b = qs('lgoSuzgecBtn'); if(b) b.textContent = window._lgoSadeceYeni ? '✅ Açık' : 'Kapalı';
@@ -8156,7 +8174,8 @@ function ligOyunculariCiz(){
         + 'color:var(--mu);padding:.2rem .4rem;border-radius:6px;margin:.3rem 0 .2rem">' + escHtml(harf) + '</div>';
     }
     var anahtar = _lgoAnahtar(p.ad, p.tid);
-    var magazada = _lgoMagazadaMi(p.ad);
+    var _dur = _lgoDurum(p.ad);
+    var magazada = (_dur === 'satista' || _dur === 'takimda');
     var secili = !!window._lgoSecim[anahtar];
     return baslik
       + '<div onclick="' + (magazada ? '' : 'ligOyuncuSec(\''+anahtar+'\',\''+escHtml(p.ad).replace(/'/g,"\\'")+'\',\''+p.tid+'\')')
@@ -8164,14 +8183,14 @@ function ligOyunculariCiz(){
       + 'border:1px solid ' + (secili ? 'var(--ac)' : 'var(--br)') + ';'
       + 'background:' + (secili ? 'rgba(124,58,237,.14)' : 'var(--s2)') + ';'
       + (magazada ? 'opacity:.55' : 'cursor:pointer') + '">'
-      + '<span style="font-size:.9rem">' + (magazada ? '🛒' : (secili ? '☑️' : '⬜')) + '</span>'
+      + '<span style="font-size:.9rem">' + (_dur === 'takimda' ? '👤' : magazada ? '🛒' : (secili ? '☑️' : '⬜')) + '</span>'
       + (p.foto
           ? '<img src="' + escHtml(p.foto) + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.outerHTML=\'<div style=&quot;width:32px;height:32px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0&quot;>👤</div>\'"/>'
           : '<div style="width:32px;height:32px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0">👤</div>')
       + '<div style="flex:1;min-width:0"><b style="font-size:.78rem">' + escHtml(p.ad) + '</b>'
       + '<div style="font-size:.63rem;opacity:.7">' + escHtml(p.takim)
       + (p.mevki ? (' · ' + escHtml(p.mevki)) : '') + (p.no ? (' · #' + escHtml(String(p.no))) : '')
-      + (magazada ? ' · <b>mağazada</b>' : '') + '</div></div>'
+      + (_dur === 'satista' ? ' · <b>mağazada</b>' : _dur === 'takimda' ? ' · <b>bir takımda</b>' : _dur === 'pasif' ? ' · <b style="color:#f59e0b">havuzda, satışta değil - tekrar sunulabilir</b>' : '') + '</div></div>'
       + '</div>';
   }).join('');
 }
@@ -8190,6 +8209,14 @@ function ligOyuncuMagazayaSun(){
     secim.forEach(function(anahtar){
       var p = window._lgoSecim[anahtar]; if(!p) return;
       if(_lgoMagazadaMi(p.ad)){ atlanan++; return; }     // yarışta eklenmiş olabilir
+      var _eski = _lgoHavuzKaydi(p.ad);
+      if(_eski){
+        // Havuzda pasif duran kayıt yeniden satışa açılır (bkz. TEKRAR SATIŞA ÇIKARMA).
+        var _k = 'oyuncuHavuzu/' + _eski.id + '/';
+        g[_k + 'satista'] = true; g[_k + 'fiyat'] = fiyat; g[_k + 'guc'] = guc; g[_k + 'hiz'] = c;
+        g[_k + 'sahip'] = null; g[_k + 'satisIlan'] = null; g[_k + 'alisTs'] = null; g[_k + 'baslangic'] = false;
+        eklenen++; return;
+      }
       var mevki = 'SF', foto = '';
       try{
         var bul = ligOyunculariTopla().find(function(x){ return _lgoAnahtar(x.ad, x.tid) === anahtar; });
@@ -8243,7 +8270,17 @@ function oyuncuHavuzaEkle(){
   var ad = (qs('ohAd').value||'').trim();
   if(!ad){ toast('❌ Oyuncu adi girin','er'); return; }
   // Aynı ad iki kez olmasın: SAHA oyuncunun gücünü ve puan tablosu golleri ADA göre eşleştiriyor.
-  if(_lgoMagazadaMi(ad)){ toast('❌ Bu adda bir oyuncu zaten havuzda','er'); return; }
+  if(_lgoMagazadaMi(ad)){ toast('❌ Bu oyuncu zaten mağazada ya da bir takımda','er'); return; }
+  var _eskiK = _lgoHavuzKaydi(ad);
+  if(_eskiK){
+    // Havuzda satış dışı duran aynı oyuncu: yeni kopya yerine mevcut kayıt yeniden satışa açılır.
+    var _f = Math.max(0, parseInt(qs('ohFiyat').value,10) || 0), _g = Math.max(1, Math.min(99, parseInt(qs('ohGuc').value,10) || 70));
+    var u = {}; u['oyuncuHavuzu/'+_eskiK.id+'/satista'] = true; u['oyuncuHavuzu/'+_eskiK.id+'/fiyat'] = _f; u['oyuncuHavuzu/'+_eskiK.id+'/guc'] = _g;
+    u['oyuncuHavuzu/'+_eskiK.id+'/sahip'] = null; u['oyuncuHavuzu/'+_eskiK.id+'/satisIlan'] = null; u['oyuncuHavuzu/'+_eskiK.id+'/baslangic'] = false;
+    firebase.database().ref().update(u).then(function(){ qs('ohAd').value=''; toast('🛒 '+ad+' yeniden satışa sunuldu'); })
+      .catch(function(e){ toast('❌ Sunulamadı: '+((e&&e.message)||''),'er'); });
+    return;
+  }
   var guc = Math.max(1, Math.min(99, parseInt(qs('ohGuc').value,10) || 70));
   var fiyat = Math.max(0, parseInt(qs('ohFiyat').value,10) || 0);
   var mevki = qs('ohMevki').value;

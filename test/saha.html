@@ -32,6 +32,16 @@
       document.body.appendChild(b);
     };
     if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', serit); else serit();
+    // Maç OYNANIRKEN şerit görünmez (kullanıcı: "canlı oynanan maçta test bandı olmasın; diğer
+    // zamanlarda olabilir"). Menü, kadro, maç sonu ekranında görünür kalır.
+    setInterval(function(){
+      try{
+        var b = document.getElementById('sahaTestSerit'); if(!b) return;
+        var oynuyor = (typeof running !== 'undefined' && running && !bitti) || (typeof TOREN !== 'undefined' && TOREN.aktif)
+          || !!window._sahaIzleModu;
+        b.style.display = oynuyor ? 'none' : 'block';
+      }catch(e){}
+    }, 400);
   }catch(e){}
 })();
 </script>
@@ -128,7 +138,7 @@
   #macSonuEkran .ms-cubuk i{background:#5fd39a;border-radius:3px}
   #macSonuEkran .ms-cubuk b{background:#6fa7e8;border-radius:3px}
   body.hud-gizli #board, body.hud-gizli #tip, body.hud-gizli #radar, body.hud-gizli #kondKutu, body.hud-gizli #msg,
-  body.hud-gizli #power, body.hud-gizli #power2, body.hud-gizli #tekrarEt, body.hud-gizli #touch{display:none!important}
+  body.hud-gizli #power, body.hud-gizli #power2, body.hud-gizli #tekrarEt, body.hud-gizli #touch, body.hud-gizli #ayarBtn{display:none!important}
   /* İzleyici (canlı yayın) sayfasında oyuncuya özgü göstergeler hiç görünmez (ayarUygula açsa bile). */
   body.izle-modu #tip, body.izle-modu #kondKutu, body.izle-modu #power, body.izle-modu #power2, body.izle-modu #touch{display:none!important}
   #macSonuEkran .ms-izle{max-width:380px;max-height:48%;padding:10px 14px;background:rgba(9,16,12,.66)}
@@ -4818,6 +4828,34 @@ let   HALF = 150;
 /* ---------- render ---------- */
 const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:"high-performance" });
 renderer.setSize(innerWidth, innerHeight);
+try{
+    /* EKRAN KARARMASI (2026-10-02-B, kullanıcı: "maç yaparken bazen ekran kararıyor, saha zemini vb.
+       sorunlar"). KÖK SEBEP: telefon grafik belleği daraldığında tarayıcı WebGL bağlamını
+       düşürür. Olay yakalanıyor ama preventDefault() çağrılmıyordu - bu durumda tarayıcı bağlamı
+       HİÇ geri vermez, ekran maç sonuna kadar siyah kalır. Geri gelse de dokular (çim, çizgiler,
+       tribün) yeniden yüklenmediği için zemin düz/bozuk görünürdü.
+       ŞİMDİ: (1) preventDefault ile geri dönüş istenir; (2) geri gelince bütün doku ve
+       malzemeler yeniden yüklenir; (3) tekrarlamasın diye piksel yoğunluğu 1'e, gölge ve stadyum
+       ekranı yükü düşürülür. Kullanıcıya kısa bir bildirim gösterilir. */
+    renderer.domElement.addEventListener('webglcontextlost', function(ev){ try{ ev.preventDefault(); }catch(e){}
+      window._sahaBaglamKayip = (window._sahaBaglamKayip || 0) + 1;
+      try{ sahaBildir('Görüntü yenileniyor…', 2500); }catch(e){} });
+    renderer.domElement.addEventListener('webglcontextrestored', function(){
+      try{
+        scene.traverse(function(o){
+          var ms = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+          ms.forEach(function(m){
+            m.needsUpdate = true;
+            ['map','normalMap','roughnessMap','emissiveMap','alphaMap','aoMap'].forEach(function(k){ if(m[k]) m[k].needsUpdate = true; });
+          });
+        });
+        renderer.setPixelRatio(1);
+        try{ if(window._sahaBaglamKayip >= 2){ renderer.shadowMap.enabled = false; } }catch(e){}
+        try{ AYAR.grafik = Math.min(AYAR.grafik, 1); }catch(e){}
+        renderer.setSize(innerWidth, innerHeight);
+      }catch(e){}
+    });
+}catch(e){}
 // 2026-09-27-V: gerçek gölge (oyuncuların çime düşen gölgesi). Güneşin castShadow'u grafik
 // ayarına bağlı: Düşük'te kapalı (yalnızca yuvarlak leke), Orta/Yüksek'te açık.
 renderer.shadowMap.enabled = true;
@@ -7134,7 +7172,7 @@ function gurultu(sure, ses, frek){
     s.start();
   } catch(e){_sessiz(e,'gurultu:1543','saha_ses');}
 }
-function sesDuduk(uzun){ ton(1500, 1350, uzun ? 0.6 : 0.22, 'square', 0.12); }
+function sesDuduk(uzun){ ton(1500, 1350, uzun ? 0.6 : 0.22, 'square', 0.12); try{ yayinSesOlay(uzun ? 'duduk2' : 'duduk1'); }catch(e){} }
 // KULLANICI BİLDİRDİ ("varsayılan taraftar sesi geliyor sadece diğerleri gelmiyor" - devam):
 // Şut/pas/müdahale (vuruş) sesleri izleyiciye HİÇ ULAŞMIYORDU çünkü bu olaylar Firebase'e
 // hiç yazılmıyordu (bkz. IZLEYICI SESI notundaki "SINIR" - bilinçli kapsam dışı bırakma).
@@ -7277,8 +7315,26 @@ function yayinDurdur(){
 }
 addEventListener('pagehide', function(){ try{ yayinDurdur(); }catch(e){} });
 // Spiker metni izleyiciye (konuşma sesi videoya giremez).
+/* OYUN SESLERİ İZLEYİCİYE (2026-10-02-B, kullanıcı: "maçı oynayanın duyduğu bütün sesler izleyiciye de
+   iletilmeli"). Görüntülü yayın varsa sesler zaten yayının ses hattında gider. Yayın kurulamadıysa
+   (izleyici veriyle çizilen sahnede) düdük ve tezahürat da olay olarak gönderilir; izleyici cihazı
+   aynı sesi kendisi üretir. Vuruş sesleri ve gol coşkusu zaten canlı veriden türetiliyordu. */
+function yayinSesOlay(tur){
+  try{
+    if(window._sahaIzleModu) return;
+    var kok = (YAYIN.rol === 'yayinci' && YAYIN.kok) ? YAYIN.kok
+      : ((window._sahaAktifFikstur && fbHazir && fbDb) ? _yayinKok(window._sahaAktifFikstur.ligId, window._sahaAktifFikstur.matchId) : null);
+    if(kok) fbDb.ref(kok + '/ses').set({ k: tur, t: Date.now() }).catch(function(){});
+  }catch(e){}
+}
+// Görüntülü yayın kurulamasa da (eski tarayıcı, captureStream yok) lig maçında anons/spiker
+// cümleleri izleyiciye gider: kök, yayın açık olmasa da fikstürden türetilir.
 function yayinAnonsGonder(metin, rol){
-  try{ if(YAYIN.rol === 'yayinci' && YAYIN.kok) fbDb.ref(YAYIN.kok + '/anons').set({ m: String(metin).slice(0, 200), t: Date.now(), r: rol || 'anons' }).catch(function(){}); }catch(e){}
+  try{
+    var kok = (YAYIN.rol === 'yayinci' && YAYIN.kok) ? YAYIN.kok
+      : ((window._sahaAktifFikstur && !window._sahaIzleModu && fbHazir && fbDb) ? _yayinKok(window._sahaAktifFikstur.ligId, window._sahaAktifFikstur.matchId) : null);
+    if(kok) fbDb.ref(kok + '/anons').set({ m: String(metin).slice(0, 200), t: Date.now(), r: rol || 'anons' }).catch(function(){});
+  }catch(e){}
 }
 // ── İZLEYİCİ TARAFI ──
 function izleYayinDinle(lig, mac){
@@ -7303,11 +7359,24 @@ function izleYayinDinle(lig, mac){
         // Spiker/yorumcu cümleleri kendi sesleriyle; video yokken (veriyle çizilen izleme) de okunur.
         if(YAYIN.videoAktif || window._sahaIzleModu){
           if(v.r === 'spiker' || v.r === 'yorumcu'){ _spkOku(v.m, v.r, function(){}); _izleAltyazi((v.r === 'spiker' ? '🎙️ ' : '🗣️ ') + v.m, true); }
-          else { _anonsKonus(v.m); _izleAltyazi(v.m); }
+          else { if(!_spkDisariyaIlet(v.m, 'anons')) _anonsKonus(v.m); _izleAltyazi(v.m); }
         }
       }
     };
     ar.on('value', af); YAYIN.dinle.push([ar, 'value', af]);
+    // Oyun sesi olayları: görüntülü yayın AÇIKKEN atlanır (ses zaten yayında), değilse yerel üretilir.
+    var sr = fbDb.ref(kok + '/ses'), sonSes = Date.now();
+    var sf = function(sn){
+      var v = sn.val();
+      if(!v || !v.t || v.t <= sonSes || (Date.now() - v.t) > 5000) return;
+      sonSes = v.t;
+      if(YAYIN.videoAktif) return;
+      try{
+        if(v.k === 'duduk1' || v.k === 'duduk2') sesDuduk(v.k === 'duduk2');
+        else if(v.k === 'tezahurat' || v.k === 'tezahurat2') tezahurat(v.k === 'tezahurat2', true);
+      }catch(e){}
+    };
+    sr.on('value', sf); YAYIN.dinle.push([sr, 'value', sf]);
   }catch(e){ _sessiz(e, 'izleYayinDinle', 'saha_izle'); }
 }
 function _izleBaglan(){
@@ -7445,28 +7514,64 @@ function stadyumAnons(metin, zil){
    Tribün anonsu (stadyumAnons) ayrı kalır - o stadyumun hoparlörüdür, spiker değil. */
 var SPK = { sira:[], konusuyor:false, sonTur:{}, sonKonusma:0, sonYorum:0, sonAnlati:0, ses:{} };
 function _spkAcik(){ try{ return AYAR.spiker !== false && !window._sahaIzleModu && mod !== 'antrenman'; }catch(e){ return false; } }
+/* ERKEK SES (2026-10-02-B, kullanıcı: "spiker ve yorumcu seslerini erkek olarak değiştir").
+   Tarayıcı ses listesinde cinsiyet alanı yok; ad üzerinden seçilir: bilinen erkek Türkçe sesler
+   (Windows "Tolga", Android "tr-tr-x-…" erkek varyantları, adında male/erkek geçenler) öne alınır,
+   bilinen kadın sesleri (Filiz, Seda, Yelda, Emel, Zeynep, Google varsayılan Türkçe…) en sona
+   itilir. Cihazda erkek ses YOKSA (çoğu Android'de tek kadın ses var) perde belirgin şekilde
+   düşürülür - ses kalınlaşır, erkek sesine yaklaşır. Aynı seçim izleyici tarafında (Puan
+   Tablosu) da kullanılır (bkz. index.html ptSahaKonus). */
+var SPK_ERKEK = /(male|erkek|tolga|ahmet|mehmet|cem|kerem|tr-tr-x-(mfm|tmc|efu)|#male)/i;
+var SPK_KADIN = /(female|kad[ıi]n|filiz|seda|yelda|emel|zeynep|ay[sş]e|tr-tr-x-(cfs|ama))/i;
+function sahaErkekSesler(){
+  try{
+    var ss = window.speechSynthesis, l = (ss && ss.getVoices) ? ss.getVoices() : [];
+    var tr = l.filter(function(v){ return /^tr/i.test(v.lang); });
+    var puan = function(v){ var ad = (v.name || '') + ' ' + (v.voiceURI || ''); return SPK_ERKEK.test(ad) ? 2 : (SPK_KADIN.test(ad) ? 0 : 1); };
+    return tr.sort(function(a, b){ return puan(b) - puan(a); }).map(function(v){ return { v:v, erkek:puan(v) === 2 }; });
+  }catch(e){ return []; }
+}
 function _spkSecSes(rol){
   try{
     if(SPK.ses[rol] !== undefined) return SPK.ses[rol];
-    var ss = window.speechSynthesis, l = (ss && ss.getVoices) ? ss.getVoices() : [];
-    var tr = l.filter(function(v){ return /^tr/i.test(v.lang); });
-    if(!tr.length) return null;               // sesler henüz yüklenmediyse önbelleğe alma
-    // İki farklı Türkçe ses varsa spiker ve yorumcu ayrı seslerle konuşur; yoksa aynı ses,
-    // farklı perde/hızla (bkz. _spkOku).
-    SPK.ses.spiker = tr[0];
-    SPK.ses.yorumcu = tr[1] || tr[0];
+    var l = sahaErkekSesler();
+    if(!l.length) return null;               // sesler henüz yüklenmediyse önbelleğe alma
+    var erkekler = l.filter(function(x){ return x.erkek; });
+    SPK.erkekVar = erkekler.length > 0;
+    SPK.ses.spiker = (erkekler[0] || l[0]).v;
+    SPK.ses.yorumcu = (erkekler[1] || erkekler[0] || l[0]).v;
     return SPK.ses[rol];
   }catch(e){ return null; }
 }
+/* İZLEYİCİYE SES (2026-10-02-B, kullanıcı: "maçı canlı izleyen kişi spiker seslerini duyamıyor").
+   KÖK SEBEP: İzleyici bu sayfayı Puan Tablosu'nun TV oynatıcısında, bir çerçevenin (iframe)
+   içinde açıyor. Tarayıcı konuşma sentezini yalnızca kullanıcının dokunduğu çerçevede çalıştırır;
+   çerçeveye hiç dokunulamıyor (dokunuşları oynatıcının kendi katmanı alıyor). Cümleler geliyor,
+   altyazı görünüyordu ama ses hiç çıkmıyordu. Konuşma sentezi görüntülü yayının ses hattına da
+   eklenemez (tarayıcı sentez sesini dışarı vermez).
+   ÇÖZÜM: Çerçevedeyken cümle Puan Tablosu sayfasına iletilir; o sayfa kullanıcının dokunduğu
+   sayfa olduğu için seslendirebilir (bkz. index.html ptSahaKonus). */
+function _spkDisariyaIlet(metin, rol){
+  try{
+    if(window.parent && window.parent !== window){
+      window.parent.postMessage(JSON.stringify({ event:'sahaKonus', m:String(metin).slice(0, 220), r:rol || 'anons' }), '*');
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
 function _spkOku(metin, rol, bitti){
   try{
+    if(window._sahaIzleModu && _spkDisariyaIlet(metin, rol)){ setTimeout(bitti, Math.min(5000, 600 + metin.length * 60)); return; }
     var ss = window.speechSynthesis;
     if(!ss || !window.SpeechSynthesisUtterance || !AYAR.ses){ setTimeout(bitti, Math.min(4000, 400 + metin.length * 55)); return; }
     var u = new SpeechSynthesisUtterance(metin);
     u.lang = 'tr-TR';
-    if(rol === 'yorumcu'){ u.rate = 0.98; u.pitch = 0.78; } else { u.rate = 1.12; u.pitch = 1.08; }
-    u.volume = 1;
     var v = _spkSecSes(rol); if(v) u.voice = v;
+    // Erkek ses varsa doğal perde; yoksa perde düşürülerek kalınlaştırılır.
+    var dus = SPK.erkekVar ? 0 : 0.28;
+    if(rol === 'yorumcu'){ u.rate = 0.97; u.pitch = 0.82 - dus; } else { u.rate = 1.1; u.pitch = 0.98 - dus; }
+    u.volume = 1;
     var bitirildi = false, son = function(){ if(bitirildi) return; bitirildi = true; bitti(); };
     u.onend = son; u.onerror = son;
     setTimeout(son, 9000);                     // bazı tarayıcılar onend göndermez
@@ -7640,9 +7745,10 @@ function _nakaratNota(t, frek, sure, ses){
     o.connect(f); o.start(t); o.stop(t + sure + 0.05);
   }
 }
-function tezahurat(coskulu){
+function tezahurat(coskulu, izleyicide){
   try{
-    if(!ac || !_sesUret() || window._sahaIzleModu) return;
+    if(!izleyicide){ try{ yayinSesOlay(coskulu ? 'tezahurat2' : 'tezahurat'); }catch(e){} }
+    if(!ac || !_sesUret() || (window._sahaIzleModu && !izleyicide)) return;
     if(typeof _tribunTaban !== 'undefined' && _tribunTaban <= 0) return;   // maç dışında (menü) çalmaz
     var t0 = ac.currentTime + 0.05, vurus = 0.5, ses = coskulu ? 0.07 : 0.045;
     // "O-le, o-le o-le o-le" + alkış: 2 tur
@@ -8302,22 +8408,114 @@ function takimSec(tid){
 }
 // Satin alma. Kontroller SUNUCU kurallarinda da olmali; buradakiler kullaniciya hizli
 // geri bildirim icin - tek basina guvenlik saglamaz.
+/* ══ UYGULAMA İÇİ SORU / BİLDİRİM (2026-10-02-B) ══════════════════════════════════════════
+   KÖK SEBEP (kullanıcı: "satış butonu çalışmıyor"): Takım/Transfer ekranındaki işlemler sonucu
+   mesaj() ile bildiriyordu. mesaj() OYUN İÇİ göstergenin (#hud/#msg) parçası; menü (p-shell)
+   açıkken onun ALTINDA kalıyor. İlk 11'deki oyuncuyu satmaya çalışan kullanıcıya verilen
+   "önce yerine birini koy" uyarısı hiç görünmüyordu - düğme "hiçbir şey yapmıyor" gibiydi.
+   Ayrıca onay için tarayıcının confirm() kutusu kullanılıyordu (uygulama dışı görünüm).
+   ŞİMDİ: sahaSoru() uygulamanın kendi penceresi (Evet/Hayır), sahaBildir() menünün de
+   üstünde görünen kısa bildirim. mesaj() da bir panel açıkken bildirimi ayrıca gösterir. */
+function sahaBildir(metin, sure){
+  try{
+    var t = document.getElementById('sahaBildirim');
+    if(!t){
+      t = document.createElement('div'); t.id = 'sahaBildirim';
+      t.style.cssText = 'position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);'
+        + 'z-index:2147482500;max-width:90%;background:rgba(15,23,32,.96);color:#eef3ef;border:1px solid rgba(255,255,255,.14);'
+        + 'border-radius:12px;padding:10px 16px;font-weight:700;font-size:14px;line-height:1.4;text-align:center;'
+        + 'box-shadow:0 8px 24px rgba(0,0,0,.45);pointer-events:none;transition:opacity .3s;opacity:0';
+      document.body.appendChild(t);
+    }
+    t.textContent = metin; t.style.opacity = '1';
+    clearTimeout(t._z); t._z = setTimeout(function(){ t.style.opacity = '0'; }, sure || 2400);
+  }catch(e){}
+}
+// secenek: { baslik, govde (HTML), soru, evet, hayir, tehlikeli }  → Promise<boolean>
+function sahaSoru(secenek){
+  return new Promise(function(coz){
+    try{
+      var o = secenek || {};
+      var el = document.getElementById('sahaSoruKutu');
+      if(!el){
+        el = document.createElement('div'); el.id = 'sahaSoruKutu';
+        el.style.cssText = 'position:fixed;inset:0;z-index:2147482400;display:none;align-items:center;justify-content:center;'
+          + 'background:rgba(6,10,16,.82);backdrop-filter:blur(3px);padding:18px';
+        document.body.appendChild(el);
+      }
+      el.innerHTML = '<div style="background:#0f1720;border:1px solid rgba(255,255,255,.12);border-radius:18px;max-width:360px;width:100%;'
+        + 'max-height:88vh;overflow:auto;padding:18px;color:#e6edf5;box-shadow:0 18px 50px rgba(0,0,0,.55)">'
+        + (o.baslik ? '<div style="font-size:16px;font-weight:900;margin-bottom:10px;text-align:center">' + o.baslik + '</div>' : '')
+        + (o.govde || '')
+        + (o.soru ? '<div style="font-size:14.5px;font-weight:800;text-align:center;margin:14px 0 4px">' + o.soru + '</div>' : '')
+        + '<div style="display:flex;gap:10px;margin-top:12px">'
+        + (o.hayir === false ? '' : '<button type="button" data-c="0" style="flex:1;min-height:44px;border-radius:12px;border:1px solid rgba(255,255,255,.18);background:#1f2937;color:#fff;font-weight:800;font-size:14px;cursor:pointer">' + (o.hayir || 'Hayır') + '</button>')
+        + '<button type="button" data-c="1" style="flex:1;min-height:44px;border-radius:12px;border:0;background:' + (o.tehlikeli ? '#d8443a' : '#2fae7a') + ';color:#fff;font-weight:900;font-size:14px;cursor:pointer">' + (o.evet || 'Evet') + '</button>'
+        + '</div></div>';
+      var bitti = false, kapat = function(v){ if(bitti) return; bitti = true; el.style.display = 'none'; coz(v); };
+      el.querySelectorAll('button[data-c]').forEach(function(b){ b.onclick = function(){ kapat(b.getAttribute('data-c') === '1'); }; });
+      el.onclick = function(ev){ if(ev.target === el) kapat(false); };
+      el.style.display = 'flex';
+    }catch(e){ coz(false); }
+  });
+}
+function _sahaOyuncuKartHtml(o, satirlar){
+  var esc2 = function(x){ return String(x == null ? '' : x).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+  var gorsel = ''; try{ gorsel = _oyuncuAvatarHtml(o, 76, 3); }catch(e){}
+  return '<div style="display:flex;flex-direction:column;align-items:center;gap:8px;margin-bottom:10px">' + gorsel
+    + '<div style="font-size:17px;font-weight:900;text-align:center">' + esc2(o.ad || '?') + '</div>'
+    + '<div style="font-size:12px;opacity:.7">' + esc2(o.mevki || '—') + ' · Güç ' + (o.guc || 0) + '</div></div>'
+    + (satirlar || []).map(function(x){
+        return '<div style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.07);font-size:13px">'
+          + '<span style="opacity:.65">' + x[0] + '</span><b style="text-align:right">' + x[1] + '</b></div>';
+      }).join('');
+}
+/* KATILIM KAYBI (2026-10-02-B, kullanıcı: "satın alınan her oyuncu gücüne ve alış fiyatına göre
+   50-100 SL zarar ederek takıma katılır; oynadıkça performansa göre değeri yükselir/düşer").
+   Taban 75 SL; pahalı oyuncuda kayıp büyür (2000 SL ve üstü +25), güçlü oyuncuda küçülür
+   (güç 99: -25, güç 1: +25). Sonuç 50-100 arasına sıkıştırılır ve imza anında KİLİTLENİR
+   (oyuncu kaydında katilimKaybi) - sonradan formül değişse bile alınmış oyuncunun değeri oynamaz. */
+function sahaKatilimKaybi(fiyat, guc){
+  var f = Math.max(0, Number(fiyat) || 0), g = Math.max(1, Math.min(99, Number(guc) || 50));
+  var k = 75 + 25 * Math.min(1, f / 2000) - 25 * ((g - 50) / 49);
+  return Math.round(Math.max(50, Math.min(100, k)));
+}
 function oyuncuSatinAl(id){
   const o = magazaHavuz[id];
   if(!o || !kayitliMi()){ return; }
-  if(o.sahip){ mesaj('', 'Bu oyuncu satilmis', 1500); return; }
-  if(!o.satista){ mesaj('', 'Satista degil', 1500); return; }
-  if((benimKayit.para||0) < (o.fiyat||0)){ mesaj('', 'Paran yetmiyor', 1600); return; }
+  if(o.sahip){ sahaBildir('Bu oyuncu başka bir takımla anlaştı'); return; }
+  if(!o.satista){ sahaBildir('Bu oyuncu şu an satışta değil'); return; }
+  var _fiyat = o.fiyat || 0, _para = benimKayit.para || 0;
+  if(_para < _fiyat){ sahaBildir('Paran yetmiyor: ' + _fiyat + ' SL gerekli, bakiyen ' + _para + ' SL'); return; }
+  var _kayip = sahaKatilimKaybi(_fiyat, o.guc);
+  var _deger = Math.max(0, _fiyat - _kayip);
+  sahaSoru({
+    baslik: '✍️ Sözleşme',
+    govde: _sahaOyuncuKartHtml(o, [
+      ['Bonservis bedeli', _fiyat + ' SL'],
+      ['Takıma katılınca değeri', _deger + ' SL <span style="color:#f0a8a2">(-' + Math.min(_kayip, _fiyat) + ')</span>'],
+      ['Bakiyen (imzadan sonra)', (_para - _fiyat) + ' SL'],
+      ['Oynadığı maç', (o.macSayisi || 0) ? (o.macSayisi + ' maç') : 'henüz yok']
+    ]) + '<div style="font-size:11.5px;opacity:.6;line-height:1.55;margin-top:8px;text-align:center">Değeri, takımında oynadıkça performansına göre yükselir ya da düşer.</div>',
+    soru: 'Bu oyuncuyla sözleşme imzalansın mı?', evet: 'Evet', hayir: 'Hayır'
+  }).then(function(ok){ if(ok) _oyuncuSatinAlOnayli(id, _kayip); });
+}
+function _oyuncuSatinAlOnayli(id, katilimKaybi){
+  const o = magazaHavuz[id];
+  if(!o || !kayitliMi()) return;
+  if(o.sahip || !o.satista){ sahaBildir('Bu oyuncu artık satışta değil'); return; }
+  if((benimKayit.para||0) < (o.fiyat||0)){ sahaBildir('Paran yetmiyor'); return; }
   // Atomik: para dusme ve sahip atama TEK update ile. Ayri yapilsaydi, arada baglanti
   // koparsa para gider oyuncu gelmezdi.
   const g = {};
   g['oyuncuHavuzu/'+id+'/sahip'] = benimUid;
   g['oyuncuHavuzu/'+id+'/alisTs'] = Date.now();       // takıma katılım anı (performans puanı bundan sonra)
   g['oyuncuHavuzu/'+id+'/alisFiyat'] = (o.fiyat||0);
+  g['oyuncuHavuzu/'+id+'/katilimKaybi'] = katilimKaybi;     // imza anında kilitlenir (bkz. KATILIM KAYBI)
   g['oyuncuHavuzu/'+id+'/satista'] = false;
   g['kullanicilar/'+benimUid+'/para'] = (benimKayit.para||0) - (o.fiyat||0);
   fbDb.ref().update(g)
-    .then(function(){ mesaj('SATIN ALINDI', o.ad, 1800); })
+    .then(function(){ sahaBildir('✍️ ' + (o.ad || '') + ' ile sözleşme imzalandı'); try{ magazaCiz(); }catch(e){} })
     .catch(function(err){
       // SENSOR: Satin alma basarisiz oldugunda kullanici "para gitti mi" diye bilemiyordu.
       DiagSaha('satinAlma', err, {oyuncu:(o&&o.ad)||'', fiyat:(o&&o.fiyat)||0,
@@ -8691,9 +8889,18 @@ function transferAltSec(a){ _transferAlt = a; sayTakimCiz(); }
 function satisFiyati(o){
   try{
     if(!o || o.baslangic) return 0;
-    var taban = Math.max(0, o.alisFiyat || 0);
-    if(!taban) return 0;
+    var alis = Math.max(0, o.alisFiyat || 0);
+    if(!alis) return 0;
     var mac = o.macSayisi || 0;
+    // İmzada belirlenen katılım kaybı varsa değer ondan başlar; eski alımlarda eski kural (%85).
+    if(o.katilimKaybi != null){
+      var taban = Math.max(0, alis - Number(o.katilimKaybi));
+      if(!mac) return taban;
+      var ort0 = (o.puanToplam || 0) / mac;
+      var kat0 = Math.max(0.35, Math.min(1.8, 1 + (ort0 - 6.0) * 0.15));
+      return Math.round(taban * kat0);
+    }
+    var taban = alis;
     if(!mac) return Math.round(taban * 0.85);
     var ort = (o.puanToplam || 0) / mac;            // 10 uzerinden performans puani
     var kat = 1 + (ort - 6.0) * 0.15;               // 6.0 notr
@@ -8798,9 +9005,10 @@ function oyuncuDetayAc(id){
    kadrodan çıkarılır. Hemen çıkarmak, iptal edildiğinde diziliş bozuk kalırdı. */
 function oyuncuSat(id){
   var o = magazaHavuz[id];
-  if(!o || !kayitliMi()){ return; }
-  if(o.sahip !== benimUid){ mesaj('', 'Bu oyuncu senin değil', 1500); return; }
-  if(satisIlaniniOku(o)){ mesaj('', 'Bu oyuncu zaten satışta', 1600); return; }
+  if(!o){ sahaBildir('Oyuncu bulunamadı'); return; }
+  if(!kayitliMi()){ sahaBildir('Önce takımını seçmelisin'); return; }
+  if(o.sahip !== benimUid){ sahaBildir('Bu oyuncu senin değil'); return; }
+  if(satisIlaniniOku(o)){ sahaBildir('Bu oyuncu zaten satışta'); return; }
   /* BAŞLANGIÇ KADROSU (kullanıcı talebi): satışa sunulabilir ama SL KAZANDIRMAZ ve
      GERİ SAYIM YOKTUR - anında kadrodan çıkar. Geri sayım, satıştan gelecek parayı
      beklemek için var; kazanç olmayan bir işlemde beklemenin hiçbir karşılığı olmaz
@@ -8809,20 +9017,32 @@ function oyuncuSat(id){
   var fiyat = satisFiyati(o);
   var kd = (benimKayit.kadro) || {};
   var ilk11 = kdIlkDizi(kd);
-  if(ilk11.indexOf(id) >= 0){
-    mesaj('', 'İlk 11\'deki oyuncu satılamaz - önce yerine birini koy', 2600); return;
-  }
-  if(!confirm((o.ad || 'Bu oyuncu') + ' satışa çıkarılsın mı?\n\n'
-    + 'Değer: ' + fiyat + ' SL (performansına göre hesaplandı)\n'
-    + '1 saat içinde satılacak. O süre boyunca iptal edebilirsin.')) return;
+  // İlk 11'deki oyuncu da satışa çıkabilir: ilan süresince oynamaya devam eder, satış
+  // tamamlanınca yeri boşalır (bkz. satisIlanlariniTamamla - kadro boşluklu olabilir).
+  var _ilk11de = ilk11.indexOf(id) >= 0;
+  sahaSoru({
+    baslik: '💰 Satışa çıkar',
+    govde: _sahaOyuncuKartHtml(o, [
+      ['Satış değeri', '<span style="color:#7ee0a0">' + fiyat + ' SL</span>'],
+      ['Alış fiyatı', (o.alisFiyat || 0) + ' SL'],
+      ['Oynadığı maç', (o.macSayisi || 0) ? (o.macSayisi + ' maç') : 'hiç oynamadı']
+    ]) + '<div style="font-size:11.5px;opacity:.65;line-height:1.55;margin-top:8px;text-align:center">'
+      + '1 saat içinde satılır; o süre içinde iptal edebilirsin.'
+      + (_ilk11de ? '<br><b style="color:#f5c26b">Oyuncu ilk 11\'inde: satış tamamlanınca yeri boş kalır.</b>' : '') + '</div>',
+    soru: 'Bu oyuncu satışa çıkarılsın mı?', evet: 'Satışa çıkar', hayir: 'Vazgeç'
+  }).then(function(ok){ if(ok) _oyuncuSatOnayli(id, fiyat); });
+}
+function _oyuncuSatOnayli(id, fiyat){
+  var o = magazaHavuz[id];
+  if(!o || o.sahip !== benimUid || satisIlaniniOku(o)) return;
   var g = {};
   g['oyuncuHavuzu/'+id+'/satisIlan'] = { fiyat: fiyat, bitis: Date.now() + SAHA_SATIS_SURE_MS, sahip: benimUid };
   fbDb.ref().update(g)
-    .then(function(){ mesaj('SATIŞA ÇIKTI', (o.ad||'') + ' · ' + fiyat + ' SL · 1 saat', 2400); magazaCiz(); })
+    .then(function(){ sahaBildir('💰 ' + (o.ad||'') + ' satışta · ' + fiyat + ' SL · 1 saat'); magazaCiz(); })
     .catch(function(err){
       DiagSaha('oyuncuSat', err, { oyuncu:(o&&o.ad)||'', fiyat:fiyat,
         anlami:'Satış ilanı yazılamadı.', oneri:'oyuncuHavuzu yazma kurallarını denetleyin.' });
-      mesaj('', 'İşlem başarısız', 1600);
+      sahaBildir('❌ Satışa çıkarılamadı: ' + String((err && err.message) || 'bağlantı/izin sorunu').slice(0, 80), 3600);
     });
 }
 /* Başlangıç oyuncusunu kadrodan çıkarır: oyuncu havuza döner, para EKLENMEZ. */
@@ -8831,11 +9051,19 @@ function baslangicOyuncusuCikar(id){
   if(!o || o.sahip !== benimUid) return;
   var kd = (benimKayit.kadro) || {};
   var ilk11 = kdIlkDizi(kd), yedek = sahaDizi(kd.yedek).slice();
-  if(ilk11.indexOf(id) >= 0 && kdDoluSay(ilk11) <= 11){
-    mesaj('', 'İlk 11\'deki oyuncu çıkarılamaz - önce yerine birini koy', 2600); return;
-  }
-  if(!confirm((o.ad || 'Bu oyuncu') + ' kadrodan çıkarılsın mı?\n\n'
-    + 'Başlangıç kadrosundan geldiği için SL kazandırmaz. İşlem anında yapılır, geri alınamaz.')) return;
+  sahaSoru({
+    baslik: 'Kadrodan çıkar',
+    govde: _sahaOyuncuKartHtml(o, [['Değer', '0 SL (başlangıç kadrosu)']])
+      + '<div style="font-size:11.5px;opacity:.65;line-height:1.55;margin-top:8px;text-align:center">Başlangıç kadrosundan geldiği için SL kazandırmaz. İşlem anında yapılır, geri alınamaz.'
+      + (ilk11.indexOf(id) >= 0 ? '<br><b style="color:#f5c26b">Oyuncu ilk 11\'inde: yeri boş kalır.</b>' : '') + '</div>',
+    soru: (o.ad || 'Bu oyuncu') + ' kadrodan çıkarılsın mı?', evet: 'Çıkar', hayir: 'Vazgeç', tehlikeli: true
+  }).then(function(ok){ if(ok) _baslangicCikarOnayli(id); });
+}
+function _baslangicCikarOnayli(id){
+  var o = magazaHavuz[id];
+  if(!o || o.sahip !== benimUid) return;
+  var kd = (benimKayit.kadro) || {};
+  var ilk11 = kdIlkDizi(kd), yedek = sahaDizi(kd.yedek).slice();
   var g = {};
   g['oyuncuHavuzu/'+id+'/sahip']   = null;
   g['oyuncuHavuzu/'+id+'/alisTs']  = null;
@@ -8843,10 +9071,10 @@ function baslangicOyuncusuCikar(id){
   g['kullanicilar/'+benimUid+'/kadro/ilk11'] = ilk11.map(function(x){ return x === id ? '' : x; });
   g['kullanicilar/'+benimUid+'/kadro/yedek'] = yedek.filter(function(x){ return x !== id; });
   fbDb.ref().update(g)
-    .then(function(){ mesaj('ÇIKARILDI', (o.ad||'') + ' · kadrodan çıktı', 2000); magazaCiz(); })
+    .then(function(){ sahaBildir((o.ad||'') + ' kadrodan çıktı'); magazaCiz(); })
     .catch(function(err){
       DiagSaha('baslangicCikar', err, { oyuncu:(o&&o.ad)||'', anlami:'Oyuncu kadrodan çıkarılamadı.' });
-      mesaj('', 'İşlem başarısız', 1600);
+      sahaBildir('❌ İşlem başarısız', 3000);
     });
 }
 function satisIptal(id){
@@ -8854,8 +9082,8 @@ function satisIptal(id){
   if(!o || !satisIlaniniOku(o)) return;
   if(o.sahip !== benimUid){ return; }
   fbDb.ref('oyuncuHavuzu/'+id+'/satisIlan').remove()
-    .then(function(){ mesaj('İPTAL', (o.ad||'') + ' satıştan çekildi', 1800); magazaCiz(); })
-    .catch(function(){ mesaj('', 'İptal edilemedi', 1500); });
+    .then(function(){ sahaBildir((o.ad||'') + ' satıştan çekildi'); magazaCiz(); })
+    .catch(function(){ sahaBildir('❌ İptal edilemedi', 3000); });
 }
 /* SÜRESİ DOLAN İLANLARI TAMAMLA
    Sunucu tarafı iş yok (Cloud Functions yok): satış, sahibi uygulamayı açtığında
@@ -10716,7 +10944,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-02-A';
+window.APP_BUILD = '2026-10-02-B';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -11648,6 +11876,11 @@ function torenBaslat(tur, hazirla, bitis, secenek){
         if(k.oyuncu && k.takim === kaz){
           k.kutla = true;
           k.kutlamaYeri = new THREE.Vector3(TOREN.kutlamaX + (Math.random()-0.5)*7, 0, (Math.random()-0.5)*18);
+        } else if(k.oyuncu && kaz >= 0){
+          // Kaybeden: sahada kalır, birkaç adım atıp başı önde durur (2026-10-02-B).
+          k.uzgunSon = true;
+          var _o = k.obj().position;
+          k.kutlamaYeri = new THREE.Vector3(_o.x * 0.92 + (Math.random()-0.5)*2, 0, _o.z * 0.9 + (Math.random()-0.5)*2);
         }
       });
     }
@@ -11722,6 +11955,13 @@ function torenAdim(dt){
     } else if(TOREN.faz === 'yerlere'){
       const u = _degYuru(o, k.hedef.x, k.hedef.z, 4.4, dt); hiz = u > 0.03 ? 4.4 : 0;
       if(u > 0.2) hepsi = false;
+    } else if(TOREN.faz === 'son' && k.uzgunSon){
+      const u = _degYuru(o, k.kutlamaYeri.x, k.kutlamaYeri.z, 1.1, dt); hiz = u > 0.08 ? 1.1 : 0;
+      if(hiz === 0){
+        // Kazananların kutlamasına dönük, başı önde; arada bir eller dizlerde gibi öne eğilir.
+        o.rotation.y = Math.atan2(TOREN.kutlamaX - o.position.x, -o.position.z * 0.3);
+        k.egilT = (k.egilT || Math.random() * 3) + dt;
+      }
     } else if(TOREN.faz === 'donus' || (TOREN.faz === 'son' && !k.kutla)){
       // Tünele yürüyüş: önce ağzın önüne, sonra içeri; içeri girince görünmez olur.
       const yavas = TOREN.tur === 'son' && k.oyuncu ? 1.9 : 3.4;   // devre: tempolu; maç sonu: yorgun / üzgün yürüyüş
@@ -11771,6 +12011,17 @@ function torenAdim(dt){
     if(TOREN.faz === 'gol' && k.kolYukari && hiz === 0) kolDikey(ud);
     if(TOREN.faz === 'gol' && k.rol === 'uzgun' && ud && ud.bas) ud.bas.rotation.x = 0.45;
     if(TOREN.tur === 'son' && !k.kutla && k.oyuncu && ud && ud.bas) ud.bas.rotation.x = 0.45;   // kaybeden: baş önde
+    // Kaybeden (sahada kalan): gövde de öne eğik. Kutu modelde govde, hazır modelde (iskelet)
+    // omurga ve baş kemiğine animasyonun ÜSTÜNE ek eğim verilir (her karede yeniden).
+    if(TOREN.faz === 'son' && k.uzgunSon && ud){
+      try{
+        if(ud.govde && !ud.hazirModel) ud.govde.rotation.x = 0.2 + Math.max(0, Math.sin((k.egilT || 0) * 0.9)) * 0.22;
+        if(ud.hazirModel){
+          if(!ud._uzKemik){ ud._uzKemik = []; o.traverse(function(b){ if(b.isBone && /spine2|spine1|neck|head$/i.test(b.name)) ud._uzKemik.push(b); }); }
+          ud._uzKemik.forEach(function(b){ b.rotation.x += /head/i.test(b.name) ? 0.45 : 0.16; });
+        }
+      }catch(e){}
+    }
     if(k.ob.golge) k.ob.golge.position.set(o.position.x, 0.02, o.position.z);
   });
   // Faz geçişleri
@@ -13919,6 +14170,8 @@ function faulKontrol(dt){
 
 /* ---------- HUD ---------- */
 function mesaj(buyuk, kucuk, sure){
+  // Menü/panel açıkken oyun içi gösterge görünmez - aynı metin bildirim olarak da çıkar.
+  try{ if(document.querySelector('.panel.on') && !running) sahaBildir(String(buyuk || '') + (buyuk && kucuk ? ' · ' : '') + String(kucuk || ''), sure); }catch(e){}
   const m = document.getElementById('msg');
   m.innerHTML = buyuk + (kucuk ? `<small>${kucuk}</small>` : '');
   m.style.opacity = '1';
@@ -14109,7 +14362,7 @@ var OZET = { anlar:[], aktif:false, i:0, kare:0, aci:0 };
 // Eski görünürlük saklanır; yeni maç başlarken / ekran kapanınca (_sahaHudGeri) aynen geri gelir.
 function _sahaHudGizle(){
   window._hudOnceki = window._hudOnceki || {};
-  ['board','tip','radar','kondKutu','msg','power','power2','tekrarEt','touch','hata','kart'].forEach(function(id){
+  ['board','tip','radar','kondKutu','msg','power','power2','tekrarEt','touch','hata','kart','ayarBtn'].forEach(function(id){
     var el = document.getElementById(id); if(!el) return;
     if(!(id in window._hudOnceki)) window._hudOnceki[id] = el.style.display;
     el.style.display = 'none'; });
@@ -14330,6 +14583,7 @@ function macSonuEkraniAc(){
       + '<button type="button" id="msDon" onclick="macSonuEkraniKapat()">Ana sayfaya dön</button>';
     el.style.display = 'flex';
     _sahaHudGizle();
+    try{ _torenDugme(false); }catch(e){}           // tören arkada sürer; "Geç" düğmesi pencerenin üstünde kalmasın
     OZET.i = 0; OZET.kare = 0; OZET.aktif = true;
     try{ document.getElementById('p-end').classList.remove('on'); }catch(e){}
   }catch(e){
@@ -15166,13 +15420,22 @@ function bitir(){
   macOzetiCiz();
   // TÖREN: kazanan taraftarıyla kutlar, kaybeden (berabere: iki takım) soyunma odasına gider;
   // bitince maç sonu ekranı açılır. "Geç ▶" ile hemen açılabilir.
+  /* MAÇ SONU AKIŞI (2026-10-02-B, kullanıcı: "önce oyuncular skora göre sevinsin/üzülsün -
+     kazananlar sevinip kaybedenler üzülsün, berabere ise oyuncular soyunma odasına gitsin -
+     ardından ~3 sn sonra istatistik penceresi çıksın"). Pencere törenin SONUNU beklemez:
+     3 sn sonra açılır, tören arkada sürer; tören bitince arkada önemli anlar oynamaya başlar.
+     İki yoldan da (zamanlayıcı / tören sonu) çağrılır; ikinci çağrı pencereyi yeniden kurmaz. */
   const _sonEkran = function(){
+    if(window._msAcildi) { try{ if(!TOREN.aktif) OZET.aktif = true; }catch(e){} return; }
+    window._msAcildi = true;
     macSonuEkraniAc();
     setTimeout(function(){ try{ yayinDurdur(); }catch(e){} }, 6000);   // yayın maç sonu ekranından kısa süre sonra kapanır
   };
   if (_torenUygun()){
+    window._msAcildi = false;
     torenBaslat('son', null, _sonEkran, { kazanan: skorA > skorB ? 0 : (skorB > skorA ? 1 : -1) });
-  } else _sonEkran();
+    setTimeout(_sonEkran, 3000);
+  } else { window._msAcildi = false; setTimeout(_sonEkran, 3000); }
 }
 
 /* ---------- döngü (sabit adım) ---------- */
@@ -15938,7 +16201,11 @@ document.getElementById('b-again').onclick = () => {
   // rakip, bitmiş bir odada beklemeye devam ederdi.
   try{ if(window._sahaOdaMacBasladi){ window._sahaOdaMacBasladi = false; odaCik(true); } }catch(e){}
   window._sahaOdaSuresiDk = 0;
-  panelKapat(); menuGoster();
+  // KÖK SEBEP (kullanıcı: "Ana sayfaya dön görevini yapmıyor"): burada panelKapat() çağrılıyordu;
+  // o işlev yalnızca teşhis panelinin İÇİNDE tanımlı, burada yok. ReferenceError fırlıyor,
+  // menuGoster() hiç çalışmıyordu. Açık oyun panelleri doğrudan kapatılır.
+  try{ document.querySelectorAll('.panel.on').forEach(function(p){ if(p.id !== 'p-shell') p.classList.remove('on'); }); }catch(e){}
+  menuGoster();
 };
 document.getElementById('ayarBtn').onclick = ayarAc;
 
@@ -17127,7 +17394,10 @@ SahaTeshis.hepsiniSar();   // bütün fonksiyonlar ve _stadEkran tanımlandıkta
   window._sahaIzleModu = mod;
   _sahaIzleUIHazirla();
   // ÖZET İZLEME (?ozet=1): canlı veri dinlenmez, kayıtlı özet oynatılır (bkz. MAÇ ÖZETİ KAYDI).
-  try{ if(new URLSearchParams(location.search).get('ozet') === '1'){ ozetIzleBaslat(mod); return; } }catch(e){}
+  // KÖK SEBEP (AK: "maç özetleri açılmıyor"): özet modunda Puan Tablosu oynatıcısıyla konuşan
+  // köprü (_sahaIzlePTKoprusu) kurulmuyordu. Oynatıcının açılış bekçisi 'onReady' gelmeyince
+  // kaynağı açılamadı sayıyordu. Köprü artık özet modunda da kurulur.
+  try{ if(new URLSearchParams(location.search).get('ozet') === '1'){ _sahaIzlePTKoprusu(); ozetIzleBaslat(mod); return; } }catch(e){}
   _sahaIzlePTKoprusu();
   _sahaIzleFirebaseDinle(mod);
   _sahaIzleRozetGlobalDinle();
