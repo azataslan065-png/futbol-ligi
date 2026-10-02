@@ -7175,7 +7175,30 @@ function gurultu(sure, ses, frek){
     s.start();
   } catch(e){_sessiz(e,'gurultu:1543','saha_ses');}
 }
-function sesDuduk(uzun){ ton(1500, 1350, uzun ? 0.6 : 0.22, 'square', 0.12); try{ yayinSesOlay(uzun ? 'duduk2' : 'duduk1'); }catch(e){} }
+/* MAÇ SESİ KAYDI (2026-10-02-I, kullanıcı: "spiker, yorumcu ve maç içi diğer sesler birebir özete yansıtılmalı").
+   Oyunda çalan her ses (vuruş, düdük, tribün coşkusu, tezahürat, anons zili) zamanıyla kaydedilir;
+   özet anı kesilirken o pozisyonun içindeki sesler de saklanır ve özette aynı anda aynı ses çalınır.
+   Yalnızca GERÇEKTEN oynanan maçta kaydedilir (özet oynatırken çalan sesler kayda girmez). */
+var SES_LOG = [];
+function _sesKaydet(k, a, b){
+  try{
+    if(window._sahaIzleModu || typeof running === 'undefined' || !running || bitti) return;
+    SES_LOG.push({ ts:Date.now(), k:k, a:(a == null ? 0 : Math.round(a*100)/100), b:(b == null ? 0 : Math.round(b*100)/100) });
+    if(SES_LOG.length > 600) SES_LOG.splice(0, SES_LOG.length - 600);
+  }catch(e){}
+}
+// Özette kayıtlı sesi çalar - yayına GÖNDERMEDEN (izleyiciye düdük olayı tekrar gitmesin).
+function _ozetSesCal(e){
+  try{
+    if(e.k === 'v') gurultu(0.09, 0.16 + e.a*0.2, 700 + e.a*900);
+    else if(e.k === 'd') ton(1500, 1350, e.a ? 0.6 : 0.22, 'square', 0.12);
+    else if(e.k === 't') sesTribun(e.a, e.b);
+    else if(e.k === 'z') tezahurat(!!e.a, true);
+    else if(e.k === 'zil') stadyumZil();
+    else if(e.k === 'n') gurultu(0.08, 0.2, 1400);
+  }catch(x){}
+}
+function sesDuduk(uzun){ _sesKaydet('d', uzun ? 1 : 0); ton(1500, 1350, uzun ? 0.6 : 0.22, 'square', 0.12); try{ yayinSesOlay(uzun ? 'duduk2' : 'duduk1'); }catch(e){} }
 // KULLANICI BİLDİRDİ ("varsayılan taraftar sesi geliyor sadece diğerleri gelmiyor" - devam):
 // Şut/pas/müdahale (vuruş) sesleri izleyiciye HİÇ ULAŞMIYORDU çünkü bu olaylar Firebase'e
 // hiç yazılmıyordu (bkz. IZLEYICI SESI notundaki "SINIR" - bilinçli kapsam dışı bırakma).
@@ -7186,7 +7209,7 @@ function sesDuduk(uzun){ ton(1500, 1350, uzun ? 0.6 : 0.22, 'square', 0.12); try
 // Not: update() seyirci modunda hiç çalışmadığı için (bkz. ilgili not), bu sayaç yalnızca
 // GERÇEKTEN OYNAYAN tarafta artar - izleyicinin kendi 3D animasyonu bunu tetiklemez.
 window._sahaVurusSayaci = 0;
-function sesVurus(g){ window._sahaVurusSayaci++; gurultu(0.09, 0.16 + g*0.2, 700 + g*900); }
+function sesVurus(g){ window._sahaVurusSayaci++; _sesKaydet('v', g); gurultu(0.09, 0.16 + g*0.2, 700 + g*900); }
 /* TRİBÜN TABAN SEVİYESİ: maç içinde 0.035, menüde 0. Tek değişkende tutulur ki
    coşku (gol, şut) sonrası geri dönülen seviye her zaman doğru olsun - önceden
    sabit 0.035'e dönüyordu, yani menüde bir coşku tetiklenirse uğultu menüde de
@@ -7493,6 +7516,7 @@ function _izleVideoGizle(){
   }catch(e){}
 }
 function stadyumZil(){
+  _sesKaydet('zil');
   try{ ton(784, 0, 0.55, 'sine', 0.09); setTimeout(function(){ ton(622, 0, 0.8, 'sine', 0.08); }, 420); }catch(e){}
 }
 function _anonsKonus(metin){
@@ -7510,6 +7534,7 @@ function _anonsKonus(metin){
 function stadyumAnons(metin, zil){
   try{
     if(!_sesUret() || window._sahaIzleModu) return;
+    try{ if(running && !bitti){ SPK.log.push({ ts:Date.now() + (zil !== false ? 1100 : 0), r:'anons', m:String(metin) }); if(SPK.log.length > 60) SPK.log.shift(); } }catch(e){}
     if(zil !== false) stadyumZil();
     // Görüntülü yayındaki izleyici de duysun: zil videoda gider, konuşma metni ayrıca.
     setTimeout(function(){ yayinAnonsGonder(metin); }, zil !== false ? 1100 : 0);
@@ -7797,6 +7822,59 @@ function spk(tur, v){
         setTimeout(function(){ spkSoyle('yorumcu', _spkSec(['Bu kart maçın dengesini tamamen değiştirebilir.', 'Eksik kalmak bu tempoda çok zor olacak.',
           tk + ' şimdi yeniden organize olmak zorunda.']), 'kirmiziY', true); }, 3000);
         break;
+      /* EK REPLİKLER (2026-10-02-I, kullanıcı: "canlı maçta daha fazla spiker repliği"): pas, uzun top,
+         top kapma, çalım, kafa vuruşu, kalecinin topu alması, taç, kale vuruşu, avantaj, uzatma,
+         ceza sahasına giriş. Sıradan olaylar sık yaşandığı için her biri kendi aralığıyla seyreltilir
+         ve sıra doluysa atlanır - spiker konuşmaya boğulmaz, ama sessiz an kalmaz. */
+      case 'pas':
+        if(!ad) break;
+        var _qa = _spkAd(v.q);
+        if(v.u > 24) spkSoyle('spiker', _spkSec([ad + ' uzun oynadı' + (_qa ? ', ' + _qa + ' hedefte.' : '.'), ad + ' topu ileriye, ' + (_qa || 'arkadaşına') + ' doğru şişirdi.',
+            'Uzun top ' + ad + ' ayağından' + (_qa ? ', ' + _qa + ' için.' : '.'), ad + ' oyunun yönünü değiştiriyor, uzun bir pas.', 'Ve ' + ad + ' çaprazdan ' + (_qa || 'arkadaşını') + ' arıyor.']), 'uzunPas', false, 9000);
+        else if(v.ileri > 12) spkSoyle('spiker', _spkSec([ad + ' ara pası denedi' + (_qa ? ', ' + _qa + ' koşu yolunda.' : '.'), ad + ' derine attı' + (_qa ? ', ' + _qa + ' kovalıyor.' : '.'),
+            ad + ' savunmanın arkasına topu bıraktı!', 'Akıllıca bir pas ' + ad + ' ayağından.', ad + ' dikine oynadı' + (_qa ? ', top ' + _qa + ' ile.' : '.')]), 'araPas', false, 9000);
+        else if(Math.random() < 0.35) spkSoyle('spiker', _spkSec([ad + (_qa ? ', ' + _qa + '.' : ' pasını verdi.'), ad + ' kısa oynadı' + (_qa ? ', ' + _qa + ' ile.' : '.'),
+            (_qa ? _qa + ' topla buluştu.' : 'Top el değiştirdi, ' + tk + ' devam ediyor.'), ad + ' topu ' + (_qa || 'arkadaşına') + ' aktardı.', tk + ' paslaşarak ilerliyor; ' + ad + (_qa ? ', ' + _qa + '.' : '.')]), 'pas', false, 7000);
+        break;
+      case 'kaleciPas':
+        spkSoyle('spiker', _spkSec([(ad ? ad + ' ' : 'Kaleci ') + 'oyunu elle başlatıyor.', (ad ? ad + ' ' : 'Kaleci ') + 'topu ' + (_spkAd(v.q) || 'arkadaşına') + ' verdi.', 'Kaleciden kısa oyun kuruluşu.']), 'kaleciPas', false, 15000);
+        break;
+      case 'kapma':
+        var _sa = _spkAd(v.s);
+        spkSoyle('spiker', v.kayarak ? _spkSec([(ad || 'Savunma') + ' kayarak topu kesti!', 'Harika bir kayarak müdahale ' + (ad ? ad + ' ile!' : '!'), (ad || 'Savunmacı') + ' yerden girdi, top onda!'])
+          : _spkSec([(ad ? ad + ' topu kaptı' : 'Top el değiştirdi') + (_sa ? ', ' + _sa + ' kaybetti.' : '.'), (ad || 'Savunma') + ' araya girdi, top artık ' + tk + ' oyuncularında.',
+            'Top kapıldı! ' + (ad ? ad + ' ' : '') + tk + ' için kazandı.', (_sa ? _sa + ' topu kaptırdı; ' : '') + (ad || 'rakip') + ' iyi baskı yaptı.', 'İyi müdahale ' + (ad ? ad + ' ile.' : '.')]), 'kapma', false, 7000);
+        if(Math.random() < 0.3) setTimeout(function(){ spkSoyle('yorumcu', _spkSec(['Top kazanıldığı anda hızlı çıkmak lazım, kontra fırsatı olabilir.', 'Bu bölgede top kaybı çok tehlikeli.',
+          'Ön alan baskısı meyvesini verdi.', 'Savunmada zamanlama çok iyiydi.']), 'kapmaY', false, 30000); }, 1800);
+        break;
+      case 'calim':
+        if(!ad) break;
+        spkSoyle('spiker', _spkSec([ad + ' rakibini geçti!', 'Çalım! ' + ad + ' ' + (_spkAd(v.s) ? _spkAd(v.s) + ' karşısında' : '') + ' çok rahat.', ad + ' topu saklıyor, bir rakibi daha eksiltti!',
+          ad + ' ayağının içiyle oynadı ve geçti!', 'Ne güzel bir hareket ' + ad + ' ile!', ad + ' dar alanda sıyrıldı!']), 'calim', false, 6000);
+        break;
+      case 'kafa':
+        spkSoyle('spiker', _spkSec([(ad ? ad + ' kafayla' : 'Kafa vuruşu') + '!', (ad || 'Oyuncu') + ' yükseldi ve kafayı vurdu!', 'Kafa! ' + (ad ? ad + ' havada üstün.' : ''), (ad ? ad + ' ' : '') + 'kafayla topu yönlendirdi.']), 'kafa', false, 4000);
+        break;
+      case 'kaleciAldi':
+        spkSoyle('spiker', _spkSec([(ad || 'Kaleci') + ' topu kucakladı.', (ad || 'Kaleci') + ' çıktı ve topu aldı.', 'Top ' + (ad || 'kalecinin') + ' kucağında; tehlike yok.', (ad || 'Kaleci') + ' güvenli ellerle topu kontrol etti.']), 'kaleciAldi', false, 6000);
+        break;
+      case 'tac':
+        spkSoyle('spiker', _spkSec(['Taç atışı ' + _spkTakim(v.takim) + ' için.', 'Top taca çıktı; ' + _spkTakim(v.takim) + ' kullanacak.', _spkTakim(v.takim) + ' taçla oyunu başlatıyor.', 'Kenar çizgisinden taç.']), 'tac', false, 14000);
+        break;
+      case 'kale':
+        spkSoyle('spiker', _spkSec(['Kale vuruşu ' + _spkTakim(v.takim) + ' için.', 'Top auta çıktı, kale vuruşu.', _spkTakim(v.takim) + ' kaleden oyunu başlatacak.', 'Kaleci topu yerleştiriyor; kale vuruşu.']), 'kaleV', false, 12000);
+        break;
+      case 'avantaj':
+        spkSoyle('spiker', _spkSec(['Hakem avantaj verdi, oyun devam ediyor!', 'Avantaj! Hakem oyunu durdurmadı.', 'Faul vardı ama hakem avantaj kuralını uyguladı.']), 'avantaj', false, 6000);
+        break;
+      case 'uzatma':
+        spkSoyle('spiker', _spkSec(['Dördüncü hakem tabelayı kaldırdı: ' + v.ek + ' dakika uzatma.', 'Uzatma süresi ' + v.ek + ' dakika.', 'Ve ' + v.ek + ' dakika eklendi.']), 'uzatma', true);
+        setTimeout(function(){ spkSoyle('yorumcu', skorA === skorB ? 'Bu dakikalarda gelecek bir gol her şeyi değiştirir.' : (skorA > skorB ? _spkTakim(1) : _spkTakim(0)) + ' için son şanslar; zaman daralıyor.', 'uzatmaY', false); }, 3200);
+        break;
+      case 'ceza':
+        if(!ad) break;
+        spkSoyle('spiker', _spkSec([ad + ' ceza sahasına girdi!', ad + ' ceza alanında, tehlikeli!', 'Top ceza sahasında, ' + ad + ' kaleye yöneliyor!', ad + ' son çizgiye indi!', 'Tehlike! ' + ad + ' kaleciyle karşı karşıya kalabilir!']), 'ceza', false, 7000);
+        break;
       case 'degisiklik':
         var _cik = _spkAd({ ad:v.cikan });
         spkSoyle('spiker', _spkSec([tk + ' cephesinde değişiklik: ' + (ad || 'yeni oyuncu') + ' oyunda' + (_cik ? ', ' + _cik + ' kenara geliyor.' : '.'),
@@ -7908,16 +7986,26 @@ function spkKapanisMetinleri(){
   }catch(e){ _sessiz(e, 'spkKapanis', 'saha_ses'); }
   return l;
 }
+// Ceza sahasına topla giriş: anında (durgun an beklenmez).
+setInterval(function(){
+  try{
+    if(!_spkAcik() || !running || bitti || duraklat || tekrar || duran) return;
+    var p = topSahibi(); if(!p || p.gk) { SPK._cezaP = null; return; }
+    var ileri = p.obj.position.x * p.dir;
+    if(ileri > HLX - 16.5 && Math.abs(p.obj.position.z) < 20){ if(SPK._cezaP !== p){ SPK._cezaP = p; spk('ceza', { p:p }); } }
+    else if(ileri < HLX - 20) SPK._cezaP = null;
+  }catch(e){}
+}, 400);
 // Durgun anlar: kimse konuşmuyorsa spiker topun nerede olduğunu, arada bir yorumcu maçı yorumlar.
 setInterval(function(){
   try{
     if(!_spkAcik() || !running || bitti || duraklat || tekrar || (typeof TOREN !== 'undefined' && TOREN.aktif)) return;
     if(SPK.konusuyor || SPK.sira.length) return;
     var simdi = Date.now();
-    if(simdi - SPK.sonKonusma < 6500) return;
+    if(simdi - SPK.sonKonusma < 5000) return;
     if(simdi - SPK.sonYorum > 35000 && Math.random() < 0.5){ spkSoyle('yorumcu', _spkIstatYorumu(), 'durgunY', false, 25000); return; }
     var p = sonDokunanOyuncu;
-    if(p && sahada(p) && simdi - SPK.sonAnlati > 8000){
+    if(p && sahada(p) && simdi - SPK.sonAnlati > 6500){
       var ad = _spkAd(p), bolge = _spkBolge(p), tk = _spkTakim(p.team), dk = macDakika();
       var l = ad ? [ad + ' topla ' + bolge + '.', ad + ' topu taşıyor, ' + bolge + '.', tk + ' ' + bolge + ' paslaşıyor; top şimdi ' + ad + ' ile.',
           ad + ' başını kaldırıp pas arıyor.', ad + ' topu ayağının altına aldı, ' + bolge + '.', 'Top ' + ad + ' ile, ' + tk + ' sabırla oyun kuruyor.',
@@ -7954,7 +8042,7 @@ function _nakaratNota(t, frek, sure, ses){
 }
 function tezahurat(coskulu, izleyicide){
   try{
-    if(!izleyicide){ try{ yayinSesOlay(coskulu ? 'tezahurat2' : 'tezahurat'); }catch(e){} }
+    if(!izleyicide){ _sesKaydet('z', coskulu ? 1 : 0); try{ yayinSesOlay(coskulu ? 'tezahurat2' : 'tezahurat'); }catch(e){} }
     if(!ac || !_sesUret() || (window._sahaIzleModu && !izleyicide)) return;
     if(typeof _tribunTaban !== 'undefined' && _tribunTaban <= 0) return;   // maç dışında (menü) çalmaz
     var t0 = ac.currentTime + 0.05, vurus = 0.5, ses = coskulu ? 0.07 : 0.045;
@@ -8010,6 +8098,7 @@ function sesMacOrtami(ac2){
   } catch(e){_sessiz(e,'sesMacOrtami','saha_ses');}
 }
 function sesTribun(seviye, sure){
+  _sesKaydet('t', seviye, sure);
   if (!ac || !tribunGain || !_sesUret()) return;
   // Maç dışındayken (menü) coşku sesi de çalmaz - istenen şey "maça girildiğinde".
   if (_tribunTaban <= 0) return;
@@ -11191,7 +11280,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-02-H';
+window.APP_BUILD = '2026-10-02-I';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -12667,8 +12756,8 @@ function olayEkle(type, p, ek){
     try{
       var _ad = (p && p.ad) ? String(p.ad).split(/\s+/).pop() : '';
       var _tk = (p && (p.team === 0 || p.team === 1)) ? p.team : undefined;
-      if(type === 'goal' || type === 'pen_goal') ozetKaydet('gol', _ad, 1800, _tk);
-      else if(type === 'og') ozetKaydet('gol', _ad, 1800, _tk === undefined ? undefined : 1 - _tk);
+      if(type === 'goal' || type === 'pen_goal') ozetKaydet('gol', _ad, 5000, _tk);
+      else if(type === 'og') ozetKaydet('gol', _ad, 5000, _tk === undefined ? undefined : 1 - _tk);
       else if(type === 'red' || type === 'yellow2red') ozetKaydet('kirmizi', _ad, 0, _tk === undefined ? undefined : 1 - _tk);
       else if(type === 'yellow') ozetKaydet('kart', _ad, 0, _tk === undefined ? undefined : 1 - _tk);
       else if(type === 'pen_awarded') ozetKaydet('penalti', _ad, 0);
@@ -13710,6 +13799,7 @@ function sut(o){
     bVel.set(d.x*(13 + g*9)*_nk, 3.6, d.z*(13 + g*9)*_nk);
     bSpin = 0;
     mesaj('', 'Kafa vuruşu', 700);
+    try{ spk('kafa', { p:p }); }catch(e){}
   } else {
     // Sut gucu nitelige bagli: forvetin vurusu stoperinkinden sert. Yukseklik de
     // olcekleniyor, yoksa guclu sut yerde kalip fark yaratmazdi.
@@ -13725,7 +13815,7 @@ function sut(o){
   sonDokunan = t; sonDokunanOyuncu = p; sonVurusTuru = kafa ? 'kafa' : 'sut';
   (t === 0 ? istat.a : istat.b).sut++;
   try{ if(!kafa || Math.abs(p.obj.position.x - p.dir*HLX) < 30) spk('sut', { p:p });
-       if(Math.abs(p.obj.position.x - p.dir*HLX) < 25) ozetKaydet('firsat', (p.ad||'').split(/\s+/).pop(), 1400, p.team); }catch(e){}
+       if(Math.abs(p.obj.position.x - p.dir*HLX) < 25) ozetKaydet('firsat', (p.ad||'').split(/\s+/).pop(), 2500, p.team); }catch(e){}
   if (Math.abs(p.obj.position.x - p.dir*HLX) < 34) sesVurus(g);
   ofsaytHesapla(t);
   if (duran && duran.takim === t){ duranSonrasiKur(duran, p); duran = null; }
@@ -13767,6 +13857,7 @@ function pasVer(p, takim, yonTercih){
   const _ph = 0.9 + Math.min(0.2, Math.max(0, _np - 0.85) * 0.5);
   bVel.set(d.x*(u*0.92 + 6)*_ph, 1.3, d.z*(u*0.92 + 6)*_ph);
   p.cd = 0.3; p.tcd = 0.3; topKilit = 0.28;
+  try{ spk(p.gk ? 'kaleciPas' : 'pas', { p:p, q:best, u:u, ileri:(best.obj.position.x - p.obj.position.x) * p.dir }); }catch(e){}
   // Pastan ÖNCEKİ dokunan, bu pasın asist adayıdır (bkz. sonPasOyuncu notu).
   sonPasOyuncu = p; sonPasTakim = takim;
   sonDokunan = takim; sonDokunanOyuncu = p;
@@ -13838,6 +13929,7 @@ function kaymaKontrol(p, dt){
         topaDokundu(p);
         sonDokunan = p.team; sonDokunanOyuncu = p; s.tcd = 0.6; topKilit = 0.18;
         sesVurus(0.25); mesaj('', 'Kayarak kesti', 800);
+        try{ spk('kapma', { p:p, s:s, kayarak:true }); }catch(e){}
       } else {
         faul(s, p, true);                                // kayarak faul: kart riski yüksek
       }
@@ -13874,6 +13966,7 @@ function mudahale(o){
       ball.position.set(p.obj.position.x + d.x*0.8, R_BALL, p.obj.position.z + d.z*0.8);
       sonDokunan = t; sonDokunanOyuncu = p; sahip.tcd = 0.5; topKilit = 0.18;
       sesVurus(0.2); mesaj('', 'Top kapıldı', 800);
+      try{ spk('kapma', { p:p, s:sahip }); }catch(e){}
     } else if (_arkadan && Math.random() < 0.6){
       faul(sahip, p, true);                              // arkadan müdahale: sert faul
     } else {
@@ -13885,17 +13978,78 @@ function mudahale(o){
 }
 
 /* ---------- yapay zekâ ---------- */
+/* KALECİ (2026-10-02-I, kullanıcı: "kaleci duruşu stabil değil, pozisyonlarda topa doğru müdahale etmiyor").
+   KÖK SEBEPLER: (1) Hedef her adımda topun z'sinin bir katıydı ve hiç süzülmüyordu; kaleci 6 m/sn
+   sabit hızla gidip 0,35 m kala duruyordu - top kıpırdadıkça koş-dur titremesi. (2) Kaleci her
+   hareketinde VÜCUDUNU hareket yönüne çeviriyordu: yana kayarken topa yan/sırt dönüyordu.
+   (3) Kale çizgisinde (x sabit) sadece z'de kayıyordu; açıyı kapatmak için topla kale ortası
+   arasındaki çizgiye çıkmıyordu. (4) Şutu hiç ÖNGÖRMÜYORDU: yalnızca top 1,5 m yanına gelirse
+   tutuyordu; plonjon yalnızca penaltıda vardı. (5) Ceza sahasındaki sahipsiz topa hiç çıkmıyordu.
+   ŞİMDİ: Kaleci top ile kale ortası arasındaki çizgide, topun uzaklığına göre 1,2-3 m önde durur;
+   hedef yumuşatılır, yaklaşırken yavaşlar, gövdesi hep topa dönüktür (yana adım atar). Kaleye
+   gelen şutun kalecinin hizasındaki noktası hesaplanır; oraya hızlanır, yetişemeyecekse o tarafa
+   plonjon yapar (dalışta erişim artar). Ceza sahasında rakipten önce ulaşabileceği yavaş topa çıkar. */
+function _gkSutTahmin(p){
+  try{
+    var kaleX = -p.dir*HLX, vx = bVel.x, vz = bVel.z;
+    if (vx * -p.dir < 4 || Math.hypot(vx, vz) < 9) return null;          // kaleye doğru hızlı top değil
+    if (sonDokunan === p.team && sonDokunanOyuncu && sonDokunanOyuncu !== p && sonVurusTuru !== 'sekme') return null;   // kendi takımı
+    var tKale = (kaleX - ball.position.x) / vx; if (tKale <= 0 || tKale > 2.2) return null;
+    var zKale = ball.position.z + vz * tKale;
+    if (Math.abs(zKale) > GOAL_HW + 1.2) return null;                    // kaleyi tutmuyor
+    var tGk = (p.obj.position.x - ball.position.x) / vx; if (tGk < 0) tGk = 0;
+    var zGk = ball.position.z + vz * tGk;
+    return { z: Math.max(-GOAL_HW - 0.6, Math.min(GOAL_HW + 0.6, zGk)), t: tGk, zKale: zKale };
+  }catch(e){ return null; }
+}
+function _gkHedef(p){
+  var kaleX = -p.dir*HLX, ic = p.dir, gp = p.obj.position;
+  // Penaltı / plonjon sürüyor: dalış noktası.
+  if (p.dalisT > 0) return new THREE.Vector3(p._dalisX != null ? p._dalisX : -p.dir*(HLX-2.2), 0, p.dalis);
+  p._dalisX = null;
+  // 1) Kaleye gelen şut: hizadaki kesişme noktasına; yetişemeyecekse plonjon.
+  var t = duran ? null : _gkSutTahmin(p);
+  p._gkAlarm = !!t;
+  if (t){
+    var mesafe = Math.abs(t.z - gp.z);
+    if (mesafe > 0.9 && t.t < 0.6 && !(p._dalisCd > 0)){
+      p.dalis = t.z; p._dalisX = gp.x; p.dalisT = 0.85; p._dalisCd = 1.6;
+      try{ if (p.obj.userData.hazirModel){ var _solZ = -Math.sin(p.obj.rotation.y);
+        modelTekSefer(p.obj.userData, (t.z - gp.z) * _solZ >= 0 ? 'plonjonSol' : 'plonjonSag', 1.6); } }catch(e){}
+      return new THREE.Vector3(gp.x, 0, t.z);
+    }
+    return new THREE.Vector3(gp.x, 0, t.z);
+  }
+  // 2) Ceza sahasında sahipsiz, yavaş top: rakipten önce ulaşabiliyorsa çık.
+  var bx = ball.position.x, bz = ball.position.z;
+  var cezaIci = (bx - kaleX) * ic > 0 && (bx - kaleX) * ic < 16.5 && Math.abs(bz) < 20.15;
+  if (!duran && cezaIci && Math.hypot(bVel.x, bVel.z) < 9 && ball.position.y < 1.6){
+    var dGk = Math.hypot(bx - gp.x, bz - gp.z), dRak = 1e9, dArk = 1e9;
+    players.forEach(function(q){ if (q.dis || q === p) return; var d = Math.hypot(bx - q.obj.position.x, bz - q.obj.position.z);
+      if (q.team === p.team) dArk = Math.min(dArk, d); else dRak = Math.min(dRak, d); });
+    if (dGk < 11 && dGk + 1.2 < dRak && dGk < dArk + 1.5) return new THREE.Vector3(bx, 0, bz);
+  }
+  // 3) Açı kapatma: top ile kale ortası arasındaki çizgi üzerinde, kaleden 1,2-3 m önde.
+  var ux = bx - kaleX, uz = bz, D = Math.hypot(ux, uz);
+  var hx, hz;
+  if (D < 0.5 || ux * ic <= 0.2){ hx = kaleX + ic*1.2; hz = Math.max(-GOAL_HW + 0.4, Math.min(GOAL_HW - 0.4, bz)); }
+  else {
+    ux /= D; uz /= D;
+    var derin = D > 40 ? 2.6 : (D > 20 ? 1.8 + (D - 20) * 0.04 : 1.2 + D * 0.03);   // uzakta biraz önde, yakında çizgiye yakın değil: açıyı daraltır
+    derin = Math.min(3.0, derin * (0.9 + nit(p,'nKal',0.4)*0.2));
+    hx = kaleX + ux * derin; hz = uz * derin;
+    var _kz = GOAL_HW - 0.3 + nit(p,'nKal',0.4)*0.6;                    // direklerin dışına taşmasın
+    hz = Math.max(-_kz, Math.min(_kz, hz));
+  }
+  // Yumuşatma: hedef kare kare zıplamaz (titreme kaynağı).
+  if (!p._gkT) p._gkT = new THREE.Vector3(hx, 0, hz);
+  var k = Math.min(1, STEP * 4.5);
+  p._gkT.x += (hx - p._gkT.x) * k; p._gkT.z += (hz - p._gkT.z) * k;
+  return p._gkT.clone();
+}
 function aiHedef(p, kovalayan){
   if (duran && duran.duvar && duran.duvar.indexOf(p) >= 0 && p.duvarHedef) return p.duvarHedef.clone();
-  if (p.gk && !(duran && p === duran.alici)){
-    // GOL BASITLESTIRME: kaleci eskiden kale genisliginin (3.66) neredeyse iki kati
-    // (+-7) bir alanda topu takip ediyordu - kanatlardan gelen her sutu da kapatiyordu.
-    // Simdi kapsama araligi daraltildi, direk diplerinde bosluk birakir.
-    // Güçlü kaleci açıyı daha iyi kapatır (kapsama 4.4-6.0 m).
-    const _kz = 4.4 + nit(p,'nKal',0.4)*1.6;
-    const z = p.dalisT > 0 ? p.dalis : Math.max(-_kz, Math.min(_kz, ball.position.z*(0.40 + nit(p,'nKal',0.4)*0.16)));
-    return new THREE.Vector3(-p.dir*(HLX-2.2), 0, z);
-  }
+  if (p.gk && !(duran && p === duran.alici)) return _gkHedef(p);
   if (duran){
     if (p === duran.alici){
       if (duran.tip === 'tac'){
@@ -14012,7 +14166,7 @@ function aiVurus(p){
     p.cd = 0.5; p.tcd = 0.4;
     sonDokunan = p.team; sonDokunanOyuncu = p;
     (p.team === 0 ? istat.a : istat.b).sut++;
-    try{ spk('sut', { p:p }); if(uzak < 24) ozetKaydet('firsat', (p.ad||'').split(/\s+/).pop(), 1400, p.team); }catch(e){}
+    try{ spk('sut', { p:p }); if(uzak < 24) ozetKaydet('firsat', (p.ad||'').split(/\s+/).pop(), 2500, p.team); }catch(e){}
     sesVurus(0.8); ofsaytHesapla(p.team);
     return;
   }
@@ -14065,8 +14219,10 @@ function topKontrol(dt){
     if (Math.random() > sans){
       p.tcd = 0.55;                                      // çalımlandı
       if (_sahip === ctrl) mesaj('', 'Çalım', 600);
+      try{ spk('calim', { p:_sahip, s:p }); }catch(e){}
       return;
     }
+    try{ spk('kapma', { p:p, s:_sahip }); }catch(e){}
   }
 
   if (ofsaytTakim === p.team && ofsaytAday.indexOf(p) >= 0){ ofsaytCal(p); return; }
@@ -14186,7 +14342,8 @@ function duranBaslat(tip, takim, x, z, sec){
   const alici = (tip === 'kale') ? (takim === 0 ? teamA : teamB)[0] : takimEnYakin(takim, ball.position);
   // dolayli: ENDİREKT serbest vuruş (ofsayt, geri pas) - kaleye doğrudan atılan top gol olmaz.
   duran = { tip, takim, alici, bekle:1.0, hazir:0, omur:0, duvar:null, dolayli:!!sec.dolayli,
-            nokta:{ x:x, z:z } };   // taç atıcısı bu noktaya bağlıdır (bkz. duran top bloğu)
+            nokta:{ x:x, z:z } };
+  try{ if (tip === 'tac' || tip === 'kale') spk(tip, { takim:takim, p:alici }); }catch(e){}   // taç atıcısı bu noktaya bağlıdır (bkz. duran top bloğu)
   if (tip === 'serbest') duran.duvar = duvarKur(takim);
   // KALE VURUŞU (Kural 16): Top vurulana kadar rakipler ceza sahasının DIŞINDA olmalı.
   // Önceden rakip forvetler ceza sahasında bekleyip kalecinin vuruşunu kesebiliyordu.
@@ -14259,14 +14416,14 @@ function duranCalistir(){
     const d = h.sub(ball.position).setY(0).normalize();
     bVel.set(d.x*30, 1.5, d.z*30);
     (p.team === 0 ? istat.a : istat.b).sut++;
-    try{ ozetKaydet('penalti', (p.ad||'').split(/\s+/).pop(), 1500, p.team); }catch(e){}
+    try{ ozetKaydet('penalti', (p.ad||'').split(/\s+/).pop(), 2500, p.team); }catch(e){}
   } else if (tip === 'serbest' && kaleUzak < 30 && !duran.dolayli){
     const h = new THREE.Vector3(p.dir*HLX, 0, (Math.random()-0.5)*GOAL_HW*1.6);
     const d = h.sub(ball.position).setY(0).normalize();
     bVel.set(d.x*26, 3.2, d.z*26);
     (p.team === 0 ? istat.a : istat.b).sut++;
     // Doğrudan kaleye çekilen serbest vuruş özete girer (gol olursa gol anı onu kapsar).
-    try{ spk('serbest', { p:p }); ozetKaydet('serbest', (p.ad||'').split(/\s+/).pop(), 1600, p.team); }catch(e){}
+    try{ spk('serbest', { p:p }); ozetKaydet('serbest', (p.ad||'').split(/\s+/).pop(), 2500, p.team); }catch(e){}
     ofsaytHesapla(p.team);
   } else if (tip === 'tac'){
     // TAC ATISI: Top gorsel olarak elde (2.05 m) tutuluyor; pasVer mesafeyi 3 boyutlu
@@ -14437,6 +14594,7 @@ function faulKontrol(dt){
       if (ileri){
         avantaj = { magdur:tas, ihlalci:p, takim:tas.team, t:2.0 };
         mesaj('', 'Avantaj', 900);
+        try{ spk('avantaj', { p:tas }); }catch(e){}
       } else faul(tas, p);
       return;
     }
@@ -14619,7 +14777,7 @@ function kayitAl(){
    o anki KAMERA (konum, bakış noktası, yatay görüş açısı), topa son dokunan takım ve saat
    saklanır. An kaydedilirken pozisyonun BAŞI geriye doğru aranır: topu rakipten kazanma anı
    ya da topun yerine konduğu an (santra, serbest vuruş, korner); sonu olaydan sonraki kısa süre. */
-var OZT = [], _oztSay = 0, OZT_MAX = 220, OZT_FPS = 10, OZT_K = 7;
+var OZT = [], _oztSay = 0, OZT_MAX = 420, OZT_FPS = 10, OZT_K = 7;   // 42 sn (2026-10-02-I: pozisyon başı 30 sn'ye kadar geriye aranır)
 function _oztKaydet(f){
   var k = new Float32Array(OZT_K), d = new THREE.Vector3();
   camera.getWorldDirection(d);
@@ -14635,8 +14793,8 @@ function _ozetPencere(takim, evTs){
   var n = OZT.length; if(n < 12) return null;
   var ev = n - 1; while(ev > 0 && OZT[ev].ts > evTs) ev--;
   if(takim !== 0 && takim !== 1) takim = OZT[ev].s;
-  var bas = Math.max(0, ev - 180), sebep = 'sinir', rakip = 0;
-  for(var i = ev; i > 0 && ev - i < 180; i--){
+  var bas = Math.max(0, ev - 300), sebep = 'sinir', rakip = 0;
+  for(var i = ev; i > 0 && ev - i < 300; i--){
     if(_oztSicrama(OZT[i], OZT[i - 1])){ bas = i; sebep = 'yerlesim'; break; }
     if((takim === 0 || takim === 1) && OZT[i - 1].s === 1 - takim){
       if(++rakip >= 6){ bas = Math.max(0, i - 10); sebep = 'kazanma'; break; }   // topu kazanmadan 1 sn önce başla
@@ -14693,7 +14851,40 @@ function _sahaHudGeri(){
   }catch(e){}
   try{ document.body.classList.remove('hud-gizli'); }catch(e){}
 }
-function ozetSifirla(){ OZET.anlar = []; OZET.aktif = false; OZET.i = 0; OZET.kare = 0; }
+function ozetSifirla(){ try{ (OZET.bekleyen || []).forEach(function(b){ clearTimeout(b.id); }); }catch(e){} OZET.bekleyen = [];
+  OZET.anlar = []; OZET.aktif = false; OZET.i = 0; OZET.kare = 0; OZET.bitti = false; }
+/* ÖZET BİTTİ / KAPAT (2026-10-02-I, kullanıcı: "özet bitince başa sarmamalı ve kapat butonu bulunmalı").
+   Özet Puan Tablosu'nun oynatıcısında bir çerçevede açılır ve çerçeveye dokunuşları oynatıcının kendi
+   katmanı alır - bu yüzden KAPAT düğmesi Puan Tablosu tarafında çizilir (bkz. index.html ptOzetKapatDugmesi).
+   Bu sayfa yalnızca "bitti" bilgisini gönderir. Sayfa tek başına açıldıysa düğme burada çizilir. */
+function _ozetMesaj(ev){ try{ if(window.parent && window.parent !== window){ window.parent.postMessage(JSON.stringify({ event:ev }), '*'); return true; } }catch(e){} return false; }
+function ozetKapat(){
+  try{ if(window.speechSynthesis) window.speechSynthesis.cancel(); }catch(e){}
+  if(_ozetMesaj('sahaOzetKapat')) return;
+  try{ if(history.length > 1) history.back(); else location.href = 'index.html'; }catch(e){ location.href = 'index.html'; }
+}
+function _ozetKapatDugmesi(){
+  try{
+    if(window.parent && window.parent !== window) return;      // çerçevede: düğme Puan Tablosu'nda
+    if(document.getElementById('ozetKapatBtn')) return;
+    var b = document.createElement('button'); b.id = 'ozetKapatBtn'; b.type = 'button'; b.textContent = '✕ Kapat';
+    b.style.cssText = 'position:fixed;top:calc(10px + env(safe-area-inset-top,0px));right:12px;z-index:2147478600;padding:8px 14px;border-radius:999px;'
+      + 'border:1px solid rgba(255,255,255,.35);background:rgba(10,14,18,.75);color:#fff;font-weight:800;font-size:13px;line-height:1;cursor:pointer';
+    b.onclick = ozetKapat; document.body.appendChild(b);
+  }catch(e){}
+}
+function _ozetBitti(){
+  try{
+    _ozetEtiketYaz((window._ozetSabitBaslik ? window._ozetSabitBaslik + ' · ' : '') + 'Özet sona erdi');
+    var e = document.getElementById('ozetBittiKutu');
+    if(!e){ e = document.createElement('div'); e.id = 'ozetBittiKutu';
+      e.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2147478500;padding:14px 22px;border-radius:14px;'
+        + 'background:rgba(8,12,18,.78);color:#fff;font-weight:800;font-size:16px;text-align:center;pointer-events:none';
+      e.textContent = 'Özet sona erdi'; document.body.appendChild(e); }
+    _ozetMesaj('sahaOzetBitti');
+    _ozetKapatDugmesi();
+  }catch(x){}
+}
 var OZET_ONEM = { gol:9, kirmizi:8, penalti:7, kurtaris:6, serbest:5, direk:5, kart:3, firsat:2 };
 function ozetKaydet(tur, metin, gecikme, takim){
   try{
@@ -14701,7 +14892,7 @@ function ozetKaydet(tur, metin, gecikme, takim){
     var evTs = Date.now();
     var al = function(){
       // Önce tam pozisyon + maçtaki kamera (ÖZET TAMPONU); yeterli kayıt yoksa eski kısa kayıt.
-      var pen = _ozetPencere(takim, evTs), veri, fps = 30, K = 0, soz = [];
+      var pen = _ozetPencere(takim, evTs), veri, fps = 30, K = 0, soz = [], ses = null;
       if(pen){
         veri = OZT.slice(pen.bas, pen.son + 1).map(function(x){ return x.f; }); fps = OZT_FPS; K = OZT_K;
         var t0 = OZT[pen.bas].ts, t1 = OZT[pen.son].ts;
@@ -14713,6 +14904,10 @@ function ozetKaydet(tur, metin, gecikme, takim){
           soz.push({ t:Math.round((k - pen.bas) / OZT_FPS * 10) / 10, r:c.r, m:c.m });
         });
         soz.sort(function(x, y){ return x.t - y.t; });
+        // Maç sesleri (vuruş, düdük, tribün, tezahürat, direk/zil) aynı zamanlamayla.
+        var _idx = function(ts){ var k = pen.bas; while(k < pen.son && OZT[k].ts < ts) k++; return Math.round((k - pen.bas) / OZT_FPS * 100) / 100; };
+        ses = SES_LOG.filter(function(e){ return e.ts >= t0 - 100 && e.ts <= t1 + 100; }).slice(-160)
+          .map(function(e){ return { t:_idx(e.ts), k:e.k, a:e.a, b:e.b }; });
       } else {
         if(!kayit || kayit.length < 8) return;
         veri = kayit.slice();
@@ -14723,8 +14918,8 @@ function ozetKaydet(tur, metin, gecikme, takim){
       // Gol, aynı vuruşun serbest vuruş / penaltı kaydının da yerine geçer (aynı görüntü iki kez gösterilmesin).
       if(tur !== 'firsat'){ for(var _j = OZET.anlar.length - 1; _j >= 0; _j--){ var _x = OZET.anlar[_j];
         var _ayni = _x.tur === 'firsat' || (tur === 'gol' && (_x.tur === 'serbest' || _x.tur === 'penalti'));
-        if(_ayni && Date.now() - _x.ts < 3500){ OZET.anlar.splice(_j, 1); } } }
-      var an = { tur:tur, metin:metin || '', dk:macDakika(), veri:veri, ts:Date.now(), fps:fps, K:K, soz:soz,
+        if(_ayni && Date.now() - _x.ts < (tur === 'gol' ? 6500 : 3500)){ OZET.anlar.splice(_j, 1); } } }
+      var an = { tur:tur, metin:metin || '', dk:macDakika(), veri:veri, ts:Date.now(), fps:fps, K:K, soz:soz, ses:ses,
                  xs:(Math.sign(son[0]) || 1), zs:(Math.sign(son[2]) || 1) };
       OZET.anlar.push(an);
       // En fazla 24 an; dolunca ÖNEMİ EN DÜŞÜK olan en eski an çıkar (gol hiç çıkmaz).
@@ -14734,8 +14929,14 @@ function ozetKaydet(tur, metin, gecikme, takim){
         OZET.anlar.splice(dus ? dus.j : 0, 1);
       }
     };
-    if(gecikme) setTimeout(al, gecikme); else al();
+    // Bekleyen kayıt maç biterse beklemeden alınır (bkz. ozetBekleyenleriAl) - son dakika golü özete girsin.
+    if(gecikme){ var _b = { al:al }; _b.id = setTimeout(function(){ OZET.bekleyen = (OZET.bekleyen || []).filter(function(x){ return x !== _b; }); al(); }, gecikme);
+      (OZET.bekleyen = OZET.bekleyen || []).push(_b); }
+    else al();
   }catch(e){ _sessiz(e, 'ozetKaydet', 'saha_oyun'); }
+}
+function ozetBekleyenleriAl(){
+  try{ var l = OZET.bekleyen || []; OZET.bekleyen = []; l.forEach(function(b){ clearTimeout(b.id); try{ b.al(); }catch(e){} }); }catch(e){}
 }
 function _ozetSonDokunanAd(){ var p = sonDokunanOyuncu; return (p && p.ad && !/^(Kaleci|Oyuncu \d+|Yedek \d+)$/.test(p.ad)) ? p.ad : ''; }
 /* ÖZET OYNATICI (2026-10-02-C, kullanıcı: "özet tek pozisyon gösteriyor; gol, kart, serbest vuruş,
@@ -14771,6 +14972,7 @@ function _ozetKare(an, t){
   return f;
 }
 function ozetOynat(dt){
+  if(window._sahaOzetIzle && OZET.bitti) return;          // özet bitti: son kare ekranda kalır
   dt = Math.min(dt, 0.05);
   var b = ball.position;
   if(!OZET.anlar.length){
@@ -14784,7 +14986,7 @@ function ozetOynat(dt){
   var an = OZET.anlar[OZET.i % OZET.anlar.length], fps = an.fps || 30;
   if(OZET.kare === 0 && OZET._basladi !== an){
     // Yeni an: anlatım + (kart/duran top ise) düdük; kamera ilk karede yerine oturur.
-    OZET._basladi = an; OZET._kamHazir = false; OZET._golSes = false; OZET._oncekiHiz = 0; OZET._sozI = 0;
+    OZET._basladi = an; OZET._kamHazir = false; OZET._golSes = false; OZET._oncekiHiz = 0; OZET._sozI = 0; OZET._sesI = 0;
     // ANLATIM YALNIZCA ÖZET İZLEMEDE (2026-10-02-G, kullanıcı: "maç bitince spiker arka plandaki oyun yerine
     // bilgilendirme yapmalı"): maç sonu ekranının arkasında dönen anlar sessiz anlatılır - spiker o sırada
     // sonucu, puan durumunu ve vedayı okuyor. Özet izlenirken: canlıda söylenen cümleler aynen (an.soz);
@@ -14803,6 +15005,10 @@ function ozetOynat(dt){
   // Tam pozisyon (an.K) gerçek hızda oynar; golde yalnızca son bölüm yavaşlar. Eski kısa kayıt eskisi gibi.
   var hiz = an.K ? ((an.tur === 'gol' && u0 > 0.82) ? 0.6 : 1.0) : ((an.tur === 'gol' && u0 > 0.6) ? 0.45 : 0.85);
   OZET.kare += hiz * dt * fps;
+  // Maçta çalan sesler, pozisyonun aynı anında.
+  try{
+    if(an.ses){ while(OZET._sesI < an.ses.length && an.ses[OZET._sesI].t * fps <= OZET.kare){ _ozetSesCal(an.ses[OZET._sesI++]); } }
+  }catch(e){}
   // Canlıda söylenen cümle, pozisyonun aynı anında okunur.
   try{
     if(window._sahaOzetIzle && an.soz){
@@ -14811,12 +15017,16 @@ function ozetOynat(dt){
       }
     }
   }catch(e){}
-  if(OZET.kare >= son){ OZET.i = (OZET.i + 1) % OZET.anlar.length; OZET.kare = 0; OZET._basladi = null; return; }
+  if(OZET.kare >= son){
+    // BAŞA SARMA YOK (2026-10-02-I, kullanıcı: "özet bitince başa sarmamalı"): özet izlenirken son
+    // pozisyondan sonra durur; Puan Tablosu'na "bitti" bildirilir. Maç sonu ekranının arkasında eskisi gibi döner.
+    if(window._sahaOzetIzle && OZET.i >= OZET.anlar.length - 1){ OZET.aktif = false; OZET.bitti = true; _ozetBitti(); return; }
+    OZET.i = (OZET.i + 1) % OZET.anlar.length; OZET.kare = 0; OZET._basladi = null; return; }
   var f = _ozetKare(an, OZET.kare), o = _ozetKare(an, Math.max(0, OZET.kare - 0.5));
   b.set(f[0], Math.max(R_BALL, f[1]), f[2]);
   topGolge.position.set(f[0], 0.02, f[2]);
-  // Vuruş sesi: topun hızı bir anda artınca (ayak teması).
-  try{
+  // Vuruş sesi: topun hızı bir anda artınca (ayak teması). Ses kaydı olan anlarda gerçek sesler çalar.
+  if(!an.ses) try{
     var vh = Math.hypot(f[0] - o[0], f[2] - o[2]) * fps * 2;
     if(vh - (OZET._oncekiHiz || 0) > 9 && (!OZET._vurusT || performance.now() - OZET._vurusT > 350)){ OZET._vurusT = performance.now(); sesVurus(Math.min(1, vh / 30)); }
     OZET._oncekiHiz = vh;
@@ -14893,7 +15103,8 @@ function ozetKodla(an){
     }
   });
   var o = { tur:an.tur, dk:an.dk, metin:an.metin || '', xs:an.xs, zs:an.zs, L:L, n:n, k:_ozetB64(new Uint8Array(a.buffer)) };
-  if(an.K){ o.K = an.K; o.fps = an.fps; if(an.soz && an.soz.length) o.soz = an.soz.slice(0, 12); }
+  if(an.K){ o.K = an.K; o.fps = an.fps; if(an.soz && an.soz.length) o.soz = an.soz.slice(0, 16);
+    if(an.ses && an.ses.length) o.ses = an.ses.map(function(e){ return [e.t, e.k, e.a, e.b]; }); }
   return o;
 }
 function ozetCoz(o){
@@ -14904,15 +15115,18 @@ function ozetCoz(o){
     veri.push(f);
   }
   var soz = o.soz ? (Array.isArray(o.soz) ? o.soz : Object.keys(o.soz).map(function(x){ return o.soz[x]; })) : [];
-  return { tur:o.tur, dk:o.dk, metin:o.metin, xs:o.xs, zs:o.zs, veri:veri, fps:o.fps || 15, K:o.K || 0, soz:soz };
+  var _sl = o.ses ? (Array.isArray(o.ses) ? o.ses : Object.keys(o.ses).map(function(x){ return o.ses[x]; })) : null;
+  var ses = _sl ? _sl.map(function(e){ return { t:e[0], k:e[1], a:e[2] || 0, b:e[3] || 0 }; }) : null;
+  return { tur:o.tur, dk:o.dk, metin:o.metin, xs:o.xs, zs:o.zs, veri:veri, fps:o.fps || 15, K:o.K || 0, soz:soz, ses:ses };
 }
 function ozetYukle(fk){
   try{
+    try{ ozetBekleyenleriAl(); }catch(e){}
     if(!fk || !fbHazir || !fbDb || !OZET.anlar.length) return;
     // En fazla 14 an: önce önem sırası (gol > kırmızı > penaltı > kurtarış > serbest/direk > kart >
     // pozisyon), sonra zaman sırasıyla oynatılır.
     var secilen = OZET.anlar.slice().sort(function(x, y){ return ((OZET_ONEM[y.tur]||0) - (OZET_ONEM[x.tur]||0)) || (x.ts - y.ts); })
-      .slice(0, 14).sort(function(x, y){ return x.ts - y.ts; });
+      .slice(0, 12).sort(function(x, y){ return x.ts - y.ts; });
     var anlar = secilen.map(ozetKodla).filter(Boolean);
     if(!anlar.length) return;
     var t = function(x){ return String(x).replace(/[.#$\[\]\/]/g, '_'); };
@@ -14941,7 +15155,8 @@ function ozetIzleBaslat(mod){
     }catch(e){}
     try{ (v.adlar || []).forEach(function(ad, i){ if(players[i] && ad){ players[i].ad = ad; etiketYaz(players[i]); } }); }catch(e){}
     var anlar = (Array.isArray(v.anlar) ? v.anlar : Object.keys(v.anlar).map(function(k){ return v.anlar[k]; })).map(ozetCoz);
-    OZET.anlar = anlar; OZET.i = 0; OZET.kare = 0; OZET.aktif = true; window._sahaOzetIzle = true;
+    OZET.anlar = anlar; OZET.i = 0; OZET.kare = 0; OZET.aktif = true; OZET.bitti = false; window._sahaOzetIzle = true;
+    _ozetKapatDugmesi();
     // Ses: izleme çerçevesi "autoplay" izniyle açılır; ses motoru hemen kurulur, tribün ortamı başlar.
     try{ AYAR.ses = true; sesBaslat(true); if(ac && ac.state === 'suspended') ac.resume(); sesMacOrtami(true); }catch(e){}
     _sahaHudGizle();
@@ -14961,6 +15176,7 @@ function _ozetEtiketYaz(m){
 }
 
 function macSonuEkraniAc(){
+  try{ ozetBekleyenleriAl(); }catch(e){}
   try{
     var _sm = window._sahaSonMac || { benEv:_benEvSahibiMi(), ad0:gorunurTakimAdi(0), ad1:gorunurTakimAdi(1) };
     var _ad = function(t){ return t === 0 ? _sm.ad0 : _sm.ad1; };
@@ -15072,7 +15288,7 @@ function _direktenDondu(){
     (t === 0 ? istat.a : istat.b).direk++;
     mesaj('', 'Direkten döndü!', 1000); sesTribun(0.16, 1.6);
     spk('direk', { p:sonDokunanOyuncu });
-    ozetKaydet('direk', (sonDokunanOyuncu && sonDokunanOyuncu.ad || '').split(/\s+/).pop(), 900, sonDokunanOyuncu ? sonDokunanOyuncu.team : undefined);
+    ozetKaydet('direk', (sonDokunanOyuncu && sonDokunanOyuncu.ad || '').split(/\s+/).pop(), 2500, sonDokunanOyuncu ? sonDokunanOyuncu.team : undefined);
   }catch(e){}
 }
 /* ---------- gol ---------- */
@@ -15356,6 +15572,7 @@ function update(dt){
     p._kapT = Math.max(0, (p._kapT || 0) - dt);
     p.toparlan = Math.max(0, p.toparlan - dt);
     if (p.dalisT > 0) p.dalisT -= dt;
+    if (p._dalisCd > 0) p._dalisCd -= dt;
     if (p.degAnim){ degisimAnimAdim(p, dt); return; }     // saha kenarına yürüyen/dönen oyuncu
     if (kaymaKontrol(p, dt)){
       p.obj.position.x = Math.max(-HLX-1.5, Math.min(HLX+1.5, p.obj.position.x));
@@ -15387,13 +15604,15 @@ function update(dt){
       // Yapay zeka oyuncular da yorulur - yalnizca insan yorulsaydi 2. yarida bilgisayar
     // haksiz avantaj kazanirdi. Kaleci hariç: kalede kondisyon belirleyici degil.
     if(!p.gk){ p.hareket = uz > 0.6; kondisyonIsle(p, dt, kovaliyor); }
-    let spd = p.gk ? 6.0 * (0.9 + nit(p,'nKal',0.4)*0.2) : (kovaliyor ? 8.6 : 6.6) * kondCarpan(p) * nit(p, 'nHiz', 1);
+    let spd = p.gk ? (p.dalisT > 0 ? 9.5 : (p._gkAlarm ? 8.2 : 6.0)) * (0.9 + nit(p,'nKal',0.4)*0.2) : (kovaliyor ? 8.6 : 6.6) * kondCarpan(p) * nit(p, 'nHiz', 1);
       if (p.team === 1) spd *= AYAR.zor;
       // VARIŞ YAVAŞLAMASI (2026-09-27-H): hedefe yaklaşırken hız kademeli düşer (son
       // metrelerde yürüyüşe geçer). Önceden tam hızla gidip 0.7 m kala birden duruyordu;
       // hedef kıpırdadıkça koş-dur-koş titremesi oluşuyordu.
-      if (uz > 0.35){
-        if (!kovaliyor && !p.gk) spd = Math.min(spd, 0.9 + uz * 1.6);   // kaleci hep çevik
+      // Kaleci: şut/plonjon dışında hedefe yaklaşırken yavaşlar (küçük düzeltmeler adım adım) - titreme yok.
+      if (p.gk && !p._gkAlarm && !(p.dalisT > 0)) spd = Math.min(spd, 0.4 + uz * 2.6);
+      if (uz > (p.gk ? 0.12 : 0.35)){
+        if (!kovaliyor && !p.gk) spd = Math.min(spd, 0.9 + uz * 1.6);
         d.normalize(); istekX = d.x*spd; istekZ = d.z*spd;
       }
       if (frozen > 0){ istekX = istekZ = 0; }
@@ -15408,13 +15627,22 @@ function update(dt){
 
     // dönüş ataleti: baktığı yönden sapmışsa yavaşlar
     const sp = Math.hypot(p.vel.x, p.vel.z);
+    // KALECİ GÖVDESİ TOPA DÖNÜK: yapay zekâ kalecisi hareket yönüne değil topa bakar ve yana adım atar
+    // (hız cezası yok). Topu elinde tutarken / duran topu kullanırken eski davranış.
+    const _gkTopaBak = p.gk && insan < 0 && !(duran && p === duran.alici) && sonDokunanOyuncu !== p;
+    if (_gkTopaBak){
+      let dfr = Math.atan2(ball.position.x - p.obj.position.x, ball.position.z - p.obj.position.z) - p.obj.rotation.y;
+      while (dfr >  Math.PI) dfr -= Math.PI*2;
+      while (dfr < -Math.PI) dfr += Math.PI*2;
+      p.obj.rotation.y += dfr * Math.min(1, dt*7);
+    }
     if (sp > 0.3){
       const hedefAci = Math.atan2(p.vel.x, p.vel.z);
       let diff = hedefAci - p.obj.rotation.y;
       while (diff >  Math.PI) diff -= Math.PI*2;
       while (diff < -Math.PI) diff += Math.PI*2;
-      p.obj.rotation.y += diff * Math.min(1, dt*9);
-      const hiza = Math.max(0.45, 1 - Math.abs(diff)*0.45);
+      if (!_gkTopaBak) p.obj.rotation.y += diff * Math.min(1, dt*9);
+      const hiza = _gkTopaBak ? 1 : Math.max(0.45, 1 - Math.abs(diff)*0.45);
       p.obj.position.x += p.vel.x * hiza * dt;
       p.obj.position.z += p.vel.z * hiza * dt;
       p.gx = p.vel.x * hiza; p.gz = p.vel.z * hiza;   // GERÇEK yer değiştirme hızı (top sürüşü)
@@ -15533,7 +15761,7 @@ function update(dt){
         [-GOAL_HW, GOAL_HW].forEach(pz => {
           if (Math.abs(ball.position.z - pz) < R_BALL + 0.1){
             bVel.x *= -0.55; bVel.z = (ball.position.z - pz)*9;
-            gurultu(0.08, 0.2, 1400);
+            _sesKaydet('n'); gurultu(0.08, 0.2, 1400);
             _direktenDondu();
           }
         });
@@ -15541,7 +15769,7 @@ function update(dt){
       if (Math.abs(ball.position.x - s*HLX) < 0.5 &&
           Math.abs(ball.position.y - GOAL_H) < R_BALL + 0.1 && Math.abs(ball.position.z) < GOAL_HW){
         bVel.y = -Math.abs(bVel.y)*0.5;
-        gurultu(0.08, 0.2, 1400);
+        _sesKaydet('n'); gurultu(0.08, 0.2, 1400);
         _direktenDondu();
       }
     });
@@ -15567,7 +15795,9 @@ function update(dt){
       // KURTARIŞ GÜCE BAĞLI (2026-09-27-G): menzil 1.45-1.95 m; sert şutta güçsüz kaleci
       // topu tutamayıp ÇELER (top oyunda kalır) - güçlü kaleci çoğunlukla bloke eder.
       const _kk = nit(gk,'nKal',0.4);
-      if (gk.obj.position.distanceTo(ball.position) < (1.45 + _kk*0.5) && ball.position.y < 2.4 + _kk*0.4){
+      // Plonjondayken erişim artar (uzanma): yana +0,9 m.
+      const _uz = (gk.dalisT > 0) ? 0.9 : 0;
+      if (gk.obj.position.distanceTo(ball.position) < (1.45 + _kk*0.5 + _uz) && ball.position.y < 2.4 + _kk*0.4){
         const hizli = Math.hypot(bVel.x, bVel.z) > 12;
         if (hizli && Math.random() > 0.35 + _kk*0.55){
           const _yan = Math.sign(ball.position.z - gk.obj.position.z) || (Math.random() < 0.5 ? -1 : 1);
@@ -15576,7 +15806,7 @@ function update(dt){
           ofsaytTemizle(); duranSonrasi = null;
           (gk.team === 0 ? istat.b : istat.a).isabet++;
           (gk.team === 0 ? istat.a : istat.b).kurtaris++;
-          try{ spk('kurtaris', { p:gk }); ozetKaydet('kurtaris', (gk.ad||'').split(/\s+/).pop(), 700, 1 - gk.team); }catch(e){}
+          try{ spk('kurtaris', { p:gk }); ozetKaydet('kurtaris', (gk.ad||'').split(/\s+/).pop(), 2500, 1 - gk.team); }catch(e){}
           mesaj('', 'Kaleci çeldi', 800); sesTribun(0.12, 1.2);
           return;
         }
@@ -15587,9 +15817,10 @@ function update(dt){
         if (hizli){
           (gk.team === 0 ? istat.b : istat.a).isabet++; (gk.team === 0 ? istat.a : istat.b).kurtaris++; sesTribun(0.12, 1.4);
           // Sert şutu kucaklayan kaleci de "güzel kurtarış" sayılır: özete girer, spiker anlatır.
-          try{ spk('kurtaris', { p:gk }); ozetKaydet('kurtaris', (gk.ad||'').split(/\s+/).pop(), 600, 1 - gk.team); }catch(e){}
+          try{ spk('kurtaris', { p:gk }); ozetKaydet('kurtaris', (gk.ad||'').split(/\s+/).pop(), 2500, 1 - gk.team); }catch(e){}
         }
         mesaj('', 'Kaleci topu aldı', 900);
+        if (!hizli){ try{ spk('kaleciAldi', { p:gk }); }catch(e){} }
         setTimeout(() => { if (running && !bitti && !duran) aiVurus(gk); }, 600);
       }
     });
@@ -15744,6 +15975,7 @@ function uzatmaVer(){
     }
   }catch(e){_sessiz(e,'uzatmaVer:olay','saha_oynanis');}
   try{ mesaj('', 'Uzatma: +' + ek + ' dk', 1800); }catch(e){_sessiz(e,'uzatmaVer:5168','saha_oynanis');}
+  try{ spk('uzatma', { ek:ek }); }catch(e){}
   try{ sahaCanliYaz(false); }catch(e){_sessiz(e,'uzatmaVer:5169','saha_oynanis');}
 }
 function devreArasi(){

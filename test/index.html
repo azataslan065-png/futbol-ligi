@@ -2648,7 +2648,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-02-H';
+window.APP_BUILD='2026-10-02-I';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -6367,14 +6367,17 @@ window._ptTbAlinma = window._ptTbAlinma || {};
 function ptCanliSaat(m){
   try{
     var tb = m && m.tabela;
-    if(!m || !m.isLive || !tb || typeof tb.saniye !== 'number') return (m && m.minute || 0) + "'";
+    // YALNIZCA DAKİKA (2026-10-02-I, kullanıcı: "'dk - sn' yerine sadece 'Dk' olsun ve canlı hareket etsin"):
+    // saniye gösterilmez; saat yine iki yazım arasında ilerletilir, dakika dolduğu anda değişir.
+    if(!m || !m.isLive || !tb || typeof tb.saniye !== 'number') return (m && m.minute || 0) + ' Dk';
     var k = window._ptTbAlinma[m.id];
     if(!k || k.saniye !== tb.saniye){ k = window._ptTbAlinma[m.id] = { saniye: tb.saniye, t: Date.now() }; }
     var gecen = tb.akiyor ? Math.min(6, (Date.now() - k.t) / 1000) : 0;
     var sn = Math.max(0, Math.floor(tb.saniye + gecen * (Number(tb.hiz) || 1)));
-    var mm = Math.floor(sn / 60), ss = sn % 60;
-    return (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss;
-  }catch(e){ return (m && m.minute || 0) + "'"; }
+    var dk = Math.floor(sn / 60) + 1;                               // 0:00-0:59 → 1. dakika
+    dk = sn < 2700 ? Math.min(45, dk) : Math.max(46, Math.min(90, dk));   // devre sınırları (uzatma "+N" ile ayrı)
+    return dk + ' Dk';
+  }catch(e){ return (m && m.minute || 0) + ' Dk'; }
 }
 setInterval(function(){
   try{
@@ -13239,6 +13242,47 @@ function ptMacOzetHtml(id,m,h,a){
     }catch(err){}
   });
 })();
+/* ÖZET KAPAT (2026-10-02-I, kullanıcı: "özet izlerken kapat butonu bulunmalı; özet bitince başa sarmamalı").
+   Özet SAHA çerçevesinde oynar ama çerçeveye dokunuşları oynatıcının katmanı alıyor; bu yüzden düğme
+   oynatıcının KENDİ kökünde (#ptpRoot) çizilir - tam ekranda da görünür. Kapatınca oynatıcı kapanır ve
+   özetin açıldığı maç detayına dönülür. SAHA özet bitince 'sahaOzetBitti' gönderir: düğme belirginleşir. */
+(function ptOzetKapatDugmesi(){
+  function kapat(){
+    try{if(document.fullscreenElement&&document.exitFullscreen)document.exitFullscreen().catch(function(){});}catch(e){}
+    try{if(window.speechSynthesis)speechSynthesis.cancel();}catch(e){}
+    try{if(window.PTPlayer&&PTPlayer.isActive())PTPlayer.destroy();}catch(e){}
+    window._ptAktifKanalId=null;
+    try{var b=document.getElementById('ptOzetKapatBtn');if(b)b.remove();}catch(e){}
+    try{if(window.PTSheetNav&&PTSheetNav._depth()>0)PTSheetNav.back();else window.closeSheet();}catch(e){try{window.closeSheet();}catch(_e){}}
+  }
+  window.ptOzetKapat=kapat;
+  setInterval(function(){
+    try{
+      var ozet=/^ozet_/.test(String(window._ptAktifKanalId||''));
+      var root=document.getElementById('ptpRoot'), b=document.getElementById('ptOzetKapatBtn');
+      if(ozet&&root&&root.isConnected&&root.querySelector('iframe[src*="saha.html"]')){
+        if(!b||b.parentNode!==root){
+          if(b)b.remove();
+          b=document.createElement('button');b.id='ptOzetKapatBtn';b.type='button';b.textContent='✕ Kapat';
+          b.style.cssText='position:absolute;top:50px;left:50%;transform:translateX(-50%);z-index:2147483000;padding:7px 13px;border-radius:999px;'
+            +'border:1px solid rgba(255,255,255,.35);background:rgba(10,14,18,.78);color:#fff;font-weight:800;font-size:12.5px;line-height:1;cursor:pointer;pointer-events:auto';
+          b.onclick=function(e){try{e.stopPropagation();e.preventDefault();}catch(_e){}kapat();};
+          root.appendChild(b);
+        }
+      }else if(b)b.remove();
+    }catch(e){}
+  },400);
+  window.addEventListener('message',function(e){
+    try{
+      var d=typeof e.data==='string'?JSON.parse(e.data):e.data;
+      if(!d||(d.event!=='sahaOzetKapat'&&d.event!=='sahaOzetBitti'))return;
+      if(e.origin&&e.origin!==location.origin&&e.origin!=='null')return;
+      if(d.event==='sahaOzetKapat'){kapat();return;}
+      var b=document.getElementById('ptOzetKapatBtn');
+      if(b){b.textContent='✕ Özeti kapat';b.style.background='var(--ac,#2563eb)';b.style.borderColor='transparent';b.style.fontSize='14px';b.style.padding='9px 16px';}
+    }catch(err){}
+  });
+})();
 window._ptOzetKanallar=[];
 window.ptOzetIzle=function(mid){
   try{
@@ -16938,7 +16982,7 @@ function renderMdIstatistik(id,m,h,a){
   // yaziyordu - ama bu sekme o alani hic okumuyordu, sadece gol/kart gosteriyordu.
   // Veri zaten vardi, sadece ekrana hic cikmiyordu.
   const ss=m.sahaStats;
-  // Pas, isabetli pas, kurtarış ve direk 2026-10-02-H'de eklendi - eski maçlarda bu alanlar yok,
+  // Pas, isabetli pas, kurtarış ve direk 2026-10-02-I'de eklendi - eski maçlarda bu alanlar yok,
   // o satırlar yalnızca veri varsa çizilir.
   const varMi=(k)=>ss&&ss.home&&ss.away&&(ss.home[k]!=null||ss.away[k]!=null);
   const detay=(ss&&ss.home&&ss.away) ? `
