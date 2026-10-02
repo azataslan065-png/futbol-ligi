@@ -2648,7 +2648,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-02-B';
+window.APP_BUILD='2026-10-02-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -6271,7 +6271,7 @@ function _sahaSadeceCanliAlanDegisti(matchId,m){
     // etiketi) - bu yüzden artık 'çekirdek' karşılaştırmasının DIŞINDA tutuluyor;
     // sadece dakika değiştiğinde de artık TAM yeniden çizim değil, mini widget
     // güncellemesi yapılır.
-    delete core.minute;delete core.sahiplik;delete core.momentum;
+    delete core.minute;delete core.sahiplik;delete core.momentum;delete core.sahaStats;
     const json=JSON.stringify(core);
     const prev=window._sahaCoreSnapshots[matchId];
     window._sahaCoreSnapshots[matchId]=json;
@@ -6294,7 +6294,9 @@ function _sahaSadeceCanliAlanDegisti(matchId,m){
 // imzadan çıkarılır.
 var PT_CANLI_SUNUM_ALANLARI = ['ballX','ballZ','ballAttack','ballTs','homePlayers',
                                'awayPlayers','vurus','tabela','minute','sahaCanliTs','sahaOynayan',
-                               'ekranOran','izleYon','sahiplik','momentum'];
+                               'ekranOran','izleYon','sahiplik','momentum','sahaStats'];
+// 2026-10-02-C: 'sahaStats' artık maç SÜRERKEN saniyede bir güncelleniyor (canlı istatistik). İmzada
+// kalsaydı her güncelleme sayfayı baştan çizerdi; istatistik kutusu yerinde tazelenir (ptIstatTazele).
 // 2026-09-27-S (kullanıcı: "veri kesilmesi devam ediyor"): 'sahiplik' ve 'momentum' da oyun
 // tarafından HER saniye güncelleniyor; imzada kaldıkları için her yazım yine TAM çizime
 // düşüyordu. Artık onlar da çıkarıldı - Baskımetre kendi kutusunda yerinde tazelenir
@@ -6303,6 +6305,19 @@ var PT_CANLI_SUNUM_ALANLARI = ['ballX','ballZ','ballAttack','ballTs','homePlayer
 function _ptBaskiImza(bm){
   var sh = bm.sahiplik && typeof bm.sahiplik === 'object' ? Object.keys(bm.sahiplik).length + ':' + JSON.stringify(bm.sahiplik[Object.keys(bm.sahiplik).pop()]||null) : '';
   return JSON.stringify({mom:bm.momentum||null,ev:(bm.events||[]).length,dk:Math.round(bm.minute||0),sh:sh});
+}
+// Canlı istatistik kutusu (İstatistik sekmesi açıkken) yerinde tazelenir - sayfanın geri kalanına dokunulmaz.
+function ptIstatTazele(){
+  try{
+    var id = window._mdMatchId || (typeof _mdMatchId !== 'undefined' ? _mdMatchId : null); if(!id || (typeof _mdTab !== 'undefined' ? _mdTab : window._mdTab) !== 'istatistik') return;
+    var m = (D.matches||{})[id]; if(!m || !m.isLive) return;
+    var el = document.getElementById('mdIstatLive_'+id); if(!el) return;
+    var imza = JSON.stringify(m.sahaStats||null) + '|' + (m.homeGoals||0) + '-' + (m.awayGoals||0);
+    if(el._imza === imza) return; el._imza = imza;
+    var tmp = document.createElement('div');
+    tmp.innerHTML = renderMdIstatistik(id, m, D.teams[m.homeId]||{}, D.teams[m.awayId]||{});
+    var yeni = tmp.firstElementChild; if(yeni) el.innerHTML = yeni.innerHTML;
+  }catch(e){ DiagSil('ptIstatTazele', e); }
 }
 function ptBaskimetreTazele(){
   try{
@@ -6342,6 +6357,33 @@ function _ptRenderImzasi(d){
    tablosundaki ilgili alanlarda bilgi verilsin"): SAHA uzatmayı açıkladığı an 'sahaUzatma'
    (dakika) yazar; canlı dakika rozetlerinde "+2" olarak görünür. Anlatımdaki "hakem 2 dakika
    uzatma verdi" satırı da artık aynı anda gelir (önceden yarı bitince geliyordu). */
+/* CANLI SAAT (2026-10-02-C, kullanıcı: "maçtaki canlı süre ve puan tablosu, maçın tüm dakikalarıyla
+   anlık olarak akmalı; sadece dakika değil"). SAHA her canlı yazımda tabelayı (saniye, saat hızı,
+   akıyor mu) gönderiyor. Buradaki saat iki yazım arasını bu bilgiyle kendisi ilerletir ve saniyede
+   bir güncellenir: "37:24" gibi. Tabela yoksa (yönetici maçı) dakika gösterilir.
+   Oyuncu cihazının saati farklı olabileceği için ilerleme, verinin BU cihaza ulaştığı andan ölçülür;
+   veri 6 sn'den uzun gelmezse saat durur (oyun duraklamış/bağlantı kopmuş olabilir). */
+window._ptTbAlinma = window._ptTbAlinma || {};
+function ptCanliSaat(m){
+  try{
+    var tb = m && m.tabela;
+    if(!m || !m.isLive || !tb || typeof tb.saniye !== 'number') return (m && m.minute || 0) + "'";
+    var k = window._ptTbAlinma[m.id];
+    if(!k || k.saniye !== tb.saniye){ k = window._ptTbAlinma[m.id] = { saniye: tb.saniye, t: Date.now() }; }
+    var gecen = tb.akiyor ? Math.min(6, (Date.now() - k.t) / 1000) : 0;
+    var sn = Math.max(0, Math.floor(tb.saniye + gecen * (Number(tb.hiz) || 1)));
+    var mm = Math.floor(sn / 60), ss = sn % 60;
+    return (mm < 10 ? '0' : '') + mm + ':' + (ss < 10 ? '0' : '') + ss;
+  }catch(e){ return (m && m.minute || 0) + "'"; }
+}
+setInterval(function(){
+  try{
+    document.querySelectorAll('[data-canli-saat]').forEach(function(el){
+      var m = (D.matches||{})[el.getAttribute('data-canli-saat')]; if(!m) return;
+      var y = ptCanliSaat(m); if(el.textContent !== y) el.textContent = y;
+    });
+  }catch(e){}
+}, 1000);
 function ptUzatmaEki(m){
   try{ var u = Number(m && m.sahaUzatma) || 0; return (m && m.isLive && u > 0) ? ' +' + u : ''; }catch(e){ return ''; }
 }
@@ -6351,7 +6393,7 @@ function ptCanliHafifTazele(){
       var m = (D.matches||{})[el.getAttribute('data-mid')];
       if(!m) return;
       var dk = el.querySelector('.pt-dk');
-      var yeni = String(m.minute || 0);
+      var yeni = ptCanliSaat(m);
       if(dk && dk.textContent !== yeni) dk.textContent = yeni;
       var uzEl = el.querySelector('.pt-uz'), uzYeni = ptUzatmaEki(m);
       if(uzEl && uzEl.textContent !== uzYeni) uzEl.textContent = uzYeni;
@@ -6370,6 +6412,7 @@ function ptCanliHafifTazele(){
       }
       ptBaskimetreTazele();
     }
+    ptIstatTazele();
   }catch(e){ DiagSil('ptCanliHafifTazele', e); }
 }
 function listenToLeague(leagueId){
@@ -6712,6 +6755,7 @@ function listenToLeague(leagueId){
           }
         }
       }catch(e){DiagSil('baskimetreAnlikGuncelle',e);}
+      try{ ptIstatTazele(); }catch(e){}   // canlı istatistik kutusu (İstatistik sekmesi açıksa)
       // HATA DÜZELTMESİ (kullanıcı bildirdi: "sohbet ekranında yazarken klavyede biraz
       // donma oluyor"): Önceden bu blok, kullanıcı odaktayken bile input'u YOK EDİP YENİDEN
       // OLUŞTURUYOR, sonra değeri/odağı geri yüklüyordu - bu "yok et/yeniden oluştur" döngüsü,
@@ -11033,7 +11077,7 @@ function renderResults(){
     // margin-left YOK: ortalanmış sütunda sol boşluk rozeti sağa kaydırırdı.
     // data-mid + .pt-dk: dakika, TÜM kartı yeniden çizmeden yerinde güncellenir
     // (bkz. ptCanliHafifTazele) - titremenin kök sebebi tam olarak bu yeniden çizimdi.
-    const liveTag=m.isLive?`<span class="pt-canli-rozet" data-mid="${m.id}" style="background:#dc2626;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;animation:lp 1.4s infinite;white-space:nowrap">🔴 CANLI <span class="pt-dk">${m.minute||0}</span>'<span class="pt-uz">${ptUzatmaEki(m)}</span></span>`:'';
+    const liveTag=m.isLive?`<span class="pt-canli-rozet" data-mid="${m.id}" style="background:#dc2626;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;animation:lp 1.4s infinite;white-space:nowrap">🔴 CANLI <span class="pt-dk" data-canli-saat="${m.id}">${ptCanliSaat(m)}</span><span class="pt-uz">${ptUzatmaEki(m)}</span></span>`:'';
     const finishedTag=(m.played&&!m.isLive)?`<span style="background:#1a1a1a;color:#d1d5db;font-size:.56rem;font-weight:700;border-radius:6px;padding:.08rem .45rem;border:1px solid rgba(255,255,255,.1);white-space:nowrap">Maç Sonucu</span>`:'';
     /* 🎮 Saha rozeti KALDIRILDI (kullanıcı talebi). */
     html+=`<div class="mc wide-able" onclick="showMatchDetail('${m.id}','results')" style="${m.isLive?'border:1.5px solid rgba(239,68,68,.4)':''}">
@@ -11087,7 +11131,7 @@ function renderSaha(){
   maclar.forEach(m=>{
     const h=D.teams[m.homeId]||{},a=D.teams[m.awayId]||{};
     const win=m.homeGoals>m.awayGoals?'home':m.awayGoals>m.homeGoals?'away':'draw';
-    const liveTag=m.isLive?`<span style="background:#dc2626;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;margin-left:.4rem;animation:lp 1.4s infinite">🔴 CANLI ${m.minute||0}'${ptUzatmaEki(m)}</span>`:'';
+    const liveTag=m.isLive?`<span style="background:#dc2626;color:#fff;font-size:.56rem;font-weight:800;border-radius:8px;padding:.08rem .4rem;margin-left:.4rem;animation:lp 1.4s infinite">🔴 CANLI <span data-canli-saat="${m.id}">${ptCanliSaat(m)}</span>${ptUzatmaEki(m)}</span>`:'';
     const finishedTag=(m.played&&!m.isLive)?`<span style="background:#1a1a1a;color:#d1d5db;font-size:.56rem;font-weight:700;border-radius:6px;padding:.08rem .45rem;margin-left:.4rem;border:1px solid rgba(255,255,255,.1)">Maç Sonucu</span>`:'';
     const bekliyorTag=(!m.played&&!m.isLive)?`<span style="background:var(--s2);color:var(--mu);font-size:.56rem;font-weight:700;border-radius:6px;padding:.08rem .45rem;margin-left:.4rem;border:1px solid var(--br)">⏳ Bekliyor</span>`:'';
     html+=`<div class="mc wide-able" onclick="showMatchDetail('${m.id}','results')" style="${m.isLive?'border:1.5px solid rgba(239,68,68,.4)':''}">
@@ -12523,7 +12567,7 @@ function renderMatchDetailContent(){
 
   // Durum metni
   let statusLabel='MS',isLive=false;
-  if(m.isLive){isLive=true;statusLabel=(m.minute||0)+"'"+ptUzatmaEki(m);}
+  if(m.isLive){isLive=true;statusLabel='<span data-canli-saat="'+id+'">'+ptCanliSaat(m)+'</span>'+ptUzatmaEki(m);}
   else if(!m.played)statusLabel=(m.time||'');
   else statusLabel='MS';
 
@@ -13166,8 +13210,9 @@ function ptMacOzetHtml(id,m,h,a){
         var l=sesler(), er=l.filter(function(y){return y.erkek;});
         var sec=(x.r==='yorumcu'?(er[1]||er[0]):er[0])||l[0];
         if(sec)u.voice=sec.v;
-        var dus=er.length?0:0.28;
-        if(x.r==='yorumcu'){u.rate=0.97;u.pitch=0.82-dus;}else if(x.r==='spiker'){u.rate=1.1;u.pitch=0.98-dus;}else{u.rate=1.02;u.pitch=0.92-dus;}
+        // saha.html sahaSpikerTon ile aynı: spiker canlı, yorumcu belirgin kalın/ağır; erkek ses yoksa perde düşük.
+        var ev=er.length>0;
+        if(x.r==='yorumcu'){u.rate=ev?0.92:0.9;u.pitch=ev?0.72:0.4;}else if(x.r==='spiker'){u.rate=ev?1.12:1.14;u.pitch=ev?1.0:0.62;}else{u.rate=1.0;u.pitch=ev?0.9:0.55;}
         konusuyor=true;
         var bitti=false,son=function(){if(bitti)return;bitti=true;konusuyor=false;setTimeout(siradaki,200);};
         u.onend=son;u.onerror=son;setTimeout(son,9000);
@@ -16893,15 +16938,22 @@ function renderMdIstatistik(id,m,h,a){
   // yaziyordu - ama bu sekme o alani hic okumuyordu, sadece gol/kart gosteriyordu.
   // Veri zaten vardi, sadece ekrana hic cikmiyordu.
   const ss=m.sahaStats;
+  // Pas, isabetli pas, kurtarış ve direk 2026-10-02-D'de eklendi - eski maçlarda bu alanlar yok,
+  // o satırlar yalnızca veri varsa çizilir.
+  const varMi=(k)=>ss&&ss.home&&ss.away&&(ss.home[k]!=null||ss.away[k]!=null);
   const detay=(ss&&ss.home&&ss.away) ? `
+    ${bar('⏱️ Topa Sahip Olma',ss.home.sahiplik||0,ss.away.sahiplik||0,true)}
     ${bar('🎯 Şut',ss.home.sut||0,ss.away.sut||0)}
     ${bar('🎯 İsabetli Şut',ss.home.isabet||0,ss.away.isabet||0)}
+    ${varMi('pas')?bar('🔁 Pas',ss.home.pas||0,ss.away.pas||0):''}
+    ${varMi('isabetliPas')?bar('✅ İsabetli Pas',ss.home.isabetliPas||0,ss.away.isabetliPas||0):''}
+    ${varMi('kurtaris')?bar('🧤 Kurtarış',ss.home.kurtaris||0,ss.away.kurtaris||0):''}
+    ${varMi('direk')?bar('🥅 Direkten Dönen',ss.home.direk||0,ss.away.direk||0):''}
     ${bar('🚩 Korner',ss.home.korner||0,ss.away.korner||0)}
     ${bar('⚠️ Faul',ss.home.faul||0,ss.away.faul||0)}
     ${bar('🚫 Ofsayt',ss.home.ofsayt||0,ss.away.ofsayt||0)}
-    ${bar('⏱️ Topa Sahip Olma',ss.home.sahiplik||0,ss.away.sahiplik||0,true)}
   ` : '';
-  return `<div style="padding:.85rem .9rem">
+  return `<div id="mdIstatLive_${id}" style="padding:.85rem .9rem">
     ${bar('⚽ Gol',hGoals,aGoals)}
     ${detay}
     ${bar('🟨 Sarı Kart',hYel,aYel)}
@@ -26864,7 +26916,9 @@ function ptCanliRozetUygula(){
     // video/VOD ya da canlı olmayan bir kanal olabilir); window._ptCanliMacIzleniyor (bkz.
     // ptpYayinBindirmeGuncelle) o an izlenen kanala bağlı GERÇEKTEN canlı bir maç olup
     // olmadığını tutar - rozet İKİSİ de doğruyken gösterilir.
-    var canliMacVar = !!window._ptCanliMacIzleniyor;
+    // Maç özeti izlenirken de (kanal kimliği 'ozet_') rozet görünür (2026-10-02-D, kullanıcı:
+    // "özetler için adminin eklediği rozet orası için de geçerli olsun").
+    var canliMacVar = !!window._ptCanliMacIzleniyor || /^ozet_/.test(String(window._ptAktifKanalId||''));
     if(!el || !metin && !logo || !canliMacVar){ if(el) el.style.display='none'; return; }
     // SERBEST TASIMA (kullanici: "ozgurce tasinabilsin"): Yonetici artik kose secmiyor,
     // onizleme uzerinde surukluyor. Kaydedilen deger sol-ust kosesine gore YUZDE.

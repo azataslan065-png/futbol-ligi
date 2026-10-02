@@ -2125,7 +2125,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-02-B';
+window.APP_BUILD='2026-10-02-D';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5976,6 +5976,14 @@ function renderLivePicker(){
       if(_sahaOyuncu.length && typeof admVeriKaynagi==='function' && admVeriKaynagi()!=='saha'){
         _sahaOyuncu=[];
       }
+      /* SAHİPSİZ MAÇLAR (2026-10-02-C, kullanıcı: "admin canlı sekmesindeki bazı maçları canlıya alamıyor").
+         KÖK SEBEP: düğme yalnızca en az bir takımı SAHA kullanıcısına ait maçlarda çiziliyordu; iki takımı
+         da sahipsiz maçlar SAHA'da hiç başlatılamıyordu. Artık SAHA tarafında HER oynanmamış maçta düğme
+         var. Sahipsiz maç "açık maç" olur: onaylı herhangi bir SAHA kullanıcısı ev sahibini yönetir. */
+      var _acikMac=false;
+      if(!_sahaOyuncu.length && !m.played && typeof admVeriKaynagi==='function' && admVeriKaynagi()==='saha'){
+        _acikMac=true; _sahaOyuncu=['açık maç - herhangi bir SAHA kullanıcısı oynayabilir'];
+      }
       if(_sahaOyuncu.length){
         var sar=document.createElement('div');
         sar.style.cssText='display:flex;flex-direction:column;gap:.3rem;width:100%';
@@ -8130,7 +8138,21 @@ function _lgoDurum(ad){
   if(k.o.sahip && (_kullanicilar||{})[k.o.sahip]) return 'takimda';
   return k.o.satista ? 'satista' : 'pasif';
 }
-function _lgoMagazadaMi(ad){ var d = _lgoDurum(ad); return d === 'satista' || d === 'takimda'; }
+/* BİRDEN FAZLA KEZ SATIŞA ÇIKARMA (2026-10-02-C, kullanıcı: "yönetici aynı oyuncuyu birden fazla
+   kez satışa çıkarabilmeli"). Önceki turda yalnızca satış dışı kaydı yeniden açılabilir yapmıştım;
+   istenen bu değildi. Artık oyuncu satıştayken ya da bir takımdayken de seçilebilir; her sunuş
+   havuza YENİ bir kart ekler (aynı oyuncudan birden çok kullanıcı alabilir). Satırda kaç kartın
+   satışta, kaçının takımlarda olduğu yazar. */
+function _lgoSayilar(ad){
+  var hedef = String(ad||'').trim().toLocaleLowerCase('tr'), r = { satista:0, takimda:0 };
+  Object.keys(_havuz || {}).forEach(function(id){
+    var o = _havuz[id];
+    if(!o || String(o.ad||'').trim().toLocaleLowerCase('tr') !== hedef) return;
+    if(o.sahip && (_kullanicilar||{})[o.sahip]) r.takimda++; else if(o.satista) r.satista++;
+  });
+  return r;
+}
+function _lgoMagazadaMi(ad){ return false; }
 function ligOyuncuSuzgecDegistir(){
   window._lgoSadeceYeni = !window._lgoSadeceYeni;
   var b = qs('lgoSuzgecBtn'); if(b) b.textContent = window._lgoSadeceYeni ? '✅ Açık' : 'Kapalı';
@@ -8174,8 +8196,8 @@ function ligOyunculariCiz(){
         + 'color:var(--mu);padding:.2rem .4rem;border-radius:6px;margin:.3rem 0 .2rem">' + escHtml(harf) + '</div>';
     }
     var anahtar = _lgoAnahtar(p.ad, p.tid);
-    var _dur = _lgoDurum(p.ad);
-    var magazada = (_dur === 'satista' || _dur === 'takimda');
+    var _say = _lgoSayilar(p.ad);
+    var magazada = false;
     var secili = !!window._lgoSecim[anahtar];
     return baslik
       + '<div onclick="' + (magazada ? '' : 'ligOyuncuSec(\''+anahtar+'\',\''+escHtml(p.ad).replace(/'/g,"\\'")+'\',\''+p.tid+'\')')
@@ -8183,14 +8205,14 @@ function ligOyunculariCiz(){
       + 'border:1px solid ' + (secili ? 'var(--ac)' : 'var(--br)') + ';'
       + 'background:' + (secili ? 'rgba(124,58,237,.14)' : 'var(--s2)') + ';'
       + (magazada ? 'opacity:.55' : 'cursor:pointer') + '">'
-      + '<span style="font-size:.9rem">' + (_dur === 'takimda' ? '👤' : magazada ? '🛒' : (secili ? '☑️' : '⬜')) + '</span>'
+      + '<span style="font-size:.9rem">' + (secili ? '☑️' : '⬜') + '</span>'
       + (p.foto
           ? '<img src="' + escHtml(p.foto) + '" style="width:32px;height:32px;border-radius:50%;object-fit:cover;flex-shrink:0" onerror="this.outerHTML=\'<div style=&quot;width:32px;height:32px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0&quot;>👤</div>\'"/>'
           : '<div style="width:32px;height:32px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.9rem;flex-shrink:0">👤</div>')
       + '<div style="flex:1;min-width:0"><b style="font-size:.78rem">' + escHtml(p.ad) + '</b>'
       + '<div style="font-size:.63rem;opacity:.7">' + escHtml(p.takim)
       + (p.mevki ? (' · ' + escHtml(p.mevki)) : '') + (p.no ? (' · #' + escHtml(String(p.no))) : '')
-      + (_dur === 'satista' ? ' · <b>mağazada</b>' : _dur === 'takimda' ? ' · <b>bir takımda</b>' : _dur === 'pasif' ? ' · <b style="color:#f59e0b">havuzda, satışta değil - tekrar sunulabilir</b>' : '') + '</div></div>'
+      + (_say.satista ? ' · <b>🛒 ' + _say.satista + ' kart satışta</b>' : '') + (_say.takimda ? ' · <b>👤 ' + _say.takimda + ' takımda</b>' : '') + '</div></div>'
       + '</div>';
   }).join('');
 }
@@ -8209,14 +8231,7 @@ function ligOyuncuMagazayaSun(){
     secim.forEach(function(anahtar){
       var p = window._lgoSecim[anahtar]; if(!p) return;
       if(_lgoMagazadaMi(p.ad)){ atlanan++; return; }     // yarışta eklenmiş olabilir
-      var _eski = _lgoHavuzKaydi(p.ad);
-      if(_eski){
-        // Havuzda pasif duran kayıt yeniden satışa açılır (bkz. TEKRAR SATIŞA ÇIKARMA).
-        var _k = 'oyuncuHavuzu/' + _eski.id + '/';
-        g[_k + 'satista'] = true; g[_k + 'fiyat'] = fiyat; g[_k + 'guc'] = guc; g[_k + 'hiz'] = c;
-        g[_k + 'sahip'] = null; g[_k + 'satisIlan'] = null; g[_k + 'alisTs'] = null; g[_k + 'baslangic'] = false;
-        eklenen++; return;
-      }
+
       var mevki = 'SF', foto = '';
       try{
         var bul = ligOyunculariTopla().find(function(x){ return _lgoAnahtar(x.ad, x.tid) === anahtar; });
@@ -8270,8 +8285,7 @@ function oyuncuHavuzaEkle(){
   var ad = (qs('ohAd').value||'').trim();
   if(!ad){ toast('❌ Oyuncu adi girin','er'); return; }
   // Aynı ad iki kez olmasın: SAHA oyuncunun gücünü ve puan tablosu golleri ADA göre eşleştiriyor.
-  if(_lgoMagazadaMi(ad)){ toast('❌ Bu oyuncu zaten mağazada ya da bir takımda','er'); return; }
-  var _eskiK = _lgoHavuzKaydi(ad);
+  var _eskiK = null;   // aynı oyuncudan birden fazla kart sunulabilir (bkz. BİRDEN FAZLA KEZ SATIŞA ÇIKARMA)
   if(_eskiK){
     // Havuzda satış dışı duran aynı oyuncu: yeni kopya yerine mevcut kayıt yeniden satışa açılır.
     var _f = Math.max(0, parseInt(qs('ohFiyat').value,10) || 0), _g = Math.max(1, Math.min(99, parseInt(qs('ohGuc').value,10) || 70));
