@@ -2125,7 +2125,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-28-AJ';
+window.APP_BUILD='2026-10-02-A';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5765,9 +5765,84 @@ function sahaKartArkaUrl(){
   if(u&&!/^https?:\/\//i.test(u)){ toast('Adres http:// ya da https:// ile başlamalı','er'); return; }
   sahaKartArkaKaydet(u);
 }
+/* UYDURMA TAKIM / OYUNCU TARAMASI (2026-10-02, kullanıcı: "canlı maçta 'Şimşek' gibi farklı takım
+   isimleri görünüyor; daha önce oluşturulanları tespit et ve tamamen kaldır, kaç tane var söyle").
+   KAYNAK: saha.html'de koda gömülü 6 uydurma takım ve 102 uydurma oyuncu vardı (2026-10-02'de
+   koddan silindi). Gerçek kadro eksik kaldığında bu isimler sahaya çıkıp gol/kart olaylarıyla
+   veritabanına yazılmış olabilir. Bu tarama seçili veri kaynağındaki (SAHA / SAHA dışı) BÜTÜN
+   liglerde takım adlarını, kadroları ve maç olaylarını tarar; "Temizle" bulunanları siler:
+   kadrodaki uydurma oyuncu çıkarılır, olaydaki oyuncu adı boşaltılır (olay ve skor korunur),
+   uydurma adlı takım - maçı yoksa - silinir; maçı varsa yalnızca sayılır (fikstür bozulmasın). */
+var ADM_SAHTE_TAKIMLAR=['ŞİMŞEK','FIRTINA','ÇELİK','ANKA','POYRAZ','ZEYBEK'];
+var ADM_SAHTE_OYUNCULAR=["Ahmet Bilge", "Alp Duran", "Alp Tuna", "Alper Gün", "Aras Kaplan", "Arda Güneş", "Arda Tek", "Atlas Kara", "Atlas Su", "Baran Keskin", "Baran Yel", "Barış Aksoy", "Batu Kaya", "Berk Turan", "Berk Umut", "Bilge Han", "Bora Nur", "Bora Çakır", "Bulut Er", "Bulut Gür", "Burak Aydın", "Cem Dağ", "Cem Polat", "Cihan Ergin", "Deniz Arslan", "Devrim Alp", "Devrim Öz", "Doruk Er", "Doruk Sarı", "Efe Nar", "Efe Soylu", "Ege Deniz", "Ege Tan", "Ege Şimşek", "Emir Gökçe", "Emir Sal", "Emre Doğan", "Eren Boz", "Eren Koç", "Furkan Işık", "Fırat Yiğit", "Görkem Ak", "Görkem Taş", "Hakan Sel", "Hakan Tunç", "Halil Boz", "Hüseyin Nar", "Ilgaz Ay", "Kaan Dere", "Kaan Yılmaz", "Kadir Uzun", "Kaya Bulut", "Kaya Erdem", "Kağan Öz", "Kerem Su", "Kerem Yıldız", "Kuzey Kal", "Kuzey Çelik", "Levent Kurt", "Mehmet Zorlu", "Mert Kaya", "Mete Kor", "Metehan Su", "Murat Sezer", "Mustafa Aslan", "Okan Vural", "Onur Dal", "Onur Kılıç", "Ozan Mert", "Ozan Yalçın", "Poyraz Demirel", "Poyraz El", "Rüzgar Ay", "Rüzgâr Koç", "Sarp Emre", "Sarp Ilgaz", "Sarper Ak", "Selim Acar", "Selim Taş", "Sencer Toprak", "Sencer Ün", "Serkan Ateş", "Sinan Öz", "Sinan Öztürk", "Tarık Bulut", "Tarık Ege", "Tolga Demir", "Toprak Şen", "Tuncay Er", "Tunç Ay", "Tunç Beyaz", "Ufuk Şahin", "Umut Akın", "Umut Kar", "Uygar Can", "Uygar Deniz", "Volkan Çetin", "Yalın Korkmaz", "Yiğit Aras", "Yiğit Barut", "Yusuf Bal", "Çağlar Ün"];
+function _admSahteTakimMi(ad){ var a=String(ad||'').trim().toLocaleUpperCase('tr'); return ADM_SAHTE_TAKIMLAR.indexOf(a)>=0; }
+function _admSahteOyuncuMu(ad){ return ADM_SAHTE_OYUNCULAR.indexOf(String(ad||'').trim())>=0; }
+window._admSahteSonuc=null;
+function sahteTaramaCiz(){
+  var pg=qs('pg-live'); if(!pg) return;
+  var k=qs('sahteTaramaKutu');
+  if(!k){
+    k=document.createElement('div'); k.id='sahteTaramaKutu'; k.className='card';
+    var once=qs('liveMatchPicker');
+    if(once&&once.parentNode) once.parentNode.insertBefore(k,once); else pg.appendChild(k);
+  }
+  var r=window._admSahteSonuc;
+  var ozet=!r?'<div style="font-size:.62rem;color:var(--mu)">Henüz taranmadı.</div>'
+    :'<div style="font-size:.66rem;line-height:1.7">'
+      +'Uydurma adlı takım: <b>'+r.takim+'</b>'+(r.takimMacli?' ('+r.takimMacli+' tanesinin maçı var, silinmez)':'')+'<br>'
+      +'Kadrolardaki uydurma oyuncu: <b>'+r.kadro+'</b><br>'
+      +'Maç olaylarındaki uydurma isim: <b>'+r.olay+'</b> ('+r.mac+' maçta)<br>'
+      +'<span style="color:var(--mu)">Taranan lig: '+r.lig+' · kaynak: '+r.kaynak+'</span></div>';
+  k.innerHTML='<div style="font-size:.72rem;font-weight:800;margin-bottom:.45rem">🧹 Uydurma takım/oyuncu taraması</div>'
+    +ozet
+    +'<div style="display:flex;gap:.35rem;margin-top:.45rem">'
+    +'<button class="btn bgh" style="flex:1;font-size:.68rem;padding:.35rem" onclick="sahteTara(false)">🔍 Tara</button>'
+    +(r&&(r.takim-r.takimMacli+r.kadro+r.olay)>0?'<button class="btn" style="flex:1;font-size:.68rem;padding:.35rem;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)" onclick="sahteTara(true)">🗑 Temizle</button>':'')
+    +'</div>';
+}
+function sahteTara(temizle){
+  if(temizle && !confirm('Bulunan uydurma kayıtlar silinsin mi? Geri alınamaz.')) return;
+  db.ref('leagues').once('value').then(function(sn){
+    var ligler=sn.val()||{}, g={}, r={takim:0,takimMacli:0,kadro:0,olay:0,mac:0,lig:0,kaynak:(admVeriKaynagi()==='saha'?'SAHA':'SAHA dışı')};
+    Object.keys(ligler).forEach(function(lid){
+      var L=ligler[lid]; if(!L||typeof L!=='object') return; r.lig++;
+      var teams=L.teams||{}, matches=L.matches||{};
+      Object.keys(teams).forEach(function(tid){
+        var t=teams[tid]; if(!t) return;
+        if(_admSahteTakimMi(t.name)){
+          var macli=Object.keys(matches).some(function(mid){ var m=matches[mid]; return m&&(m.homeId===tid||m.awayId===tid); });
+          r.takim++; if(macli) r.takimMacli++;
+          else if(temizle) g['leagues/'+lid+'/teams/'+tid]=null;
+        }
+        ['starting','bench'].forEach(function(bol){
+          var arr=t.squad&&t.squad[bol]; if(!arr) return;
+          var liste=Array.isArray(arr)?arr:Object.keys(arr).map(function(k){return arr[k];});
+          var kalan=liste.filter(function(p){ var sahte=p&&_admSahteOyuncuMu(p.name); if(sahte) r.kadro++; return !sahte; });
+          if(temizle&&kalan.length!==liste.length) g['leagues/'+lid+'/teams/'+tid+'/squad/'+bol]=kalan;
+        });
+      });
+      Object.keys(matches).forEach(function(mid){
+        var m=matches[mid], ev=m&&m.events; if(!ev) return;
+        var bulundu=false;
+        Object.keys(ev).forEach(function(k){
+          var e=ev[k]; if(!e) return;
+          ['player','player2'].forEach(function(a){
+            if(_admSahteOyuncuMu(e[a])){ r.olay++; bulundu=true; if(temizle) g['leagues/'+lid+'/matches/'+mid+'/events/'+k+'/'+a]=''; }
+          });
+        });
+        if(bulundu) r.mac++;
+      });
+    });
+    window._admSahteSonuc=r; sahteTaramaCiz();
+    if(!temizle){ toast('🔍 Tarama bitti'); return; }
+    if(!Object.keys(g).length){ toast('Silinecek kayıt yok'); return; }
+    return db.ref().update(g).then(function(){ toast('🗑 Temizlendi'); sahteTara(false); });
+  }).catch(function(e){ toast('❌ Tarama başarısız: '+((e&&e.message)||''),'er'); DiagSil('sahteTara',e); });
+}
 function renderLive(){
   fillSelects();
   try{ sahaKartArkaCiz(); }catch(e){}
+  try{ sahteTaramaCiz(); }catch(e){}
   renderLivePicker();
   renderCanliRozetGlobal();
   var live=getManagedLiveMatch();
@@ -7847,6 +7922,11 @@ function sahaSquadKur(kadro, havuz, eski, uid, diz){
     // mevki koduna göre tahmin etmek yerine TAM bu yere çizer (2026-09-27-L).
     if(!yedekMi && x.yer != null) r.yer = x.yer; else delete r.yer;
     r.photo = x.o.foto || (ek && ek.photo) || '';
+    // KATILIM (2026-10-02, kullanıcı: "sonradan transfer olan oyuncu, takıma katıldıktan sonra
+    // performans puanı alır"): oyuncunun bu takıma geldiği an. Puan Tablosu bundan ÖNCE oynanmış
+    // maçlarda oyuncuyu kadroda saymaz. Havuzdaki alisTs satın alma/atama anıdır.
+    if(x.o.alisTs) r.katilim = Number(x.o.alisTs) || r.katilim;
+    if(!r.katilim) delete r.katilim;
     return r;
   }
   return { starting: ilk.map(function(x){ return cikti(x, false); }),

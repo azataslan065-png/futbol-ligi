@@ -2648,7 +2648,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-09-28-AJ';
+window.APP_BUILD='2026-10-02-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -11241,10 +11241,9 @@ function renderStats(){
   const allAssisters=pArr.filter(p=>p.assists>0).sort((a,b)=>b.assists-a.assists);
   const gkConcededByTeam={};
   Object.values(D.matches||{}).filter(m=>m.played).forEach(m=>{
-    [['home',m.homeId,m.awayGoals],['away',m.awayId,m.homeGoals]].forEach(([,tid,conceded])=>{
+    [['home',m.homeId,m.awayGoals],['away',m.awayId,m.homeGoals]].forEach(([taraf,tid,conceded])=>{
       const team=D.teams[tid];if(!team)return;
-      const sq=team.squad||{};
-      const gk=(sq.starting||[]).find(p=>p&&p.position==='KL');
+      const gk=ptMacKalecisi(m,taraf);
       if(!gk)return;
       if(!gkConcededByTeam[tid])gkConcededByTeam[tid]={name:gk.name,teamId:tid,conceded:0,photo:gk.photo};
       gkConcededByTeam[tid].conceded+=(conceded||0);
@@ -11457,8 +11456,7 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
     matchesForB11.forEach(m=>{
       [['home',m.homeId],['away',m.awayId]].forEach(([taraf,tid])=>{
         const team=D.teams[tid];if(!team)return;
-        const sq=team.squad||{};
-        (sq.starting||[]).forEach(p=>{
+        ptMacOynayanlar(m,taraf).forEach(p=>{
           if(!p||!p.name)return;
           const kayit=getOrCreate(p.name,tid,p.position,p.photo,p.number);
           // Oyuncunun bu dönemde oynadığı maçlar biriktirilir - performans puanı
@@ -11478,7 +11476,7 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
         if(!team)return;
         function findP(name){
           const sq=team.squad||{};
-          const all=[...(sq.starting||[]),...(sq.bench||[])];
+          const all=[...ptMacOynayanlar(m,isHome?'home':'away'),...(sq.starting||[]),...(sq.bench||[])];
           return all.find(p=>p&&p.name===name)||{};
         }
         if(e.type==='goal'){
@@ -11499,8 +11497,7 @@ html+=`<div id="st_goals" style="display:${_statTab==='goals'?'':'none'}">${rend
     matchesForB11.forEach(m=>{
       [['home',m.homeId,m.awayGoals],['away',m.awayId,m.homeGoals]].forEach(([taraf,tid,conceded])=>{
         const team=D.teams[tid];if(!team)return;
-        const sq=team.squad||{};
-        const gk=(sq.starting||[]).find(p=>p&&p.position==='KL');
+        const gk=ptMacKalecisi(m,taraf);
         if(!gk)return;
         if(!gkByTeamB11[tid])gkByTeamB11[tid]={name:gk.name,teamId:tid,conceded:0,photo:gk.photo,number:gk.number,position:'KL',_puanlar:[]};
         gkByTeamB11[tid].conceded+=(conceded||0);
@@ -11859,7 +11856,7 @@ html+=`<div id="st_homeaway" style="display:${_statTab==='homeaway'?'':'none'}">
       [['home',m.homeId],['away',m.awayId]].forEach(([taraf,tid])=>{
         const t=D.teams[tid]; if(!t||!t.squad)return;
         const hafta=m.week||0;
-        (t.squad.starting||[]).forEach(p=>{
+        ptMacOynayanlar(m,taraf).forEach(p=>{
           if(!p||!p.name)return;
           const pn=ptOyuncuPuani(m,p.name,taraf,p.position);
           if(pn==null)return;
@@ -11892,7 +11889,7 @@ html+=`<div id="st_homeaway" style="display:${_statTab==='homeaway'?'':'none'}">
       [['home',m.homeId,Number(m.awayGoals)||0],['away',m.awayId,Number(m.homeGoals)||0]]
         .forEach(([taraf,tid,yenen])=>{
           const t=D.teams[tid]; if(!t||!t.squad)return;
-          const gk=(t.squad.starting||[]).find(x=>x&&x.position==='KL');
+          const gk=ptMacKalecisi(m,taraf);
           if(!gk||!gk.name)return;
           const k=gk.name+'|'+tid;
           if(!out[k])out[k]={name:gk.name,teamId:tid,photo:gk.photo,mac:0,yenen:0,temiz:0,puanT:0,puanN:0};
@@ -12786,8 +12783,12 @@ function renderSahaPitch(m,h,a){
     if(!ptSahaGoster())return '';   // SAHA'ya özgü
     if(!m||!m.isLive||!m.sahaMode)return '';
     if(typeof m.ballX!=='number'||typeof m.ballZ!=='number')return '';
-    const x=Math.max(-1,Math.min(1,m.ballX));
-    const z=Math.max(-1,Math.min(1,m.ballZ));
+    // TARAF DEĞİŞİMİ (2026-10-02): ilk yarıda ev sahibi SAĞ kaleye, ikinci yarıda SOL kaleye
+    // hücum eder. Veri ev sahibi perspektifinde (ev hücumu +) geldiği için ikinci yarıda
+    // görünüm 180° çevrilir (x ve z birlikte - aynalama değil döndürme).
+    const _yf=(m.izleYon&&Number(m.izleYon.devre)===2)?-1:1;
+    const x=Math.max(-1,Math.min(1,m.ballX*_yf));
+    const z=Math.max(-1,Math.min(1,m.ballZ*_yf));
     const attackHome=m.ballAttack!=='away';
     const attackTeam=attackHome?h:a;
     const attackColor=attackHome?'#3b82f6':'#ef4444';
@@ -12825,7 +12826,7 @@ function renderSahaPitch(m,h,a){
     // hiçbir hata oluşmaz.
     const oyuncuNoktasi=(pt,renk)=>{
       if(!pt||typeof pt[0]!=='number'||typeof pt[1]!=='number')return '';
-      const ox=Math.max(-1,Math.min(1,pt[0])), oz=Math.max(-1,Math.min(1,pt[1]));
+      const ox=Math.max(-1,Math.min(1,pt[0]*_yf)), oz=Math.max(-1,Math.min(1,pt[1]*_yf));
       const opx=PX0+((ox+1)/2)*PW, opy=PY0+((oz+1)/2)*PH;
       return `<circle cx="${opx.toFixed(1)}" cy="${opy.toFixed(1)}" r="3.6" fill="${renk}" stroke="#0b0b0e" stroke-width=".8" stroke-opacity=".55"/>`;
     };
@@ -13074,6 +13075,80 @@ function renderBaskimetre(m){
   }catch(e){DiagSil('renderBaskimetre',e);return '';}
 }
 
+/* MAÇ ÖZETİ (2026-10-02, kullanıcı: "maç özetleri için bir sistem kurulacak")
+   Oynanmış her maçın Detay sekmesinin başında: (1) olaylardan, istatistiklerden ve performans
+   puanlarından üretilen kısa metin özeti, (2) önemli anlar şeridi, (3) SAHA maçlarında
+   oyunun kaydettiği önemli anların 3B tekrarı ("Maç özetini izle" - TV oynatıcısında açılır,
+   bkz. saha.html MAÇ ÖZETİ KAYDI). Özet hesaplanır, saklanmaz: yönetici bir olayı düzeltirse
+   özet de kendiliğinden düzelir. */
+function ptMacOzetHtml(id,m,h,a){
+  try{
+    if(!m||!m.played)return '';
+    var esc=function(x){return escHtml(String(x==null?'':x));};
+    var hg=Number(m.homeGoals)||0, ag=Number(m.awayGoals)||0;
+    var hn=h.name||'Ev sahibi', an=a.name||'Deplasman';
+    var ev=Array.isArray(m.events)?m.events:Object.values(m.events||{});
+    var soy=function(ad){return String(ad||'').trim().split(/\s+/).pop();};
+    var cumle;
+    if(hg===ag)cumle=hn+' ile '+an+' '+hg+'-'+ag+' berabere kaldı.';
+    else if(hg>ag)cumle=hn+' sahasında '+an+' karşısında '+hg+'-'+ag+' kazandı.';
+    else cumle=an+' deplasmanda '+hn+' karşısında '+ag+'-'+hg+' kazandı.';
+    var gol=ev.filter(function(e){return e&&(e.type==='goal'||e.type==='pen_goal'||e.type==='og');})
+      .sort(function(x,y){return (x.min||0)-(y.min||0);});
+    var golMetin=gol.map(function(e){
+      var takimH=(e.type==='og')?(e.team!=='home'):(e.team==='home');
+      return (e.min||0)+"' "+(e.player?soy(e.player):'?')+(e.type==='og'?' (k.k.)':e.type==='pen_goal'?' (p)':'')+' – '+(takimH?hn:an);
+    });
+    // Maçın oyuncusu: o maçta forma giyenler arasından en yüksek performans puanı.
+    var enIyi=null;
+    ['home','away'].forEach(function(t){
+      ptMacOynayanlar(m,t).forEach(function(p){
+        var pn=ptOyuncuPuani(m,p.name,t,p.position);
+        if(pn!=null&&(!enIyi||pn>enIyi.p))enIyi={ad:p.name,p:pn,t:t};
+      });
+    });
+    var st=m.sahaStats||null, ek='';
+    if(st&&st.home&&st.away){
+      var sh=st.home,sa=st.away;
+      ek=' Topa sahip olma %'+(sh.sahiplik!=null?sh.sahiplik:50)+'-%'+(sa.sahiplik!=null?sa.sahiplik:50)
+        +', şut '+(sh.sut||0)+'-'+(sa.sut||0)+(((sh.korner||0)+(sa.korner||0))?', korner '+(sh.korner||0)+'-'+(sa.korner||0):'')+'.';
+    }
+    var kirmizi=ev.filter(function(e){return e&&(e.type==='red'||e.type==='yellow2red');});
+    var metin=cumle
+      +(golMetin.length?' Goller: '+golMetin.join(', ')+'.':' Golsüz bir maç oldu.')
+      +(kirmizi.length?' '+kirmizi.map(function(e){return (e.min||0)+"' "+soy(e.player)+' kırmızı kart gördü';}).join(', ')+'.':'')
+      +ek
+      +(enIyi?' Maçın oyuncusu '+enIyi.ad+' ('+enIyi.p.toFixed(1)+').':'');
+    var anlar=ev.filter(function(e){return e&&['goal','pen_goal','og','red','yellow2red','pen_miss'].indexOf(e.type)>=0;})
+      .sort(function(x,y){return (x.min||0)-(y.min||0);});
+    var ikon={goal:'⚽',pen_goal:'⚽',og:'⚽',red:'🟥',yellow2red:'🟥',pen_miss:'❌'};
+    var serit=anlar.length?'<div style="display:flex;gap:.35rem;overflow-x:auto;padding:.1rem 0 .2rem;margin-top:.5rem">'
+      +anlar.map(function(e){
+        var sag=(e.type==='og')?(e.team==='home'):(e.team!=='home');
+        return '<span style="flex-shrink:0;display:inline-flex;align-items:center;gap:.25rem;font-size:.64rem;font-weight:700;padding:.22rem .5rem;border-radius:999px;background:var(--s3);border:1px solid '+(sag?'rgba(239,68,68,.35)':'rgba(59,130,246,.35)')+'">'
+          +ikon[e.type]+' '+(e.min||0)+"' "+esc(soy(e.player)||'')+'</span>';
+      }).join('')+'</div>':'';
+    var izle=(m.sahaMode&&Number(m.sahaOzetVar)>0)
+      ?'<button onclick="ptOzetIzle(\''+id+'\')" style="margin-top:.6rem;width:100%;min-height:40px;border-radius:11px;cursor:pointer;background:var(--ac);color:var(--ac-tx,#fff);border:none;font-size:.74rem;font-weight:800">▶ Maç özetini izle <span style="opacity:.75;font-weight:600">· '+Number(m.sahaOzetVar)+' an</span></button>':'';
+    return '<div class="md-section-head">📋 Maç Özeti</div>'
+      +'<div class="mi-card" style="padding:.7rem .8rem;margin-bottom:.7rem">'
+      +'<div style="font-size:.74rem;line-height:1.65;color:var(--tx)">'+esc(metin)+'</div>'
+      +serit+izle+'</div>';
+  }catch(e){DiagSil('ptMacOzetHtml',e);return '';}
+}
+window._ptOzetKanallar=[];
+window.ptOzetIzle=function(mid){
+  try{
+    var m=(D.matches||{})[mid]; if(!m)return;
+    var h=(D.teams||{})[m.homeId]||{}, a=(D.teams||{})[m.awayId]||{};
+    var lig=window._curLeagueId||'';
+    var k={id:'ozet_'+mid,title:'📼 '+(h.name||'?')+' '+(m.homeGoals||0)+' - '+(m.awayGoals||0)+' '+(a.name||'?')+' · Özet',
+      isLive:false,category:'📼 Maç Özeti',logo:h.logo||a.logo||'',
+      url:'saha.html?izle=1&ozet=1&lig='+encodeURIComponent(lig)+'&mac='+encodeURIComponent(mid)};
+    window._ptOzetKanallar=window._ptOzetKanallar.filter(function(x){return x.id!==k.id;}).concat([k]);
+    if(typeof window.openVideoWatch==='function')window.openVideoWatch(k.id);
+  }catch(e){DiagSil('ptOzetIzle',e);}
+};
 function renderMdDetay(id,m,h,a,ntInfo){
   const dateStr=m.date?new Date(m.date+'T'+(m.time||'00:00')).toLocaleDateString('tr-TR',{day:'2-digit',month:'long',year:'numeric'})+', '+(m.time||''):'Tarih belirlenmedi';
   // KULLANICI TALEBİ: 🔁 Rövanş Bağlantısı - bu iki takımın DAHA ÖNCE oynanmış (bu maçtan
@@ -13089,6 +13164,7 @@ function renderMdDetay(id,m,h,a,ntInfo){
   })():'';
   return `
     ${rematchHtml}
+    ${m.played?ptMacOzetHtml(id,m,h,a):''}
     ${ntInfo?`<div style="padding:.6rem .9rem;margin:0 -1rem;border-bottom:1px solid var(--br);text-align:center"><span style="display:inline-flex;align-items:center;gap:.3rem;background:${ntInfo.color}1a;border:1px solid ${ntInfo.color}55;color:${ntInfo.color};border-radius:20px;padding:.18rem .65rem;font-size:.68rem;font-weight:800">${ntInfo.icon} ${ntInfo.label}</span></div>`:''}
     <!-- ── MAÇ BİLGİSİ (referans görselin birebir karşılığı) ────────────────────────
          Satır tipleri referanstaki gibi ayrıldı:
@@ -13789,6 +13865,67 @@ function confirmDownloadMatchCard(){
 // olmadan üretiliyor. Elimizde yalnızca gol/asist/kart ve sonuç var. Yani gerçek bir
 // performans ölçümü DEĞİL, mevcut verinin makul bir özeti. Gol atmayan ama iyi oynayan
 // oyuncu ile vasat oynayan aynı puanı alabilir.
+/* MAÇIN GERÇEK KADROSU (2026-10-02, kullanıcı: "maça çıkmış oyuncunun verileri işlenmiyor" +
+   "sonradan transfer olan oyuncular performans puanı alamaz; takıma katıldıktan sonra alırlar").
+   KÖK SEBEP: Her istatistik, geçmiş maçlar için de takımın BUGÜNKÜ ilk 11'ine bakıyordu.
+   Sonuç: (1) bugün transfer edilen oyuncu sezonun bütün maçlarından puan, kalecilik ve
+   "haftanın 11'i" kaydı alıyordu; (2) maçta oynayıp sonra satılan/yedeğe alınan ya da oyuna
+   sonradan giren oyuncunun maçı hiç sayılmıyordu.
+   ŞİMDİ: SAHA maç bitince sahaya çıkan oyuncuları maça yazar (m.sahaKadro). Varsa o kullanılır.
+   Yoksa (eski maç / admin maçı) bugünkü kadrodan, takıma KATILIMI (katilim) maçtan sonra olan
+   oyuncular çıkarılır. */
+function ptKadroKonumu(t,ad){
+  var sq=(t&&t.squad)||{};
+  var i=(sq.starting||[]).findIndex(function(p){return p&&p.name===ad;});
+  if(i>=0)return {section:'starting',idx:i};
+  i=(sq.bench||[]).findIndex(function(p){return p&&p.name===ad;});
+  return i>=0?{section:'bench',idx:i}:null;
+}
+function ptMacZamani(m){
+  if(!m)return 0;
+  var t=Number(m.sahaBitisTs)||0;
+  if(t)return t;
+  if(m.date){var d=Date.parse(m.date+'T'+((m.time&&/^\d{1,2}:\d{2}/.test(m.time))?m.time.slice(0,5):'23:59')+':00');if(isFinite(d))return d;}
+  return 0;
+}
+function ptKatilimUygun(p,m){
+  if(!p)return false;
+  var k=Number(p.katilim)||0; if(!k)return true;
+  var mt=ptMacZamani(m); if(!mt)return true;
+  return k<=mt;
+}
+// {starting, bench}: o maçtaki kadro. starting = ilk 11, girenler = oyuna sonradan girenler.
+function ptMacKadro(m,taraf){
+  var tid=taraf==='home'?m.homeId:m.awayId;
+  var t=(D.teams||{})[tid]||{}, sq=t.squad||{};
+  var tum=[].concat(sq.starting||[],sq.bench||[]).filter(function(p){return p&&p.name;});
+  var mk=m&&m.sahaKadro&&m.sahaKadro[taraf];
+  if(mk&&!Array.isArray(mk))mk=Object.keys(mk).map(function(k){return mk[k];});
+  if(Array.isArray(mk)&&mk.length){
+    var esle=function(x){
+      var k=tum.find(function(p){return p.name===x.name;})||{};
+      var o=Object.assign({},k,{name:x.name});
+      if(x.number)o.number=x.number;
+      if(x.position==='KL')o.position='KL'; else if(!o.position&&x.position)o.position=x.position;
+      if(x.yer!=null)o.yer=x.yer; if(x.yerKod)o.yerKod=x.yerKod;
+      if(!o.position)o.position='OOS';
+      return o;
+    };
+    var ilk=mk.filter(function(x){return x&&x.name&&!x.girdi;}).map(esle);
+    var giren=mk.filter(function(x){return x&&x.name&&x.girdi;}).map(esle);
+    return {starting:ilk,bench:giren.concat((sq.bench||[]).filter(function(p){return p&&!giren.some(function(g){return g.name===p.name;})&&!ilk.some(function(g){return g.name===p.name;});})),girenler:giren,_macKadrosu:true};
+  }
+  return {starting:(sq.starting||[]).filter(function(p){return !p||!p.name||ptKatilimUygun(p,m);}),
+          bench:(sq.bench||[]).filter(function(p){return !p||!p.name||ptKatilimUygun(p,m);}),girenler:[]};
+}
+// O maçta forma giyen herkes (ilk 11 + oyuna girenler) - puan/istatistik hesapları için.
+function ptMacOynayanlar(m,taraf){
+  var k=ptMacKadro(m,taraf);
+  return (k.starting||[]).concat(k.girenler||[]).filter(function(p){return p&&p.name;});
+}
+function ptMacKalecisi(m,taraf){
+  return ptMacOynayanlar(m,taraf).find(function(p){return p.position==='KL';})||null;
+}
 function ptOyuncuPuani(m,oyuncuAdi,takimTarafi,mevki){
   try{
     if(!m||!oyuncuAdi)return null;
@@ -13903,7 +14040,8 @@ function renderMdKadro(id,m,h,a){
 
   // side: 'top'/'bottom' (dik mod) veya 'left'/'right' (yatay mod)
   function renderHalfPitch(t,side,isVertical,liveEvents,teamSideKey){
-    const sq=t.squad||{};
+    // Oynanmış maçta o maçın kadrosu (bkz. ptMacKadro); canlı/oynanmamış maçta bugünkü kadro.
+    const sq=(m&&m.played&&teamSideKey)?ptMacKadro(m,teamSideKey):(t.squad||{});
     // Canlı maç esnasında oyuncu değişikliği olduysa, saha görünümü GERÇEK ZAMANLI günceller:
     // çıkan oyuncu sahadan kalkar, giren oyuncu onun pozisyonuna (yeri/numarası korunarak) geçer.
     // Bu, sadece GÖRÜNTÜLEME anlık hesaplaması - kalıcı kadro verisi (squad.starting) değişmez.
@@ -13999,7 +14137,11 @@ function renderMdKadro(id,m,h,a){
         const _dB=p.status?(PT_DURUM_ETIKET[p.status]||{ikon:'❔'}):null;
         const _dRenk=(p.status==='injured'||p.status==='ill')?'#f97316':(p.status==='suspended'||p.status==='cards')?'#dc2626':'#64748b';
         const statusBadge=_dB?'<span class="pitch-badge" style="background:'+_dRenk+'">'+_dB.ikon+'</span>':'';
-        pitchHtml+=`<div class="pitch-player" style="${posStyle}" onclick="event.stopPropagation();showPlayerDetail('${t.id}','${clickSection}',${clickIdx})">
+        // Maç kadrosu kullanılıyorsa sıra takımın bugünkü kadrosuyla aynı değildir: tıklama
+        // oyuncuyu ADIYLA takımın kadrosunda bulur (takımdan ayrıldıysa bilgi açılmaz).
+        let _ks=clickSection,_ki=clickIdx;
+        if(sq._macKadrosu){const _gk=ptKadroKonumu(t,p.name);_ks=_gk?_gk.section:'';_ki=_gk?_gk.idx:-1;}
+        pitchHtml+=`<div class="pitch-player" style="${posStyle}" onclick="event.stopPropagation();${_ki>=0?`showPlayerDetail('${t.id}','${_ks}',${_ki})`:''}">
           <div class="pitch-dot" style="border-color:${p.status?'#f97316':c};width:28px;height:28px;position:relative">${photoHtml}${badges||subBadge||statusBadge?`<div style="position:absolute;top:-8px;left:50%;transform:translateX(-50%);display:flex;gap:1px;white-space:nowrap">${badges}${subBadge}${statusBadge}</div>`:''}</div>
           <!-- 7.4px ölçüldü (eşik 9px). .46rem çok küçüktü; .56rem hem okunur hem sığar. -->
           <div class="pitch-name" style="font-size:.56rem">${p.name.split(' ').pop()}</div>
@@ -14017,8 +14159,9 @@ function renderMdKadro(id,m,h,a){
 
     const benchHtml=bench.length?bench.map(p=>{
       const c=PC[p.position]||'var(--br)';
-      const bIdx=sq.bench.indexOf(p);
-      return `<div onclick="showPlayerDetail('${t.id}','bench',${bIdx})" style="display:flex;align-items:center;gap:.4rem;padding:.28rem .4rem;background:var(--s2);border-radius:8px;margin-bottom:.22rem;cursor:pointer">
+      let bIdx=sq.bench.indexOf(p), bSec='bench';
+      if(sq._macKadrosu){const _gk=ptKadroKonumu(t,p.name);bSec=_gk?_gk.section:'';bIdx=_gk?_gk.idx:-1;}
+      return `<div onclick="${bIdx>=0?`showPlayerDetail('${t.id}','${bSec}',${bIdx})`:''}" style="display:flex;align-items:center;gap:.4rem;padding:.28rem .4rem;background:var(--s2);border-radius:8px;margin-bottom:.22rem;cursor:pointer">
         ${p.photo?`<img src="${p.photo}" style="width:22px;height:22px;border-radius:50%;object-fit:cover;border:1.5px solid ${c}" onerror="this.style.display='none'"/>`:`<div style="width:22px;height:22px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.55rem">👤</div>`}
         <span style="flex:1;min-width:0;font-size:.66rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
         ${p.position?`<span style="font-size:.5rem;color:${c};font-weight:800">${p.position}</span>`:''}
@@ -14133,10 +14276,8 @@ function renderMvpSection(id,m,h,a){
   // Oy verilebilecek oyuncuları ev sahibi/deplasman olarak ayrı ayrı türetir (sol/sağ gösterim için).
   const homePlayers=[];
   const awayPlayers=[];
-  const sqH=(D.teams[m.homeId]||{}).squad||{};
-  const sqA=(D.teams[m.awayId]||{}).squad||{};
-  (sqH.starting||[]).forEach(p=>{if(p&&p.name)homePlayers.push({name:p.name,photo:p.photo});});
-  (sqA.starting||[]).forEach(p=>{if(p&&p.name)awayPlayers.push({name:p.name,photo:p.photo});});
+  ptMacOynayanlar(m,'home').forEach(p=>{if(p&&p.name)homePlayers.push({name:p.name,photo:p.photo});});
+  ptMacOynayanlar(m,'away').forEach(p=>{if(p&&p.name)awayPlayers.push({name:p.name,photo:p.photo});});
   let html='<div style="background:var(--s2);border-radius:14px;padding:.75rem .8rem;margin-bottom:.7rem">';
   html+='<div style="font-size:.7rem;font-weight:800;color:var(--mu);text-transform:uppercase;margin-bottom:.55rem">🌟 Bu Maçın Yıldızı</div>';
 
@@ -17040,8 +17181,8 @@ function renderMdAnlati(id,m,h,a){
     `${m.week}. hafta mücadelesi${m.stadium?', '+escHtml(m.stadium):''}${m.referee?'. Maçın hakemi '+escHtml(m.referee):''}.`,
     'var(--mu)'));
   // Kadrolar - iki ayrı mesaj
-  [[h,'starting','home'],[a,'starting','away']].forEach(([t])=>{
-    const sq=(t&&t.squad)||{};
+  [[h,'starting','home'],[a,'starting','away']].forEach(([t,,taraf])=>{
+    const sq=(m&&m.played)?ptMacKadro(m,taraf):((t&&t.squad)||{});
     const ilk11=(sq.starting||[]).filter(p=>p&&p.name);
     if(!ilk11.length)return;
     mesajlar.push(ptAnlatiSatir('👕',null,'',
@@ -17993,6 +18134,11 @@ function sahaSquadKur(kadro, havuz, eski, uid, diz){
     // mevki koduna göre tahmin etmek yerine TAM bu yere çizer (2026-09-27-L).
     if(!yedekMi && x.yer != null) r.yer = x.yer; else delete r.yer;
     r.photo = x.o.foto || (ek && ek.photo) || '';
+    // KATILIM (2026-10-02, kullanıcı: "sonradan transfer olan oyuncu, takıma katıldıktan sonra
+    // performans puanı alır"): oyuncunun bu takıma geldiği an. Puan Tablosu bundan ÖNCE oynanmış
+    // maçlarda oyuncuyu kadroda saymaz. Havuzdaki alisTs satın alma/atama anıdır.
+    if(x.o.alisTs) r.katilim = Number(x.o.alisTs) || r.katilim;
+    if(!r.katilim) delete r.katilim;
     return r;
   }
   return { starting: ilk.map(function(x){ return cikti(x, false); }),
@@ -18823,6 +18969,8 @@ window.showPlayerDetail=function(teamId,section,idx){
     Object.values(D.matches||{}).filter(m=>m.played&&(m.homeId===teamId||m.awayId===teamId))
       .sort((a,b)=>(a.week||0)-(b.week||0)).forEach(m=>{
         const taraf=(m.homeId===teamId)?'home':'away';
+        // Yalnızca o maçta forma giydiyse (katılımdan önceki maçlar ve oynamadığı maçlar puan almaz).
+        if(!ptMacOynayanlar(m,taraf).some(x=>x.name===p.name))return;
         const pn=ptOyuncuPuani(m,p.name,taraf,p.position);
         if(pn!=null)out.push({puan:pn,hafta:m.week||0,mac:m});
       });
@@ -23013,7 +23161,17 @@ window._ptCanliMacKanallari=function(){
     // aldiginda" 'isLive' DEGIL 'sahaOnayli' yaziyor. isLive ancak oyuncu maci baslatinca
     // gelir. Kart onay aninda gorunmeli -> onayli ve henuz oynanmamis mac da listelenir.
     return Object.values(matches).filter(function(m){
-      return m && (m.isLive || m._realIsLive || (m.sahaOnayli && !m.played));
+      if(!m) return false;
+      // KULLANICI MAÇTAN ÇIKINCA KART KAYBOLUR (2026-10-02): (1) oyuncu maçı yarıda bırakırsa
+      // SAHA 'sahaTerkTs' yazar - onaylı ama terk edilmiş maç "birazdan başlayacak" diye
+      // kalmaz; (2) oyunun cihazı kapandıysa/çöktüyse canlılık damgası 60 sn'den eskidir.
+      if(m.isLive){
+        var _ts=Math.max(Number(m.sahaCanliTs)||0,Number(m.ballTs)||0);
+        if(m.sahaMode&&_ts&&(Date.now()-_ts)>60000) return false;
+        return true;
+      }
+      if(m._realIsLive) return true;
+      return !!(m.sahaOnayli && !m.played && !m.sahaTerkTs);
     }).map(function(m){
       var h=teams[m.homeId]||{},a=teams[m.awayId]||{};
       // BASLADI MI: Oyuncu SAHA'da maci baslatinca konum akisi (ballX) ya da dakika gelir.
@@ -23077,13 +23235,25 @@ function _ptMacLogo(url, ad, boy){
     +'color:#fff;font-weight:900;font-size:1.1rem;filter:drop-shadow(0 3px 6px rgba(0,0,0,.65))">'+ic+'</div>';
 }
 // Kartın görsel kısmı: arka plan + iki logo (ev solda, deplasman sağda) + CANLI rozeti.
-function ptMacKartGorsel(v, oran, logoBoy){
+function ptMacKartGorsel(v, oran, logoBoy, rozetsiz){
   return '<div style="position:relative;width:100%;'+oran+';background:#0b1a12 url(\''+ptMacKartArka().replace(/'/g,'%27')+'\') center/cover no-repeat;overflow:hidden">'
     +'<div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.08),rgba(0,0,0,.45))"></div>'
     +'<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:space-around;padding:0 5%">'
     +_ptMacLogo(v.evLogo,v.evAd,logoBoy)+_ptMacLogo(v.depLogo,v.depAd,logoBoy)+'</div>'
-    +'<span style="position:absolute;top:5px;left:5px;background:#dc2626;color:#fff;font-size:.5rem;font-weight:900;letter-spacing:.04em;padding:.1rem .35rem;border-radius:5px">● CANLI</span>'
+    +(rozetsiz?'':'<span style="position:absolute;top:5px;left:5px;background:#dc2626;color:#fff;font-size:.5rem;font-weight:900;letter-spacing:.04em;padding:.1rem .35rem;border-radius:5px">● CANLI</span>')
     +'</div>';
+}
+/* KUMANDADA CANLI MAÇ KARTI (2026-10-02, kullanıcı: "canlı maç kartı TV sekmesindeki yazı ve kart
+   temasını kumanda içinde uygula"). Kumandanın kanal listesinde maç kartı da TV sekmesindeki gibi
+   görünür: küçük stadyum arka planı + ev solda/deplasman sağda logolar, ad satırı yalnızca
+   "Ev - Deplasman" ve tek satıra sığdırılmış. İki kumanda (oynatıcı içi ve iki cihazlı) aynı
+   parçaları kullanır. */
+function ptKumandaMacSatiri(x, genislik, koyu){
+  return {
+    gorsel:'<span style="width:'+genislik+'px;flex-shrink:0;border-radius:7px;overflow:hidden;display:block;box-shadow:0 1px 3px rgba(0,0,0,.35)">'+ptMacKartGorsel(x,'aspect-ratio:16/10','36%',true)+'</span>',
+    ad:'<span class="pt-mac-ad" style="container-type:inline-size;flex:1;min-width:0;display:block;font-weight:800;white-space:nowrap;overflow:hidden">'+ptMacAdHtml(x,11.5)+'</span>',
+    alt:'<span style="display:block;font-size:.56rem;font-weight:700;color:'+(koyu?'#fca5a5':'#ef4444')+';margin-top:1px">● '+(x.macBasladi===false?'Birazdan başlayacak':'Canlı maç')+'</span>'
+  };
 }
 function ptMacKartAd(v){ return escAttr((v.evAd||'?')+' - '+(v.depAd||'?')); }
 // Takım adları TEK SATIRA sığsın.
@@ -23306,6 +23476,33 @@ function renderVideoScreenList(){
              .sort(function(a,b){return _sira[a.id]-_sira[b.id];});
   }
   if(q)list=list.filter(function(v){return (v.title||'').toLocaleLowerCase('tr').indexOf(q)!==-1;});
+  /* VİDEO KLASÖRLERİ (2026-10-02, kullanıcı: "Video bölümünde kategoriler klasör olarak görünecek;
+     örneğin 'Payitaht Abdülhamid'e tıklandığında ilgili videolar çıkacak").
+     Video sekmesinde kategori seçili değilken kategoriler klasör kutusu olarak gösterilir; klasöre
+     dokununca o kategorinin videoları açılır, üstte "← Klasörler" ile geri dönülür. Kategorisiz
+     videolar klasörlerin altında listelenir. Arama, favori/geçmiş süzgeci ya da sıralama
+     düzenlenirken klasör görünümü devre dışıdır (bu durumlarda düz liste daha kullanışlı). */
+  const klasorModu=(tab==='video'&&!activeCat&&!q&&!_suz&&!window._videoScreenReordering&&catsInTab.length>0);
+  let klasorHtml='';
+  if(klasorModu){
+    const klasorler=catsInTab.map(function(c){
+      const icerik=baseList.filter(function(v){return v.category===c;});
+      const kapak=icerik.find(function(v){return v.logo;});
+      return {ad:c,sayi:icerik.length,kapak:kapak?kapak.logo:''};
+    });
+    klasorHtml='<div style="font-size:.66rem;font-weight:800;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;margin:.1rem 0 .45rem">📁 Klasörler</div>'
+      +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:.55rem;margin-bottom:.9rem">'
+      +klasorler.map(function(k){
+        return '<button onclick="filterVideoScreenCategory(\''+escAttr(k.ad).replace(/'/g,"\\'")+'\')" style="text-align:left;cursor:pointer;font-family:inherit;color:var(--tx);background:var(--s2);border:1.5px solid var(--br);border-radius:14px;padding:0;overflow:hidden;display:flex;flex-direction:column">'
+          +'<div style="position:relative;aspect-ratio:16/10;background:var(--s3);display:flex;align-items:center;justify-content:center;overflow:hidden">'
+          +(k.kapak?'<img src="'+escAttr(k.kapak)+'" style="width:100%;height:100%;object-fit:cover;opacity:.9" onerror="this.style.display=\'none\'"/>':'')
+          +'<span style="position:absolute;left:.4rem;bottom:.35rem;font-size:1.25rem;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))">📁</span></div>'
+          +'<div style="padding:.45rem .55rem .5rem"><div style="font-size:.74rem;font-weight:800;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'+escAttr(k.ad)+'</div>'
+          +'<div style="font-size:.62rem;color:var(--mu);margin-top:.15rem">'+k.sayi+' video</div></div></button>';
+      }).join('')+'</div>';
+    list=list.filter(function(v){return !v.category;});
+    if(list.length)klasorHtml+='<div style="font-size:.66rem;font-weight:800;color:var(--mu);text-transform:uppercase;letter-spacing:.04em;margin:.1rem 0 .45rem">🎬 Diğer videolar</div>';
+  }
   function tabBtnHtml(id,label){
     const on=tab===id;
     // TEŞHİS RAPORU DÜZELTMESİ (kontrast): Seçili sekmenin yazısı sabit beyaz yerine temanın
@@ -23340,7 +23537,12 @@ function renderVideoScreenList(){
       ${_gecSay?`<button onclick="ptVideoSuzgec('gecmis')" style="${catChipCss(_suzAktif==='gecmis')}">🕘 Geçmiş · ${_gecSay}</button>`:''}
       ${_suzAktif==='gecmis'?`<button onclick="ptGecmisTemizle()" style="margin-left:auto;background:transparent;border:none;color:var(--mu);font-size:.66rem;cursor:pointer;font-family:inherit">🗑️ Temizle</button>`:''}
     </div>`:'';
-  const catHtml=suzHtml+(catsInTab.length?`<div style="display:flex;gap:.35rem;overflow-x:auto;padding-bottom:.5rem;margin-bottom:.2rem">
+  const catHtml=(tab==='video'&&activeCat&&!_suz)
+    ? suzHtml+`<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem">
+        <button onclick="filterVideoScreenCategory('')" style="${catChipCss(false)}">← Klasörler</button>
+        <span style="font-size:.8rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">📁 ${escAttr(activeCat)}</span></div>`
+    : (tab==='video'&&catsInTab.length) ? suzHtml
+    : suzHtml+(catsInTab.length?`<div style="display:flex;gap:.35rem;overflow-x:auto;padding-bottom:.5rem;margin-bottom:.2rem">
       <button onclick="filterVideoScreenCategory('')" style="${catChipCss(!activeCat)}">Tümü</button>
       ${catsInTab.map(c=>`<button onclick="filterVideoScreenCategory('${escAttr(c)}')" style="${catChipCss(activeCat===c)}">${escAttr(c)}</button>`).join('')}
     </div>`:'');
@@ -23369,7 +23571,8 @@ function renderVideoScreenList(){
           border:1.5px solid ${_videoGorunum===k?'var(--ac)':'var(--br)'}">${ik}</button>`).join('')}
     </div>`:''}
     ${reorderBtnHtml}
-    ${!list.length?`<div style="text-align:center;padding:2rem 1rem;color:var(--mu);font-size:.78rem">${q?'🔍 "'+q+'" ile eşleşen bir sonuç bulunamadı':(tab==='tv'?'Henüz canlı yayın eklenmedi':'Henüz video eklenmedi')}</div>`:
+    ${klasorHtml}
+    ${(!list.length&&!klasorHtml)?`<div style="text-align:center;padding:2rem 1rem;color:var(--mu);font-size:.78rem">${q?'🔍 "'+q+'" ile eşleşen bir sonuç bulunamadı':(tab==='tv'?'Henüz canlı yayın eklenmedi':'Henüz video eklenmedi')}</div>`:
     (_videoGorunum==='izgara'&&!reordering
       ? '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:.5rem">'
       : '')+
@@ -23718,6 +23921,7 @@ function remoteCtrlChannelRowsHtml(isLive){
   if(kat)items=items.filter(function(o){return (o.x.category||'').trim()===kat;});
   if(term)items=items.filter(function(o){return (o.x.title||'').toLocaleLowerCase('tr').indexOf(term)>=0;});
   if(!items.length)return '<div style="text-align:center;color:var(--mu);font-size:.68rem;padding:1rem 0">'+(term?'❌ Sonuç bulunamadı':'Kayıtlı yayın yok')+'</div>';
+  setTimeout(function(){ try{ ptMacAdSigdir(document.getElementById('remoteCtrlChList')); }catch(e){} }, 0);
   return items.map(function(o){
     var x=o.x,i=o.i;
     var harf=(x.title||'?').trim().charAt(0).toUpperCase()||'?';
@@ -23731,6 +23935,12 @@ function remoteCtrlChannelRowsHtml(isLive){
         +'<button onclick="remoteCtrlSiraTasi(\''+x.id.replace(/'/g,"\\'")+'\',-1)" title="Yukarı taşı" style="width:30px;height:28px;flex-shrink:0;border-radius:7px;border:1px solid var(--br);background:var(--s2);color:var(--tx);font-size:.6rem;cursor:pointer;padding:0">▲</button>'
         +'<button onclick="remoteCtrlSiraTasi(\''+x.id.replace(/'/g,"\\'")+'\',1)" title="Aşağı taşı" style="width:30px;height:28px;flex-shrink:0;border-radius:7px;border:1px solid var(--br);background:var(--s2);color:var(--tx);font-size:.6rem;cursor:pointer;padding:0">▼</button>'
       +'</div>';
+    }
+    if(x.isMatchCard){
+      var _ms=ptKumandaMacSatiri(x,52,false);
+      return '<button onclick="remoteCtrlJumpTo(\''+x.id.replace(/'/g,"\\'")+'\')" style="width:100%;display:flex;align-items:center;gap:.5rem;padding:.4rem .3rem;background:none;border:none;border-bottom:1px solid var(--br);color:var(--tx);text-align:left;cursor:pointer;font-family:inherit">'
+        +'<span style="width:1.2rem;flex-shrink:0;text-align:center;font-size:.6rem;font-weight:800;color:var(--mu)">'+(i+1)+'</span>'
+        +_ms.gorsel+'<span style="flex:1;min-width:0;display:block">'+_ms.ad+_ms.alt+'</span></button>';
     }
     return '<button onclick="remoteCtrlJumpTo(\''+x.id.replace(/'/g,"\\'")+'\')" style="width:100%;display:flex;align-items:center;gap:.5rem;padding:.4rem .3rem;background:none;border:none;border-bottom:1px solid var(--br);color:var(--tx);text-align:left;cursor:pointer;font-family:inherit">'
       +'<span style="width:1.2rem;flex-shrink:0;text-align:center;font-size:.6rem;font-weight:800;color:var(--mu)">'+(i+1)+'</span>'
@@ -30425,6 +30635,15 @@ function ptpUstBarParcalari(){
       // fonksiyon olduğundan (window'a atanmamış olsa da) PTPlayer'ın kendi kapsamından
       // normal JS closure zinciriyle doğrudan erişilebilir.
       var kilitli=x.premium&&typeof hasPremiumAccess==='function'&&!hasPremiumAccess('ch_'+x.id);
+      if(x.isMatchCard&&!S.chSira&&typeof ptKumandaMacSatiri==='function'){
+        var _ms=ptKumandaMacSatiri(x,56,true);
+        setTimeout(function(){ try{ ptMacAdSigdir(); }catch(e){} }, 0);
+        return '<div class="ptp-ch-row'+(i===curIdx?' ptp-ch-active':'')+'" data-idx="'+i+'">'
+          +'<span class="ptp-ch-num">'+(i+1)+'</span>'+_ms.gorsel
+          +'<div class="ptp-ch-info" style="min-width:0;flex:1">'+_ms.ad.replace('font-weight:800','font-weight:800;color:#f1f5f9')+_ms.alt+'</div>'
+          +(i===curIdx?'<span style="color:#a78bfa;font-size:.75rem;flex-shrink:0">▶</span>':'')
+          +'</div>';
+      }
       return '<div class="ptp-ch-row'+(i===curIdx?' ptp-ch-active':'')+'" data-idx="'+i+'">'
         +'<span class="ptp-ch-num">'+(i+1)+'</span>'
         +'<div class="ptp-ch-logo" style="position:relative'+(kilitli?';filter:grayscale(.6) brightness(.6)':'')+'">'+logoHtml+(kilitli?'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:.85rem;filter:none">🔒</span>':'')+'</div>'
@@ -32148,7 +32367,7 @@ window.openVideoWatch=function(videoId,secenek){
   try{if(window.ptGecmiseEkle)ptGecmiseEkle(videoId);}catch(e){}
   // KULLANICI TALEBİ: videoId bir canlı maç kartıysa ('match_' öneki) D.videoLinks'te değil,
   // ptTumKanallar()'ın ürettiği sanal kayıtlar arasında bulunur - bkz. yukarıdaki not.
-  const v=(String(videoId||'').indexOf('match_')===0?ptTumKanallar():(D.videoLinks||[])).find(function(x){return x.id===videoId;});
+  const v=(String(videoId||'').indexOf('match_')===0?ptTumKanallar():String(videoId||'').indexOf('ozet_')===0?(window._ptOzetKanallar||[]):(D.videoLinks||[])).find(function(x){return x.id===videoId;});
   if(!v){showToast('❌ Video bulunamadı - maç artık canlı olmayabilir');return;}
   // KULLANICI TALEBİ ("yönetici istediği kanalları şifreli yapabilir... böyle bir sistem
   // zaten var, ekstra TV ekleyeceğiz"): Mevcut premium erişim kontrolü (yazı tipi/tema/tepki
