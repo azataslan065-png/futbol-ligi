@@ -2125,7 +2125,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-02-F';
+window.APP_BUILD='2026-10-02-H';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5839,10 +5839,132 @@ function sahteTara(temizle){
     return db.ref().update(g).then(function(){ toast('🗑 Temizlendi'); sahteTara(false); });
   }).catch(function(e){ toast('❌ Tarama başarısız: '+((e&&e.message)||''),'er'); DiagSil('sahteTara',e); });
 }
+/* ══ SAHA KÖK YAYIN HAZIRLIĞI (2026-10-02-H, kullanıcı: "kök sürümü yok; kök sürüm çıktığında
+   veritabanları ayrı olmalı") ══════════════════════════════════════════════════════════════
+   KOD TARAFI ZATEN AYRI: test kopyası (/test/) her yolu 'test/' altına yazar, kök kopya hiçbir
+   zaman 'test/' altına yazmaz (bkz. saha.html TEST ORTAMI - AYRI VERI KOKU).
+   ASIL RİSK ESKİ KALINTILAR: saha.html'e test öneki eklenmeden ÖNCE test adresinde oynanan
+   oyun KÖKE yazıyordu (teşhiste "oyun 522 kayıt gördü, panel 2"). Kök SAHA yayına alındığında
+   bu kalıntılarla açılır: test kullanıcıları, onların parası ve kadroları, sahip atanmış
+   oyuncular, test maçlarının sonuçları; hatta gerçek ligde SAHA'nın yazdığı kadro ve maç alanları.
+   BU ARAÇ: yalnızca KÖK panelde görünür (testte hiç çıkmaz). Önce yalnızca OKUR ve sayar;
+   temizlik seçilen gruplarla, yazarak onaylanınca yapılır. Okuma/yazma önek uygulanmamış
+   ref (_ptGercekRef) ile yapılır - yol tam olarak ekranda yazdığı gibidir.
+   KİLİT: "Kök SAHA yayına alındı" işaretlenince (globalConfig/sahaKokYayinTs) temizlik düğmesi
+   kalıcı olarak kapanır - yayındaki gerçek kullanıcı verisi bu araçla silinemez. */
+var ADM_SAHA_MAC_ALANLARI=['sahaMode','sahaStats','sahaKadro','sahaBitisTs','sahaTerkTs','sahaOzetVar','sahaCanliTs','sahaOynayan',
+  'sahaUzatma','momentum','izleYon','tabela','sahiplik','ballX','ballZ','ballAttack','ballTs','vurus','ekranOran','homePlayers','awayPlayers','homeJer','awayJer'];
+window._admKokHazir=null;
+function _admKokRef(y){ return (window._ptGercekRef||firebase.database().ref.bind(firebase.database()))(y); }
+function kokHazirlikCiz(){
+  if(window._ptTestOrtami) return;                     // test panelinde bu araç yok
+  var pg=qs('pg-live'); if(!pg) return;
+  var k=qs('kokHazirlikKutu');
+  if(!k){ k=document.createElement('div'); k.id='kokHazirlikKutu'; k.className='card';
+    var once=qs('sahteTaramaKutu')||qs('liveMatchPicker');
+    if(once&&once.parentNode) once.parentNode.insertBefore(k,once); else pg.appendChild(k); }
+  var r=window._admKokHazir, esc=function(x){return String(x==null?'':x).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+  var h='<div style="font-size:.72rem;font-weight:800;margin-bottom:.35rem">🚀 SAHA kök yayın hazırlığı</div>'
+    +'<div style="font-size:.6rem;color:var(--mu);line-height:1.5;margin-bottom:.4rem">Test sürümü kendi verisini <b>test/</b> altında tutar ve köke yazmaz. '
+    +'Bu araç, test öneki gelmeden önce köke yazılmış SAHA kalıntılarını bulur. Kök SAHA yayına alınmadan önce kullanın.</div>';
+  if(!r){ h+='<div style="font-size:.62rem;color:var(--mu)">Henüz taranmadı.</div>'; }
+  else {
+    var sat=function(id,etiket,sayi,ayr,tik){ return '<label style="display:flex;justify-content:flex-start;gap:.45rem;align-items:flex-start;text-align:left;width:100%;font-size:.64rem;line-height:1.5;margin:.15rem 0">'
+      +(tik&&!r.kilit?'<input type="checkbox" id="kh_'+id+'" '+(sayi?'checked':'disabled')+' style="width:15px;height:15px;min-width:15px;flex:0 0 15px;margin:.15rem 0 0;padding:0">':'<span style="flex:0 0 15px"></span>')
+      +'<span style="flex:1;text-align:left"><b>'+etiket+':</b> '+sayi+(ayr?' <span style="color:var(--mu)">· '+esc(ayr)+'</span>':'')+'</span></label>'; };
+    h+='<div style="font-size:.62rem;font-weight:800;margin:.3rem 0 .1rem">Yalnızca SAHA\'ya ait kök dalları (tamamen silinir)</div>'
+      +sat('kull','kullanicilar (SAHA hesapları)',r.kull,r.kullAd,true)
+      +sat('havuz','oyuncuHavuzu',r.havuz,r.havuzSahipli+' tanesi bir hesaba ait',true)
+      +sat('sahip','takimSahipleri',r.sahip,'',true)
+      +sat('aktif','sahaAktif',r.aktif,'',true)
+      +sat('oda','sahaOdalar (oda, yayın, özet)',r.oda,'',true)
+      +sat('canli','paylasilan/canliMaclar',r.canli,'',true)
+      +'<div style="font-size:.62rem;font-weight:800;margin:.4rem 0 .1rem">sahaVeri (SAHA ligi kurulumu - lig, takım, fikstür KORUNUR)</div>'
+      +sat('sv','Oynanmış SAHA maçı (sonuç + oyun alanları sıfırlanır)',r.svMac,r.svMacAd,true)
+      +sat('svk','SAHA kadrosu yazılmış takım (gerçek kadro geri yüklenir)',r.svKadro,'',true)
+      +'<div style="font-size:.62rem;font-weight:800;margin:.4rem 0 .1rem">Gerçek lig (Puan Tablosu) - SAHA izleri</div>'
+      +sat('gm','SAHA alanı yazılmış maç (yalnızca SAHA alanları silinir; skor korunur)',r.gMac,r.gMacSkor?r.gMacSkor+' tanesinde skor SAHA\'dan gelmiş olabilir: '+r.gMacAd:'',true)
+      +sat('gk','SAHA kadrosu yazılmış takım (gerçek kadro geri yüklenir)',r.gKadro,r.gKadroYok?r.gKadroYok+' takımın yedeği yok, kadrosuna dokunulmaz':'',true);
+    if(r.kilit) h+='<div style="font-size:.62rem;color:#22c55e;margin-top:.4rem">🔒 Kök SAHA '+esc(new Date(r.kilit).toLocaleString('tr-TR'))+' tarihinde yayına alındı olarak işaretlendi; temizlik kapalı.</div>';
+  }
+  h+='<div style="display:flex;gap:.35rem;margin-top:.45rem;flex-wrap:wrap">'
+    +'<button class="btn bgh" style="flex:1;font-size:.68rem;padding:.35rem" onclick="kokHazirlikTara()">🔍 Tara</button>'
+    +(r&&!r.kilit&&r.toplam>0?'<button class="btn" style="flex:1;font-size:.68rem;padding:.35rem;background:rgba(239,68,68,.15);color:#f87171;border:1px solid rgba(239,68,68,.3)" onclick="kokHazirlikTemizle()">🗑 Seçilenleri temizle</button>':'')
+    +(r&&!r.kilit?'<button class="btn bgh" style="flex:1 1 100%;font-size:.62rem;padding:.3rem" onclick="kokYayinIsaretle()">🔒 Kök SAHA yayına alındı (temizliği kalıcı kapat)</button>':'')
+    +'</div>';
+  k.innerHTML=h;
+}
+function kokHazirlikTara(){
+  if(window._ptTestOrtami){ toast('Bu araç yalnızca kök panelde çalışır','er'); return Promise.resolve(); }
+  var dal=['kullanicilar','oyuncuHavuzu','takimSahipleri','sahaAktif','sahaOdalar','paylasilan/canliMaclar','sahaVeri/leagues','leagues','globalConfig/sahaKokYayinTs'], v={};
+  return Promise.all(dal.map(function(d){ return _admKokRef(d).once('value').then(function(sn){ v[d]=sn.val(); }); })).then(function(){
+    var say=function(o){ return o&&typeof o==='object'?Object.keys(o).length:0; };
+    var r={ g:{}, kilit:v['globalConfig/sahaKokYayinTs']||null };
+    var ku=v.kullanicilar||{}; r.kull=say(ku); r.kullAd=Object.keys(ku).slice(0,6).map(function(u){ return (ku[u]&&ku[u].ad)||u; }).join(', ')+(r.kull>6?'…':'');
+    var hv=v.oyuncuHavuzu||{}; r.havuz=say(hv); r.havuzSahipli=Object.keys(hv).filter(function(i){ return hv[i]&&hv[i].sahip; }).length;
+    r.sahip=say(v.takimSahipleri); r.aktif=say(v.sahaAktif); r.oda=say(v.sahaOdalar); r.canli=say(v['paylasilan/canliMaclar']);
+    // Kurallar bu dallarda yazmayı ÇOCUK düzeyinde tanımlıyor (kullanicilar/$uid ...); dalın tamamını tek
+    // anahtarla silmek reddedilir. Bu yüzden her kayıt ayrı anahtarla silinir.
+    var tek=function(yol, o){ var g={}; Object.keys(o||{}).forEach(function(k){ g[yol+'/'+k]=null; }); return g; };
+    r.g.kull=tek('kullanicilar',ku); r.g.havuz=tek('oyuncuHavuzu',hv); r.g.sahip=tek('takimSahipleri',v.takimSahipleri);
+    r.g.aktif=tek('sahaAktif',v.sahaAktif); r.g.oda=tek('sahaOdalar',v.sahaOdalar); r.g.canli=tek('paylasilan/canliMaclar',v['paylasilan/canliMaclar']);
+    // sahaVeri: oynanmış SAHA maçları + SAHA kadrosu yazılmış takımlar
+    r.svMac=0; r.svKadro=0; var svAd=[], gsv={}, gsvk={};
+    var SV=v['sahaVeri/leagues']||{};
+    Object.keys(SV).forEach(function(lid){ var L=SV[lid]||{}, T=L.teams||{}, M=L.matches||{}, ad=function(t){ return (T[t]&&T[t].name)||t; };
+      Object.keys(M).forEach(function(mid){ var m=M[mid]; if(!m) return;
+        var iz=m.played||m.isLive||ADM_SAHA_MAC_ALANLARI.some(function(a){ return m[a]!=null; }); if(!iz) return;
+        r.svMac++; if(svAd.length<4) svAd.push(ad(m.homeId)+' '+(m.homeGoals||0)+'-'+(m.awayGoals||0)+' '+ad(m.awayId));
+        var b='sahaVeri/leagues/'+lid+'/matches/'+mid+'/';
+        ADM_SAHA_MAC_ALANLARI.concat(['events','minute']).forEach(function(a){ if(m[a]!=null) gsv[b+a]=null; });
+        gsv[b+'played']=false; gsv[b+'isLive']=false; gsv[b+'homeGoals']=0; gsv[b+'awayGoals']=0; });
+      Object.keys(T).forEach(function(tid){ var t=T[tid]; if(!t||t.squadKaynak!=='saha') return; r.svKadro++;
+        var b='sahaVeri/leagues/'+lid+'/teams/'+tid+'/'; gsvk[b+'squadKaynak']=null; if(t.squadGercek){ gsvk[b+'squad']=t.squadGercek; gsvk[b+'squadGercek']=null; } });
+    });
+    r.svMacAd=svAd.join('; ')+(r.svMac>4?'…':''); r.g.sv=gsv; r.g.svk=gsvk;
+    // Gerçek lig: SAHA alanları + SAHA kadrosu
+    r.gMac=0; r.gMacSkor=0; r.gKadro=0; r.gKadroYok=0; var gAd=[], ggm={}, ggk={};
+    var GL=v.leagues||{};
+    Object.keys(GL).forEach(function(lid){ var L=GL[lid]||{}, T=L.teams||{}, M=L.matches||{}, ad=function(t){ return (T[t]&&T[t].name)||t; };
+      Object.keys(M).forEach(function(mid){ var m=M[mid]; if(!m) return;
+        // 'momentum' gerçek ligde yöneticinin kendi canlı maç baskı grafiği de olabilir - dokunulmaz.
+        var alan=ADM_SAHA_MAC_ALANLARI.filter(function(a){ return a!=='momentum' && m[a]!=null; }); if(!alan.length) return;
+        r.gMac++; if(m.sahaMode&&m.played){ r.gMacSkor++; if(gAd.length<4) gAd.push(ad(m.homeId)+' '+(m.homeGoals||0)+'-'+(m.awayGoals||0)+' '+ad(m.awayId)); }
+        alan.forEach(function(a){ ggm['leagues/'+lid+'/matches/'+mid+'/'+a]=null; }); });
+      Object.keys(T).forEach(function(tid){ var t=T[tid]; if(!t||t.squadKaynak!=='saha') return; r.gKadro++;
+        var b='leagues/'+lid+'/teams/'+tid+'/';
+        if(t.squadGercek){ ggk[b+'squad']=t.squadGercek; ggk[b+'squadGercek']=null; ggk[b+'squadKaynak']=null; } else r.gKadroYok++; });
+    });
+    r.gMacAd=gAd.join('; ')+(r.gMacSkor>4?'…':''); r.g.gm=ggm; r.g.gk=ggk;
+    r.toplam=r.kull+r.havuz+r.sahip+r.aktif+r.oda+r.canli+r.svMac+r.svKadro+r.gMac+r.gKadro;
+    window._admKokHazir=r; kokHazirlikCiz();
+    toast(r.toplam?('🔍 '+r.toplam+' kalıntı bulundu'):'✅ Kökte SAHA kalıntısı yok');
+  }).catch(function(e){ toast('❌ Tarama başarısız: '+((e&&e.message)||''),'er'); try{ DiagSil('kokHazirlikTara',e); }catch(_e){} });
+}
+function kokHazirlikTemizle(){
+  var r=window._admKokHazir; if(!r||r.kilit||window._ptTestOrtami) return;
+  var g={}, sec=[];
+  ['kull','havuz','sahip','aktif','oda','canli','sv','svk','gm','gk'].forEach(function(id){
+    var c=qs('kh_'+id); if(!c||!c.checked) return; sec.push(id); Object.assign(g, r.g[id]||{}); });
+  if(!Object.keys(g).length){ toast('Seçili kalıntı yok'); return; }
+  var c=prompt('Seçilen '+sec.length+' gruptaki KÖK veriler silinecek/geri yüklenecek. Bu işlem GERİ ALINAMAZ.\n\n'
+    +'Test ortamına (test/) dokunulmaz.\n\nOnaylamak için büyük harfle KÖKÜ TEMİZLE yazın:');
+  if(c===null) return;
+  if(String(c).trim().toLocaleUpperCase('tr')!=='KÖKÜ TEMİZLE'){ alert('İptal edildi.'); return; }
+  _admKokRef('').update(g).then(function(){ toast('🗑 Kök temizlendi'); kokHazirlikTara(); })
+    .catch(function(e){ toast('❌ Temizlenemedi: '+((e&&e.message)||''),'er'); try{ DiagSil('kokHazirlikTemizle',e); }catch(_e){} });
+}
+function kokYayinIsaretle(){
+  if(window._ptTestOrtami) return;
+  if(!confirm('Kök SAHA yayına alındı olarak işaretlensin mi?\n\nBundan sonra bu araçla kök temizliği YAPILAMAZ (gerçek kullanıcı verisini korumak için). Tarama çalışmaya devam eder.')) return;
+  _admKokRef('globalConfig/sahaKokYayinTs').set(Date.now()).then(function(){ toast('🔒 İşaretlendi'); kokHazirlikTara(); })
+    .catch(function(e){ toast('❌ '+((e&&e.message)||''),'er'); });
+}
 function renderLive(){
   fillSelects();
   try{ sahaKartArkaCiz(); }catch(e){}
   try{ sahteTaramaCiz(); }catch(e){}
+  try{ kokHazirlikCiz(); }catch(e){}
   renderLivePicker();
   renderCanliRozetGlobal();
   var live=getManagedLiveMatch();
