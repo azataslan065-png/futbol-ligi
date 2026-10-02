@@ -61,6 +61,20 @@
     opacity:0;transition:opacity .12s}
   #power2 i{display:block;height:100%;width:0%;background:linear-gradient(90deg,#8fc7ff,#3d7fd4)}
 
+  /* SPİKER & YORUMCU ALTYAZISI: iki satır, konuşan satır yanar. Geniş ekranda üst orta;
+     dar/yatay telefonda radarın üstü (üst köşeler skorbord ve ayar düğmesiyle dolu). */
+  #yorumKutu{position:absolute;left:50%;top:8px;transform:translateX(-50%);
+    width:min(460px,calc(100vw - 520px));display:flex;flex-direction:column;gap:4px;pointer-events:none}
+  .yk-sat{display:none;padding:6px 10px;background:var(--ink);border:1px solid var(--line);
+    border-left:3px solid #5aa9ff;border-radius:4px;font-size:12.5px;line-height:1.4;
+    text-shadow:0 1px 3px rgba(0,0,0,.6)}
+  .yk-sat.yo{border-left-color:#f0c14b}
+  .yk-sat.on{display:block}
+  .yk-sat b{display:block;font-size:10.5px;letter-spacing:.06em;opacity:.7;margin-bottom:1px}
+  @media (max-width:900px){
+    #yorumKutu{top:auto;bottom:136px;width:max(200px,min(420px,calc(100vw - 440px)))}
+    .yk-sat{font-size:11.5px;padding:5px 8px}
+  }
   #hata{position:absolute;left:12px;top:56px;display:none;background:rgba(6,10,8,.82);
     border:1px solid rgba(120,220,160,.35);border-radius:4px;padding:8px 10px;
     font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;line-height:1.7;
@@ -390,6 +404,7 @@
   <canvas id="radar" width="184" height="118"></canvas>
   <div id="msg"></div>
   <div id="kart"></div>
+  <div id="yorumKutu"><div class="yk-sat sp" id="yorumSpiker"><b></b><span></span></div><div class="yk-sat yo" id="yorumYorumcu"><b></b><span></span></div></div>
   <div id="tekrarEt">TEKRAR</div>
   <div id="power"><i></i></div>
   <div id="power2"><i></i></div>
@@ -536,6 +551,8 @@
     <div class="row"><span>Maç süresi<small>Sonraki maçta geçerli</small></span><button id="sw-sure">2 × 2:30</button></div>
     <div class="row"><span>Zorluk<small>Rakip hızı ve isabeti</small></span><button id="sw-zor">Normal</button></div>
     <div class="row"><span>Ses<small>Düdük, vuruş, tribün</small></span><button id="sw-ses">Açık</button></div>
+    <div class="row"><span>Spiker &amp; yorumcu<small>Maç anlatımı ve altyazı</small></span><button id="sw-yorum">Açık</button></div>
+    <div class="row"><span>Anlatım sesi<small>Kapalıysa yalnızca altyazı</small></span><button id="sw-yorumses">Açık</button></div>
     <div class="row"><span>Gol tekrarı<small>Golden sonra yavaş tekrar</small></span><button id="sw-tekrar">Açık</button></div>
     <div class="row"><span>Radar<small>Alt ortadaki mini saha</small></span><button id="sw-radar">Açık</button></div>
     <div class="row"><span>Grafik<small>Çözünürlük ve tribün</small></span><button id="sw-grafik">Yüksek</button></div>
@@ -7214,8 +7231,8 @@ function yayinDurdur(){
 }
 addEventListener('pagehide', function(){ try{ yayinDurdur(); }catch(e){} });
 // Spiker metni izleyiciye (konuşma sesi videoya giremez).
-function yayinAnonsGonder(metin){
-  try{ if(YAYIN.rol === 'yayinci' && YAYIN.kok) fbDb.ref(YAYIN.kok + '/anons').set({ m: String(metin).slice(0, 200), t: Date.now() }).catch(function(){}); }catch(e){}
+function yayinAnonsGonder(metin, kim){
+  try{ if(YAYIN.rol === 'yayinci' && YAYIN.kok) fbDb.ref(YAYIN.kok + '/anons').set({ m: String(metin).slice(0, 200), t: Date.now(), k: kim || null }).catch(function(){}); }catch(e){}
 }
 // ── İZLEYİCİ TARAFI ──
 function izleYayinDinle(lig, mac){
@@ -7237,7 +7254,10 @@ function izleYayinDinle(lig, mac){
       var v = sn.val();
       if(v && v.t && v.t > YAYIN.sonAnons && (Date.now() - v.t) < 10000){
         YAYIN.sonAnons = v.t;
-        if(YAYIN.videoAktif){ _anonsKonus(v.m); _izleAltyazi(v.m); }
+        if(YAYIN.videoAktif){
+          if(v.k){ try{ yorumIzleyici(v.k, v.m); }catch(e){ _anonsKonus(v.m); _izleAltyazi(v.m); } }
+          else { _anonsKonus(v.m); _izleAltyazi(v.m); }
+        }
       }
     };
     ar.on('value', af); YAYIN.dinle.push([ar, 'value', af]);
@@ -7321,7 +7341,7 @@ function _izleVideoGoster(ms){
   }catch(e){ _sessiz(e, 'izleVideoGoster', 'saha_izle'); }
 }
 // Spiker cümlesi izleyici ekranında altyazı olarak da görünür (tarayıcı konuşmayı engellese bile).
-function _izleAltyazi(metin){
+function _izleAltyazi(metin, ikon){
   try{
     var a = document.getElementById('yayinAltyazi');
     if(!a){
@@ -7331,7 +7351,7 @@ function _izleAltyazi(metin){
         + 'font:700 15px/1.35 inherit;text-align:center;pointer-events:none;transition:opacity .4s';
       document.body.appendChild(a);
     }
-    a.textContent = '📢 ' + metin; a.style.opacity = '1';
+    a.textContent = (ikon || '📢') + ' ' + metin; a.style.opacity = '1';
     clearTimeout(a._t); a._t = setTimeout(function(){ a.style.opacity = '0'; }, 5000);
   }catch(e){}
 }
@@ -7361,8 +7381,10 @@ function stadyumAnons(metin, zil){
     if(!_sesUret() || window._sahaIzleModu) return;
     if(zil !== false) stadyumZil();
     // Görüntülü yayındaki izleyici de duysun: zil videoda gider, konuşma metni ayrıca.
-    setTimeout(function(){ yayinAnonsGonder(metin); }, zil !== false ? 1100 : 0);
-    if(AYAR.ses) setTimeout(function(){ _anonsKonus(metin); }, zil !== false ? 1100 : 0);
+    // Spiker & yorumcu açıksa gol/açılış/bitiş cümlelerini onlar söyler; stadyum anonsu aynı anda
+    // konuşup birbirini kesmesin diye yalnızca zil çalar (bkz. SPİKER & YORUMCU).
+    if(!yorumAktifMi()) setTimeout(function(){ yayinAnonsGonder(metin); }, zil !== false ? 1100 : 0);
+    if(AYAR.ses && !yorumSesliMi()) setTimeout(function(){ _anonsKonus(metin); }, zil !== false ? 1100 : 0);
   }catch(e){ _sessiz(e, 'stadyumAnons', 'saha_ses'); }
 }
 function _alkis(t, ses){
@@ -8398,7 +8420,9 @@ function sayLigCiz(){
     else if(m.sahaOnayli) aksiyon = '<button class="sh-dug" type="button" onclick="fiksturMacinaBasla(\'' + id + '\')">▶ Oyna</button>';
     else                  aksiyon = '<span class="sh-rozet">⏳ Onay bekliyor</span>';
     return '<div class="sh-satir"><div class="ad">' + (benHome ? 'Ev sahibi' : 'Deplasman') + ' · ' + esc(rakip.name || '?')
-      + '<div class="alt">' + esc(bilgi || 'Tarih belirtilmedi') + '</div></div>' + aksiyon + '</div>';
+      + '<div class="alt">' + esc(bilgi || 'Tarih belirtilmedi') + '</div>'
+      + ((m.spiker || m.yorumcu) ? '<div class="alt">' + esc([m.spiker ? '🎙️ ' + m.spiker : '', m.yorumcu ? '🗣️ ' + m.yorumcu : ''].filter(Boolean).join(' · ')) + '</div>' : '')
+      + '</div>' + aksiyon + '</div>';
   }).join('');
   h += sahaLigTeshisSatiri();
   k.innerHTML = h;
@@ -9225,6 +9249,14 @@ function sayAyarCiz(){
       + 'oninput="ayarSesSeviye(this.value)"><span class="deg" id="ayDegSes">%' + (AYAR.sesSeviye==null?70:AYAR.sesSeviye) + '</span></div>'
     + '</div>';
 
+  h += '<div class="sh-kart"><div class="sh-kart-bas">Maç anlatımı</div>'
+    + '<div class="sh-ayar"><div class="et">Spiker &amp; yorumcu<small>Gol, kart, penaltı, şut ve devre arası anlatılır; altyazı olarak da akar</small></div>'
+      + '<button type="button" class="' + (AYAR.yorum !== false ? '' : 'off') + '" onclick="ayarYorumAcKapa()">' + (AYAR.yorum !== false ? 'Açık' : 'Kapalı') + '</button></div>'
+    + '<div class="sh-ayar"><div class="et">Anlatım sesi<small>Kapalıysa yalnızca altyazı görünür. Ses düzeyi yukarıdaki ayarı izler.</small></div>'
+      + '<button type="button" class="' + (AYAR.yorumSes !== false ? '' : 'off') + '" onclick="ayarYorumSesAcKapa()">' + (AYAR.yorumSes !== false ? 'Açık' : 'Kapalı') + '</button></div>'
+    + '<button class="sh-dug sh-genis ikincil" type="button" onclick="ayarYorumDene()">🎙️ Sesleri dene</button>'
+    + '</div>';
+
   h += '<div class="sh-kart"><div class="sh-kart-bas">Dokunmatik</div>'
     + '<div class="sh-ayar"><div class="et">Tuş hassasiyeti<small>Yön çubuğunun tepki eşiği - yüksek değer, küçük hareketle tam hız</small></div>'
       + '<input type="range" min="50" max="200" step="10" value="' + Math.round((AYAR.dokunmaHassas==null?1:AYAR.dokunmaHassas)*100) + '" '
@@ -9255,6 +9287,9 @@ function sayAyarCiz(){
   try{ kolAyarShellCiz(); }catch(e){ _sessiz(e,'sayAyarCiz:kol','saha_kol'); }
 }
 function ayarSesAcKapa(){ AYAR.ses = !AYAR.ses; if(AYAR.ses) sesBaslat(); ayarKaydet(); ayarUygula(); sayAyarCiz(); }
+function ayarYorumAcKapa(){ AYAR.yorum = (AYAR.yorum === false); ayarKaydet(); if(AYAR.yorum === false) yorumSifirla(); sayAyarCiz(); }
+function ayarYorumSesAcKapa(){ AYAR.yorumSes = (AYAR.yorumSes === false); ayarKaydet(); if(AYAR.yorumSes === false){ try{ window.speechSynthesis.cancel(); }catch(e){} } sayAyarCiz(); }
+function ayarYorumDene(){ if(AYAR.ses === false){ AYAR.ses = true; ayarKaydet(); try{ sesBaslat(); }catch(e){} } try{ yorumDene(); }catch(e){ _sessiz(e,'ayarYorumDene','saha_ses'); } }
 function ayarTipAcKapa(){ AYAR.tip = !AYAR.tip; ayarKaydet(); ayarUygula(); sayAyarCiz(); }
 function ayarRadarAcKapa(){ AYAR.radar = !AYAR.radar; ayarKaydet(); ayarUygula(); if(AYAR.radar) radar(); sayAyarCiz(); }
 function ayarTekrarAcKapa(){ AYAR.tekrar = !AYAR.tekrar; ayarKaydet(); ayarUygula(); sayAyarCiz(); }
@@ -11837,6 +11872,634 @@ function macDakika(){
     return Math.max(1, Math.min(90, dk));      // 0. dakika futbolda yoktur
   }catch(e){ return 1; }
 }
+/* ══════════════════════════════════════════════════════════════════════════════════════
+   SPİKER & YORUMCU (kullanıcı talebi: "oynanan maçlara spiker ve yorumcu ekle")
+   İki ayrı konuşmacı var:
+     · SPİKER   - anı anlatır: gol, kart, penaltı, şut, kurtarış. Hızlı, tizce, heyecanlı.
+     · YORUMCU  - ardından değerlendirir: neden oldu, skora etkisi, istatistik. Yavaş, kalın.
+   Olaylar zaten tek yerden geçiyor (olayEkle); modül oraya ve birkaç ek noktaya (şut,
+   kurtarış, direk, dışarı, duran top, devre arası, maç sonu) bağlanır. Oyun kodu bu
+   modülün çalışmasına BAĞIMLI DEĞİL: her çağrı try/catch içinde, hata verse maç sürer.
+   İSİMLER: Yönetici maça spiker/yorumcu yazdıysa (fikstür: m.spiker / m.yorumcu) altyazıda
+   o isimler görünür ve açılışta tanıtılır; yazılmadıysa "Spiker" / "Yorumcu".
+   TASARIM KARARLARI:
+   1) KUYRUK: Aynı anda tek kişi konuşur. Gol (öncelik 3) kuyruktaki her şeyin önüne geçer;
+      eski/bayat satırlar (9 sn+) atılır - 10 saniye önceki bir şutu anlatmak yanlış olur.
+   2) UYDURMA YOK: Cümleler yalnızca oyunun gerçekten bildiği şeyi söyler (skor, dakika,
+      şut/korner/faul sayısı, topla oynama). Olmayan bir pozisyon uydurulmaz.
+   3) SIKLIK SINIRI: Şut, faul, ofsayt gibi sık olaylar bekleme süresine ve olasılığa bağlı;
+      yoksa maç boyunca durmadan konuşurlardı.
+   4) SES KAPALIYSA ALTYAZI: Ses ayarı kapalıysa (veya "Anlatım sesi" kapalıysa) satırlar
+      yine altyazı olarak akar; oyuncu sessiz ortamda da anlatımı okuyabilir.
+   ══════════════════════════════════════════════════════════════════════════════════════ */
+var KOM = {
+  kuyruk:[], aktif:null, gap:null, zaman:null, jeton:0, durdu:false, sonSecim:{},
+  bekleyenFaul:null, sonKonusma:0, t:0, sonAnaliz:0, analizAralik:45, ikinci:false, bayrak:{},
+  sonSut:0, sonFaul:0, sonOfsayt:0, sonKurtaris:0, sonDirek:0, sonDisari:0, sonKorner:0,
+  sonSerbest:0, sonAvantaj:0, sonAnalizTur:'', altyaziT:{ spiker:null, yorumcu:null }
+};
+
+// Seyirci modunda (TV sekmesi) oyun değişkenleri boştur; skor, dakika, takım adı ve istatistik
+// ev sahibi cihazın Firebase'e yazdığı maç kaydından gelir (bkz. yorumIzleVeri).
+function _ySA(){ return KOM.izle ? KOM.izle.sh : skorA; }
+function _ySB(){ return KOM.izle ? KOM.izle.sa : skorB; }
+function _yDk(){ return KOM.izle ? KOM.izle.dk : macDakika(); }
+function yorumAktifMi(){
+  try{
+    if(window._sahaIzleModu) return !!KOM.izle && AYAR.yorum !== false;
+    return AYAR.yorum !== false && (typeof mod === 'undefined' || mod !== 'antrenman');
+  }catch(e){ return false; }
+}
+function yorumSesliMi(){
+  try{ return yorumAktifMi() && AYAR.yorumSes !== false && AYAR.ses && 'speechSynthesis' in window; }
+  catch(e){ return false; }
+}
+function _yHacim(){
+  var s = (AYAR.sesSeviye == null) ? 70 : AYAR.sesSeviye;
+  return Math.max(0, Math.min(1, s / 100));
+}
+
+/* ---------- Türkçe yardımcılar ---------- */
+// Ünlüyle biten ve kalın/ince ünlülü adlara doğru ek getirir: Rodri'ye, Messi'nin, Ramos'a.
+function _yEk(isim, tur){
+  var t = String(isim || '').trim(); if(!t) return t;
+  var son = t[t.length-1].toLocaleLowerCase('tr');
+  var unlu = 'aeıioöuüéèáà'.indexOf(son) !== -1;
+  var kalin = true, dar = 'i';
+  for(var i = t.length-1; i >= 0; i--){
+    var c = t[i].toLocaleLowerCase('tr');
+    if('aâ'.indexOf(c) !== -1){ kalin = true;  dar = 'ı'; break; }
+    if(c === 'ı'){              kalin = true;  dar = 'ı'; break; }
+    if('ou'.indexOf(c) !== -1){ kalin = true;  dar = 'u'; break; }
+    if('ei'.indexOf(c) !== -1){ kalin = false; dar = 'i'; break; }
+    if('öü'.indexOf(c) !== -1){ kalin = false; dar = 'ü'; break; }
+    if('éè'.indexOf(c) !== -1){ kalin = false; dar = 'i'; break; }
+  }
+  if(tur === 'e')  return t + "'" + (unlu ? (kalin ? 'ya' : 'ye') : (kalin ? 'a' : 'e'));
+  if(tur === 'in') return t + "'" + (unlu ? ('n' + dar + 'n') : (dar + 'n'));
+  if(tur === 'i')  return t + "'" + (unlu ? ('y' + dar) : dar);
+  return t;
+}
+var _Y_RAKAM = ['sıfır','bir','iki','üç','dört','beş','altı','yedi','sekiz','dokuz','on'];
+function _yN(n){ return (n >= 0 && n <= 10) ? _Y_RAKAM[n] : String(n); }
+function _ySoyad(ad){ var s = String(ad || '').trim().split(/\s+/); return s[s.length-1] || ''; }
+function _yAd(i){
+  if(KOM.izle) return i === 0 ? KOM.izle.h : KOM.izle.a;
+  try{ return tabelaAdi(i) || (i === 0 ? takA() : takB()).ad || (i === 0 ? 'Ev sahibi' : 'Deplasman'); }
+  catch(e){ return i === 0 ? 'Ev sahibi' : 'Deplasman'; }
+}
+// "Şimşekler iki, Fırtına bir" - "2-1" yazılsa ses motoru "iki tire bir" gibi okuyabilir.
+function _ySkorCumle(){ return _yAd(0) + ' ' + _yN(_ySA()) + ', ' + _yAd(1) + ' ' + _yN(_ySB()); }
+function _yGorevli(){
+  var r = { s:'', y:'' };
+  if(KOM.izle) return { s:KOM.izle.s, y:KOM.izle.y };
+  try{
+    var fk = window._sahaAktifFikstur, m = fk && sahaFikstur[fk.matchId];
+    if(m){ r.s = String(m.spiker || '').trim(); r.y = String(m.yorumcu || '').trim(); }
+  }catch(e){}
+  return r;
+}
+// Aynı cümleyi art arda seçmez.
+function _yCek(anahtar, liste){
+  if(!liste || !liste.length) return '';
+  var son = KOM.sonSecim[anahtar], i = Math.floor(Math.random() * liste.length);
+  if(liste.length > 1 && i === son) i = (i + 1 + Math.floor(Math.random() * (liste.length - 1))) % liste.length;
+  KOM.sonSecim[anahtar] = i;
+  return liste[i];
+}
+function _yDoldur(s, d){ return String(s).replace(/\{(\w+)\}/g, function(_, k){ return d[k] != null ? d[k] : ''; }); }
+function _yP(d, p, isim){   // oyuncu: {s} {sE} {sIn} {sI}
+  var x = _ySoyad(isim) || 'oyuncu';
+  d[p] = x; d[p+'E'] = _yEk(x, 'e'); d[p+'In'] = _yEk(x, 'in'); d[p+'I'] = _yEk(x, 'i');
+}
+function _yT(d, p, idx){    // takım: {t} {tE} {tIn} {tI}
+  var x = _yAd(idx);
+  d[p] = x; d[p+'E'] = _yEk(x, 'e'); d[p+'In'] = _yEk(x, 'in'); d[p+'I'] = _yEk(x, 'i');
+}
+function _yVeri(o){
+  var d = {}, ti = (o && o.team === 'away') ? 1 : 0;
+  _yP(d, 's', o && o.player); _yP(d, 'm', o && o.player2);
+  _yT(d, 't', ti); _yT(d, 'r', 1 - ti);
+  d.dk = _yDk(); d.sk = _ySkorCumle();
+  return d;
+}
+
+/* ---------- konuşma kuyruğu ---------- */
+function yorumSoyle(kim, metin, oncelik, gecikme, izleyici){
+  try{
+    if(!metin || (!izleyici && !yorumAktifMi())) return;
+    var K = KOM; oncelik = oncelik || 1;
+    var oge = { kim:kim, metin:String(metin), o:oncelik, ts:Date.now() + (gecikme || 0), izle:!!izleyici };
+    if(oncelik >= 3){
+      K.kuyruk = K.kuyruk.filter(function(x){ return x.o >= 3; });
+      if(K.aktif && K.aktif.o < 3){
+        _yIptal(false);
+        K.gap = setTimeout(function(){ K.gap = null; _yIsle(); }, 150);   // iptalden hemen sonra konuşmak bazı tarayıcılarda yutulur
+      }
+    } else if(oncelik === 2){
+      K.kuyruk = K.kuyruk.filter(function(x){ return x.o >= 2; });
+    }
+    K.kuyruk.push(oge);
+    if(K.kuyruk.length > 6) K.kuyruk.splice(0, K.kuyruk.length - 6);
+    _yIsle();
+  }catch(e){ _sessiz(e, 'yorumSoyle', 'saha_ses'); }
+}
+function _yIsle(){
+  var K = KOM;
+  if(K.durdu || K.aktif || K.gap) return;
+  var simdi = Date.now();
+  K.kuyruk = K.kuyruk.filter(function(x){ return x.o >= 3 || simdi - x.ts < 9000; });   // bayat satırlar atılır
+  if(!K.kuyruk.length) return;
+  var secim = -1, bekle = Infinity;
+  for(var i = 0; i < K.kuyruk.length; i++){
+    if(K.kuyruk[i].ts <= simdi){ secim = i; break; }
+    bekle = Math.min(bekle, K.kuyruk[i].ts - simdi);
+  }
+  if(secim < 0){ K.gap = setTimeout(function(){ K.gap = null; _yIsle(); }, bekle + 10); return; }
+  _yKonus(K.kuyruk.splice(secim, 1)[0]);
+}
+function _yIptal(yenidenKuyruga){
+  var K = KOM;
+  K.jeton++;
+  clearTimeout(K.zaman); K.zaman = null;
+  try{ if('speechSynthesis' in window) window.speechSynthesis.cancel(); }catch(e){}
+  var a = K.aktif; K.aktif = null;
+  if(yenidenKuyruga && a) K.kuyruk.unshift(a);
+}
+// İki ayrı ses bulunursa spiker erkek/ilk, yorumcu diğeri; tek sesse perde ve hız ayırır.
+function _ySes(kim){
+  try{
+    var v = window.speechSynthesis.getVoices() || [];
+    var tr = v.filter(function(x){ return /^tr/i.test(x.lang); });
+    if(!tr.length) return null;
+    var iyi = tr.filter(function(x){ return /google|natural|online/i.test(x.name); });
+    var havuz = iyi.length ? iyi : tr;
+    var erkek = /tolga|cem|ahmet|male|erkek/i;
+    var sp = havuz.filter(function(x){ return erkek.test(x.name); })[0] || havuz[0];
+    var yo = tr.filter(function(x){ return x !== sp && !erkek.test(x.name); })[0] || tr.filter(function(x){ return x !== sp; })[0] || sp;
+    return kim === 'spiker' ? sp : yo;
+  }catch(e){ return null; }
+}
+function _yKonus(oge){
+  var K = KOM; K.aktif = oge;
+  var jeton = ++K.jeton;
+  if(oge.izle || K.izle){ _yAltyaziIzle(oge); } else { _yAltyazi(oge); _yGonder(oge); }
+  var bitir = function(){
+    if(K.jeton !== jeton || K.aktif !== oge) return;   // iptal edilmiş ya da çoktan bitmiş
+    clearTimeout(K.zaman); K.zaman = null;
+    K.aktif = null; K.sonKonusma = Date.now();
+    K.gap = setTimeout(function(){ K.gap = null; _yIsle(); }, oge.kim === 'spiker' ? 280 : 380);
+  };
+  // Seyircide tarayıcı ses iznini ilk dokunuştan sonra verir (bkz. _izleSesAcik); öncesinde yalnızca altyazı.
+  var izleSesYok = window._sahaIzleModu && !(typeof _izleSesAcik !== 'undefined' && _izleSesAcik);
+  var sesli = !izleSesYok && AYAR.ses && AYAR.yorumSes !== false && _yHacim() > 0
+              && 'speechSynthesis' in window && window.SpeechSynthesisUtterance;
+  if(!sesli){ K.zaman = setTimeout(bitir, Math.max(1800, oge.metin.length * 62)); return; }
+  try{
+    var u = new SpeechSynthesisUtterance(oge.metin), sp = (oge.kim === 'spiker'), heyecan = oge.o >= 3;
+    u.lang = 'tr-TR';
+    u.rate   = sp ? (heyecan ? 1.2 : 1.1) : 0.96;
+    u.pitch  = sp ? (heyecan ? 1.25 : 1.1) : 0.8;
+    u.volume = Math.max(0.3, _yHacim());
+    var ses = _ySes(oge.kim); if(ses) u.voice = ses;
+    u.onend = bitir; u.onerror = bitir;
+    // Ses motoru bazen ne bitiş ne hata olayı verir; kuyruk sonsuza dek kilitlenmesin.
+    K.zaman = setTimeout(bitir, 9000 + oge.metin.length * 90);
+    window.speechSynthesis.speak(u);
+  }catch(e){ bitir(); }
+}
+function _yGonder(oge){      // görüntülü yayındaki izleyici de duysun / okusun
+  try{ yayinAnonsGonder(oge.metin, oge.kim); }catch(e){}
+}
+function _yAltyazi(oge){
+  try{
+    var kutu = document.getElementById('yorumKutu'); if(!kutu) return;
+    var g = _yGorevli(), sp = (oge.kim === 'spiker');
+    var sat = document.getElementById(sp ? 'yorumSpiker' : 'yorumYorumcu'); if(!sat) return;
+    sat.querySelector('b').textContent = sp ? ('🎙️ ' + (g.s || 'Spiker')) : ('🗣️ ' + (g.y || 'Yorumcu'));
+    sat.querySelector('span').textContent = oge.metin;
+    sat.classList.add('on');
+    clearTimeout(KOM.altyaziT[oge.kim]);
+    KOM.altyaziT[oge.kim] = setTimeout(function(){ sat.classList.remove('on'); }, Math.max(3500, oge.metin.length * 70 + 1800));
+  }catch(e){}
+}
+// Seyirci/test: oyun HUD'u gizli olabilir; yayın altyazısı (sabit konumlu) kullanılır.
+function _yAltyaziIzle(oge){
+  try{
+    var g = _yGorevli(), sp = (oge.kim === 'spiker');
+    _izleAltyazi(oge.metin, (sp ? '🎙️ ' + (g.s || 'Spiker') : '🗣️ ' + (g.y || 'Yorumcu')) + ':');
+  }catch(e){}
+}
+function _yAltyaziGizle(){
+  try{
+    ['yorumSpiker','yorumYorumcu'].forEach(function(id){ var s = document.getElementById(id); if(s) s.classList.remove('on'); });
+    clearTimeout(KOM.altyaziT.spiker); clearTimeout(KOM.altyaziT.yorumcu);
+  }catch(e){}
+}
+// Yeni maç / yeniden oyna / ayar kapatma: her şey sıfırlanır.
+function yorumSifirla(){
+  try{
+    var K = KOM;
+    _yIptal(false);
+    clearTimeout(K.gap); K.gap = null; clearTimeout(K.bekleyenFaul); K.bekleyenFaul = null;
+    K.kuyruk = []; K.durdu = false; K.t = 0; K.sonAnaliz = 0; K.analizAralik = 38 + Math.random() * 22;
+    K.ikinci = false; K.bayrak = {}; K.sonKonusma = 0; K.sonAnalizTur = '';
+    K.sonSut = K.sonFaul = K.sonOfsayt = K.sonKurtaris = K.sonDirek = K.sonDisari = K.sonKorner = K.sonSerbest = K.sonAvantaj = 0;
+    _yAltyaziGizle();
+  }catch(e){ _sessiz(e, 'yorumSifirla', 'saha_ses'); }
+}
+// Ayar paneli açılınca maç durur; konuşma da durur, kapanınca satır baştan okunur.
+function yorumDurakla(dur){
+  try{
+    var K = KOM;
+    if(dur){
+      if(K.durdu) return;
+      K.durdu = true;
+      if(K.aktif){ var a = K.aktif; _yIptal(true); a.ts = Date.now(); }
+    } else {
+      if(!K.durdu) return;
+      K.durdu = false;
+      clearTimeout(K.gap);
+      K.gap = setTimeout(function(){ K.gap = null; _yIsle(); }, 200);
+    }
+  }catch(e){ _sessiz(e, 'yorumDurakla', 'saha_ses'); }
+}
+// Ayarlar sayfasındaki "Sesleri dene" düğmesi.
+function yorumDene(){
+  try{
+    yorumSifirla();
+    yorumSoyle('spiker', 'Merhabalar, spiker mikrofonda. Maç anlatımı hazır!', 2, 0, true);
+    yorumSoyle('yorumcu', 'Ben de yorumcu. Ses ve altyazı tamam, iyi seyirler.', 2, 300, true);
+  }catch(e){}
+}
+// Görüntülü yayını izleyen cihaz: ev sahibinin cihazından gelen satırı kendi sesiyle okur.
+function yorumIzleyici(kim, metin){
+  yorumSoyle(kim === 'spiker' ? 'spiker' : 'yorumcu', metin, 2, 0, true);
+}
+
+/* ---------- olay yorumları ---------- */
+function yorumOlay(o){
+  if(!o || !yorumAktifMi()) return;
+  switch(o.type){
+    case 'goal': case 'pen_goal': return _yGol(o, false);
+    case 'og': return _yGol(o, true);
+    case 'yellow': case 'red': case 'yellow2red': return _yKart(o);
+    case 'foul': case 'pen_awarded': return _yFaul(o);
+    case 'offside': return _yOfsayt(o);
+    case 'sub': return _ySub(o);
+    case 'corner': return KOM.izle ? _yKornerIzle(o) : undefined;
+  }
+}
+function _yGol(o, kk){
+  var ti = (o.team === 'away') ? 1 : 0, sti = kk ? (1 - ti) : ti;       // kendi kalesine golde sayı rakibe yazılır
+  var lehte = (sti === 0) ? _ySA() : _ySB(), aleyhte = (sti === 0) ? _ySB() : _ySA();
+  var once = (lehte - 1) - aleyhte, simdi = lehte - aleyhte;
+  var d = _yVeri(o); _yT(d, 't', sti); _yT(d, 'r', 1 - sti);
+  var ex = kk
+    ? _yCek('og', ['Olamaz! {s} topu kendi ağlarına gönderdi.', 'Kendi kalesine gol! {s} için talihsiz bir an.', 'Ve top kendi ağlarında! {s} kendi kalesini buldu.'])
+    : _yCek('gol', ['Goooool! {s}!', 'Gol, gol, gol! {s} ağları buldu!', '{s} vurdu ve top ağlarda! Gooool!', 'Ve {s}! Gol!', 'Gooool! {s} yaptı!']);
+  var ctx;
+  if(_ySA() + _ySB() === 1) ctx = _yCek('golIlk', ['Maçın ilk golü! {t} skora ilk imzayı attı.', '{t} maçta öne geçti, ilk gol geldi.']);
+  else if(simdi === 0)    ctx = _yCek('golEs', ['Beraberlik geldi! {t} eşitliği yakaladı.', '{t} maça geri dönüyor, skor eşit!']);
+  else if(once === 0)     ctx = _yCek('golOne', ['{t} öne geçiyor!', '{t} skoru çevirdi ve öne geçti!']);
+  else if(once < 0)       ctx = _yCek('golAzalt', ['{t} farkı azaltıyor.', '{t} umutlarını canlı tutuyor, fark azaldı.']);
+  else                    ctx = _yCek('golFark', ['{t} farkı açıyor.', '{t} üstünlüğünü sürdürüyor.']);
+  var s = _yDoldur(ex + ' ' + ctx, d);
+  if(Math.random() < 0.7) s += ' Skor, ' + _ySkorCumle() + '.';
+  if(d.dk >= 80 && Math.random() < 0.5) s += ' Üstelik maçın son dakikalarında!';
+  yorumSoyle('spiker', s, 3, 0);
+
+  var havuz;
+  if(kk){
+    havuz = ['Futbolda bunlar olur, {s} için moral bozucu bir an ama oyun devam ediyor.', 'Baskı altında kalan savunmada iletişim eksikliği bu golü getirdi.'];
+  } else {
+    havuz = ['Çok net bir bitiriş. {s} soğukkanlılığını korudu.', 'Savunma burada bir an gevşedi ve {s} bunu cezalandırdı.',
+             'Kaleci için yapacak bir şey yoktu.', 'Güzel bir golle karşı karşıyayız.'];
+    if(o.player2) havuz = havuz.concat(['{m} güzel bir pas vermişti, golde onun da payı büyük.', '{mIn} pası harikaydı, {s} da boş bırakmadı.']);
+    if(simdi === 0 && _ySA() + _ySB() > 1) havuz.push('Bu gol maçı yeniden başlatıyor, {r} artık daha dikkatli olmak zorunda.');
+    if(once === 0 && simdi === 1) havuz.push('Skor avantajı artık {tIn} lehine; {r} üzerine gitmek zorunda.');
+  }
+  yorumSoyle('yorumcu', _yDoldur(_yCek('golY', havuz), d), 3, 400);
+}
+function _yKart(o){
+  var K = KOM;
+  if(K.bekleyenFaul){ clearTimeout(K.bekleyenFaul); K.bekleyenFaul = null; }   // faul + kart tek cümlede anlatılır
+  var d = _yVeri(o), S, Y;
+  if(o.type === 'yellow'){
+    S = _yCek('sari', ['Sarı kart! {s} uyarıldı.', 'Hakem {sE} sarı kartı gösteriyor.', '{s} sarı kart görüyor, bundan sonra dikkatli olması gerek.']);
+    Y = _yCek('sariY', ['Müdahale biraz geçti, kart doğru karar.', 'İkinci bir kart oyundan çıkması demek, daha temkinli girmeli.', 'Takımı için de bir risk bu sarı kart.']);
+  } else if(o.type === 'yellow2red'){
+    S = _yCek('ikiSari', ['İkinci sarı! {s} kırmızı kartla oyundan çıkıyor!', 'Hakem ikinci sarıyı gösterdi, {s} oyun dışı!']);
+    Y = '{t} artık on kişi. Maçın geri kalanı onlar için çok zor geçecek.';
+  } else {
+    S = _yCek('kirmizi', ['Kırmızı kart! {s} oyundan atılıyor!', 'Hakem direkt kırmızıyı gösterdi, {s} sahayı terk ediyor!']);
+    Y = 'Çok sert bir hareketti, hakemin başka seçeneği yoktu. {t} bundan sonra on kişiyle oynayacak.';
+  }
+  yorumSoyle('spiker', _yDoldur(S, d), 2, 0);
+  yorumSoyle('yorumcu', _yDoldur(Y, d), 2, 300);
+}
+function _yFaul(o){
+  var K = KOM, d = _yVeri(o), simdi = Date.now();
+  if(o.type === 'pen_awarded'){
+    if(K.bekleyenFaul){ clearTimeout(K.bekleyenFaul); K.bekleyenFaul = null; }
+    yorumSoyle('spiker', _yDoldur(_yCek('pen', ['Penaltı! Hakem beyaz noktayı gösterdi!', 'Hakem penaltıya işaret ediyor!']), d), 2, 0);
+    yorumSoyle('yorumcu', _yDoldur(_yCek('penY', ['{s}, ceza sahası içinde çok riskli girdi.', 'Bu pozisyonda {sIn} müdahalesi gereksizdi, ceza kaçınılmazdı.']), d), 2, 300);
+    return;
+  }
+  if(simdi - K.sonFaul < 9000 || Math.random() > 0.55) return;
+  K.sonFaul = simdi;
+  // Faulün hemen ardından kart gelebilir; kısa bekleyip kart gelirse tek cümle kurulur (bkz. _yKart).
+  K.bekleyenFaul = setTimeout(function(){
+    K.bekleyenFaul = null;
+    yorumSoyle('spiker', _yDoldur(_yCek('faul', ['Hakem düdüğü çaldı, {s} faul yaptı.', 'Faul! {s}, {mIn} önünü kesti.', '{s} biraz geç kaldı, faul veriliyor.']), d), 1, 0);
+  }, 900);
+}
+function _yOfsayt(o){
+  var K = KOM, simdi = Date.now();
+  if(simdi - K.sonOfsayt < 10000 || Math.random() > 0.6) return;
+  K.sonOfsayt = simdi;
+  var d = _yVeri(o);
+  yorumSoyle('spiker', _yDoldur(_yCek('ofs', ['Yan hakem bayrağı kaldırdı, {s} ofsaytta.', 'Ofsayt! {s} çizgiyi geçmişti.']), d), 1, 0);
+  if(Math.random() < 0.3) yorumSoyle('yorumcu', _yCek('ofsY', ['Hücum hattının zamanlaması biraz bozuk, çizgiyi iyi okuyamadı.', 'Savunma çizgiyi güzel tuttu, tuzağa düştüler.']), 1, 300);
+}
+function _ySub(o){
+  var d = _yVeri(o); d.c = _ySoyad(o.player2) || 'oyuncu';
+  yorumSoyle('spiker', _yDoldur(_yCek('sub', ['Oyuncu değişikliği: {c} çıkıyor, {s} oyuna giriyor.', '{t} kenara çağırdı; {c} yerini {sE} bırakıyor.']), d), 1, 0);
+  if(Math.random() < 0.5) yorumSoyle('yorumcu', _yCek('subY', ['Tempoyu değiştirmek için doğru bir hamle olabilir.', 'Taze kan, oyuna yeni bir enerji getirebilir.']), 1, 300);
+}
+
+function _yKornerIzle(o){
+  var K = KOM, simdi = Date.now();
+  if(simdi - K.sonKorner < 8000 || Math.random() > 0.6) return;
+  K.sonKorner = simdi;
+  var d = _yVeri(o);
+  yorumSoyle('spiker', _yDoldur(_yCek('kornerI', ['{t} korner kazandı, top ceza sahasına gelecek.', 'Korner! {t} tehlikeli bir pozisyon yakaladı.']), d), 1, 0);
+}
+
+/* ══ SEYİRCİ (TV SEKMESİ) ══════════════════════════════════════════════════════════════
+   TV sekmesi saha.html?izle=1 sayfasını gömer; bu sayfa oyunu oynatmaz, ev sahibinin cihazının
+   Firebase'e yazdığı maç kaydını (skor, dakika, olaylar) okuyup sahneyi çizer. Spiker ve yorumcu
+   da aynı kayıttan üretilir: YENİ olaylar (gol, kart, penaltı...) konuşulur, geçmiş olaylar
+   sayfa açılırken tekrar okunmaz. Her izleyici kendi cihazında kendi sesiyle dinler.
+   Ev sahibi görüntülü yayın (WebRTC) açmışsa izleyici ev sahibinin gönderdiği satırları
+   kullanır (yorumIzleyici); aynı olayın iki kez anlatılmaması için yerel üretim o durumda
+   susar. Şut/kurtarış gibi kayda yazılmayan anlar seyircide anlatılmaz. */
+function yorumIzleVeri(m){
+  var K = KOM; if(!m) return;
+  var tak = function(id, y){ var t = window._sahaIzleTakimlar && window._sahaIzleTakimlar[id]; return (t && t.name) ? String(t.name) : y; };
+  var evs = Array.isArray(m.events) ? m.events : [], flow = null;
+  for(var i = evs.length - 1; i >= 0; i--){ if(evs[i] && evs[i].type === 'flow'){ flow = evs[i]; break; } }
+  K.izle = { h:tak(m.homeId, 'Ev sahibi'), a:tak(m.awayId, 'Deplasman'), sh:Number(m.homeGoals) || 0, sa:Number(m.awayGoals) || 0,
+             dk:Math.max(0, Math.min(120, Math.round(m.minute || 0))), s:String(m.spiker || '').trim(), y:String(m.yorumcu || '').trim(), flow:flow };
+  var videoda = !!(typeof YAYIN !== 'undefined' && YAYIN && YAYIN.videoAktif);
+  var canli = !!m.isLive && !m.played;
+  var sesAcik = (typeof _izleSesAcik !== 'undefined' && _izleSesAcik);
+  if(K.izleEvSay == null || evs.length < K.izleEvSay){            // ilk yükleme (ya da yeni maç): geçmişi anlatma
+    K.izleEvSay = evs.length;
+    K.izleDevreArasi = false;
+    K.izleIkinci = evs.some(function(e){ return e && e.type === 'half_time'; });
+  } else if(evs.length > K.izleEvSay){
+    var yeni = evs.slice(K.izleEvSay); K.izleEvSay = evs.length;
+    yeni.forEach(function(e){
+      if(!e) return;
+      if(e.type === 'half_time') K.izleDevreArasi = true;
+      if(videoda || !yorumAktifMi()) return;
+      if(e.type === 'half_time') yorumDevreArasi();
+      else if(e.type === 'match_end') yorumMacSonu();
+      else yorumOlay(e);
+    });
+  }
+  if(videoda || !canli || !yorumAktifMi()) return;
+  var simdi = Date.now(), dk = K.izle.dk;
+  if(!K.izleSelam && sesAcik){                                    // yayına katılınca bir kez
+    K.izleSelam = true; K.izleSonAnaliz = simdi;
+    var g = _yGorevli();
+    yorumSoyle('spiker', 'Merhabalar, ' + K.izle.h + ' ile ' + K.izle.a + ' maçının canlı yayınındasınız.'
+      + (dk > 2 ? (' Maçta ' + dk + '. dakika, skor, ' + _ySkorCumle() + '.') : '') + (g.s ? (' Ben ' + g.s + '.') : ''), 2, 800);
+    yorumSoyle('yorumcu', 'Merhabalar' + (g.y ? (', ben ' + g.y + '.') : '.') + ' İyi seyirler.', 2, 300);
+    return;
+  }
+  if(K.izleDevreArasi && !K.izleIkinci && dk >= 46){
+    K.izleIkinci = true;
+    yorumSoyle('spiker', 'İkinci yarı başladı! Skor, ' + _ySkorCumle() + '.', 2, 0);
+    return;
+  }
+  if(K.izleSelam && !K.aktif && !K.kuyruk.length && simdi - K.sonKonusma > 40000 && simdi - (K.izleSonAnaliz || 0) > 55000){
+    K.izleSonAnaliz = simdi; _yAnaliz(false);
+  }
+}
+// Seyirci sayfasında ayar düğmesi yok; köşede küçük bir aç/kapat. Yalnızca bellekte tutulur
+// (ayarKaydet çağrılmaz): izleyicinin oyundaki kendi ayarı değişmesin.
+function yorumIzleDugme(){
+  try{
+    if(document.getElementById('yorumIzleDug')) return;
+    var b = document.createElement('button'); b.id = 'yorumIzleDug'; b.type = 'button';
+    b.style.cssText = 'position:fixed;right:8px;bottom:calc(8px + env(safe-area-inset-bottom,0px));z-index:2147478000;'
+      + 'width:34px;height:34px;padding:0;border-radius:50%;border:1px solid rgba(255,255,255,.25);'
+      + 'background:rgba(8,12,18,.6);color:#fff;font-size:16px;line-height:1;cursor:pointer';
+    var yaz = function(){ var ac = AYAR.yorum !== false; b.textContent = ac ? '🎙️' : '🔇'; b.style.opacity = ac ? '.85' : '.55';
+      b.title = ac ? 'Spiker ve yorumcu açık' : 'Spiker ve yorumcu kapalı'; };
+    b.onclick = function(e){ try{ e.stopPropagation(); }catch(x){} AYAR.yorum = (AYAR.yorum === false); if(AYAR.yorum === false){ yorumSifirla(); } yaz(); };
+    yaz(); document.body.appendChild(b);
+  }catch(e){}
+}
+
+/* ---------- oyun içi ek noktalar ---------- */
+function yorumSut(p, kafa){
+  var K = KOM; if(!p || !p.obj || !yorumAktifMi()) return;
+  var simdi = Date.now();
+  if(simdi - K.sonSut < 14000) return;
+  if(Math.abs(p.obj.position.x - p.dir * HLX) > 30 || Math.random() > 0.6) return;
+  K.sonSut = simdi;
+  var d = {}; _yP(d, 's', p.ad);
+  var L = kafa ? ['{s} yükseldi, kafa vuruşu!', 'Kafayla vuruyor {s}!']
+               : ['{s} şutunu çekiyor!', 'Vurdu {s}!', '{s} denedi, top kaleye doğru gidiyor!', '{s}, kale önünde fırsatı değerlendirmek istiyor!'];
+  yorumSoyle('spiker', _yDoldur(_yCek('sut', L), d), 1, 0);
+}
+function yorumKurtaris(gk, celdi){
+  var K = KOM; if(!gk || !yorumAktifMi()) return;
+  var simdi = Date.now();
+  if(simdi - K.sonKurtaris < 7000 || Math.random() > 0.85) return;
+  K.sonKurtaris = simdi;
+  var d = {}; _yP(d, 'k', gk.ad);
+  var L = celdi ? ['Kaleci çeldi! {k} devre dışı bıraktı.', 'Kaleci son anda çıkardı, {k} yine araya girdi!']
+                : ['{k} topu kontrol altına aldı.', 'Kaleci {k} sağlam bir kurtarış yaptı!'];
+  yorumSoyle('spiker', _yDoldur(_yCek('kurt', L), d), 2, 0);
+  if(Math.random() < 0.4) yorumSoyle('yorumcu', _yCek('kurtY', ['Kaleci çok iyi yerleşmişti.', 'Bu şut kaleciyi sınadı, işini iyi yaptı.', 'Açıyı iyi kapattı, forvete fırsat bırakmadı.']), 2, 300);
+}
+function yorumDirek(){
+  var K = KOM; if(!yorumAktifMi()) return;
+  var simdi = Date.now();
+  if(simdi - K.sonDirek < 10000) return;
+  K.sonDirek = simdi;
+  yorumSoyle('spiker', _yCek('direk', ['Direkten döndü!', 'Direk! Kaleci çaresizdi ama top direğe çarptı!', 'Vuruş direğe çarptı, gol olmadı!']), 2, 0);
+  yorumSoyle('yorumcu', _yCek('direkY', ['Santim farkla gol olmadı, çok şanssız.', 'Bu top gol olabilirdi, burada talih kaleden yana.']), 2, 300);
+}
+function yorumDisari(savunan){
+  var K = KOM; if(!yorumAktifMi()) return;
+  var simdi = Date.now(), p = sonDokunanOyuncu;
+  if(!p || p.team === savunan || (sonVurusTuru !== 'sut' && sonVurusTuru !== 'kafa')) return;
+  if(simdi - K.sonDisari < 9000 || Math.random() > 0.7) return;
+  K.sonDisari = simdi;
+  var d = {}; _yP(d, 's', p.ad);
+  yorumSoyle('spiker', _yDoldur(_yCek('disari', ['{s} şutunu dışarı gönderdi.', 'Auta gitti, {s} isabet ettiremedi.', '{s} denedi ama top yan taraftan dışarı çıktı.']), d), 1, 0);
+  if(Math.random() < 0.3) yorumSoyle('yorumcu', _yCek('disariY', ['Açıyı iyi bulamadı.', 'Biraz acele etti, bu pozisyon daha iyi değerlendirilebilirdi.']), 1, 300);
+}
+function yorumDuran(dr){
+  try{
+    var K = KOM; if(!dr || !dr.alici || !yorumAktifMi()) return;
+    var simdi = Date.now(), d = {}; _yP(d, 's', dr.alici.ad); _yT(d, 't', dr.takim);
+    if(dr.tip === 'korner'){
+      if(simdi - K.sonKorner < 8000 || Math.random() > 0.7) return;
+      K.sonKorner = simdi;
+      yorumSoyle('spiker', _yDoldur(_yCek('korner', ['{t} korner kazandı, topun başında {s} var.', 'Korner! {s} ortaya hazırlanıyor, ceza sahasında kalabalık.']), d), 1, 400);
+    } else if(dr.tip === 'serbest' && !dr.dolayli){
+      var uzak = Math.abs(ball.position.x - dr.alici.dir * HLX);
+      if(uzak > 32 || simdi - K.sonSerbest < 8000) return;
+      K.sonSerbest = simdi;
+      yorumSoyle('spiker', _yDoldur(_yCek('serbest', ['Ceza sahası çevresinde serbest vuruş! {s} topun başında.', 'Tehlikeli bir noktada serbest vuruş, {s} deneyecek.']), d), 1, 600);
+      if(Math.random() < 0.5) yorumSoyle('yorumcu', 'Buradan kaleyi doğrudan zorlayabilirler, baraj önemli olacak.', 1, 300);
+    }
+  }catch(e){ _sessiz(e, 'yorumDuran', 'saha_ses'); }
+}
+function yorumPenaltiVurus(p){
+  if(!p || !yorumAktifMi()) return;
+  var d = {}; _yP(d, 's', p.ad);
+  yorumSoyle('spiker', _yDoldur(_yCek('penVur', ['{s} penaltının başında... ve vuruyor!', 'Penaltıyı {s} kullanıyor!']), d), 2, 0);
+}
+function yorumSakatlik(p){
+  if(!p || !yorumAktifMi()) return;
+  var d = {}; _yP(d, 's', p.ad);
+  yorumSoyle('spiker', _yDoldur(_yCek('sakat', ['{s} yerde kaldı, bir sakatlık söz konusu.', '{s} acı içinde, oyun durdu.']), d), 2, 0);
+  yorumSoyle('yorumcu', 'Umarım ciddi bir şey değildir. Değişiklik hakkı olan takım için de önemli bir an.', 2, 300);
+}
+function yorumAvantaj(){
+  var K = KOM, simdi = Date.now(); if(!yorumAktifMi()) return;
+  if(simdi - K.sonAvantaj < 12000 || Math.random() > 0.5) return;
+  K.sonAvantaj = simdi;
+  yorumSoyle('spiker', _yCek('avantaj', ['Hakem avantaj uyguluyor, oyun devam ediyor.', 'Düdük çalmadı, hakem avantajı işletiyor.']), 1, 0);
+}
+
+/* ---------- maç akışı: açılış, analiz, devre arası, bitiş ---------- */
+function yorumMacBasladi(){
+  try{
+    yorumSifirla();
+    // Telefon tarayıcıları konuşmayı ancak bir kullanıcı dokunuşuyla açar; maç butonundan hemen
+    // sonra sessiz bir cümle okutmak, sonraki cümlelerin engellenmemesini sağlar.
+    try{ if('speechSynthesis' in window && window.SpeechSynthesisUtterance){ var u0 = new SpeechSynthesisUtterance(' '); u0.volume = 0; window.speechSynthesis.speak(u0); } }catch(e){}
+    if(!yorumAktifMi()) return;
+    var g = _yGorevli(), tA = _yAd(0), tB = _yAd(1);
+    var tanit = (g.s && g.y) ? ('Maçı ben, ' + g.s + ', anlatacağım; yanımda yorumcu ' + g.y + ' var.')
+              : g.s ? ('Ben ' + g.s + ', maçı sizin için anlatacağım; yanımda yorumcumuz da var.')
+              : g.y ? ('Maçı birlikte takip edeceğiz, yanımda yorumcu ' + g.y + ' var.')
+              : 'Maçı birlikte takip edeceğiz, yanımda yorumcumuz da var.';
+    yorumSoyle('spiker', 'Merhabalar, ' + tA + ' ile ' + tB + ' karşılaşmasına hoş geldiniz. ' + tanit, 2, 1500);
+    yorumSoyle('yorumcu', _yCek('acilis', ['Merhabalar. İki takım da sahaya hazır, güzel bir mücadele bizi bekliyor.', 'Merhabalar, iyi seyirler. İlk dakikalarda tempoyu kimin belirleyeceğini göreceğiz.']), 2, 300);
+  }catch(e){ _sessiz(e, 'yorumMacBasladi', 'saha_ses'); }
+}
+function _yIstat(){
+  if(KOM.izle){
+    var f = KOM.izle.flow;
+    if(!f) return { top:0, pa:50, sa:0, sb:0, ka:0, kb:0, fa:0, fb:0 };
+    return { top:100, pa:Number(f.pHome)||50, sa:Number(f.sutHome)||0, sb:Number(f.sutAway)||0,
+             ka:Number(f.kornerHome)||0, kb:Number(f.kornerAway)||0, fa:Number(f.faulHome)||0, fb:Number(f.faulAway)||0 };
+  }
+  var top = (istat.a.sahiplik || 0) + (istat.b.sahiplik || 0);
+  return { top: top, pa: top < 1 ? 50 : Math.round(istat.a.sahiplik / top * 100),
+           sa: istat.a.sut, sb: istat.b.sut, ka: istat.a.korner, kb: istat.b.korner, fa: istat.a.faul, fb: istat.b.faul };
+}
+// Yorumcunun, elimizdeki GERÇEK istatistiklere dayanan değerlendirmesi.
+function _yAnaliz(zorla){
+  var K = KOM, I = _yIstat(), dk = _yDk(), aday = [];
+  var farkli = function(tur, metin){ if(tur !== K.sonAnalizTur) aday.push({ tur:tur, m:metin }); };
+  var tA = _yAd(0), tB = _yAd(1);
+  if(I.top > 20){
+    if(I.pa >= 58)      farkli('top', tA + ' topa daha çok sahip, yüzde ' + I.pa + ' civarında. Ama topla oynamak yetmez, kale önünde etkili olmaları lazım.');
+    else if(I.pa <= 42) farkli('top', tB + ' topa daha çok sahip, yüzde ' + (100 - I.pa) + ' civarında. Ama topla oynamak yetmez, kale önünde etkili olmaları lazım.');
+    else                farkli('top', 'Topa sahip olma dengeli, iki takım da oyunu kendi lehine çevirmeye çalışıyor.');
+  }
+  if(Math.abs(I.sa - I.sb) >= 3){
+    var onde = I.sa > I.sb ? tA : tB, k = Math.max(I.sa, I.sb), l = Math.min(I.sa, I.sb);
+    farkli('sut', onde + ' şut sayısında önde, ' + _yN(k) + ' şuta karşılık ' + _yN(l) + '. Bu baskı bir gole dönüşebilir.');
+  }
+  if(_ySA() === 0 && _ySB() === 0) farkli('skor', 'Henüz gol yok. İki takım da temkinli, ilk gol maçın seyrini belirleyecek.');
+  else if(_ySA() !== _ySB()){
+    var lider = _ySA() > _ySB() ? tA : tB, geri = _ySA() > _ySB() ? tB : tA;
+    farkli('skor', lider + ' skor avantajını korumaya çalışıyor, ' + geri + ' ise çözüm bulmak zorunda.');
+  }
+  if(I.fa + I.fb >= 5) farkli('faul', 'Maç biraz sertleşti, ' + _yN(I.fa + I.fb) + ' faul oldu. Hakemin oyun kontrolü önemli hale geliyor.');
+  if(!KOM.izle) try{
+    var sayi = 0, top = 0;
+    players.forEach(function(p){ if(!p.gk && !p.dis){ top += (p.kond == null ? 100 : p.kond); sayi++; } });
+    if(sayi && top / sayi < 62) farkli('kond', 'Oyuncularda yorgunluk belirtileri görülmeye başladı, değişiklikler önem kazanıyor.');
+  }catch(e){}
+  if(!aday.length) return false;
+  var sec = aday[Math.floor(Math.random() * aday.length)];
+  K.sonAnalizTur = sec.tur;
+  if(zorla || Math.random() < 0.5) yorumSoyle('spiker', 'Maçta ' + dk + '. dakika, skor, ' + _ySkorCumle() + '.', 1, 0);
+  yorumSoyle('yorumcu', sec.m, 1, zorla ? 300 : 0);
+  return true;
+}
+function yorumAdim(dt){
+  var K = KOM; if(K.durdu || K.izle || !yorumAktifMi()) return;
+  K.t += dt;
+  // İkinci yarı: devre arası menüsü kapanıp oyun gerçekten başlayınca bir kez.
+  if(devre === 2 && !K.ikinci && !window._devreMenusu && frozen <= 0){
+    K.ikinci = true;
+    yorumSoyle('spiker', 'İkinci yarı başlıyor! Skor, ' + _ySkorCumle() + '.', 2, 0);
+    yorumSoyle('yorumcu', _yCek('ikinciY', ['İlk yarıda gördüklerimize göre ikinci yarı da hareketli geçecek.', 'Teknik heyetler soyunma odasında neler konuştu, sahada göreceğiz.']), 2, 300);
+  }
+  // Dakika dönüm noktaları
+  var dk = _yDk();
+  if(dk >= 85 && !K.bayrak.son){
+    K.bayrak.son = true;
+    var fark = Math.abs(_ySA() - _ySB()), t1 = _ySA() > _ySB() ? _yAd(0) : _yAd(1), t2 = _ySA() > _ySB() ? _yAd(1) : _yAd(0);
+    yorumSoyle('spiker', 'Maçın son dakikalarına giriyoruz. Skor, ' + _ySkorCumle() + '.', 2, 0);
+    yorumSoyle('yorumcu', fark === 0 ? 'Beraberlik iki takımı da tatmin eder mi, yoksa son dakikalarda risk alacaklar mı, göreceğiz.'
+                       : fark === 1 ? (t1 + ' avantajı korumaya çalışacak, ' + t2 + ' ise son hücum için üzerine gelecek.')
+                       : 'Skor tablosu belli gibi ama futbolda her an her şey olabilir.', 2, 300);
+  } else if(dk >= 60 && !K.bayrak.ceyrek){ K.bayrak.ceyrek = true; if(_yAnaliz(true)) K.sonAnaliz = K.t;
+  } else if(dk >= 30 && dk <= 44 && !K.bayrak.otuz){ K.bayrak.otuz = true; if(_yAnaliz(true)) K.sonAnaliz = K.t; }
+  // Uzun süre kimse konuşmadıysa yorumcu bir değerlendirme yapar.
+  if(K.t - K.sonAnaliz > K.analizAralik && !K.aktif && !K.kuyruk.length && Date.now() - K.sonKonusma > 20000
+     && frozen <= 0 && !duran && !golBekleme){
+    K.sonAnaliz = K.t; K.analizAralik = 38 + Math.random() * 22;
+    _yAnaliz(false);
+  }
+}
+function yorumDevreArasi(){
+  try{
+    if(!yorumAktifMi()) return;
+    var I = _yIstat(), tA = _yAd(0), tB = _yAd(1);
+    yorumSoyle('spiker', 'İlk yarı sona erdi. Skor, ' + _ySkorCumle() + '.', 2, 1200);
+    var y;
+    if(I.sa + I.sb === 0) y = 'İlk yarı çekişmeli geçti ama kalelere pek tehlike olmadı. İkinci yarıda biri riski göze almalı.';
+    else {
+      var onde = I.top > 20 ? (I.pa >= 55 ? tA : (I.pa <= 45 ? tB : '')) : '';
+      y = (onde ? (onde + ' topa daha çok sahip oldu. ') : 'Topa sahip olma dengeliydi. ')
+        + 'Şut sayıları: ' + tA + ' ' + _yN(I.sa) + ', ' + tB + ' ' + _yN(I.sb) + '.';
+    }
+    yorumSoyle('yorumcu', y, 2, 300);
+  }catch(e){ _sessiz(e, 'yorumDevreArasi', 'saha_ses'); }
+}
+function yorumMacSonu(){
+  try{
+    if(!yorumAktifMi()) return;
+    var I = _yIstat(), tA = _yAd(0), tB = _yAd(1);
+    var kazanan = _ySA() > _ySB() ? tA : (_ySB() > _ySA() ? tB : '');
+    yorumSoyle('spiker', 'Maç sona erdi! ' + _ySkorCumle() + '. ' + (kazanan ? (kazanan + ' sahadan galip ayrılıyor.') : 'Maç berabere sonuçlandı.'), 3, 0);
+    var y;
+    if(!kazanan) y = 'İki takım da puanı paylaştı. Fırsatlar göz önüne alındığında adil bir sonuç denebilir.';
+    else {
+      var kazSut = _ySA() > _ySB() ? I.sa : I.sb, kaySut = _ySA() > _ySB() ? I.sb : I.sa;
+      y = kazSut > kaySut ? (kazanan + ' şut ve fırsat üstünlüğünü skora yansıttı, galibiyeti hak etti.')
+        : kazSut < kaySut ? (kazanan + ' daha az şut kullanmasına rağmen etkili oldu, skor avantajı onlara yetti.')
+        : (kazanan + ' kritik anlarda daha etkili oldu.');
+    }
+    yorumSoyle('yorumcu', y, 3, 400);
+  }catch(e){ _sessiz(e, 'yorumMacSonu', 'saha_ses'); }
+}
+
 function olayEkle(type, p, ek){
   try{
     const o = Object.assign({
@@ -11847,6 +12510,7 @@ function olayEkle(type, p, ek){
       team: (p && p.team===1) ? 'away' : 'home'
     }, ek||{});
     olaylar.push(o);
+    try{ yorumOlay(o); }catch(e){ _sessiz(e, 'olayEkle:yorum', 'saha_ses'); }
     return o;
   }catch(e){ return null; }
 }
@@ -12360,7 +13024,7 @@ let bIleriSmooth = 0;
 let bSpin = 0, topKilit = 0;
 const AYAR = { radar:true, tip:!isTouch, sure:150, zor:1.0, ses:true, tekrar:true, grafik:2,
                ta:0, tb:1, diz:'4-4-2', dizB:'4-4-2', baski:7, agirlik:0, hata:false,
-  hava:'gece' };   // varsayilan: mevcut gorunum korunur, kullanici isterse degistirir
+  hava:'gece', yorum:true, yorumSes:true };   // varsayilan: mevcut gorunum korunur, kullanici isterse degistirir
 try { const k = localStorage.getItem('saha-ayar'); if (k) Object.assign(AYAR, JSON.parse(k)); } catch(e){_sessiz(e,'kickoff:3558','saha_oynanis');}
 try { grafikGecerli(); } catch(e){}   // eski menünün yazdığı 0/1/2 değerini düzelt
 function ayarKaydet(){ try { localStorage.setItem('saha-ayar', JSON.stringify(AYAR)); } catch(e){
@@ -12393,6 +13057,7 @@ function ayarUygula(){
   };
   yaz('sw-radar', AYAR.radar); yaz('sw-tip', AYAR.tip);
   yaz('sw-ses', AYAR.ses); yaz('sw-tekrar', AYAR.tekrar); yaz('sw-tam', tamEkranMi());
+  yaz('sw-yorum', AYAR.yorum !== false); yaz('sw-yorumses', AYAR.yorumSes !== false);
   // 'sw-hata' düğmesi maç içi ayar panelinden kaldırıldı (kullanıcı talebi);
   // hata ayıklama katmanı yalnızca H tuşuyla açılıyor.
   document.getElementById('hata').classList.toggle('on', !!AYAR.hata);
@@ -12424,8 +13089,9 @@ function ayarUygula(){
   else if (tribunGain){ try { tribunGain.gain.value = _tribunTaban; } catch(e){_sessiz(e,'ayarUygula:3613','saha_grafik');} }
   try{ _sesHatKur(); }catch(e){}
 }
-function ayarAc(){ if (running && !bitti){ duraklat = true; try{ odaDuraklatYaz(true,'ayar'); }catch(e){} } ayarUygula(); try{ kolAyarCiz(); }catch(e){_sessiz(e,'ayarAc:3615','saha_oyun');} document.getElementById('p-ayar').classList.add('on'); }
+function ayarAc(){ try{ yorumDurakla(true); }catch(e){} if (running && !bitti){ duraklat = true; try{ odaDuraklatYaz(true,'ayar'); }catch(e){} } ayarUygula(); try{ kolAyarCiz(); }catch(e){_sessiz(e,'ayarAc:3615','saha_oyun');} document.getElementById('p-ayar').classList.add('on'); }
 function ayarKapa(){
+  try{ yorumDurakla(false); }catch(e){}
   _kolDinleIptal();
   document.getElementById('p-ayar').classList.remove('on');
   const _dd = document.getElementById('devreAyarDug'); if(_dd) _dd.remove();
@@ -12774,6 +13440,7 @@ function sut(o){
   if (sonPasOyuncu === p) { sonPasOyuncu = null; sonPasTakim = -1; }
   sonDokunan = t; sonDokunanOyuncu = p; sonVurusTuru = kafa ? 'kafa' : 'sut';
   (t === 0 ? istat.a : istat.b).sut++;
+  try{ yorumSut(p, kafa); }catch(e){}
   if (Math.abs(p.obj.position.x - p.dir*HLX) < 34) sesVurus(g);
   ofsaytHesapla(t);
   if (duran && duran.takim === t){ duranSonrasiKur(duran, p); duran = null; }
@@ -13058,6 +13725,7 @@ function aiVurus(p){
     p.cd = 0.5; p.tcd = 0.4;
     sonDokunan = p.team; sonDokunanOyuncu = p;
     (p.team === 0 ? istat.a : istat.b).sut++;
+    try{ yorumSut(p, false); }catch(e){}
     sesVurus(0.8); ofsaytHesapla(p.team);
     return;
   }
@@ -13263,6 +13931,7 @@ function duranBaslat(tip, takim, x, z, sec){
   if (alici){ alici.cd = 0; alici.tcd = 0; }
   if (takim === 0 && alici) ctrl = alici;
   mesaj('', (duran.dolayli ? 'Endirekt serbest vuruş' : ETIKET[tip]) + (takim === 0 ? ' — sende' : ''), 1300);
+  try{ yorumDuran(duran); }catch(e){}
   try{ degisimKuyruguIsle(); }catch(e){}      // top oyun dışında: sıradaki değişiklikler yapılır
 }
 function duranCalistir(){
@@ -13302,6 +13971,7 @@ function duranCalistir(){
       } }catch(e){_sessiz(e,'duranCalistir:4302','saha_oynanis');}
     }
     const d = h.sub(ball.position).setY(0).normalize();
+    try{ yorumPenaltiVurus(p); }catch(e){}
     bVel.set(d.x*30, 1.5, d.z*30);
     (p.team === 0 ? istat.a : istat.b).sut++;
   } else if (tip === 'serbest' && kaleUzak < 30 && !duran.dolayli){
@@ -13358,7 +14028,7 @@ function tacAt(z, takim){
   }
   duranBaslat('tac', takim, ball.position.x, Math.sign(z || 1)*(HWZ - 0.4));
 }
-function kaleVurusu(side, takim){ duranBaslat('kale', takim, side*(HLX - 5.5), 0); }
+function kaleVurusu(side, takim){ try{ yorumDisari(takim); }catch(e){} duranBaslat('kale', takim, side*(HLX - 5.5), 0); }
 function korner(side, z, takim){
   (takim === 0 ? istat.a : istat.b).korner++;
   olayEkle('corner', null, { team: takim===1?'away':'home' });
@@ -13406,6 +14076,7 @@ function sakatlikVer(p){
     if(!p || p.gk || p.sakat || p.dis) return;
     p.sakat = true;
     mesaj('SAKATLIK', (p.ad || 'Oyuncu') + ' sakatlandı', 2400);
+    try{ yorumSakatlik(p); }catch(e){}
     const t = p.team;
     if(window._sahaOdaHost || window._sahaOdaKonuk) return;               // arkadaş maçında kullanıcı karar verir
     if((degisiklikHakki[t]||0) - degisimBekleyen(t).length <= 0) return;
@@ -13477,6 +14148,7 @@ function faulKontrol(dt){
       if (ileri){
         avantaj = { magdur:tas, ihlalci:p, takim:tas.team, t:2.0 };
         mesaj('', 'Avantaj', 900);
+        try{ yorumAvantaj(); }catch(e){}
       } else faul(tas, p);
       return;
     }
@@ -13863,6 +14535,7 @@ function _yayinKamerasiIc(dt){
 let birikim = 0, kayitSayac = 0;
 
 function update(dt){
+  try{ yorumAdim(dt); }catch(e){}
   // Oyun duruyor mu? Gol sonrası (santraya kadar) ve faul/penaltı/korner duran topu
   // hazırlanırken top oyunda değil. Taç ve kale vuruşu SAYILMAZ: çok sık ve kısa,
   // gerçek hakemler de bunları uzatmaya eklemez. Devre başı/santra donması da sayılmaz.
@@ -14150,6 +14823,7 @@ function update(dt){
       if (Math.abs(ball.position.x - s*HLX) < 0.45 && ball.position.y < GOAL_H){
         [-GOAL_HW, GOAL_HW].forEach(pz => {
           if (Math.abs(ball.position.z - pz) < R_BALL + 0.1){
+            try{ yorumDirek(); }catch(e){}
             bVel.x *= -0.55; bVel.z = (ball.position.z - pz)*9;
             gurultu(0.08, 0.2, 1400);
           }
@@ -14192,6 +14866,7 @@ function update(dt){
           ofsaytTemizle(); duranSonrasi = null;
           (gk.team === 0 ? istat.b : istat.a).isabet++;
           mesaj('', 'Kaleci çeldi', 800); sesTribun(0.12, 1.2);
+          try{ yorumKurtaris(gk, true); }catch(e){}
           return;
         }
         bVel.set(0,0,0);
@@ -14200,6 +14875,7 @@ function update(dt){
         ofsaytTemizle(); duranSonrasi = null;
         if (hizli){ (gk.team === 0 ? istat.b : istat.a).isabet++; sesTribun(0.12, 1.4); }
         mesaj('', 'Kaleci topu aldı', 900);
+        try{ if(hizli) yorumKurtaris(gk, false); }catch(e){}
         setTimeout(() => { if (running && !bitti && !duran) aiVurus(gk); }, 600);
       }
     });
@@ -14373,6 +15049,7 @@ function devreArasi(){
   saat = HALF; uzatmaHesapla();
   sesDuduk(true);
   mesaj('DEVRE ARASI', 'Saha değişti — hücum yönün yine sağa', 2400);
+  try{ yorumDevreArasi(); }catch(e){}
   // TÖREN: oyuncular ve hakemler soyunma odasına yürür, sonra devre arası menüsü açılır.
   if (_torenUygun()) torenBaslat('devre', null, function(){ if (!bitti) devreMenusuAc(); });
   else if (_devreMenusuUygun()) setTimeout(() => { if (!bitti) devreMenusuAc(); }, 1500);   // menü: ikinci yarıyı kullanıcı başlatır
@@ -14457,6 +15134,7 @@ function bitir(){
   }catch(e){_sessiz(e,'bitir:kazanc','saha_ag');}
   try{ if(window._sahaAktifFikstur) sahaFiksturSonucuKaydet(); }catch(e){_sessiz(e,'bitir:5253','saha_oynanis');}
   bitti = true; running = false; duran = null; tekrar = null;
+  try{ yorumMacSonu(); }catch(e){}
   // Maç bitti: tribün ortamı kapanır. sesDuduk/sesTribun aşağıda bitiş coşkusunu
   // çalar; o coşku bittiğinde taban artık 0 olduğu için ses tamamen susar.
   try{ setTimeout(function(){ sesMacOrtami(false); }, 3500); }catch(e){}
@@ -15159,6 +15837,7 @@ function basla(yeniMod){
   sonPasOyuncu = null; sonPasTakim = -1;
   yedekleriKur();          // her mac 5 hak ve dolu yedek kulubesiyle baslar
   olaylar.push({ type:'match_start', min:1, player:'', player2:'', team:'home' });
+  try{ yorumMacBasladi(); }catch(e){ _sessiz(e, 'basla:yorum', 'saha_ses'); }
   bitti = false; frozen = 1.0; tekrar = null;
   istat.a = bosIstat(); istat.b = bosIstat();
   OYN.forEach(o => { o.c = 0; o.ch = false; o.st = 100; o.mc = 0; });
@@ -15332,6 +16011,8 @@ document.getElementById('b-ayar-kapa').onclick  = ayarKapa;
 document.getElementById('sw-radar').onclick  = () => { AYAR.radar = !AYAR.radar; ayarKaydet(); ayarUygula(); if (AYAR.radar) radar(); };
 document.getElementById('sw-tip').onclick    = () => { AYAR.tip = !AYAR.tip; ayarKaydet(); ayarUygula(); };
 document.getElementById('sw-ses').onclick    = () => { AYAR.ses = !AYAR.ses; if (AYAR.ses) sesBaslat(); ayarKaydet(); ayarUygula(); };
+document.getElementById('sw-yorum').onclick  = () => { AYAR.yorum = (AYAR.yorum === false); ayarKaydet(); ayarUygula(); if (AYAR.yorum === false) yorumSifirla(); };
+document.getElementById('sw-yorumses').onclick = () => { AYAR.yorumSes = (AYAR.yorumSes === false); ayarKaydet(); ayarUygula(); if (AYAR.yorumSes === false){ try{ window.speechSynthesis.cancel(); }catch(e){} } };
 document.getElementById('sw-tekrar').onclick = () => { AYAR.tekrar = !AYAR.tekrar; ayarKaydet(); ayarUygula(); };
 document.getElementById('sw-tam').onclick    = () => { tamEkran(!tamEkranMi()); setTimeout(ayarUygula, 120); };
 document.getElementById('sw-sure').onclick   = () => {
@@ -15816,6 +16497,7 @@ function _sahaIzleVeriUygula(m){
   window._sahaIzleSonVeri = m; // son gelen ham veri (gerektiginde incelemek icin)
   try{ if(window.SahaSensor) SahaSensor.izleVeri(); }catch(e){_sessiz(e,'_sahaIzleVeriUygula:6328','saha_izle');}
   try{ _sahaIzleSesTetikle(m); }catch(e){ window._sahaIzleSonHata = String((e&&e.message)||e); }
+  try{ yorumIzleVeri(m); }catch(e){ _sessiz(e, 'yorumIzleVeri', 'saha_izle'); }
   window._sahaIzleHedef = {
     top: (typeof m.ballX === 'number' && typeof m.ballZ === 'number') ? { x:m.ballX, z:m.ballZ } : null,
     home: Array.isArray(m.homePlayers) ? m.homePlayers : [],
@@ -16328,6 +17010,7 @@ SahaTeshis.hepsiniSar();   // bütün fonksiyonlar ve _stadEkran tanımlandıkta
   if(!mod)return;
   window._sahaIzleModu = mod;
   _sahaIzleUIHazirla();
+  try{ yorumIzleDugme(); }catch(e){}
   _sahaIzlePTKoprusu();
   _sahaIzleFirebaseDinle(mod);
   _sahaIzleRozetGlobalDinle();
