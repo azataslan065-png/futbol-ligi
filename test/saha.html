@@ -9816,6 +9816,7 @@ function _kadroHtml(){
   if(!benim.length) return h + '<div class="sh-bos">Kadron boş. Transferler sekmesinden oyuncu al.</div>';
 
   h += _kadroSahaHtml();
+  h += _duranTopHtml(ilk11, yedek);
   // Kısa tutuldu (2026-09-27-J): liste varsayılan KAPALI ve açılınca kendi içinde kayar -
   // saha düzeni zaten her şeyi gösteriyor, bu liste yalnızca bilgi/satış için.
   h += '<details class="sh-kart"><summary class="sh-kart-bas" style="cursor:pointer">Tüm oyuncular (' + benim.length + ') · İlk 11: ' + ilk11.length + '/11 · Yedek: ' + yedek.length + '/7</summary>'
@@ -9841,6 +9842,37 @@ function _kadroHtml(){
   return h + '</div></details>';
 }
 
+// Takım > Kadro: duran top atıcıları. Seçenekler ilk 11 + yedekler (kaleci hariç); "Rastgele" = seçim yok.
+function _duranTopHtml(ilk11, yedek){
+  var dt = (benimKayit && benimKayit.duranTop) || {};
+  var ids = ilk11.concat(yedek).filter(function(id, i, a){ var o = magazaHavuz[id]; return o && a.indexOf(id) === i && String(o.mevki || '') !== 'KL'; });
+  var h = '<div class="sh-kart"><div class="sh-kart-bas">🎯 Duran top atıcıları</div>'
+    + '<div style="font-size:11.5px;opacity:.6;line-height:1.5;margin:-2px 0 6px">Seçtiğin oyuncu sahadaysa topun başına o geçer. "Rastgele" ya da oyuncu sahada değilse maç başında rastgele biri seçilir.</div>';
+  DURAN_TIPLERI.forEach(function(t){
+    var secili = dt[t[0]] || '';
+    if(secili && ids.indexOf(secili) < 0) secili = '';          // satılmış / kadrodan çıkmış oyuncu
+    h += '<div class="sh-satir" style="gap:10px"><div class="ad" style="flex:0 0 108px">' + t[1] + '</div>'
+      + '<select onchange="duranTopSec(\'' + t[0] + '\', this.value)" style="flex:1;min-width:0;padding:8px 10px;border-radius:10px;'
+      + 'border:1px solid rgba(255,255,255,.18);background:#101820;color:#e6edf5;font:inherit;font-size:13px">'
+      + '<option value=""' + (secili ? '' : ' selected') + '>🎲 Rastgele</option>'
+      + ids.map(function(id){ var o = magazaHavuz[id];
+          return '<option value="' + id + '"' + (secili === id ? ' selected' : '') + '>' + esc(o.ad || '?') + ' · ' + esc(o.mevki || '') + (ilk11.indexOf(id) < 0 ? ' (yedek)' : '') + '</option>'; }).join('')
+      + '</select></div>';
+  });
+  return h + '</div>';
+}
+function duranTopSec(tip, id){
+  try{
+    if(!kayitliMi() || !fbHazir) return;
+    benimKayit.duranTop = benimKayit.duranTop || {};
+    if(id) benimKayit.duranTop[tip] = id; else delete benimKayit.duranTop[tip];   // iyimser
+    try{ if(window._duranRastgele && window._duranRastgele[0]) delete window._duranRastgele[0][tip]; }catch(e){}
+    fbDb.ref('kullanicilar/' + benimUid + '/duranTop/' + tip).set(id || null)
+      .then(function(){ sahaBildir((DURAN_TIPLERI.find(function(t){ return t[0] === tip; }) || [0,'Atıcı'])[1] + ': ' + (id && magazaHavuz[id] ? magazaHavuz[id].ad : 'rastgele')); })
+      .catch(function(err){ DiagSaha('duranTopSec', err, { anlami:'Duran top atıcısı kaydedilemedi.', oneri:'kullanicilar/{uid}/duranTop yazma kuralını denetleyin.' });
+        sahaBildir('Kaydedilemedi'); });
+  }catch(e){ _sessiz(e, 'duranTopSec', 'saha_ag'); }
+}
 function _transferHtml(){
   var h = '<div class="sh-alt">'
     + '<button type="button" class="' + (_transferAlt==='al'?'on':'') + '" onclick="transferAltSec(\'al\')">Satın al</button>'
@@ -11280,7 +11312,7 @@ function sahaKareOlc(dt){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-02-I';
+window.APP_BUILD = '2026-10-03-A';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -14303,6 +14335,49 @@ function topKontrol(dt){
 
 /* ---------- duran toplar ---------- */
 const ETIKET = { tac:'Taç', korner:'Korner', kale:'Kale vuruşu', serbest:'Serbest vuruş', penalti:'Penaltı' };
+/* DURAN TOP ATICILARI (2026-10-03-A, kullanıcı: "penaltı, taç, serbest vuruş, korner vb. durumlarda topun
+   başında kullanıcının önceden belirlediği oyuncu olacak; belirlenmediyse rastgele birer oyuncu seçilecek").
+   ÖNCEDEN: her duran topta topa EN YAKIN oyuncu atıcıydı.
+   ŞİMDİ: Takım > Kadro > "Duran top atıcıları"nda her tür için oyuncu seçilir (kullanicilar/{uid}/duranTop).
+   Seçilen oyuncu sahadaysa o atar. Seçim yoksa (ya da oyuncu sahada değilse - yedekte, oyundan çıktı,
+   kırmızı kart) o tür için maç başında RASTGELE bir saha oyuncusu belirlenir ve maç boyunca o kullanır;
+   o da oyundan çıkarsa yeni rastgele oyuncu seçilir. Rakip takım (yapay zekâ) için de rastgele atıcı.
+   Kaleci atıcı olmaz; kale vuruşunu kaleci kullanır. */
+var DURAN_TIPLERI = [['penalti','Penaltı'],['serbest','Serbest vuruş'],['korner','Korner'],['tac','Taç']];
+window._duranRastgele = { 0:{}, 1:{} };
+function duranAticiSifirla(){ window._duranRastgele = { 0:{}, 1:{} }; }
+function _duranUygun(p, takim){ return !!(p && !p.gk && !p.dis && p.team === takim && sahada(p) && !p.degAnim); }
+function duranAtici(tip, takim){
+  try{
+    var liste = (takim === 0 ? teamA : teamB);
+    // Kullanıcının seçimi: insan takımı (A) her zaman kullanıcının kendi kadrosudur.
+    if(takim === 0 && benimKayit && benimKayit.duranTop && benimKayit.duranTop[tip]){
+      var o = (magazaHavuz || {})[benimKayit.duranTop[tip]];
+      if(o && o.ad){
+        var ad = String(o.ad).trim();
+        var sec = liste.find(function(p){ return _duranUygun(p, takim) && String(p.ad || '').trim() === ad; });
+        if(sec) return sec;
+      }
+    }
+    var R = window._duranRastgele[takim] || (window._duranRastgele[takim] = {});
+    if(_duranUygun(R[tip], takim)) return R[tip];
+    var aday = liste.filter(function(p){ return _duranUygun(p, takim); });
+    if(!aday.length) return null;
+    R[tip] = aday[Math.floor(Math.random() * aday.length)];
+    return R[tip];
+  }catch(e){ _sessiz(e, 'duranAtici', 'saha_oynanis'); return null; }
+}
+// Atıcı uzaktaysa (yarım sahayı yürümesin) topun birkaç metre gerisine alınır; yakındaysa yürüyerek gelir.
+function _aticiyiYaklastir(p, tip, x, z){
+  var d = Math.hypot(p.obj.position.x - x, p.obj.position.z - z);
+  if(d < 18) return;
+  var nx, nz;
+  if(tip === 'tac'){ nx = x - p.dir*2; nz = z - Math.sign(z || 1)*2.5; }
+  else if(tip === 'korner'){ nx = x - Math.sign(x || 1)*2.5; nz = z - Math.sign(z || 1)*2.5; }
+  else { nx = x - p.dir*3; nz = z; }                       // penaltı / serbest: topun arkasında
+  p.obj.position.set(nx, 0, nz); p.vel.set(0, 0, 0);
+  try{ p.golge.position.set(nx, 0.02, nz); }catch(e){}
+}
 function takimEnYakin(takim, hedef){
   let best = null, bd = 1e9;
   (takim === 0 ? teamA : teamB).forEach(p => {
@@ -14339,7 +14414,8 @@ function duranBaslat(tip, takim, x, z, sec){
   ofsaytTemizle(); avantaj = null; duranSonrasi = null;
   // Avantajdan kalan kart: oyun ilk durduğunda gösterilir.
   bekleyenKartlariGoster();
-  const alici = (tip === 'kale') ? (takim === 0 ? teamA : teamB)[0] : takimEnYakin(takim, ball.position);
+  const alici = (tip === 'kale') ? (takim === 0 ? teamA : teamB)[0] : (duranAtici(tip, takim) || takimEnYakin(takim, ball.position));
+  try{ if (alici && tip !== 'kale') _aticiyiYaklastir(alici, tip, x, z); }catch(e){}
   // dolayli: ENDİREKT serbest vuruş (ofsayt, geri pas) - kaleye doğrudan atılan top gol olmaz.
   duran = { tip, takim, alici, bekle:1.0, hazir:0, omur:0, duvar:null, dolayli:!!sec.dolayli,
             nokta:{ x:x, z:z } };
@@ -16783,6 +16859,7 @@ function basla(yeniMod){
        : AYAR.sure;
   durma = { 1:0, 2:0 }; uzatmaVerildi = false; golBekleme = false;
   skorA = 0; skorB = 0; saat = 0; devre = 1; dirA = _odaKameraModu() ? 1 : _devreYonu(1);
+  try{ duranAticiSifirla(); }catch(e){}
   try{ ozetSifirla(); _sahaHudGeri(); var _mse = document.getElementById('macSonuEkran'); if(_mse) _mse.style.display = 'none'; }catch(e){}
   degisimKuyrugu = []; window._devreMenusu = false; window._degKam = null;
   try{ if(_degAktif && _degAktif.degAnim && _degAktif.degAnim.gecici) scene.remove(_degAktif.degAnim.gecici); }catch(e){}
