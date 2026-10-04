@@ -2648,7 +2648,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-04-B';
+window.APP_BUILD='2026-10-04-E';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -4891,7 +4891,10 @@ function ptKureselBakimDinle(){
       // bakım başladığı hâlde açık kalan bir oturum veri yazmaya devam ederdi.
       try{
         var mt=window._ptKureselBakim;
-        if(isMaintenanceCurrentlyActive(mt)&&!isUserAllowedDuringMaintenance(mt,_userName)){
+        // Yalnızca GİRİŞ YAPMIŞ kullanıcıya (2026-10-04-C, kullanıcı: "bakım ekranı isim ve şifre girildikten sonra
+        // görünmeli"): önceden giriş ekranındaki kullanıcı da (ad yokken izinli sayılmadığı için) anında bakım ekranına
+        // atılıyor, izinli kişi adını ve şifresini giremiyordu. Giriş anındaki kontrol doEnterAfterPasswordCheck'te.
+        if(_userName&&isMaintenanceCurrentlyActive(mt)&&!isUserAllowedDuringMaintenance(mt,_userName)){
           showMaintenanceScreen(mt);
         }
       }catch(e){DiagSil('ptKureselBakimDinle:uygula',e);}
@@ -4902,6 +4905,7 @@ function ptKureselBakimDinle(){
     });
   }catch(e){DiagSil('ptKureselBakimDinle',e);}
 }
+function _ptBakimMt(){ try{ return window._ptKureselBakim || (typeof D!=='undefined' && D && D.maintenance) || null; }catch(e){ return null; } }
 function isMaintenanceCurrentlyActive(mt){
   /* BAKIM MODU TEK DÜĞÜM (kullanıcı: "bakım modu veritabanını ortak kullanacak")
      ÖNCEKİ DAVRANIŞ VE HATASI: küresel düğüm ile sezon düğümü VEYA'lanıyordu. Sezon
@@ -4930,6 +4934,8 @@ function _bakimDurumHesapla(mt){
   return true;
 }
 function isUserAllowedDuringMaintenance(mt,name){
+  // İzin listesi kararla AYNI düğümden okunur (küresel varsa o): sezon kopyası eski bir listeyi taşıyabilir.
+  try{ if(window._ptKureselBakim) mt=window._ptKureselBakim; }catch(e){}
   if(!mt||!name)return false;
   const allowed=mt.allowedUsers||[];
   return allowed.some(u=>sameUserName(u,name));
@@ -4983,7 +4989,7 @@ window.returnToLoginFromMaintenance=function(){
   const nameInp=document.getElementById('nameInp');
   const nameErr=document.getElementById('nameErr');
   if(nameErr)nameErr.textContent='';
-  const stillInMaintenance=isMaintenanceCurrentlyActive(D&&D.maintenance)&&!isUserAllowedDuringMaintenance(D&&D.maintenance,rememberedName||_userName);
+  const stillInMaintenance=isMaintenanceCurrentlyActive(_ptBakimMt())&&!isUserAllowedDuringMaintenance(_ptBakimMt(),rememberedName||_userName);
   // ÖNEMLİ (yeni, hızlı kontrol döngüsüyle birlikte gerekli): Kullanıcı bakım ekranından
   // giriş ekranına DÖNDÜĞÜNDE oturumu sonlanmış sayılır. Aksi halde her saniye çalışan
   // checkMaintenanceScheduleTransition, _userName hâlâ dolu olduğu için kullanıcıyı ANINDA
@@ -5012,7 +5018,7 @@ function doEnterAfterPasswordCheck(name){
   // KULLANICI TALEBİ: "Bakıma aldığı zaman kullanıcı giriş yapamaz ve ilgili uyarıyı alır."
   // Şifre doğrulaması BAŞARILI olsa bile, bakım modu aktifse ve bu isim izin listesinde
   // DEĞİLSE, girişe İZİN VERİLMEZ - kullanıcı doğrudan tam ekran bakım ekranını görür.
-  const mtCheck=D.maintenance;
+  const mtCheck=_ptBakimMt();
   if(isMaintenanceCurrentlyActive(mtCheck)&&!isUserAllowedDuringMaintenance(mtCheck,name)){
     showMaintenanceScreen(mtCheck);
     return;
@@ -10232,8 +10238,8 @@ setInterval(applyAutoDarkModeIfNeeded,5*60*1000);
 // (ya da admin ayrıca bir şey değiştirirse) bunu fark ederdi. Her 20 saniyede bir kontrol
 // edilir (saniye hassasiyeti gerekmeyen bir özellik için yeterince sık, performansı etkilemez).
 function checkMaintenanceScheduleTransition(){
-  if(!D||!D.maintenance)return;
-  const mt=D.maintenance;
+  const mt=_ptBakimMt();
+  if(!mt)return;
   const shouldBeActive=_userName&&isMaintenanceCurrentlyActive(mt)&&!isUserAllowedDuringMaintenance(mt,_userName);
   const scr=document.getElementById('maintenanceScreen');
   const isCurrentlyShown=scr&&scr.style.display==='flex';
@@ -13176,7 +13182,7 @@ function ptMacOzetHtml(id,m,h,a){
           +ikon[e.type]+' '+(e.min||0)+"' "+esc(soy(e.player)||'')+'</span>';
       }).join('')+'</div>':'';
     var izle=(m.sahaMode&&Number(m.sahaOzetVar)>0)
-      ?'<button onclick="ptOzetIzle(\''+id+'\')" style="margin-top:.6rem;width:100%;min-height:40px;border-radius:11px;cursor:pointer;background:var(--ac);color:var(--ac-tx,#fff);border:none;font-size:.74rem;font-weight:800">▶ Maç özetini izle <span style="opacity:.75;font-weight:600">· '+Number(m.sahaOzetVar)+' an</span></button>':'';
+      ?'<button onclick="ptOzetIzle(\''+id+'\')" style="margin-top:.6rem;width:100%;min-height:40px;border-radius:11px;cursor:pointer;background:var(--ac);color:var(--ac-tx,#fff);border:none;font-size:.74rem;font-weight:800">▶ Maç özetini izle</button>':'';
     return '<div class="md-section-head">📋 Maç Özeti</div>'
       +'<div class="mi-card" style="padding:.7rem .8rem;margin-bottom:.7rem">'
       +'<div style="font-size:.74rem;line-height:1.65;color:var(--tx)">'+esc(metin)+'</div>'
@@ -13278,8 +13284,13 @@ function ptMacOzetHtml(id,m,h,a){
       if(!d||(d.event!=='sahaOzetKapat'&&d.event!=='sahaOzetBitti'))return;
       if(e.origin&&e.origin!==location.origin&&e.origin!=='null')return;
       if(d.event==='sahaOzetKapat'){kapat();return;}
+      // ÖZET BİTTİ (2026-10-04-C, kullanıcı: "özet bitince sağ üstte çarpı butonu çıksın"): ortadaki "Kapat"
+      // hapı, sağ üst köşede yuvarlak bir ✕ düğmesine dönüşür (kanal logosunun üstünde, dokunması kolay).
       var b=document.getElementById('ptOzetKapatBtn');
-      if(b){b.textContent='✕ Özeti kapat';b.style.background='var(--ac,#2563eb)';b.style.borderColor='transparent';b.style.fontSize='14px';b.style.padding='9px 16px';}
+      if(b){b.textContent='✕';b.setAttribute('aria-label','Özeti kapat');b.dataset.bitti='1';
+        b.style.cssText='position:absolute;top:calc(8px + env(safe-area-inset-top,0px));right:calc(8px + env(safe-area-inset-right,0px));left:auto;transform:none;z-index:2147483600;'
+          +'width:44px;height:44px;padding:0;border-radius:50%;border:2px solid rgba(255,255,255,.85);background:rgba(10,14,18,.85);color:#fff;'
+          +'font-weight:900;font-size:20px;line-height:1;cursor:pointer;pointer-events:auto;box-shadow:0 4px 14px rgba(0,0,0,.45)';}
     }catch(err){}
   });
 })();
