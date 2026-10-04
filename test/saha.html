@@ -5225,13 +5225,15 @@ function reklamUygula(v){
     }
     // İçerik yalnızca ÖN yüze (malzeme dizisinin 4. elemanı = +z) uygulanır; kasa yüzleri değişmez.
     var onYuz = function(p, mat){ p.icerik = mat; p.mesh.material = mat; };
-    if(!ogeler.length){ liste.forEach(function(p){ onYuz(p, p.varsayilan); }); return; }
+    window._ledOgeler = [];
+    if(!ogeler.length){ liste.forEach(function(p){ onYuz(p, p.varsayilan); }); try{ stadLedCiz(); }catch(e){} return; }
     // Her oge icin malzeme BIR KEZ uretilir ve panolar arasinda paylasilir - ayni
     // videoyu 10 kez acmak 10 ayri video cozucusu demek, telefonu yorar.
     var malzemeler = new Array(ogeler.length);
     ogeler.forEach(function(o, idx){
       reklamOgeMalzeme(o, function(mat){
         malzemeler[idx] = mat;
+        try{ if(mat && mat.map && mat.map.image){ window._ledOgeler[idx] = mat.map.image; stadLedCiz(); } }catch(e){}
         liste.forEach(function(p, pi){
           if(pi % ogeler.length === idx) onYuz(p, mat || p.varsayilan);
         });
@@ -5740,17 +5742,69 @@ function _stadBasamak(B){
   }catch(e){ _sessiz(e, 'stadyumKur', 'saha_grafik'); }
 })();
 // LED bandı içeriği: takım adları/kodları ve logoları sırayla (logo yüklenince yeniden çizilir).
+/* ══ TRİBÜN LED BANDI: GOL ANİMASYONU (2026-10-04-F, kullanıcı: "ev sahibi gol atınca ilgili takımın gol atan
+   oyuncusunun ismi ve 'mükemmel gol' yazısı videolu olarak yansıtılmalı") ══
+   Ev sahibi golünde bant 9 sn boyunca saniyede 30 kare yeniden çizilir: takım renginde nabız gibi atan zemin,
+   yanıp sönen "GOOOL!", kayan "<OYUNCU> · MÜKEMMEL GOL" yazısı ve parlayan kıvılcımlar. Bitince reklam düzenine döner.
+   Normalde reklam yerleri 9 sn'de bir sonraki içeriğe geçer; video içerik varsa bant saniyede 10 kez tazelenir. */
+var LEDBANT = { golT:0, ad:'', takim:0, sonCiz:0 };
+setInterval(function(){ try{ window._ledKayma = (window._ledKayma || 0) + 1; if(!(LEDBANT.golT > 0)) stadLedCiz(); }catch(e){} }, 9000);
+function ledGol(ad, takim){ LEDBANT.golT = 9; LEDBANT.ad = String(ad || '').toLocaleUpperCase('tr-TR'); LEDBANT.takim = takim; }
+function ledGuncelle(dt){
+  try{
+    var L = STAD.led; if(!L) return;
+    if(LEDBANT.golT > 0){
+      LEDBANT.golT -= dt;
+      if(LEDBANT.golT <= 0){ stadLedCiz(); return; }
+      var t = performance.now(); if(t - LEDBANT.sonCiz < 33) return; LEDBANT.sonCiz = t;
+      var c = L.tuval.getContext('2d'), W = L.tuval.width, H = L.tuval.height, z = t / 1000;
+      var tk = LEDBANT.takim === 0 ? takA() : takB(), j = hx(tk.jer), sh = hx(tk.shr === tk.jer ? 0xffffff : tk.shr);
+      var nabiz = 0.5 + 0.5 * Math.sin(z * 9);
+      c.fillStyle = j; c.fillRect(0, 0, W, H);
+      c.globalAlpha = 0.25 + nabiz * 0.35; c.fillStyle = '#ffffff'; c.fillRect(0, 0, W, H); c.globalAlpha = 1;
+      // çapraz şeritler kayar
+      c.fillStyle = sh; c.globalAlpha = 0.35; var kay = (z * 160) % 64;
+      for(var x = -64; x < W + 64; x += 64){ c.beginPath(); c.moveTo(x + kay, 0); c.lineTo(x + kay + 22, 0); c.lineTo(x + kay - 10, H); c.lineTo(x + kay - 32, H); c.fill(); }
+      c.globalAlpha = 1;
+      // kayan yazı: GOOOL! · İSİM · MÜKEMMEL GOL
+      var metin = 'GOOOL!   ' + (LEDBANT.ad ? LEDBANT.ad + '   ·   ' : '') + 'MÜKEMMEL GOL   ·   ';
+      c.font = '900 40px system-ui,Arial,sans-serif'; c.textBaseline = 'middle'; c.textAlign = 'left';
+      var mw = c.measureText(metin).width, bas = -((z * 260) % mw);
+      c.lineWidth = 5; c.strokeStyle = 'rgba(0,0,0,.55)';
+      for(var x2 = bas; x2 < W; x2 += mw){ c.strokeText(metin, x2, H/2 + 2); c.fillStyle = (Math.floor(z * 6) % 2) ? '#ffffff' : sh; c.fillText(metin, x2, H/2 + 2); }
+      // kıvılcımlar
+      for(var i = 0; i < 26; i++){ var px = (i * 97 + z * 300 * (1 + (i % 3))) % W, py = (i * 37 + Math.sin(z * 5 + i) * 20 + 32) % H;
+        c.fillStyle = 'rgba(255,240,180,' + (0.4 + 0.6 * Math.abs(Math.sin(z * 12 + i))) + ')'; c.fillRect(px, py, 3, 3); }
+      L.doku.needsUpdate = true;
+      return;
+    }
+    // Video reklam görünüyorsa bant düzenli tazelenir.
+    var og = window._ledOgeler || [];
+    if(og.some(function(o){ return o && o.tagName === 'VIDEO'; })){ var t2 = performance.now(); if(t2 - LEDBANT.sonCiz > 100){ LEDBANT.sonCiz = t2; stadLedCiz(); } }
+  }catch(e){}
+}
 function stadLedCiz(){
   try{
     var L = STAD.led; if(!L) return;
+    if(LEDBANT.golT > 0) return;
     var c = L.tuval.getContext('2d'), W = L.tuval.width, H = L.tuval.height;
     var A = (typeof takA === 'function') ? takA() : { jer:0xd8443a, shr:0x24242a }, B = (typeof takB === 'function') ? takB() : { jer:0x3d7fd4, shr:0xf0f2f4 };
     var kodA = ((document.querySelector('#board .kod.a')||{}).textContent || 'EV'), kodB = ((document.querySelector('#board .kod.b')||{}).textContent || 'RKP');
     var lg = (typeof taraftarLogolari === 'function') ? taraftarLogolari() : ['',''];
-    var parca = [[A, kodA, lg[0]], ['SAHA'], [B, kodB, lg[1]], ['SÜPER LİG']];
+    // Reklam yerleri (2026-10-04-F, kullanıcı: "taraftar bölümündeki reklam alanları reklam panolarıyla aynı işlevde
+    // olmalı"): yöneticinin pano içerikleri (yazı/görsel/video) bu banttaki reklam yerlerinde de döner.
+    var og = (window._ledOgeler || []).filter(Boolean), k = window._ledKayma || 0;
+    var r1 = og.length ? { oge:og[k % og.length] } : ['SAHA'], r2 = og.length ? { oge:og[(k + 1) % og.length] } : ['SÜPER LİG'];
+    var parca = [[A, kodA, lg[0]], r1, [B, kodB, lg[1]], r2];
     var w = W / parca.length;
     parca.forEach(function(p, i){
       var x0 = i * w;
+      if(p.oge){
+        c.fillStyle = '#05080c'; c.fillRect(x0, 0, w, H);
+        try{ var im = p.oge, iw = im.videoWidth || im.width, ih = im.videoHeight || im.height;
+          if(iw && ih){ var rr = Math.min(w / iw, H / ih), dw = iw * rr, dh = ih * rr; c.drawImage(im, x0 + (w - dw)/2, (H - dh)/2, dw, dh); } }catch(e){}
+        return;
+      }
       if(p.length === 1){
         c.fillStyle = '#06131f'; c.fillRect(x0, 0, w, H);
         c.fillStyle = '#9fd8ff'; c.font = '900 34px system-ui,Arial,sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
@@ -6045,6 +6099,7 @@ function taraftarRenkUygula(){
   try{
     try{ if (typeof kulubeCiz==='function'){ kulubeCiz(0); kulubeCiz(1); } }catch(e){}
     try{ if (typeof tdRenk==='function') tdRenk(); }catch(e){}
+    try{ if (typeof KALABALIK !== 'undefined' && KALABALIK.hazir){ _kalabalikAtlasCiz(0); _kalabalikAtlasCiz(1); } }catch(e){}
     if (!TARAFTAR.hazir) return;
     var A = takA(), B = takB(), L = taraftarLogolari();
     var kodA = (document.querySelector('#board .kod.a')||{}).textContent || A.kod;
@@ -6244,6 +6299,131 @@ function taraftar3DGuncelle(dt){
 }
 
 taraftarKur();
+/* ══ KALABALIK (2026-10-04-F, kullanıcı: "olmamış, taraftarlar sahada görünmüyor; birkaç kişi dışında stadyum taraftar
+   bakımından dolu görünmeli, taraftarlar bayrak ve atkı ile takımlarını desteklemeli") ════════════════════════════
+   KÖK SEBEP: Tribünün tamamı TEK bir dokuydu - insanlar basamakların üstüne boyanmış birkaç piksellik renkli
+   dikdörtgenlerdi. Basamaklar alçaktan ve yandan bakınca kayar, bu dikdörtgenler "koltuk sırası" gibi görünüyor,
+   gerçek (3B) taraftar yalnızca ön üç sırada ve 1,3 m arayla duruyordu.
+   ŞİMDİ: Her basamakta (alt kat 13, üst kat 18 sıra, kaseyi tümüyle dolaşır) ~0,7 m arayla bir taraftar durur:
+   ~22 bin kişi, her biri tek bir dikdörtgen (2 üçgen) - tek InstancedMesh, takım başına 1 çizim çağrısı.
+   Görünüş bir doku atlasından gelir: takım renklerinde formalı 16 tip (kol aşağıda, alkış, kollar havada, iki
+   elle atkı açmış, bayrak sallayan, atkı çeviren, yumruk sallayan, boynunda atkı) × 2 kare. Kıpırtı, zıplama ve
+   kare değişimi ekran kartında (gölgelendirici) hesaplanır - işlemciye her karede 22 bin matris yükü yok.
+   Takımı gol atınca o tarafın tribünü coşar (hızlı zıplama, kollar havada), gol yiyen taraf çöker. */
+var KALABALIK = { hazir:false, mesh:[null, null], u:[null, null], atlas:[null, null] };
+function _kalabalikAtlasCiz(t){
+  var tk = t === 0 ? takA() : takB(), W = 1024, H = 256, cw = 64, ch = 128;
+  var cv = KALABALIK.atlas[t] ? KALABALIK.atlas[t].image : document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  var c = cv.getContext('2d'); c.clearRect(0, 0, W, H);
+  var jer = hx(tk.jer), shr = hx(tk.shr === tk.jer ? 0xffffff : tk.shr);
+  var TEN = ['#e0b48e','#c99d72','#b07d55','#d9a878'], SAC = ['#1a1512','#2a1d14','#3b2716','#141414'];
+  function kol(x0, y0, x1, y1, renk){ c.strokeStyle = renk; c.lineWidth = 9; c.lineCap = 'round'; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); }
+  function el(x, y, ten){ c.fillStyle = ten; c.beginPath(); c.arc(x, y, 4.5, 0, Math.PI*2); c.fill(); }
+  function atki(x0, y0, x1, y1){ var n = 6; for(var i = 0; i < n; i++){ c.fillStyle = i % 2 ? shr : jer; var a = i/n, b = (i+1)/n;
+      c.beginPath(); c.moveTo(x0 + (x1-x0)*a, y0 + (y1-y0)*a - 4); c.lineTo(x0 + (x1-x0)*b, y0 + (y1-y0)*b - 4);
+      c.lineTo(x0 + (x1-x0)*b, y0 + (y1-y0)*b + 4); c.lineTo(x0 + (x1-x0)*a, y0 + (y1-y0)*a + 4); c.fill(); } }
+  for(var v = 0; v < 16; v++){
+    var tip = v % 8, forma = v < 8 ? jer : shr, ten = TEN[v % 4], sac = SAC[(v * 3) % 4];
+    for(var f = 0; f < 2; f++){
+      var ox = v * cw, oy = f * ch, cx = ox + 32;
+      c.save(); c.beginPath(); c.rect(ox, oy, cw, ch); c.clip();
+      // gövde (forma) + omuzlar, alt kısım koyu (önündeki sıra kapatır)
+      var g = c.createLinearGradient(ox + 14, 0, ox + 50, 0); g.addColorStop(0, forma); g.addColorStop(0.5, forma); g.addColorStop(1, 'rgba(0,0,0,.35)');
+      c.fillStyle = forma; c.beginPath(); c.moveTo(cx - 17, oy + 48); c.lineTo(cx + 17, oy + 48); c.lineTo(cx + 15, oy + 104); c.lineTo(cx - 15, oy + 104); c.closePath(); c.fill();
+      c.fillStyle = 'rgba(0,0,0,.18)'; c.fillRect(cx + 4, oy + 50, 12, 54);
+      c.fillStyle = '#23272e'; c.fillRect(cx - 15, oy + 104, 30, 24);
+      // baş
+      c.fillStyle = ten; c.beginPath(); c.arc(cx, oy + 36, 11, 0, Math.PI*2); c.fill();
+      c.fillStyle = sac; c.beginPath(); c.arc(cx, oy + 32, 11, Math.PI*1.05, Math.PI*1.95); c.fill();
+      var omL = [cx - 16, oy + 52], omR = [cx + 16, oy + 52];
+      if(tip === 0){ kol(omL[0], omL[1], cx - 19, oy + 92, forma); kol(omR[0], omR[1], cx + 19, oy + 92, forma); el(cx - 19, oy + 94, ten); el(cx + 19, oy + 94, ten); }
+      else if(tip === 1){ var d = f ? 2 : 9; kol(omL[0], omL[1], cx - d, oy + 68, forma); kol(omR[0], omR[1], cx + d, oy + 68, forma); el(cx - d, oy + 68, ten); el(cx + d, oy + 68, ten); }
+      else if(tip === 2){ var y2 = f ? 6 : 12, x2 = f ? 26 : 22; kol(omL[0], omL[1], cx - x2, oy + y2, forma); kol(omR[0], omR[1], cx + x2, oy + y2, forma); el(cx - x2, oy + y2, ten); el(cx + x2, oy + y2, ten); }
+      else if(tip === 3){ var e = f ? 3 : -3; kol(omL[0], omL[1], cx - 24, oy + 12 + e, forma); kol(omR[0], omR[1], cx + 24, oy + 12 - e, forma); atki(cx - 30, oy + 12 + e, cx + 30, oy + 12 - e); el(cx - 24, oy + 12 + e, ten); el(cx + 24, oy + 12 - e, ten); }
+      else if(tip === 4){ kol(omL[0], omL[1], cx - 19, oy + 92, forma); kol(omR[0], omR[1], cx + 14, oy + 10, forma);
+        c.strokeStyle = '#d9d9d9'; c.lineWidth = 2; c.beginPath(); c.moveTo(cx + 14, oy + 30); c.lineTo(cx + 14, oy + 0); c.stroke();
+        var yon = f ? 1 : -1; c.fillStyle = jer; c.beginPath(); c.moveTo(cx + 14, oy + 1); c.quadraticCurveTo(cx + 14 + yon*14, oy + 6 + (f?4:-2), cx + 14 + yon*30, oy + 3); c.lineTo(cx + 14 + yon*30, oy + 19); c.quadraticCurveTo(cx + 14 + yon*14, oy + 22 + (f?-3:3), cx + 14, oy + 18); c.fill();
+        c.fillStyle = shr; c.fillRect(cx + 14 + (yon > 0 ? 0 : -30), oy + 9, 30, 4); el(cx + 14, oy + 12, ten); }
+      else if(tip === 5){ kol(omL[0], omL[1], cx - 19, oy + 92, forma); kol(omR[0], omR[1], cx + 10, oy + 8, forma); var sx = f ? 18 : -18; atki(cx + 10, oy + 8, cx + 10 + sx, oy + 30); el(cx + 10, oy + 8, ten); }
+      else if(tip === 6){ var fy = f ? 8 : 22; kol(omL[0], omL[1], cx - 19, oy + 92, forma); kol(omR[0], omR[1], cx + 18, oy + fy, forma); c.fillStyle = ten; c.beginPath(); c.arc(cx + 18, oy + fy, 6, 0, Math.PI*2); c.fill(); }
+      else { kol(omL[0], omL[1], cx - 19, oy + 92, forma); kol(omR[0], omR[1], cx + 19, oy + 92, forma); atki(cx - 10, oy + 50, cx - 6, oy + 90 + (f?2:0)); atki(cx + 10, oy + 50, cx + 6, oy + 90 + (f?0:2)); el(cx - 19, oy + 94, ten); el(cx + 19, oy + 94, ten); }
+      c.restore();
+    }
+  }
+  if(KALABALIK.atlas[t]) KALABALIK.atlas[t].needsUpdate = true;
+  else { var tx = new THREE.CanvasTexture(cv); tx.minFilter = THREE.LinearMipmapLinearFilter; tx.anisotropy = 2; KALABALIK.atlas[t] = tx; }
+}
+function kalabalikKur(){
+  try{
+    if(KALABALIK.hazir || !STAD.yol) return;
+    var yer = [[], []];
+    function sira(B, k, ara, ofsetU){
+      var tw = (B.o1 - B.o0) / B.n, rh = (B.h1 - B.h0) / B.n, o = B.o0 + (k + 0.55) * tw, y = B.h0 + k * rh;
+      var uzun = STAD.cevre + Math.PI * 2 * o, adet = Math.floor(uzun / ara);
+      for(var i = 0; i < adet; i++){
+        var pt = stadYolNokta((i + ofsetU + (Math.random() - 0.5) * 0.25) / adet);
+        var x = pt.x + pt.nx * o, z = pt.z + pt.nz * o;
+        if(Math.random() < 0.025) continue;                                // "birkaç kişi dışında" dolu
+        yer[x < 0 ? 0 : 1].push([x, y, z, Math.atan2(-pt.nx, -pt.nz)]);
+      }
+    }
+    var A = STAD.ALT, U = STAD.UST;
+    // Alt katın en arka sırası boş: orada duran taraftarlar arkalarındaki LED bandını (reklam / gol animasyonu) kapatıyordu.
+    for(var k = 0; k < A.n - 1; k++) sira(A, k, k < 3 ? 1.3 : 0.72, k < 3 ? 0.5 : 0);   // ön 3 sıra: 3B taraftarların arasına
+    for(var k2 = 0; k2 < U.n; k2++) sira(U, k2, 0.72, 0);
+    var geo = new THREE.PlaneGeometry(0.66, 1.32); geo.translate(0, 0.66, 0);
+    [0, 1].forEach(function(t){
+      _kalabalikAtlasCiz(t);
+      var L = yer[t];
+      for(var i = L.length - 1; i > 0; i--){ var j = Math.floor(Math.random() * (i + 1)); var tmp = L[i]; L[i] = L[j]; L[j] = tmp; }   // karışık sıra: kalite düşünce eşit seyrelir
+      var gi = geo.clone();
+      var aVar = new Float32Array(L.length), aFaz = new Float32Array(L.length);
+      for(var n = 0; n < L.length; n++){
+        var r = Math.random();
+        var tip = r < 0.2 ? 0 : r < 0.36 ? 1 : r < 0.48 ? 2 : r < 0.68 ? 3 : r < 0.76 ? 4 : r < 0.84 ? 5 : r < 0.9 ? 6 : 7;
+        aVar[n] = tip + (Math.random() < 0.72 ? 0 : 8); aFaz[n] = Math.random() * 6.283;
+      }
+      gi.setAttribute('aVar', new THREE.InstancedBufferAttribute(aVar, 1));
+      gi.setAttribute('aFaz', new THREE.InstancedBufferAttribute(aFaz, 1));
+      var uni = { uZaman:{ value:0 }, uSev:{ value:0 }, uUz:{ value:0 } };
+      var mat = new THREE.MeshBasicMaterial({ map:KALABALIK.atlas[t], alphaTest:0.5, side:THREE.DoubleSide });
+      mat.onBeforeCompile = function(sh){
+        sh.uniforms.uZaman = uni.uZaman; sh.uniforms.uSev = uni.uSev; sh.uniforms.uUz = uni.uUz;
+        sh.vertexShader = 'attribute float aVar;\nattribute float aFaz;\nuniform float uZaman;\nuniform float uSev;\nuniform float uUz;\n' + sh.vertexShader
+          .replace('#include <uv_vertex>', '#include <uv_vertex>\n  float _fr = step(0.0, sin(uZaman * (1.6 + uSev * 5.0) + aFaz * 1.7));\n  vUv = vec2((uv.x + aVar) / 16.0, (uv.y + _fr) / 2.0);')
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed.y += abs(sin(uZaman * (2.2 + uSev * 6.0) + aFaz)) * (0.025 + uSev * 0.32) - uUz * 0.22;');
+      };
+      var m = new THREE.InstancedMesh(gi, mat, L.length);
+      var m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), ax = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), sc = new THREE.Vector3(1, 1, 1), col = new THREE.Color();
+      for(var n2 = 0; n2 < L.length; n2++){
+        var P = L[n2]; q.setFromAxisAngle(ax, P[3]); v.set(P[0], P[1], P[2]);
+        var s0 = 0.92 + Math.random() * 0.16; sc.set(s0, s0, 1);
+        m4.compose(v, q, sc); m.setMatrixAt(n2, m4);
+        var b = 0.72 + Math.random() * 0.28; col.setRGB(b, b, b); m.setColorAt(n2, col);
+      }
+      m.frustumCulled = false;                       // kase tüm sahneyi sarar; sınır kutusu hesabı gereksiz
+      scene.add(m);
+      KALABALIK.mesh[t] = m; KALABALIK.u[t] = uni; KALABALIK.toplam = (KALABALIK.toplam || 0) + L.length;
+    });
+    KALABALIK.hazir = true;
+  }catch(e){ _sessiz(e, 'kalabalikKur', 'saha_grafik'); }
+}
+function kalabalikGuncelle(dt){
+  try{
+    if(!KALABALIK.hazir){ kalabalikKur(); if(!KALABALIK.hazir) return; }
+    var z = performance.now() / 1000, cos = window._sahaCosku || 0;
+    [0, 1].forEach(function(t){
+      var u = KALABALIK.u[t]; if(!u) return;
+      var tp = (typeof TARAFTAR !== 'undefined' && TARAFTAR.tepki) ? TARAFTAR.tepki[t] : 0;
+      var sev = tp > 0 ? Math.min(1, tp / 1.5) : 0, uz = tp < 0 ? Math.min(1, -tp / 1.5) : 0;
+      u.uZaman.value = z; u.uSev.value += ((Math.max(sev, cos * 0.35)) - u.uSev.value) * Math.min(1, dt * 4); u.uUz.value += (uz - u.uUz.value) * Math.min(1, dt * 3);
+      // Kalite düştükçe kalabalık seyrelir (karışık sırada olduğu için eşit dağılır).
+      var m = KALABALIK.mesh[t], kal = window._otoKalite || 0, oran = kal >= 4 ? 0.45 : (kal >= 3 ? 0.7 : 1);
+      var hedef = Math.floor(m.instanceMatrix.count * oran); if(m.count !== hedef) m.count = hedef;
+    });
+  }catch(e){}
+}
 
 function buildGoal(side){
   const g = new THREE.Group();
@@ -7324,8 +7504,10 @@ function etiketYaz(p){
          oyuncunun üstünü kapatıyordu. */
       const c = u.isimTuval.getContext('2d');
       c.clearRect(0,0,384,128);
-      const kisa = String(p.ad||'').trim().split(/\s+/).pop() || '';
-      c.font = '600 40px Arial'; c.textAlign='center'; c.textBaseline='middle';
+      // Etiket: "A. Soyad" (yalnızca soyad, aynı soyadlı iki oyuncuyu ayırt ettirmiyordu).
+      const _p = String(p.ad||'').trim().split(/\s+/).filter(Boolean);
+      const kisa = _p.length > 1 ? (_p[0].charAt(0) + '. ' + _p[_p.length-1]) : (_p[0] || '');
+      c.font = '600 ' + (kisa.length > 13 ? 34 : 40) + 'px Arial'; c.textAlign='center'; c.textBaseline='middle';
       const genislik = Math.min(372, c.measureText(kisa).width + 40);
       const rx = 192 - genislik/2, ry = 18, rw = genislik, rh = 58, rr = 29;
       c.fillStyle = 'rgba(12,16,20,.62)';
@@ -8132,7 +8314,13 @@ function _spkIstatYorumu(){
       'Taraftarların bayrakları ve atkıları muhteşem bir görüntü oluşturuyor.', 'Ev sahibi tribünü her topla birlikte nefesini tutuyor.',
       'Oyunun temposu düşmedi, iki takım da oldukça istekli.', 'Hakem bugün oyunu iyi yönetiyor, kartlara başvurmadan akışı koruyor.',
       'Bek oyuncularının bindirmeleri çok önemli; kanatlarda sayısal üstünlük kurulabilir.', 'Savunma hattı biraz daha önde oynasa ara paslar kesilebilir.',
-      'Topu kaybeden takımın geri dönüş hızı bu maçta belirleyici.', 'İkinci toplarda kim daha diriyse oyunu o kontrol ediyor.']));
+      'Topu kaybeden takımın geri dönüş hızı bu maçta belirleyici.', 'İkinci toplarda kim daha diriyse oyunu o kontrol ediyor.',
+      'Merkezde sayısal üstünlük kuran taraf oyunun ritmini belirliyor.', 'Ceza sahası çevresinde biraz daha cesur olmak gerekiyor; şut denemekten korkmamalılar.',
+      'Bire bir pozisyonlarda hızlı oyuncular fark yaratıyor.', 'Savunmanın arkasına koşular çok etkili, bu silahı daha çok kullanabilirler.',
+      'Duran toplarda markaj çok önemli, tek bir hata gol demek.', 'Pres hattı çok iyi organize; rakip geriden oyun kurmakta zorlanıyor.',
+      'Kanat bekleri hücuma katıldığında geride boşluklar oluşuyor, kontra riski var.', 'Topun hızlı dolaşması rakip savunmayı yoruyor.',
+      'Bu tempoda kondisyon belirleyici olacak; değişiklikler maçın kaderini çizebilir.', 'Teknik direktörün kenardan verdiği talimatlar oyuna yansıyor.',
+      'Oyuncular çalım denemekten çekinmiyor; bu da maçı keyifli kılıyor.', 'Uzaktan şutlar bu maçta bir seçenek olabilir, kaleci önündeki kalabalık görüşü kapatıyor.']));
     return _spkSec(l);
   }catch(e){ return _spkSkorYorumu(); }
 }
@@ -8247,7 +8435,11 @@ function spk(tur, v){
       case 'pas':
         if(!ad) break;
         var _qa = _spkAd(v.q);
-        if(v.u > 24) spkSoyle('spiker', _spkSec([ad + ' uzun oynadı' + (_qa ? ', ' + _qa + ' hedefte.' : '.'), ad + ' topu ileriye, ' + (_qa || 'arkadaşına') + ' doğru şişirdi.',
+        if(v.tur === 'ara') spkSoyle('spiker', _spkSec(['Ara pas! ' + ad + ' savunmanın arkasına topu bıraktı' + (_qa ? ', ' + _qa + ' koşuda!' : '!'), ad + ' müthiş bir ara pas çıkardı!',
+            'Ve ' + ad + ' kilidi açan pası verdi' + (_qa ? ', ' + _qa + ' kalecinin üstüne gidiyor!' : '!'), ad + ' savunmayı tek pasla geçti!']), 'araPasT', false, 5000);
+        else if(v.tur === 'uzun') spkSoyle('spiker', _spkSec([ad + ' havadan uzun oynadı' + (_qa ? ', ' + _qa + ' için.' : '.'), 'Orta geliyor ' + ad + ' ayağından!',
+            ad + ' topu havalandırdı' + (_qa ? ', hedefte ' + _qa + '.' : '.'), 'Uzun top! ' + ad + ' oyunun yönünü değiştirdi.']), 'uzunPasT', false, 5000);
+        else if(v.u > 24) spkSoyle('spiker', _spkSec([ad + ' uzun oynadı' + (_qa ? ', ' + _qa + ' hedefte.' : '.'), ad + ' topu ileriye, ' + (_qa || 'arkadaşına') + ' doğru şişirdi.',
             'Uzun top ' + ad + ' ayağından' + (_qa ? ', ' + _qa + ' için.' : '.'), ad + ' oyunun yönünü değiştiriyor, uzun bir pas.', 'Ve ' + ad + ' çaprazdan ' + (_qa || 'arkadaşını') + ' arıyor.']), 'uzunPas', false, 9000);
         else if(v.ileri > 12) spkSoyle('spiker', _spkSec([ad + ' ara pası denedi' + (_qa ? ', ' + _qa + ' koşu yolunda.' : '.'), ad + ' derine attı' + (_qa ? ', ' + _qa + ' kovalıyor.' : '.'),
             ad + ' savunmanın arkasına topu bıraktı!', 'Akıllıca bir pas ' + ad + ' ayağından.', ad + ' dikine oynadı' + (_qa ? ', top ' + _qa + ' ile.' : '.')]), 'araPas', false, 9000);
@@ -8308,6 +8500,15 @@ function spk(tur, v){
               'İşte gol! ' + _spkTakim(v.takim) + ' sevinçten çılgına döndü! ' + (ad ? ad + ' attı! ' : '') + _sk,
               'Ağlar havalandı! ' + (ad ? ad + ' ' : '') + _spkTakim(v.takim) + ' için golü attı! ' + _sk,
               'Gol gol gol! ' + (ad ? ad + ' ' : '') + 'muhteşem bitirdi! ' + _sk]), 'gol', true);
+        try{
+          if(!v.kk && ad){
+            var _gs = (olaylar || []).filter(function(e){ return e && (e.type === 'goal' || e.type === 'pen_goal') && e.player === (p && p.ad); }).length;
+            var _ek = _gs >= 3 ? _spkSec(['Hat-trick! ' + ad + ' bu maçta üçüncü golünü attı!', ad + ' üçledi! Muhteşem bir performans!'])
+                    : _gs === 2 ? _spkSec([ad + ' bu maçta ikinci golünü attı!', 'İkinci gol de ' + ad + ' imzalı!'])
+                    : (skorA === skorB ? _spkSec(['Ve eşitlik geldi!', 'Skor yeniden dengede!']) : '');
+            if(_ek) _spkKuyruk('spiker', _ek);
+          }
+        }catch(e){}
         setTimeout(function(){
           spkSoyle('yorumcu', v.asist ? _spkSec(['Asistte ' + String(v.asist).split(/\s+/).pop() + ' var; harika bir hazırlık.',
               String(v.asist).split(/\s+/).pop() + ' çok akıllıca bir pas verdi, gol onun da eseri.', 'Pası veren ' + String(v.asist).split(/\s+/).pop() + ' de en az golcü kadar alkışı hak ediyor.'])
@@ -8474,6 +8675,19 @@ setInterval(function(){
         : [tk + ' ' + bolge + ' topu çeviriyor.', tk + ' oyun kuruyor.', 'Top ' + tk + ' oyuncularının ayağında.'];
       if(dk >= 85) l.push('Son dakikalara girdik, ' + tk + ' topla ' + bolge + '.', 'Saat ilerliyor; ' + (ad ? ad + ' ' : tk + ' ') + 'acele etmiyor.');
       if(dk <= 5) l.push('Maçın ilk dakikaları; ' + tk + ' topu tanımaya çalışıyor.');
+      // EK ANLATIM (2026-10-04-F, kullanıcı: "spiker ve yorumcu için daha fazla konuşma içeriği"): sürüş/çalım
+      // anlatımı, tribün, hakem, hava ve teknik direktör cümleleri; sürerken hız ve yön anlatılır.
+      var G = (typeof macGorevlileri === 'function') ? macGorevlileri() : {}, hv = (AYAR && AYAR.hava) || 'gunduz';
+      if(ad && sonVurusTuru === 'surus') l.push(ad + ' topu sürüyor, önünde boşluk var!', ad + ' hızlandı, ' + bolge + ' ilerliyor.', ad + ' topla birlikte koşuyor, savunma geri çekiliyor.',
+        ad + ' çalım arıyor, ' + bolge + '.', ad + ' topu ayağına yapıştırmış, kimse yaklaşamıyor.', ad + ' adam eksiltmeye çalışıyor.');
+      if(Math.random() < 0.35) l.push(_spkSec([
+        'Tribünlerden müthiş bir destek var; ' + _spkTakim(0) + ' taraftarı bayraklarını sallıyor.', _spkTakim(1) + ' taraftarı da sesini duyurmaya çalışıyor.',
+        'Atkılar havada, stat inim inim inliyor.', 'Tribünlerde dalga başladı, stat ayakta!', 'Taraftarlar takımlarını bir an olsun yalnız bırakmıyor.',
+        G.hakem ? 'Hakem ' + G.hakem + ' oyunu yakından takip ediyor.' : 'Hakem pozisyonu yakından takip ediyor.',
+        G.hakem ? G.hakem + ' bugün akıcı bir maç yönetmek istiyor.' : 'Hakem oyunu fazla durdurmuyor, akış güzel.',
+        hv === 'yagmur' ? 'Yağmur zemini kaygan hale getirdi, paslar hızlı akıyor.' : (hv === 'gece' ? 'Işıklar altında harika bir futbol akşamı.' : 'Hava futbol için ideal.'),
+        'Kenarda teknik direktörler sürekli talimat veriyor.', 'Teknik alanda hareketlilik var; ' + _spkTakim(Math.random() < 0.5 ? 0 : 1) + ' hocası oyuncularını öne çağırıyor.',
+        'Yedek kulübesinde ısınan oyuncular var, değişiklik yakın olabilir.' ]));
       spkSoyle('spiker', _spkSec(l), 'durgun', false, 7000);
     }
   }catch(e){}
@@ -12050,7 +12264,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-04-F';
+window.APP_BUILD = '2026-10-04-G';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -12570,6 +12784,19 @@ function kadrolariUygula(){
         gercekB = gercekIlk11(rakipId);
       }
     }
+    /* KADROSUZ MAÇTA İSİM (2026-10-04-F, kullanıcı: "oyuncu isimleri maç içinde görünmüyor"): lig maçı DIŞINDA gerçek
+       kadrosu olmayan takımın (hızlı maç "Ev Sahibi"/"Rakip") boş yerleri "Oyuncu 9" yer tutucusuyla kalıyor, etikette
+       numara görünüyordu. Bu maçlar Puan Tablosu'na yazılmadığı için (uydurma isimlerin oraya sızması - önceki
+       şikâyetin sebebi - burada mümkün değil) boş yerlere maç boyu sabit, gerçekçi Türkçe isimler verilir. Lig (fikstür)
+       maçında yer tutucu korunur. */
+    const _uret = function(t, liste){
+      if (fk) return liste;
+      const kul = {}, yerel = {}; (liste || []).forEach(function(x){ if(x) kul[sahaAdAnahtar(x)] = true; });
+      const tohum = (t === 0 ? 'A:' : 'B:') + ((t === 0 ? takA() : takB()).ad || '');
+      const out = []; for (let i = 0; i < 11; i++) out.push((liste && liste[i]) || sahaYeniAdUret(kul, tohum + ':' + i, yerel));
+      return out;
+    };
+    gercekA = _uret(0, gercekA); gercekB = _uret(1, gercekB);
     [0,1].forEach(function(t){
       const kadro=(t===0?gercekA:gercekB) || [];
       const liste=players.filter(p=>p.team===t);
@@ -15061,7 +15288,7 @@ function pasVer(p, takim, yonTercih, tur){
     bVel.set(d.x*yatay, 10.5*tU, d.z*yatay);
   } else bVel.set(d.x*(u*0.92 + 6)*_ph*(tur === 'ara' ? 1.08 : 1), 1.3, d.z*(u*0.92 + 6)*_ph*(tur === 'ara' ? 1.08 : 1));
   p.cd = 0.3; p.tcd = 0.3; topKilit = 0.28;
-  try{ spk(p.gk ? 'kaleciPas' : 'pas', { p:p, q:best, u:u, ileri:(best.obj.position.x - p.obj.position.x) * p.dir }); }catch(e){}
+  try{ spk(p.gk ? 'kaleciPas' : 'pas', { p:p, q:best, u:u, ileri:(best.obj.position.x - p.obj.position.x) * p.dir, tur:tur }); }catch(e){}
   // Pastan ÖNCEKİ dokunan, bu pasın asist adayıdır (bkz. sonPasOyuncu notu).
   sonPasOyuncu = p; sonPasTakim = takim;
   sonDokunan = takim; sonDokunanOyuncu = p;
@@ -16655,6 +16882,11 @@ function gol(takim){
   sonPasOyuncu = null; sonPasTakim = -1;   // gol sonrası asist adayı sıfırlanır
   // ────────────────────────────────────────────────────────────────────────────────────
   hud(); frozen = 2.2; golBekleme = true;
+  // Tribün LED bandı: EV SAHİBİ golünde (kendi oyuncusu attıysa) oyuncunun adı + "MÜKEMMEL GOL" animasyonu.
+  try{
+    const _fk = window._sahaAktifFikstur, _ev = (_fk && !_fk.benTarafHome) ? 1 : 0, _g = sonDokunanOyuncu;
+    if (takim === _ev) ledGol(_g && _g.team === takim ? _g.ad : '', takim);
+  }catch(e){}
   try{ kolTitret(450, 0.9); }catch(e){_sessiz(e,'gol:4672','saha_oynanis');}
   sesDuduk(false); sesTribun(0.28, 4.5);
   mesaj('GOL!', takim === 0 ? takA().kod : takB().kod, 2000);
@@ -18477,6 +18709,8 @@ function loop(){
   }
   // Stadyum ekranlarının canlı yayını ana çizimden ÖNCE güncellenir (bkz. _stadEkran).
   try{ tdGuncelle(ham); }catch(e){}
+  try{ kalabalikGuncelle(ham); }catch(e){}
+  try{ ledGuncelle(ham); }catch(e){}
   _stadEkran.guncelle();
   if (window._sahaIzleModu && window._yayinVideoAktif) return;   // görüntülü yayın ekranda: 3B çizime gerek yok
   lodGuncelle();
