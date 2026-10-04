@@ -4952,34 +4952,7 @@ const camera = new THREE.PerspectiveCamera(_kameraFovHesapla(innerWidth/innerHei
 // telefonda kare dusurur. Panel KENDI ISIGINI YAYIYORMUS gibi gorunur (emissive benzeri
 // parlak malzeme) - uzaktan fark edilmez, maliyeti sifir.
 // Isik konisi de eklenmedi: saydam koni sahneyi sisli gosteriyor ve oyunu zorlastiriyor.
-(function isikDirekleri(){
-  try{
-    const direkMat = new THREE.MeshLambertMaterial({ color:0x3a4249 });
-    const panelSonuk = new THREE.MeshLambertMaterial({ color:0x9aa4ac });
-    // Gece/aksam icin parlak panel: emissive ile kendi isigini yayiyor gibi durur.
-    const panelParlak = new THREE.MeshLambertMaterial({ color:0xfff6d8, emissive:0xfff2c4 });
-    window._sahaIsikPanelleri = [];
-    const Y = 26;                                   // direk yuksekligi
-    [-1,1].forEach(sx => [-1,1].forEach(sz => {
-      const x = sx*(HLX+21), z = sz*(HWZ+20);
-      const direk = new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.85,Y,8), direkMat);
-      direk.position.set(x, Y/2, z);
-      scene.add(direk);
-      // Panel sahaya DONUK olsun: merkeze bakacak sekilde dondurulur.
-      const panel = new THREE.Mesh(new THREE.BoxGeometry(7.5, 4.2, 0.6), panelSonuk);
-      panel.position.set(x, Y+1.6, z);
-      panel.lookAt(0, 8, 0);
-      scene.add(panel);
-      // Panel cercevesi - duz kutu fazla sade kaliyor
-      const cerceve = new THREE.Mesh(new THREE.BoxGeometry(8.1, 4.8, 0.3), direkMat);
-      cerceve.position.copy(panel.position);
-      cerceve.quaternion.copy(panel.quaternion);
-      cerceve.translateZ(-0.35);
-      scene.add(cerceve);
-      window._sahaIsikPanelleri.push({ mesh:panel, sonuk:panelSonuk, parlak:panelParlak });
-    }));
-  }catch(e){_sessiz(e,'_kameraFovHesapla:412','saha_oyun');}
-})();
+/* Işık direkleri kaldırıldı (2026-10-04-B): projektörler artık çatının iç kenarında (bkz. stadyumKur). */
 // Hava durumuna gore panelleri yakar/sondurur. Gunduz yanmasi gereksiz ve gercekci degil.
 function isiklariAyarla(){
   try{
@@ -4988,7 +4961,7 @@ function isiklariAyarla(){
     // gunduz havalaridir; orada projektor yanmasi gercekci olmaz.
     const yansin = (h === 'gece' || h === 'aksam');
     (window._sahaIsikPanelleri || []).forEach(function(p){
-      p.mesh.material = yansin ? p.parlak : p.sonuk;
+      if(!p.sanal && p.parlak) p.mesh.material = yansin ? p.parlak : p.sonuk;
     });
     // ── GOLGELER ISIK KAYNAGINA GORE ──────────────────────────────────────────────────
     // Golge, isigin nereden geldigini anlatir. Ikisi celisirse sahne yanlis gorunur:
@@ -5052,43 +5025,84 @@ function isiklariAyarla(){
     // (Kose bayraklari ZATEN VAR - asagidaki kendi blogunda. Burada tekrar
     //  eklemek ayni yere ust uste iki bayrak koyardi.)
 
-    // ── REKLAM PANOLARI ──
-    // Saha kenarina dizili kisa panolar. Yazilar canvas dokusuyla uretilir; harici
-    // gorsel gerekmez ve lig adi degistiginde tek yerden guncellenebilir.
+    // ── REKLAM PANOLARI (2026-10-04-B yeniden tasarım, kullanıcı: "reklam panolarını yeniden tasarla; eklenen
+    // görüntü sadece panonun önünde görünsün") ──
+    // KÖK SEBEP: Pano tek malzemeli bir kutuydu - yöneticinin eklediği görsel/video kutunun ALTI yüzüne de
+    // (arkası, üstü, yanları) basılıyordu; arkadan bakan kamerada görüntü ters, üstte de şerit olarak görünüyordu.
+    // ŞİMDİ: LED pano - içerik YALNIZCA sahaya bakan ön yüzde (kutunun +z yüzü); diğer yüzler koyu metal kasa.
+    // Pano hafif geriye yatık ve arkasında iki destek ayağı var. Uzun kenarlarda neredeyse kesintisiz bir LED
+    // bandı oluşturur; kale arkalarına da (kale ağzının iki yanına) panolar eklendi. İçerik LED gibi parlak
+    // (ışıktan etkilenmeyen) malzemeyle çizilir - gece de okunur.
     function panoDoku(yazi, zeminRenk, yaziRenk){
       const c = document.createElement('canvas');
-      c.width = 512; c.height = 64;
+      c.width = 512; c.height = 56;
       const x = c.getContext('2d');
-      x.fillStyle = zeminRenk; x.fillRect(0,0,512,64);
+      const gr = x.createLinearGradient(0, 0, 0, 56); gr.addColorStop(0, zeminRenk); gr.addColorStop(1, '#05080c');
+      x.fillStyle = gr; x.fillRect(0,0,512,56);
+      x.fillStyle = 'rgba(255,255,255,.05)'; for(let i=0;i<512;i+=4) x.fillRect(i,0,1,56);   // LED ızgarası
       x.fillStyle = yaziRenk;
-      x.font = 'bold 40px Arial';
+      x.font = '900 36px system-ui,Arial,sans-serif';
       x.textAlign = 'center'; x.textBaseline = 'middle';
-      x.fillText(yazi, 256, 34);
+      x.fillText(yazi, 256, 30);
       const d = new THREE.CanvasTexture(c);
-      return new THREE.MeshLambertMaterial({ map:d });
+      return new THREE.MeshBasicMaterial({ map:d, fog:false });
     }
     const panoYazilari = [
-      panoDoku('SAHA', '#14202a', '#eaf2f6'),
-      panoDoku('SUPER LIG', '#7a1d1d', '#ffe9c9'),
+      panoDoku('SAHA', '#14304a', '#eaf2f6'),
+      panoDoku('SÜPER LİG', '#7a1d1d', '#ffe9c9'),
       panoDoku('FUTBOL', '#123a2a', '#d8f0e2'),
       panoDoku('CANLI YAYIN', '#1d2a5a', '#e6ecff')
     ];
-    const panoGeo = new THREE.BoxGeometry(9, 0.95, 0.18);
-    // Yalnizca UZUN kenarlar: kale arkasi panolari kamera acisindan zaten gorunmuyor,
-    // eklemek cizim cagrisi artirmaktan baska ise yaramazdi.
+    const kasaMat = new THREE.MeshLambertMaterial({ color:0x15191e });
+    // ÇİZİM ÇAĞRISI: Bütün kasalar ve ayaklar TEK geometride birleştirilir; her panonun yalnızca ön yüzü
+    // (içerik düzlemi) ayrı nesnedir - 32 pano = 33 çizim çağrısı (çok malzemeli kutu panoyla 256 olurdu).
+    const _kasaParca = [];
+    const kasaGeo = new THREE.BoxGeometry(9.3, 0.95, 0.22), ayakGeo = new THREE.BoxGeometry(0.08, 0.9, 0.08);
+    const onGeo = new THREE.PlaneGeometry(9.12, 0.86);
+    function panoKoy(x, z, ry, i){
+      const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry;
+      const govde = new THREE.Object3D(); govde.position.set(0, 0.52, 0); govde.rotation.x = -0.14; g.add(govde);   // hafif geriye yatık
+      const kasa = new THREE.Object3D(); govde.add(kasa); _kasaParca.push([kasaGeo, kasa]);
+      [-1,1].forEach(function(k){ const a = new THREE.Object3D(); a.position.set(k*3.8, 0.42, -0.36); a.rotation.x = 0.5; g.add(a); _kasaParca.push([ayakGeo, a]); });
+      const m = new THREE.Mesh(onGeo, panoYazilari[i % panoYazilari.length]);
+      m.position.set(0, 0, 0.115); govde.add(m);
+      scene.add(g);
+      (window._sahaReklamPanolari = window._sahaReklamPanolari || []).push({ mesh:m, varsayilan:panoYazilari[i % panoYazilari.length] });
+    }
+    let sira = 0;
     [-1,1].forEach(function(sz){
-      for(let i=0; i<10; i++){
-        const px = -HLX + 6 + i*10.4;
-        if(Math.abs(px) > HLX - 2) continue;
-        const m = new THREE.Mesh(panoGeo, panoYazilari[i % panoYazilari.length]);
-        m.position.set(px, 0.48, sz*(HWZ + 2.2));
-        if(sz > 0) m.rotation.y = Math.PI;     // yazi hep sahaya baksin
-        scene.add(m);
-        // Yonetici icerigi (yazi/foto/video) bu listedeki panolara uygulanir.
-        (window._sahaReklamPanolari = window._sahaReklamPanolari || []).push({
-          mesh:m, varsayilan:m.material });
+      for(let i=0; i<12; i++){
+        const px = -HLX + 0.5 + 4.65 + i*9.4;
+        if(Math.abs(px) > HLX + 1) continue;
+        // Kulübe tarafında (−z) kulübelerin önündeki panolar yok: oyuncular kulübeye pano içinden geçmesin,
+        // oturan yedekler kameradan görünsün (gerçek statlarda da kulübe önü açıktır).
+        if(sz < 0 && Math.abs(px) > 4 && Math.abs(px) < 21) continue;
+        panoKoy(px, sz*(HWZ + 2.4), sz > 0 ? Math.PI : 0, sira++);
       }
     });
+    // Kale arkaları: kale ağzının iki yanında, kaleyi kapatmadan.
+    [-1,1].forEach(function(sx){
+      [-1,1].forEach(function(k){
+        for(let i=0;i<2;i++){
+          const pz = k*(GOAL_HW + 5.6 + i*9.4);
+          panoKoy(sx*(HLX + 3.4), pz, sx < 0 ? Math.PI/2 : -Math.PI/2, sira++);
+        }
+      });
+    });
+    (function kasalariBirlestir(){
+      const P = [], Nn = [];
+      _kasaParca.forEach(function(k){
+        // updateWorldMatrix(ebeveynler dahil): updateMatrixWorld yalnız aşağı doğru günceller; ebeveyn
+        // pano grubu henüz hiç çizilmediğinden dünya matrisi birimdi ve TÜM kasalar orta yuvarlakta üst üste kalıyordu.
+        k[1].updateWorldMatrix(true, false);
+        const gg = k[0].toNonIndexed(); gg.applyMatrix4(k[1].matrixWorld);
+        P.push(gg.attributes.position.array); Nn.push(gg.attributes.normal.array);
+      });
+      const top = P.reduce(function(a, b){ return a + b.length; }, 0), PA = new Float32Array(top), NA = new Float32Array(top);
+      let o = 0; P.forEach(function(a, i){ PA.set(a, o); NA.set(Nn[i], o); o += a.length; });
+      const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.BufferAttribute(PA, 3)); bg.setAttribute('normal', new THREE.BufferAttribute(NA, 3));
+      scene.add(new THREE.Mesh(bg, kasaMat));
+    })();
   }catch(e){_sessiz(e,'isiklariAyarla:523','saha_grafik');}
 })();
 
@@ -5103,47 +5117,7 @@ function isiklariAyarla(){
 //  3) DIS HALKA: Tribunlerin arkasinda stadyumun dis cephesi - gokyuzu ile tribun
 //     arasindaki bosluk kapaniyor, sahne kapali bir stat gibi duruyor.
 // Poligon maliyeti dusuk: toplam birkac yuz ucgen.
-(function stadyumMimarisi(){
-  try{
-    var catiM  = new THREE.MeshLambertMaterial({ color:0xc9ced3, side:THREE.DoubleSide });
-    var kirisM = new THREE.MeshLambertMaterial({ color:0x55606a });
-    var cepheM = new THREE.MeshLambertMaterial({ color:0x2b3238 });
-    var seritM = new THREE.MeshLambertMaterial({ color:0x7a1d1d });
-    [-1,1].forEach(function(sz){
-      var zArka = sz*(HWZ+22), uzun = HLX*2+34;
-      // Cati plakasi: arkada yuksek, sahaya dogru egimli (saçak).
-      var cati = new THREE.Mesh(new THREE.BoxGeometry(uzun, 0.35, 15), catiM);
-      cati.position.set(0, 17.5, sz*(HWZ+15.5));
-      cati.rotation.x = sz * 0.16;                 // sahaya dogru hafif egim
-      scene.add(cati);
-      // On kenar seridi: catinin sahaya bakan yuzu, renkli bant
-      var serit = new THREE.Mesh(new THREE.BoxGeometry(uzun, 1.1, 0.4), seritM);
-      serit.position.set(0, 16.6, sz*(HWZ+8.6));
-      scene.add(serit);
-      // Dikey tasiyici kirisler (arka hatta, gorusu kapatmaz)
-      for(var i=-4;i<=4;i++){
-        var k = new THREE.Mesh(new THREE.BoxGeometry(0.6, 18, 0.6), kirisM);
-        k.position.set(i*(uzun/9), 9, zArka);
-        scene.add(k);
-        // Capraz destek: kirisle cati arasinda egik kol
-        var c = new THREE.Mesh(new THREE.BoxGeometry(0.35, 9, 0.35), kirisM);
-        c.position.set(i*(uzun/9), 15.2, sz*(HWZ+18.8));
-        c.rotation.x = -sz*0.62;
-        scene.add(c);
-      }
-      // Dis cephe: tribun arkasini kapatan yuksek duvar
-      var cephe = new THREE.Mesh(new THREE.BoxGeometry(uzun+10, 20, 1), cepheM);
-      cephe.position.set(0, 10, sz*(HWZ+25));
-      scene.add(cephe);
-    });
-    // Kale arkasi cepheleri: kisa kenarlar da kapansin
-    [-1,1].forEach(function(sx){
-      var c2 = new THREE.Mesh(new THREE.BoxGeometry(1, 16, HWZ*2+52), cepheM);
-      c2.position.set(sx*(HLX+27), 8, 0);
-      scene.add(c2);
-    });
-  }catch(e){_sessiz(e,'isiklariAyarla:576','saha_grafik');}
-})();
+/* Eski çatı/cephe kaldırıldı (2026-10-04-B): yeni kase çatısı stadyumKur içinde. */
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
 // YONETICI REKLAM ICERIGI (kullanici: "admin reklam panosuna yazi, foto, video ekleyebilsin")
@@ -5175,7 +5149,16 @@ function reklamOgeMalzeme(o, bitti){
     if(o.tur === 'gorsel' && o.kaynak){
       var yk = new THREE.TextureLoader();
       if(yk.setCrossOrigin) yk.setCrossOrigin('anonymous');
-      yk.load(o.kaynak, function(t){ bitti(new THREE.MeshBasicMaterial({ map:t })); },
+      // Görsel panonun oranına (≈10:1) SIĞDIRILIR: sündürülmez, iki yanı koyu zeminle doldurulur.
+      yk.load(o.kaynak, function(t){
+        try{
+          var img = t.image, c2 = document.createElement('canvas'); c2.width = 1024; c2.height = 104;
+          var x2 = c2.getContext('2d'); x2.fillStyle = o.zemin || '#0a0f14'; x2.fillRect(0, 0, 1024, 104);
+          var r = Math.min(1024 / img.width, 104 / img.height), w = img.width * r, h = img.height * r;
+          x2.drawImage(img, 512 - w/2, 52 - h/2, w, h);
+          bitti(new THREE.MeshBasicMaterial({ map:new THREE.CanvasTexture(c2), fog:false }));
+        }catch(e){ bitti(new THREE.MeshBasicMaterial({ map:t, fog:false })); }
+      },
               undefined, function(){ bitti(null); });
       return;
     }
@@ -5185,7 +5168,7 @@ function reklamOgeMalzeme(o, bitti){
     x.fillStyle = o.renk || '#eaf2f6';
     x.font = 'bold 38px Arial'; x.textAlign = 'center'; x.textBaseline = 'middle';
     x.fillText(String(o.yazi || '').slice(0,28), 256, 34);
-    bitti(new THREE.MeshLambertMaterial({ map:new THREE.CanvasTexture(c) }));
+    bitti(new THREE.MeshBasicMaterial({ map:new THREE.CanvasTexture(c), fog:false }));
   }catch(e){ bitti(null); }
 }
 function reklamUygula(v){
@@ -5204,7 +5187,9 @@ function reklamUygula(v){
                : v.gorsel ? {tur:'gorsel', kaynak:v.gorsel}
                : {tur:'yazi', yazi:v.yazi, zemin:v.zemin, renk:v.renk} ];
     }
-    if(!ogeler.length){ liste.forEach(function(p){ p.mesh.material = p.varsayilan; }); return; }
+    // İçerik yalnızca ÖN yüze (malzeme dizisinin 4. elemanı = +z) uygulanır; kasa yüzleri değişmez.
+    var onYuz = function(p, mat){ if(Array.isArray(p.mesh.material)){ var a = p.mesh.material.slice(); a[4] = mat; p.mesh.material = a; } else p.mesh.material = mat; };
+    if(!ogeler.length){ liste.forEach(function(p){ onYuz(p, p.varsayilan); }); return; }
     // Her oge icin malzeme BIR KEZ uretilir ve panolar arasinda paylasilir - ayni
     // videoyu 10 kez acmak 10 ayri video cozucusu demek, telefonu yorar.
     var malzemeler = new Array(ogeler.length);
@@ -5212,7 +5197,7 @@ function reklamUygula(v){
       reklamOgeMalzeme(o, function(mat){
         malzemeler[idx] = mat;
         liste.forEach(function(p, pi){
-          if(pi % ogeler.length === idx) p.mesh.material = mat || p.varsayilan;
+          if(pi % ogeler.length === idx) onYuz(p, mat || p.varsayilan);
         });
       });
     });
@@ -5301,7 +5286,7 @@ window._sahaCosku = 0;
 function taraftarCoskula(miktar){ window._sahaCosku = Math.min(1, (window._sahaCosku||0) + (miktar||1)); }
 function taraftarHareket(dt){
   try{
-    var liste = window._sahaKalabalikDokular; if(!liste || !liste.length) return;
+    var liste = window._sahaKalabalikDokular || [];      // (yeni kasede doku kaydırma yok; 3B taraftarlar yine güncellenir)
     window._sahaCosku = Math.max(0, (window._sahaCosku||0) - dt*0.22);
     var c = window._sahaCosku;
     var t = performance.now()/1000;
@@ -5367,9 +5352,9 @@ function golgeTakip(){
 // Yagmur icin parcacik sistemi yerine SIS + koyu renk secildi: binlerce parcacik mobil
 // GPU'da kare duserdi, kazanc gorsel olarak sinirli.
 const HAVALAR = [
-  { k:'gunduz', ad:'Gündüz',      bg:0x88a7c4, sis:[150,300], gok:0.95, gun:0.85, gunRenk:0xfff4e2 },
+  { k:'gunduz', ad:'Gündüz',      bg:0x88a7c4, sis:[180,340], gok:0.95, gun:0.85, gunRenk:0xfff4e2 },
   { k:'aksam',  ad:'Akşam üstü',  bg:0x6b5a54, sis:[120,260], gok:0.70, gun:0.70, gunRenk:0xffd9a8 },
-  { k:'gece',   ad:'Gece',        bg:0x0e1a16, sis:[110,240], gok:0.55, gun:0.55, gunRenk:0xdce8ff },
+  { k:'gece',   ad:'Gece',        bg:0x0a1222, sis:[160,320], gok:0.55, gun:0.55, gunRenk:0xdce8ff },
   { k:'sisli',  ad:'Sisli',       bg:0x9aa6a2, sis:[40,120],  gok:0.80, gun:0.35, gunRenk:0xf0f4f6 },
   { k:'yagmur', ad:'Yağmurlu',    bg:0x4a5560, sis:[90,200],  gok:0.60, gun:0.30, gunRenk:0xc8d4e0 }
 ];
@@ -5400,6 +5385,7 @@ function havaEfektleri(k){
       var mat = new THREE.MeshBasicMaterial({ color:0xfff1cf, transparent:true, opacity:0.055, depthWrite:false,
                                               blending:THREE.AdditiveBlending, side:THREE.DoubleSide, fog:false });
       (window._sahaIsikPanelleri || []).forEach(function(p){
+        if(!p.sanal) return;
         var tepe = new THREE.Vector3(); p.mesh.getWorldPosition(tepe);
         var hedef = new THREE.Vector3(tepe.x * 0.35, 0, tepe.z * 0.35);
         var boy = tepe.distanceTo(hedef);
@@ -5528,118 +5514,190 @@ pitch.rotation.x = -Math.PI/2;
 pitch.receiveShadow = true;
 scene.add(pitch);
 
-const cevre = new THREE.Mesh(new THREE.PlaneGeometry(HLX*2+26, HWZ*2+22),
-  new THREE.MeshLambertMaterial({ color:0x255030 }));
-cevre.rotation.x = -Math.PI/2; cevre.position.y = -0.03;
+// Saha çevresi (2026-10-04-B): reklam panolarına kadar çim, panolardan tribüne kadar koyu gri zemin.
+const cevre = new THREE.Mesh(new THREE.PlaneGeometry(HLX*2+30, HWZ*2+26),
+  new THREE.MeshLambertMaterial({ color:0x3b4249 }));
+cevre.rotation.x = -Math.PI/2; cevre.position.y = -0.04;
 scene.add(cevre);
+const cimKenar = new THREE.Mesh(new THREE.PlaneGeometry(HLX*2+7, HWZ*2+5.2),
+  new THREE.MeshLambertMaterial({ color:0x2f6e36 }));
+cimKenar.rotation.x = -Math.PI/2; cimKenar.position.y = -0.02;
+scene.add(cimKenar);
 
 const tribunler = [];
-{
-  // ══════════════════════════════════════════════════════════════════════════════════════
-  // TRIBUNLER (kullanici: "stadyum icin oneri")
-  // ESKI HALI: Her kenarda tek bir dev kutu. Duz beton duvar gibi duruyordu - sahanin
-  // etrafi bos hissi veriyordu.
-  // YENI HALI:
-  //  1) KALABALIK DOKUSU - canvas'ta uretilen rastgele renkli noktalar. Harici dosya
-  //     GEREKMEZ (oyun tek dosya kalir) ve maliyeti tek bir doku. Bos beton yerine
-  //     dolu stat gorunumu, en buyuk farki bu yapiyor.
-  //  2) BASAMAKLI TRIBUN - tek kutu yerine dort kademe, her biri biraz daha yuksek ve
-  //     geride. Gercek statta tribun egimlidir; duz duvar gozu rahatsiz ediyordu.
-  //     Poligon maliyeti ihmal edilebilir (kutu basina 12 ucgen).
-  // Kademe sayisi 4: daha azi basamak hissi vermiyor, daha fazlasi uzaktan fark
-  // edilmeden cizim cagrisi artiriyor.
-  // ══════════════════════════════════════════════════════════════════════════════════════
-  function kalabalikDoku(){
-    // Rastgele noktalar = uzaktan kalabalik. Yakindan bakildiginda soyut kalir ama
-    // kamera hep uzakta oldugu icin bu yeterli.
-    const c = document.createElement('canvas');
-    c.width = 256; c.height = 64;
-    const x = c.getContext('2d');
-    x.fillStyle = '#10171a'; x.fillRect(0,0,256,64);        // koyu tribun zemini
-    // Koltuk siralari: yatay ince cizgiler, kalabalik arasindan gorunur
-    x.fillStyle = 'rgba(255,255,255,.04)';
-    for(let y=4; y<64; y+=7) x.fillRect(0,y,256,1);
-    const renkler = ['#e8e8ea','#d8443a','#3d7fd4','#2fae7a','#e4b23c','#b06a3f',
-                     '#7a4a2a','#2a2119','#f0f2f4','#5a6472'];
-    for(let i=0; i<2600; i++){
-      x.fillStyle = renkler[(Math.random()*renkler.length)|0];
-      const px = Math.random()*256, py = Math.random()*64;
-      x.fillRect(px, py, 1.7, 2.4);                          // kisa dikey leke = oturan kisi
-    }
-    const d = new THREE.CanvasTexture(c);
-    d.wrapS = d.wrapT = THREE.RepeatWrapping;
-    return d;
-  }
-  const kalabalikD = kalabalikDoku();
-  const pano = new THREE.MeshLambertMaterial({ color:0x1b3f7a });
-  const trib = new THREE.MeshLambertMaterial({ color:0x18241f });
-  const kal  = new THREE.MeshLambertMaterial({ color:0x2e3a42 });
-  // Kalabalik malzemesi: dokunun tekrar sayisi yuzeyin uzunluguna gore ayarlanir,
-  // yoksa uzun kenarda insanlar yayvan gorunur.
-  // HAREKETLI TARAFTAR: Her tribun kademesinin dokusu ayri tutulur ve her karede
-  // hafifce kaydirilir (bkz. taraftarHareket). Binlerce ayri insan modeli telefonu
-  // cokertir; doku kaydirma TEK cizim cagrisi, maliyeti sifira yakin.
-  window._sahaKalabalikDokular = [];
-  // TAKIM TRİBÜNLERİ (2026-09-27-H): her tribün yüzünün kendi tuvali var - maç başında
-  // takım renklerine boyanır (bkz. taraftarTribunBoya). Yan tribün tek parça doku
-  // (4096 px) - iki yarısı farklı takım olduğu için tekrarlanan doku kullanılamaz.
-  window._sahaTribunDokular = [];
-  function tribunMat(tur, s, tekrarX){
-    let e = window._sahaTribunDokular.find(x => x.tur === tur && x.s === s);
-    if (!e){
-      const c = document.createElement('canvas');
-      c.width = (tur === 'uzun') ? 4096 : 256; c.height = 64;
-      c.getContext('2d').drawImage(kalabalikD.image, 0, 0, c.width, 64);
-      e = { tur:tur, s:s, tuval:c, dokular:[] };
-      window._sahaTribunDokular.push(e);
-    }
-    const d = new THREE.CanvasTexture(e.tuval);
-    d.wrapS = d.wrapT = THREE.RepeatWrapping;
-    d.repeat.set(tekrarX, 1);
-    e.dokular.push(d);
-    window._sahaKalabalikDokular.push({ doku:d, faz:Math.random()*6.28 });
-    return new THREE.MeshLambertMaterial({ map:d });
-  }
-  function kalabalikMat(tekrarX){
-    const d = kalabalikD.clone();
-    d.needsUpdate = true;
-    d.repeat.set(tekrarX, 1);
-    // Her kademe farkli fazda salinsin - hepsi ayni anda kalkip inerse mekanik gorunur.
-    window._sahaKalabalikDokular.push({ doku:d, faz:Math.random()*6.28 });
-    return new THREE.MeshLambertMaterial({ map:d });
-  }
-  const add = (geo, mat, x,y,z, listeye) => {
-    const m = new THREE.Mesh(geo, mat); m.position.set(x,y,z); scene.add(m);
-    if (listeye) tribunler.push(m);
-    return m;
-  };
-  const uzunPano = new THREE.BoxGeometry(HLX*2+8, 1.1, 0.4);
-  const kisaPano = new THREE.BoxGeometry(0.4, 1.1, HWZ*2+6);
-  const KADEME = 4;
-  [-1,1].forEach(s => {
-    add(uzunPano, pano, 0, 0.55, s*(HWZ+7));
-    add(kisaPano, pano, s*(HLX+9), 0.55, 0);
-    // Basamaklar: her kademe 2.4 birim yukselir ve 3 birim geriye kayar.
-    for(let k=0; k<KADEME; k++){
-      const y = 1.6 + k*2.4, geri = 10 + k*3, yuk = 2.4;
-      // Uzun kenarlar (yan tribunler)
-      const uzunlukU = HLX*2 + 30;
-      add(new THREE.BoxGeometry(uzunlukU, yuk, 3.2), tribunMat('uzun', s, 1),
-          0, y, s*(HWZ + geri), true);
-      // Kisa kenarlar (kale arkalari)
-      const uzunlukK = HWZ*2 + 16;
-      const mk = add(new THREE.BoxGeometry(3.2, yuk, uzunlukK), tribunMat('kisa', s, uzunlukK/9),
-          s*(HLX + geri + 1), y, 0, true);
-      mk.rotation.y = 0;
-    }
-    // En arkada koyu kapatici duvar: basamaklarin arkasindaki bosluk gorunmesin.
-    add(new THREE.BoxGeometry(HLX*2+32, 12, 1.2), trib, 0, 6, s*(HWZ+23), true);
-    add(new THREE.BoxGeometry(1.2, 12, HWZ*2+18), trib, s*(HLX+24), 6, 0, true);
-    // Ust kenar seridi (kal malzemesi) - basamaklari tepeden sinirlar
-    add(new THREE.BoxGeometry(HLX*2+32, 0.8, 4), kal, 0, 11.4, s*(HWZ+21.5), true);
-    add(new THREE.BoxGeometry(4, 0.8, HWZ*2+18), kal, s*(HLX+22.5), 11.4, 0, true);
-  });
+/* ══ STADYUM YENİDEN TASARIM (2026-10-04-B, kullanıcı: "stadyumu görseldeki gibi yeniden tasarla") ══════════════
+   Referans: iki katlı, dik, köşeleri kapalı (kesintisiz) bir kase; açık mavi-gri koltuklar; iki kat arasında LED
+   reklam bandı ve loca camları; tribünlerin üstünde sahaya doğru uzanan çatı, çatının iç kenarında projektör şeridi;
+   çatıdan asılı dev ekranlar (bkz. _stadEkran - takım logoları ve canlı yayın).
+   GEOMETRİ: Kase yuvarlatılmış bir dikdörtgen yol boyunca (köşe yarıçapı 14 m) bir KESİT çizgisinin süpürülmesiyle
+   üretilir. Kesit basamaklıdır (alt kat 13, üst kat 18 basamak) - koltuk sıraları gerçek basamak olarak görünür.
+   Aynı malzemedeki yüzeyler TEK geometride birleştirilir: bütün stat ~7 çizim çağrısı, ~20 bin üçgen.
+   KALABALIK: Her basamağa bir sıra seyirci çizilir (tuval dokusu, takım renklerine boyanır - bkz.
+   taraftarTribunBoya). Ön sıralarda 3B taraftarlar (bkz. taraftarKur) ayrıca durur.
+   KAMERA: Yayın kamerası yakın tribünün önünde (z ≈ ±(HWZ+10..18), y 12-15.5). Alt katın o noktadaki yüksekliği
+   ~6 m, üst kat HWZ+27'den başlar - kamera hiçbir yapının içine girmez. */
+var STAD = { AX: HLX + 9, AZ: HWZ + 8, RC: 14, yol: null, cevre: 0 };
+(function stadYol(){
+  // Taban yol (ofset 0 = ön duvar): yuvarlatılmış dikdörtgen, saat yönünün tersine. Her noktada dışa normal.
+  var ax = STAD.AX, az = STAD.AZ, r = STAD.RC, P = [];
+  function duz(x0, z0, x1, z1, nx, nz){ var L = Math.hypot(x1-x0, z1-z0), n = Math.max(2, Math.round(L / 4));
+    for(var i = 0; i < n; i++){ var t = i / n; P.push({ x:x0 + (x1-x0)*t, z:z0 + (z1-z0)*t, nx:nx, nz:nz }); } }
+  function kose(cx, cz, a0){ for(var i = 0; i < 8; i++){ var a = a0 + (i/8) * Math.PI/2; P.push({ x:cx + Math.cos(a)*r, z:cz + Math.sin(a)*r, nx:Math.cos(a), nz:Math.sin(a) }); } }
+  duz(ax, -(az - r), ax, az - r, 1, 0);        kose(ax - r, az - r, 0);
+  duz(ax - r, az, -(ax - r), az, 0, 1);         kose(-(ax - r), az - r, Math.PI/2);
+  duz(-ax, az - r, -ax, -(az - r), -1, 0);      kose(-(ax - r), -(az - r), Math.PI);
+  duz(-(ax - r), -az, ax - r, -az, 0, -1);      kose(ax - r, -(az - r), Math.PI*1.5);
+  var L = 0; P.forEach(function(p, i){ p.s = L; var q = P[(i+1) % P.length]; L += Math.hypot(q.x - p.x, q.z - p.z); });
+  P.forEach(function(p){ p.u = p.s / L; });
+  STAD.yol = P; STAD.cevre = L;
+})();
+// Yol üzerinde (u: 0..1) konum + normal (ara değerli).
+function stadYolNokta(u){
+  var P = STAD.yol, n = P.length, s = ((u % 1) + 1) % 1 * STAD.cevre, i = 0;
+  while(i < n - 1 && P[i+1].s <= s) i++;
+  var a = P[i], b = P[(i+1) % n], seg = (i + 1 < n ? b.s : STAD.cevre) - a.s, t = seg > 0 ? (s - a.s) / seg : 0;
+  var nx = a.nx + (b.nx - a.nx)*t, nz = a.nz + (b.nz - a.nz)*t, nl = Math.hypot(nx, nz) || 1;
+  return { x:a.x + (b.x - a.x)*t, z:a.z + (b.z - a.z)*t, nx:nx/nl, nz:nz/nl };
 }
+// Kesitler: [ofset, yükseklik] çizgileri, her parça bir malzemeye gider.
+STAD.ALT = { o0:0.6, o1:16, h0:1.25, h1:9.6, n:13 };
+STAD.UST = { o0:17.2, o1:36, h0:12.6, h1:31, n:18 };
+function _stadBasamak(B){
+  var pts = [[B.o0, B.h0]], tw = (B.o1 - B.o0) / B.n, rh = (B.h1 - B.h0) / B.n;
+  for(var i = 0; i < B.n; i++){ var o = B.o0 + i*tw, h = B.h0 + i*rh; pts.push([o + tw, h]); pts.push([o + tw, h + rh]); }
+  return pts;                                         // tread, riser, tread, riser ...
+}
+(function stadyumKur(){
+  try{
+    var P = STAD.yol, N = P.length;
+    var G = {};                                       // malzeme anahtarı -> {pos:[], uv:[], idx:[]}
+    function geo(k){ return G[k] || (G[k] = { pos:[], uv:[], nrm:[] }); }
+    // Kesit çizgisini yol boyunca süpürür. vFn(j) her kesit noktasının v koordinatı; uTekrar: u kaç kez tekrarlanır.
+    function supur(k, kesit, vFn, uTekrar, ters){
+      var g = geo(k);
+      for(var i = 0; i < N; i++){
+        var a = P[i], b = P[(i+1) % N], ua = a.u * uTekrar, ub = (i + 1 < N ? b.u : 1) * uTekrar;
+        for(var j = 0; j < kesit.length - 1; j++){
+          var c0 = kesit[j], c1 = kesit[j+1], v0 = vFn(j), v1 = vFn(j+1);
+          var A = [a.x + a.nx*c0[0], c0[1], a.z + a.nz*c0[0]], B = [b.x + b.nx*c0[0], c0[1], b.z + b.nz*c0[0]];
+          var C = [b.x + b.nx*c1[0], c1[1], b.z + b.nz*c1[0]], D = [a.x + a.nx*c1[0], c1[1], a.z + a.nz*c1[0]];
+          var q = ters ? [A, D, C, A, C, B] : [A, B, C, A, C, D];
+          var uvq = ters ? [[ua,v0],[ua,v1],[ub,v1],[ua,v0],[ub,v1],[ub,v0]] : [[ua,v0],[ub,v0],[ub,v1],[ua,v0],[ub,v1],[ua,v1]];
+          for(var m = 0; m < 6; m++){ g.pos.push(q[m][0], q[m][1], q[m][2]); g.uv.push(uvq[m][0], uvq[m][1]); }
+        }
+      }
+    }
+    // ── ALT KAT: ön duvar + basamaklar (kalabalık dokusu) ──
+    var alt = _stadBasamak(STAD.ALT), ust = _stadBasamak(STAD.UST);
+    supur('beton', [[0, 0], [0, STAD.ALT.h0], [STAD.ALT.o0, STAD.ALT.h0]], function(j){ return j; }, 1);
+    supur('altKalabalik', alt, function(j){ return 1 - j / (alt.length - 1); }, 1);
+    // ── ARA KAT: gezinti alanı zemini, LED bandı (dikey yüz), loca camları ──
+    supur('beton', [[STAD.ALT.o1, STAD.ALT.h1], [STAD.ALT.o1 + 0.6, STAD.ALT.h1]], function(j){ return j; }, 1);
+    // v: alt kenar 0, üst 1 (yazı dik); u yol yönünde - kaseye içeriden bakınca yazı düz okunur.
+    supur('led', [[STAD.ALT.o1 + 0.6, STAD.ALT.h1], [STAD.ALT.o1 + 0.6, STAD.ALT.h1 + 1.2]], function(j){ return j; }, 6);
+    supur('cam', [[STAD.ALT.o1 + 0.6, STAD.ALT.h1 + 1.2], [STAD.ALT.o1 + 0.9, STAD.UST.h0 - 0.15]], function(j){ return j; }, 1);
+    supur('beton', [[STAD.ALT.o1 + 0.9, STAD.UST.h0 - 0.15], [STAD.UST.o0, STAD.UST.h0]], function(j){ return j; }, 1);
+    // ── ÜST KAT ──
+    supur('ustKalabalik', ust, function(j){ return 1 - j / (ust.length - 1); }, 1);
+    // Arka duvar (üst katın tepesi) ve dış cephe
+    supur('cephe', [[STAD.UST.o1, STAD.UST.h1], [STAD.UST.o1, STAD.UST.h1 + 2.2], [STAD.UST.o1 + 1.5, STAD.UST.h1 + 2.2], [STAD.UST.o1 + 1.5, 0]], function(j){ return j; }, 1);
+    // ── ÇATI: sahaya doğru uzanan halka (alt yüz koyu, üst yüz açık), iç kenarda projektör şeridi ──
+    var catiIc = 23.5, catiDis = STAD.UST.o1 + 3, yIc = 33.4, yDis = 35.2;
+    supur('catiAlt', [[catiDis, yDis - 0.6], [catiIc, yIc - 0.6]], function(j){ return j; }, 1);
+    supur('catiUst', [[catiIc, yIc], [catiDis, yDis]], function(j){ return j; }, 1);
+    supur('isik', [[catiIc, yIc - 0.6], [catiIc, yIc]], function(j){ return j; }, 18);
+    supur('cephe', [[catiDis, yDis], [catiDis, yDis - 0.6]], function(j){ return j; }, 1);
+    // Çatı taşıyıcı kirişleri (alt yüzde ışınsal): tek geometri
+    var kiris = geo('kiris');
+    for(var i = 0; i < N; i += 2){
+      var p = P[i], w = 0.35, o0 = catiIc + 0.5, o1 = STAD.UST.o1;
+      var t = [-p.nz, p.nx];
+      var q = [[p.x + p.nx*o0 + t[0]*w, yIc - 0.62, p.z + p.nz*o0 + t[1]*w], [p.x + p.nx*o0 - t[0]*w, yIc - 0.62, p.z + p.nz*o0 - t[1]*w],
+               [p.x + p.nx*o1 - t[0]*w, STAD.UST.h1 + 2.2, p.z + p.nz*o1 - t[1]*w], [p.x + p.nx*o1 + t[0]*w, STAD.UST.h1 + 2.2, p.z + p.nz*o1 + t[1]*w]];
+      [0,1,2,0,2,3].forEach(function(m){ kiris.pos.push(q[m][0], q[m][1], q[m][2]); kiris.uv.push(0, 0); });
+    }
+    // ── Malzemeler ──
+    function kalabalikTuval(sira, gen, yuk){ var c = document.createElement('canvas'); c.width = gen; c.height = yuk; return { tuval:c, sira:sira }; }
+    var altT = kalabalikTuval(STAD.ALT.n, 4096, 160), ustT = kalabalikTuval(STAD.UST.n, 4096, 216);
+    window._sahaTribunDokular = [];
+    window._sahaKalabalikDokular = [];
+    function kalabalikMat(T, tur){
+      var d = new THREE.CanvasTexture(T.tuval); d.wrapS = THREE.RepeatWrapping; d.anisotropy = 4;
+      window._sahaTribunDokular.push({ tur:tur, tuval:T.tuval, sira:T.sira, dokular:[d] });
+      return new THREE.MeshLambertMaterial({ map:d, side:THREE.DoubleSide });
+    }
+    // LED bandı: kayan reklam/takım şeridi (bkz. stadLedCiz)
+    var ledC = document.createElement('canvas'); ledC.width = 1024; ledC.height = 64;
+    var ledD = new THREE.CanvasTexture(ledC); ledD.wrapS = THREE.RepeatWrapping;
+    STAD.led = { tuval:ledC, doku:ledD };
+    var MAT = {
+      beton: new THREE.MeshLambertMaterial({ color:0xc5ccd4, side:THREE.DoubleSide }),
+      altKalabalik: kalabalikMat(altT, 'alt'),
+      ustKalabalik: kalabalikMat(ustT, 'ust'),
+      led: new THREE.MeshBasicMaterial({ map:ledD, fog:false, side:THREE.DoubleSide }),
+      cam: new THREE.MeshLambertMaterial({ color:0x2a3a4a, emissive:0x1a2a3a, side:THREE.DoubleSide }),
+      cephe: new THREE.MeshLambertMaterial({ color:0x8d97a2, side:THREE.DoubleSide }),
+      catiAlt: new THREE.MeshLambertMaterial({ color:0x262c33, side:THREE.DoubleSide }),
+      catiUst: new THREE.MeshLambertMaterial({ color:0xb9c1c9, side:THREE.DoubleSide }),
+      isik: new THREE.MeshBasicMaterial({ color:0xf6f8ff, fog:false, side:THREE.DoubleSide }),
+      kiris: new THREE.MeshLambertMaterial({ color:0x3a434c, side:THREE.DoubleSide })
+    };
+    STAD.mat = MAT;
+    Object.keys(G).forEach(function(k){
+      var g = G[k], bg = new THREE.BufferGeometry();
+      bg.setAttribute('position', new THREE.Float32BufferAttribute(g.pos, 3));
+      bg.setAttribute('uv', new THREE.Float32BufferAttribute(g.uv, 2));
+      bg.computeVertexNormals();
+      var m = new THREE.Mesh(bg, MAT[k]);
+      m.matrixAutoUpdate = false; m.updateMatrix();
+      scene.add(m); tribunler.push(m);
+    });
+    // Projektörler (çatı kenarında yanan beyaz şerit): hava gece/akşamsa parlak, değilse sönük gri.
+    MAT.isikSonuk = new THREE.MeshLambertMaterial({ color:0x9aa4ac });
+    window._sahaIsikPanelleri = [];
+    var isikMesh = tribunler.find(function(m){ return m.material === MAT.isik; });
+    // Işık huzmeleri için dört köşede sanal projektör noktası (bkz. havaEfektleri).
+    [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(function(sx){
+      var o = new THREE.Object3D(); o.position.set(sx[0]*(STAD.AX + 12), 33, sx[1]*(STAD.AZ + 12)); scene.add(o);
+      window._sahaIsikPanelleri.push({ mesh:o, sanal:true });
+    });
+    if(isikMesh) window._sahaIsikPanelleri.push({ mesh:isikMesh, sonuk:MAT.isikSonuk, parlak:MAT.isik });
+    stadLedCiz();
+  }catch(e){ _sessiz(e, 'stadyumKur', 'saha_grafik'); }
+})();
+// LED bandı içeriği: takım adları/kodları ve logoları sırayla (logo yüklenince yeniden çizilir).
+function stadLedCiz(){
+  try{
+    var L = STAD.led; if(!L) return;
+    var c = L.tuval.getContext('2d'), W = L.tuval.width, H = L.tuval.height;
+    var A = (typeof takA === 'function') ? takA() : { jer:0xd8443a, shr:0x24242a }, B = (typeof takB === 'function') ? takB() : { jer:0x3d7fd4, shr:0xf0f2f4 };
+    var kodA = ((document.querySelector('#board .kod.a')||{}).textContent || 'EV'), kodB = ((document.querySelector('#board .kod.b')||{}).textContent || 'RKP');
+    var lg = (typeof taraftarLogolari === 'function') ? taraftarLogolari() : ['',''];
+    var parca = [[A, kodA, lg[0]], ['SAHA'], [B, kodB, lg[1]], ['SÜPER LİG']];
+    var w = W / parca.length;
+    parca.forEach(function(p, i){
+      var x0 = i * w;
+      if(p.length === 1){
+        c.fillStyle = '#06131f'; c.fillRect(x0, 0, w, H);
+        c.fillStyle = '#9fd8ff'; c.font = '900 34px system-ui,Arial,sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.fillText(p[0], x0 + w/2, H/2 + 2); return;
+      }
+      c.fillStyle = hx(p[0].jer); c.fillRect(x0, 0, w, H);
+      c.fillStyle = hx(p[0].shr); c.fillRect(x0, 0, w, 6); c.fillRect(x0, H - 6, w, 6);
+      var img = p[2] && STAD.logoImg && STAD.logoImg[p[2]];
+      if(img && img._hazir){ try{ var r = Math.min(46/img.width, 46/img.height); c.drawImage(img, x0 + 18, H/2 - img.height*r/2, img.width*r, img.height*r);
+        c.drawImage(img, x0 + w - 18 - img.width*r, H/2 - img.height*r/2, img.width*r, img.height*r); }catch(e){} }
+      else if(p[2]){
+        STAD.logoImg = STAD.logoImg || {};
+        if(!STAD.logoImg[p[2]]){ var im = new Image(); im.crossOrigin = 'anonymous'; im.onload = function(){ im._hazir = true; stadLedCiz(); }; im.src = p[2]; STAD.logoImg[p[2]] = im; }
+      }
+      c.fillStyle = hx(p[0].shr); c.font = '900 36px system-ui,Arial,sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle';
+      c.fillText(String(p[1]).slice(0, 4), x0 + w/2, H/2 + 2);
+    });
+    L.doku.needsUpdate = true;
+  }catch(e){ _sessiz(e, 'stadLedCiz', 'saha_grafik'); }
+}
+
 {
   const d = new THREE.MeshLambertMaterial({ color:0xf0f2f2 });
   const b = new THREE.MeshLambertMaterial({ color:0xf0c14b, side:THREE.DoubleSide });
@@ -5693,18 +5751,21 @@ function _taraftarGeometrileri(){
     return bg;
   }
   var Lt = function(n, seg){ return new THREE.LatheGeometry(n.map(function(p){ return new THREE.Vector2(p[0], p[1]); }), seg || 8); };
+  /* PERFORMANS (2026-10-04-B, kullanıcı: "maç biraz ağır hareket ediyor"): ölçümde sahnedeki 1,16 milyon üçgenin
+     795 bini taraftarlardı (885 taraftar × ~900 üçgen). Taraftarlar ekranda birkaç piksel boyunda; parçaların
+     segment sayıları düşürüldü (kulaklar kaldırıldı): taraftar başına ~170 üçgen. Görünüm aynı, yük ~5 kat az. */
   var G = {
-    govde: Lt([[0.001,-0.27],[0.18,-0.27],[0.175,-0.12],[0.19,0.02],[0.215,0.13],[0.2,0.2],[0.13,0.25],[0.001,0.26]], 10),
-    kalca: Lt([[0.001,-0.08],[0.17,-0.08],[0.175,0.02],[0.16,0.08],[0.001,0.09]], 10),
-    bacak: new THREE.CylinderGeometry(0.075, 0.06, 0.82, 7),
-    boyun: new THREE.CylinderGeometry(0.05, 0.055, 0.1, 7),
-    bas:   new THREE.SphereGeometry(0.115, 10, 8),
+    govde: Lt([[0.001,-0.27],[0.18,-0.27],[0.19,0.02],[0.215,0.13],[0.13,0.25],[0.001,0.26]], 6),
+    kalca: Lt([[0.001,-0.08],[0.17,-0.08],[0.16,0.08],[0.001,0.09]], 6),
+    bacak: new THREE.CylinderGeometry(0.075, 0.06, 0.82, 4, 1, true),
+    boyun: new THREE.CylinderGeometry(0.05, 0.055, 0.1, 4, 1, true),
+    bas:   new THREE.SphereGeometry(0.115, 7, 5),
     burun: new THREE.BoxGeometry(0.03, 0.045, 0.04),
-    kulak: new THREE.SphereGeometry(0.03, 6, 5),
-    sac:   new THREE.SphereGeometry(0.122, 10, 7, 0, Math.PI*2, 0, Math.PI*0.5),
-    ustKol: new THREE.CylinderGeometry(0.052, 0.046, 0.3, 7),
-    onKol: new THREE.CylinderGeometry(0.042, 0.035, 0.27, 7),
-    el:    new THREE.SphereGeometry(0.045, 6, 5)
+    kulak: new THREE.SphereGeometry(0.03, 3, 2),
+    sac:   new THREE.SphereGeometry(0.122, 7, 3, 0, Math.PI*2, 0, Math.PI*0.5),
+    ustKol: new THREE.CylinderGeometry(0.052, 0.046, 0.3, 4, 1, true),
+    onKol: new THREE.CylinderGeometry(0.042, 0.035, 0.27, 4, 1, true),
+    el:    new THREE.SphereGeometry(0.045, 4, 3)
   };
   var dummy = new THREE.MeshBasicMaterial();
   function M(geo, x, y, z, sx, sy, sz, rx){ var m = new THREE.Mesh(geo, dummy); m.position.set(x, y, z); if(sx) m.scale.set(sx, sy, sz); if(rx) m.rotation.x = rx; return m; }
@@ -5726,7 +5787,6 @@ function _taraftarGeometrileri(){
     var by = M(G.boyun, 0, 1.51, 0); kok.add(by); L.ten.push(by);
     var bs = M(G.bas, 0, 1.64, 0.005, 0.92, 1.06, 0.98); kok.add(bs); L.ten.push(bs);
     var br = M(G.burun, 0, 1.63, 0.115); kok.add(br); L.ten.push(br);
-    [-1, 1].forEach(function(sx){ var k = M(G.kulak, sx*0.108, 1.64, 0, 0.5, 1, 0.8); kok.add(k); L.ten.push(k); });
     var sc = M(G.sac, 0, 1.655, -0.012, 1, 1.05, 1, -0.35); kok.add(sc); L.sac.push(sc);
     var el = null;
     if(p === 0){        // atkı: iki kol yukarıda, eller başın üstünde
@@ -5742,7 +5802,7 @@ function _taraftarGeometrileri(){
     return sonuc;
   }
   var T = [poz(0), poz(1), poz(2)];
-  T.atki = new THREE.BoxGeometry(0.95, 0.15, 0.03);                                  // başın üstünde
+  T.atki = new THREE.BoxGeometry(1.15, 0.17, 0.02);                                  // başın üstünde, gergin
   T.sopa = new THREE.CylinderGeometry(0.012, 0.012, 1.0, 4); T.sopa.translate(0, 0.45, 0);
   T.bez1 = new THREE.PlaneGeometry(0.5, 0.18); T.bez1.translate(0.26, 0.86, 0);       // bayrak üst yarı (forma rengi)
   T.bez2 = new THREE.PlaneGeometry(0.5, 0.18); T.bez2.translate(0.26, 0.68, 0);       // alt yarı (ikinci renk)
@@ -5751,32 +5811,24 @@ function _taraftarGeometrileri(){
 function taraftarKur(){
   try{
     var KAT = 3, ARA = 1.3, kisi = [];
-    function ekle(x, y, z, taraf, ryAtki){
+    function ekle(x, y, z, taraf, yon){
       // Poz: 0 = atkıyı iki elle başının üstünde tutar, 1 = elinde bayrak, 2 = alkış/normal.
       var r = Math.random(), poz = r < 0.4 ? 0 : (r < 0.55 ? 1 : 2);
-      // Sahaya dönük: yan tribünde z'nin tersine, kale arkasında x'in tersine bakar.
-      var yon = ryAtki ? (x < 0 ? Math.PI/2 : -Math.PI/2) : (z < 0 ? 0 : Math.PI);
       kisi.push({ x:x, y:y, z:z, taraf:taraf, faz:Math.random()*6.28, atkili:poz === 0, poz:poz, yon:yon,
-                  ry:ryAtki, ton:0.82 + Math.random()*0.3, ayri:Math.random() < 0.1 });
+                  ry:0, ton:0.82 + Math.random()*0.3, ayri:Math.random() < 0.1, cevir:Math.random() < 0.35 });
     }
-    [-1,1].forEach(function(s){
-      for(var k=0;k<KAT;k++){
-        var y = 2.8 + k*2.4;
-        // Yan tribün: x<0 yarısı A takımının (kalesi -x'te), x>0 yarısı B'nin.
-        var L = HLX*2 + 24, zU = s*(HWZ + 9.9 + 3*k);
-        for(var x=-L/2; x<=L/2; x+=ARA){
-          if (Math.abs(x) < 7.5 && k < 3) continue;          // yan ekranın arkası
-          if (Math.abs(x) < 1.2) continue;                   // iki taraftar grubu arasında boşluk
-          ekle(x + (Math.random()-0.5)*0.35, y, zU + (Math.random()-0.5)*0.5, x < 0 ? 0 : 1, 0);
-        }
-        // Kale arkası: tamamı o kalenin takımının.
-        var LK = HWZ*2 + 10, xK = s*(HLX + 10.9 + 3*k);
-        for(var z=-LK/2; z<=LK/2; z+=ARA){
-          if (Math.abs(z) < 8.8) continue;                   // dev ekranın arkası
-          ekle(xK + (Math.random()-0.5)*0.5, y, z + (Math.random()-0.5)*0.35, s < 0 ? 0 : 1, Math.PI/2);
-        }
+    /* KASE ÜZERİNDE (2026-10-04-B): ön üç sıra, yuvarlatılmış tribün yolu boyunca 1,3 m arayla; her taraftar
+       basamağın üstünde durur ve sahaya (yolun iç normaline) bakar. Köşeler de dolu (kesintisiz kase). */
+    var B = STAD.ALT, tw = (B.o1 - B.o0) / B.n, rh = (B.h1 - B.h0) / B.n;
+    for(var k=0;k<KAT;k++){
+      var o = B.o0 + (k + 0.5) * tw, y = B.h0 + k * rh, adet = Math.floor(STAD.cevre / ARA);
+      for(var i=0;i<adet;i++){
+        var pt = stadYolNokta((i + (k % 2) * 0.5) / adet + (Math.random()-0.5) * 0.0008);
+        var x = pt.x + pt.nx * o, z = pt.z + pt.nz * o;
+        if (Math.abs(x) < 1.2) continue;                   // iki taraftar grubu arasında boşluk
+        ekle(x, y, z, x < 0 ? 0 : 1, Math.atan2(-pt.nx, -pt.nz));
       }
-    });
+    }
     var n = kisi.length;
     /* İNSAN BİÇİMLİ TARAFTAR (2026-09-28-AB, kullanıcı: "taraftarı oyuncular gibi tasarlayın,
        ellerinde bayraklar ve atkılar olsun"). ÖNCEDEN: kutu gövde + küre baş.
@@ -5800,7 +5852,12 @@ function taraftarKur(){
       return m;
     });
     var bayrakAdet = Math.max(1, sayac[1]);
-    var atki = new THREE.InstancedMesh(TF.atki, new THREE.MeshLambertMaterial({ color:0xffffff }), Math.max(1, sayac[0]));
+    // Atkı dokusu: beyaz zemin üstünde gri çizgiler ve püskül - örnek rengi çarpılınca takım renkli çizgili atkı olur.
+    var atkiTuval = document.createElement('canvas'); atkiTuval.width = 128; atkiTuval.height = 16;
+    (function(c){ c.fillStyle = '#ffffff'; c.fillRect(0, 0, 128, 16); c.fillStyle = '#9a9a9a';
+      for(var i = 0; i < 128; i += 16) c.fillRect(i, 0, 6, 16);
+      c.fillStyle = '#5a5a5a'; c.fillRect(0, 0, 4, 16); c.fillRect(124, 0, 4, 16); })(atkiTuval.getContext('2d'));
+    var atki = new THREE.InstancedMesh(TF.atki, new THREE.MeshLambertMaterial({ color:0xffffff, map:new THREE.CanvasTexture(atkiTuval) }), Math.max(1, sayac[0]));
     var elSopa = new THREE.InstancedMesh(TF.sopa, new THREE.MeshLambertMaterial({ color:0xdcdcdc }), bayrakAdet);
     var elBez1 = new THREE.InstancedMesh(TF.bez1, new THREE.MeshLambertMaterial({ color:0xffffff, side:THREE.DoubleSide }), bayrakAdet);
     var elBez2 = new THREE.InstancedMesh(TF.bez2, new THREE.MeshLambertMaterial({ color:0xffffff, side:THREE.DoubleSide }), bayrakAdet);
@@ -5828,29 +5885,49 @@ function taraftarKur(){
     TARAFTAR.elSopa = elSopa; TARAFTAR.elBez1 = elBez1; TARAFTAR.elBez2 = elBez2; TARAFTAR.TF = TF;
     // Bayraklar: her takıma 7 (kale arkasında 4, kendi yarısındaki yan tribünlerde 3).
     var yerler = [];
+    // Dev bayraklar: her takımın kale arkasında 4, kendi yarısındaki yan tribünlerde 3 (ikinci sırada).
+    function yolUBul(hx, hz){ var en = 0, ed = 1e9; for(var q = 0; q < 1600; q++){ var pt = stadYolNokta(q/1600), d = Math.hypot(pt.x - hx, pt.z - hz); if(d < ed){ ed = d; en = q/1600; } } return en; }
     [0,1].forEach(function(t){
       var sx = t === 0 ? -1 : 1;
-      [-22, -13, 13, 22].forEach(function(z){ yerler.push({ t:t, x:sx*(HLX+10.9), y:2.8, z:z, ry:Math.PI/2 }); });
-      [[-1, 0.55], [1, 0.3], [-1, 0.8]].forEach(function(p, j){
-        yerler.push({ t:t, x:sx*HLX*p[1] + (j-1)*2, y:2.8, z:p[0]*(HWZ+9.9), ry:0 });
+      [[STAD.AX, -20], [STAD.AX, -9], [STAD.AX, 9], [STAD.AX, 20], [HLX*0.55, STAD.AZ], [HLX*0.25, -STAD.AZ], [HLX*0.8, -STAD.AZ]].forEach(function(h){
+        var pt = stadYolNokta(yolUBul(sx * h[0], h[1])), o = B.o0 + 1.5 * tw;
+        yerler.push({ t:t, x:pt.x + pt.nx*o, y:B.h0 + rh, z:pt.z + pt.nz*o, ry:Math.atan2(-pt.nx, -pt.nz) });
       });
     });
-    var direkG = new THREE.CylinderGeometry(0.035, 0.035, 2.8, 5); direkG.translate(0, 1.4, 0);
+    var direkG = new THREE.CylinderGeometry(0.03, 0.04, 3.4, 5); direkG.translate(0, 1.7, 0);
     var direkM = new THREE.MeshLambertMaterial({ color:0xd8d8d8 });
-    var bezG = new THREE.PlaneGeometry(1.9, 1.2, 6, 1); bezG.translate(0.95, 0, 0);
+    // Daha sık ızgara (14x6): bez gerçek kumaş gibi hem boyuna hem enine dalgalanır.
+    var bezG = new THREE.PlaneGeometry(2.4, 1.5, 14, 6); bezG.translate(1.2, -0.75, 0);
     TARAFTAR.bayrak = yerler.map(function(y){
       var tuval = document.createElement('canvas'); tuval.width = 192; tuval.height = 120;
       var doku = new THREE.CanvasTexture(tuval);
       // Bayrak yüzü sahaya dönük olsun: +z ve +x tarafındaki tribünlerde 180° çevrilir
       // (önceden bu tribünlerde logo/kod sahadan AYNA gibi ters görünüyordu).
-      var ters = (y.ry === 0 && y.z > 0) || (y.ry !== 0 && y.x > 0);
-      var kok = new THREE.Group(); kok.position.set(y.x, y.y, y.z); kok.rotation.y = y.ry + (ters ? Math.PI : 0);
+      // Yüz sahaya dönük (kök sahaya bakar): yerel +z sahaya, bez yerel +x yönüne açılır.
+      var kok = new THREE.Group(); kok.position.set(y.x, y.y + 1.1, y.z); kok.rotation.y = y.ry;
       var direk = new THREE.Mesh(direkG, direkM); kok.add(direk);
       var bez = new THREE.Mesh(bezG.clone(), new THREE.MeshLambertMaterial({ map:doku, side:THREE.DoubleSide }));
-      bez.position.set(0, 2.2, 0); kok.add(bez);
+      bez.position.set(0, 3.35, 0); kok.add(bez);
       scene.add(kok);
       var poz = bez.geometry.attributes.position, taban = new Float32Array(poz.array);
-      return { t:y.t, kok:kok, bez:bez, tuval:tuval, doku:doku, taban:taban, faz:Math.random()*6.28 };
+      return { t:y.t, kok:kok, bez:bez, tuval:tuval, doku:doku, taban:taban, faz:Math.random()*6.28, y0:y.y + 1.1 };
+    });
+    /* DEV AÇILIM BAYRAĞI (TİFO, 2026-10-04-B): her takımın kale arkasındaki alt tribünü boydan boya örten
+       takım renkli, logolu dev bayrak. Basamakların eğimine yatırılmıştır ve altındaki kalabalık onu
+       kaldırdıkça hafifçe dalgalanır. Maç başında ve o takımın her golünde aşağıdan yukarı açılır,
+       ~9 sn kalır, sonra toplanır. */
+    TARAFTAR.tifo = [0,1].map(function(t){
+      var sx = t === 0 ? -1 : 1, egim = Math.atan2(B.h1 - B.h0, B.o1 - B.o0), om = (B.o0 + B.o1) / 2;
+      var tuval = document.createElement('canvas'); tuval.width = 512; tuval.height = 200;
+      var doku = new THREE.CanvasTexture(tuval);
+      var gG = new THREE.PlaneGeometry(26, 17.5, 20, 10); gG.translate(0, 8.75, 0);   // alt kenar y=0
+      var m = new THREE.Mesh(gG, new THREE.MeshLambertMaterial({ map:doku, side:THREE.DoubleSide }));
+      var kok = new THREE.Group();
+      kok.position.set(sx * (STAD.AX + B.o0 + 0.4), B.h0 + 0.9, 0);
+      kok.rotation.y = sx < 0 ? Math.PI/2 : -Math.PI/2;                      // sahaya bak
+      var egimG = new THREE.Group(); egimG.rotation.x = -(Math.PI/2 - egim); egimG.add(m); kok.add(egimG);
+      kok.visible = false; scene.add(kok);
+      return { t:t, kok:kok, mesh:m, tuval:tuval, doku:doku, taban:new Float32Array(gG.attributes.position.array), acik:0, hedef:0, sure:0, sonSkor:0 };
     });
     TARAFTAR.hazir = true;
   }catch(e){ _sessiz(e, 'taraftarKur', 'saha_grafik'); }
@@ -5892,6 +5969,7 @@ function _tfBayrakCiz(b, renk1, renk2, kod, img){
 // yoksa (imza aynı) hiçbir şey yeniden çizilmez.
 function taraftarRenkUygula(){
   try{
+    try{ if (typeof kulubeCiz==='function'){ kulubeCiz(0); kulubeCiz(1); } }catch(e){}
     if (!TARAFTAR.hazir) return;
     var A = takA(), B = takB(), L = taraftarLogolari();
     var kodA = (document.querySelector('#board .kod.a')||{}).textContent || A.kod;
@@ -5918,36 +5996,66 @@ function taraftarRenkUygula(){
         img.src = url;
       }
     });
+    (TARAFTAR.tifo || []).forEach(function(tf){
+      var tk = T[tf.t], url = L[tf.t], kod = tf.t === 0 ? kodA : kodB;
+      var ciz = function(img){ try{
+        var c = tf.tuval.getContext('2d'), W = 512, H = 200;
+        for(var i = 0; i < 8; i++){ c.fillStyle = hx(i % 2 ? tk.shr : tk.jer); c.fillRect(i * W/8, 0, W/8 + 1, H); }
+        c.fillStyle = 'rgba(0,0,0,.18)'; c.fillRect(0, 0, W, 14); c.fillRect(0, H - 14, W, 14);
+        if(img){ var r = Math.min(150/img.width, 150/img.height); c.drawImage(img, W/2 - img.width*r/2, H/2 - img.height*r/2, img.width*r, img.height*r); }
+        else { c.fillStyle = hx(tk.jer); c.beginPath(); c.arc(W/2, H/2, 72, 0, Math.PI*2); c.fill();
+          c.fillStyle = hx(tk.shr); c.font = '900 56px system-ui,Arial,sans-serif'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(String(kod).slice(0,4), W/2, H/2 + 3); }
+        tf.doku.needsUpdate = true; }catch(e){} };
+      ciz(null);
+      if(url){ var im = new Image(); im.crossOrigin = 'anonymous'; im.onload = function(){ ciz(im); }; im.src = url; }
+    });
     taraftarTribunBoya(A, B);
   }catch(e){ _sessiz(e, 'taraftarRenkUygula', 'saha_grafik'); }
 }
 // Tribün dokusunu takım renklerine boyar (bkz. kalabalikDoku). Yan tribünde doku ekseni
 // yüzeyin baktığı yöne göre ters döner: +z tribünün sahaya bakan yüzü -z yüzüdür.
 function taraftarTribunBoya(A, B){
+  /* KOLTUK + SEYİRCİ SIRALARI (2026-10-04-B): her basamak bir sıra. Sıra bandının üst kısmı basamak yüzeyi
+     (koltuk sırtları), alt kısmı dikey yüz (oturan/ayakta seyirci). Açık mavi-gri koltuklar boş yerlerde
+     görünür (referanstaki gibi). Seyircinin takımı, o noktanın sahadaki tarafına göre: x<0 yarısı A
+     (insan takımının kalesi o tarafta), x>0 yarısı B. Kale arkaları tamamen o kalenin takımının. */
   try{
     var D = window._sahaTribunDokular; if (!D) return;
-    function boya(tuval, fnTakim){
-      var x = tuval.getContext('2d'), W = tuval.width, H = tuval.height;
-      x.fillStyle = '#10171a'; x.fillRect(0, 0, W, H);
-      x.fillStyle = 'rgba(255,255,255,.04)';
-      for (var y=4; y<H; y+=7) x.fillRect(0, y, W, 1);
-      var adet = W * H * 0.16;
-      for (var i=0;i<adet;i++){
-        var px = Math.random()*W, py = Math.random()*H, tk = fnTakim(px / W), r = Math.random();
-        x.fillStyle = r < 0.72 ? hx(tk.jer) : (r < 0.9 ? hx(tk.shr) : '#d9b48f');
-        x.fillRect(px, py, 1.7, 2.4);
-      }
-    }
+    var KOLTUK = '#aebccc', KOLTUK2 = '#97a7b9';
     D.forEach(function(d){
-      if (d.tur === 'uzun'){
-        // u=0 ucunun hangi x'e düştüğü: +z tarafında (s=1) +x, -z tarafında -x
-        // (BoxGeometry yüz yönleri; ekran görüntüsünde 3B taraftarlarla eşleştiği doğrulandı).
-        boya(d.tuval, function(u){ var xPoz = d.s > 0 ? (u < 0.5) : (u >= 0.5); return xPoz ? B : A; });
-      } else {
-        boya(d.tuval, function(){ return d.s < 0 ? A : B; });
+      if(d.tur !== 'alt' && d.tur !== 'ust') return;
+      var c = d.tuval.getContext('2d'), W = d.tuval.width, H = d.tuval.height, n = d.sira, bh = H / n;
+      var dolu = d.tur === 'alt' ? 0.86 : 0.74;
+      c.fillStyle = '#5d6c7c'; c.fillRect(0, 0, W, H);
+      var adim = 5.2;                                       // koltuk genişliği (px)
+      var takimX = new Array(Math.ceil(W / adim) + 1);
+      for(var i = 0; i < takimX.length; i++){ var pt = stadYolNokta((i * adim) / W); takimX[i] = pt.x; }
+      for(var r = 0; r < n; r++){
+        var y0 = r * bh, yT = y0 + bh * 0.42;              // yT: dikey yüz başlangıcı
+        // basamak yüzeyi (açık) ve koltuk sırası
+        c.fillStyle = '#c3ccd6'; c.fillRect(0, y0, W, bh * 0.42);
+        c.fillStyle = '#4d5a68'; c.fillRect(0, yT, W, bh - bh * 0.42);
+        for(var k = 0; k < takimX.length; k++){
+          var x = k * adim, tk = takimX[k] < 0 ? A : B;
+          var dolumu = Math.random() < dolu;
+          // koltuk
+          c.fillStyle = (k + r) % 2 ? KOLTUK : KOLTUK2;
+          c.fillRect(x + 0.6, yT - bh*0.18, adim - 1.2, bh * 0.55);
+          if(!dolumu) continue;
+          // seyirci: gövde (forma), baş (ten), arada saç
+          var rr = Math.random(), govde = rr < 0.74 ? hx(tk.jer) : (rr < 0.9 ? hx(tk.shr) : ['#2a2f36','#e9e9ea','#3c4a5c'][(Math.random()*3)|0]);
+          var ayak = Math.random() < 0.35 ? -bh*0.12 : 0;    // bir kısmı ayakta: biraz daha yüksek
+          c.fillStyle = govde; c.fillRect(x + 0.9, yT - bh*0.05 + ayak, adim - 1.8, bh * 0.5);
+          c.fillStyle = ['#e0b48e','#c99d72','#b07d55','#8a5a3c','#d9a878'][(Math.random()*5)|0];
+          c.fillRect(x + 1.5, yT - bh*0.3 + ayak, adim - 3, bh * 0.26);
+          c.fillStyle = ['#1a1512','#2a1d14','#3b2716','#5a3a1f','#141414'][(Math.random()*5)|0];
+          c.fillRect(x + 1.5, yT - bh*0.34 + ayak, adim - 3, bh * 0.08);
+          if(Math.random() < 0.06){ c.fillStyle = hx(tk.shr); c.fillRect(x - 2, yT - bh*0.5 + ayak, adim + 4, bh*0.12); }   // havaya kaldırılmış atkı
+        }
       }
       d.dokular.forEach(function(dk){ dk.needsUpdate = true; });
     });
+    try{ stadLedCiz(); }catch(e){}
   }catch(e){ _sessiz(e, 'taraftarTribunBoya', 'saha_grafik'); }
 }
 // Her kare (taraftarHareket içinden). Skor değişimi burada yakalanır: oyun, konuk ve
@@ -5969,7 +6077,7 @@ function taraftar3DGuncelle(dt){
       if (v > 0) TARAFTAR.tepki[t] = Math.max(0, v - dt); else if (v < 0) TARAFTAR.tepki[t] = Math.min(0, v + dt);
     }
     TARAFTAR.tAcc += dt;
-    if (TARAFTAR.tAcc < 1/30) return;                              // 30 kare/sn yeterli
+    if (TARAFTAR.tAcc < ((window._otoKalite || 0) >= 1 ? 1/15 : 1/30)) return;   // 30 kare/sn (kalite düşükse 15)
     var adim = TARAFTAR.tAcc; TARAFTAR.tAcc = 0;
     var zaman = performance.now() / 1000, cosku = window._sahaCosku || 0;
     var k = TARAFTAR.kisi, TF = TARAFTAR.TF;
@@ -5989,11 +6097,14 @@ function taraftar3DGuncelle(dt){
       m4.compose(vp, q, vs);
       P.forma.setMatrixAt(p.pi, m4); P.ten.setMatrixAt(p.pi, m4); P.sac.setMatrixAt(p.pi, m4); P.pant.setMatrixAt(p.pi, m4);
       if(p.poz === 0){
-        // Atkı: iki elin arasında başın üstünde, sağa sola sallanır; üzgünken indirilir (görünmez).
+        // Atkı: iki elin arasında başın üstünde gergin tutulur, sağa sola sallanır. Sevinçte taraftarların
+        // bir kısmı atkıyı başının üstünde ÇEVİRİR (yatay döner); üzgünken indirilir (görünmez).
         var ol = 1 - uz;
-        var a = Math.sin(f*(2.6 + sev*6))*(0.12 + sev*0.18 + cosku*0.08);   // eller sabit: küçük salınım
-        eu.set(0, p.yon, a, 'YXZ'); qa.setFromEuler(eu);
-        vp.set(p.x, p.y + dy + 2.03*sy, p.z); vs.set(ol, ol, ol);
+        var a = Math.sin(f*(2.6 + sev*6))*(0.12 + sev*0.18 + cosku*0.08);
+        var cev = (sev > 0.2 && p.cevir) ? (zaman * 9 + p.faz) : 0;
+        if(cev) eu.set(0.35, p.yon + cev, 0, 'YXZ'); else eu.set(Math.sin(f*1.3)*0.08, p.yon, a, 'YXZ');
+        qa.setFromEuler(eu);
+        vp.set(p.x, p.y + dy + (cev ? 2.18 : 2.03)*sy, p.z); vs.set(ol, ol, ol);
         m4.compose(vp, qa, vs); TARAFTAR.atki.setMatrixAt(p.pi, m4);
       } else if(p.poz === 1){
         // El bayrağı: eldeki sopanın ucunda iki renkli küçük bayrak; sevinçte hızlı sallanır.
@@ -6009,18 +6120,47 @@ function taraftar3DGuncelle(dt){
     TARAFTAR.parca.forEach(function(P){ ['forma','ten','sac','pant'].forEach(function(n){ P[n].instanceMatrix.needsUpdate = true; }); });
     [TARAFTAR.atki, TARAFTAR.elSopa, TARAFTAR.elBez1, TARAFTAR.elBez2].forEach(function(m){ m.instanceMatrix.needsUpdate = true; });
     // Bayraklar: direk sağa sola sallanır, bez dalgalanır; sevinçte hızlanır, üzüntüde iner.
+    (TARAFTAR.tifo || []).forEach(function(tf){
+      var sk = tf.t === 0 ? sA : sB;
+      if(sk > tf.sonSkor){ tf.hedef = 1; tf.sure = 9; } else if(sk < tf.sonSkor){ tf._giris = false; }
+      tf.sonSkor = sk;
+      if(typeof TOREN !== 'undefined' && TOREN.aktif && TOREN.tur === 'giris' && tf.sure <= 0 && !tf._giris){ tf._giris = true; tf.hedef = 1; tf.sure = 12; }
+      if(tf.sure > 0){ tf.sure -= adim; if(tf.sure <= 0) tf.hedef = 0; }
+      tf.acik += (tf.hedef - tf.acik) * Math.min(1, adim * 1.4);
+      var gor = tf.acik > 0.02; tf.kok.visible = gor; if(!gor) return;
+      var arr = tf.mesh.geometry.attributes.position.array, tb = tf.taban, f = zaman;
+      for(var j = 0; j < arr.length; j += 3){
+        var v = tb[j+1] / 17.5;                                        // 0 alt .. 1 üst
+        var gorun = Math.max(0, Math.min(1, (tf.acik * 1.25 - v) * 4));  // aşağıdan yukarı açılır
+        arr[j+1] = tb[j+1] * Math.min(1, tf.acik * 1.25);
+        arr[j+2] = (Math.sin(f*1.6 + tb[j]*0.35 + v*3) * 0.22 + Math.sin(f*2.3 - tb[j]*0.2) * 0.12) * gorun + 1.9;          // seyircinin başları üstünde
+      }
+      tf.mesh.geometry.attributes.position.needsUpdate = true;
+    });
+    /* BAYRAK SALLAMA (2026-10-04-B, kullanıcı: "bayrak tutuşları ve dalgalanmaları daha gerçekçi olsun"):
+       Taşıyan kişi direği iki elle omuz hizasında tutar ve "8" çizerek sallar (sağ-sol + ileri-geri, faz
+       kaymalı). Bez, direkten uzaklaştıkça artan, hem boyuna (rüzgâr yönünde ilerleyen) hem enine (üst-alt
+       köşe farkı) dalgayla kumaş gibi kıvrılır ve yerçekimiyle ucu hafif sarkar. Sevinçte salınım büyür ve
+       hızlanır; üzüntüde direk indirilir, bez sarkar. Sakin anda yavaş, ara sıra duran bir salınım. */
     TARAFTAR.bayrak.forEach(function(b){
       var tp = TARAFTAR.tepki[b.t], sev = tp > 0 ? Math.min(1, tp/1.5) : 0, uz = tp < 0 ? Math.min(1, -tp/1.5) : 0;
       var f = zaman + b.faz;
-      b.kok.rotation.z = Math.sin(f*(1.3 + sev*2.5))*(0.35 + sev*0.25)*(1 - uz*0.8);
-      b.kok.position.y = 2.8 - uz*0.9;
+      var sakin = 0.45 + 0.55 * Math.max(0, Math.sin(f*0.23));          // sakin anda ara sıra yavaşlar
+      var w = (1.6 + sev*2.2) , gen = (0.42 + sev*0.35) * (1 - uz*0.85) * (sev > 0 ? 1 : sakin);
+      b.kok.rotation.z = Math.sin(f*w) * gen;
+      b.kok.rotation.x = Math.sin(f*w*2 + 0.7) * gen * 0.35;              // "8" hareketi
+      b.kok.position.y = b.y0 - uz*1.0 + Math.abs(Math.sin(f*w)) * 0.08;
       var poz = b.bez.geometry.attributes.position, arr = poz.array, tb = b.taban;
+      var ruz = 4.2 + sev*3.5, gecik = Math.cos(f*w) * gen;               // direk savrulunca bez geriden gelir
       for (var j=0;j<arr.length;j+=3){
-        var u = tb[j] / 1.9;                                          // direkten uzaklık 0..1
-        arr[j+2] = Math.sin(f*(4 + sev*4) - u*4.5) * u * (0.28 + sev*0.2);
-        arr[j+1] = tb[j+1] - u*u*0.25*uz;
+        var u = tb[j] / 2.4, v = -tb[j+1] / 1.5;                          // u: direkten uzaklık, v: üstten aşağı 0..1
+        var dalga = Math.sin(f*ruz - u*5.2 + v*1.3) * (0.08 + u*0.32) + Math.sin(f*ruz*1.7 - u*8 - v*2) * u * 0.07;
+        arr[j+2] = dalga * (0.8 + sev*0.5) - gecik * u * u * 0.55;
+        arr[j]   = tb[j] * (1 - Math.abs(dalga) * 0.12);                  // kıvrılınca bez kısalır
+        arr[j+1] = tb[j+1] - u*u*(0.12 + uz*0.6) + Math.sin(f*ruz - u*4) * u * 0.05;
       }
       poz.needsUpdate = true;
+      b.bez.geometry.computeVertexNormals();
     });
   }catch(e){ _sessiz(e, 'taraftar3DGuncelle', 'saha_grafik'); }
 }
@@ -6528,9 +6668,13 @@ function modelAnimKur(grup, M, kaleci){
     }
     var k = { idle: (kaleci && bul('Kaleci_Bekleme')) || bul('Idle')||bul('Bekleme')||bul('Atak_Bekleme'),
               walk:bul('Walk')||bul('Yurume'), run:bul('Run')||bul('Kosu'), sprint:bul('Sprint') };
-    // Yürüme klibi yoksa (detaylı model) koşu klibinin YAVAŞ oynatılan kopyası kullanılır.
+    // YÜRÜYÜŞ (2026-10-04-B, kullanıcı: "yürüyüş ve koşular daha gerçekçi olsun"): Detaylı modelde yürüme klibi yok;
+    // önceden koşu klibi YAVAŞ oynatılıyordu - ağır çekimde koşan biri gibi görünüyordu (dizler yüksek, kollar
+    // bükük, havada kalma evresi). Artık koşu klibinden GERÇEK bir yürüyüş üretilir: her kemik dönüşü duruş
+    // pozuyla koşu pozu arasında %40 oranında karıştırılır (adım ve kol salınımı küçülür, dizler az bükülür), kalça
+    // yükseklik salınımı azaltılır. Ritim yürüyüş temposunda (~1,9 adım/sn) oynatılır.
     var walkKosudan = false;
-    if(!k.walk && k.run){ k.walk = k.run.clone(); k.walk.name = 'Yurume_kosudan'; walkKosudan = true; }
+    if(!k.walk && k.run){ k.walk = _yurumeKlibiUret(k.run, bul('Atak_Bekleme') || k.idle) || k.run.clone(); walkKosudan = !k.walk || k.walk.name !== 'Yurume_uretilen'; }
     // TEK SEFERLIK KLIPLER (kullanici: "sut ve kaleci animasyonlari"):
     //   sutSag/sutSol : Kick_Right / Kick_Left - sut ve pas
     //   plonjon       : Roll - kalecinin yana atlayisi (modelde ozel kaleci klibi yok,
@@ -6560,6 +6704,30 @@ function modelAnimKur(grup, M, kaleci){
     });
     return { mixer: mixer, eylem: eylem, suanki: 'idle', tek: tekEylem, tekBitis: 0, walkKosudan: walkKosudan };
   }catch(e){ return null; }
+}
+function _yurumeKlibiUret(run, idle){
+  try{
+    if(!run) return null;
+    var taban = {};
+    if(idle) idle.tracks.forEach(function(tr){ taban[tr.name] = tr.values.slice(0, tr.getValueSize()); });
+    var qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), K = 0.4;
+    var izler = run.tracks.map(function(tr){
+      var v = tr.values.slice(), n = tr.getValueSize(), b = taban[tr.name];
+      if(/\.quaternion$/.test(tr.name) && n === 4){
+        if(!b) b = [0, 0, 0, 1];
+        qa.set(b[0], b[1], b[2], b[3]);
+        for(var i = 0; i < v.length; i += 4){ qb.set(v[i], v[i+1], v[i+2], v[i+3]); var q = qa.clone().slerp(qb, K); v[i] = q.x; v[i+1] = q.y; v[i+2] = q.z; v[i+3] = q.w; }
+        return new THREE.QuaternionKeyframeTrack(tr.name, tr.times.slice(), v);
+      }
+      if(/\.position$/.test(tr.name) && n === 3){
+        if(!b) return tr.clone();
+        for(var j = 0; j < v.length; j += 3){ v[j] = b[0] + (v[j] - b[0]) * 0.3; v[j+1] = b[1] + (v[j+1] - b[1]) * 0.35; v[j+2] = b[2] + (v[j+2] - b[2]) * 0.3; }
+        return new THREE.VectorKeyframeTrack(tr.name, tr.times.slice(), v);
+      }
+      return tr.clone();
+    });
+    return new THREE.AnimationClip('Yurume_uretilen', run.duration, izler);
+  }catch(e){ _sessiz(e, '_yurumeKlibiUret', 'saha_oyun'); return null; }
 }
 // Tek seferlik hareketi oynatir (sut, pas, plonjon). Bittiginde modelAnimGuncelle
 // hareket karisimina geri doner. Ayni hareket art arda tetiklenirse bastan baslar.
@@ -6610,6 +6778,7 @@ function modelAnimGuncelle(ud, dt, hiz){
     // klip AYNI adım hızında oynar ve fazları eşitlenir, ayaklar birbirine karışmaz.
     var rS = Math.max(0.55, Math.min(1.8, hiz/5.5)), wS = Math.max(0.6, Math.min(1.6, hiz/1.8));
     if(a.walkKosudan) wS = Math.max(0.32, Math.min(0.7, hiz/5.0));   // koşu klibinden yürüyüş: yavaş
+    else if(a.eylem.walk && a.eylem.walk.getClip().name === 'Yurume_uretilen') wS = Math.max(0.42, Math.min(1.0, hiz / 2.4));   // üretilen yürüyüş: yürüme temposu
     if(a.eylem.run && a.eylem.walk && wRun > 0.02 && wWalk > 0.02){
       var rd = a.eylem.run.getClip().duration, wd = a.eylem.walk.getClip().duration;
       var ortak = (wRun*rS/rd + wWalk*wS/wd) / (wRun + wWalk);          // ortak adım frekansı
@@ -6622,6 +6791,80 @@ function modelAnimGuncelle(ud, dt, hiz){
     a.mixer.update(dt);
   }catch(e){_sessiz(e,'modelAnimGuncelle:1218','saha_oyun');}
 }
+/* ══ İSKELET POZLARI (2026-10-04-B, kullanıcı: "gol sevinçlerini daha gerçekçi hale getir"; değişiklikte beşlik/sarılma;
+   kalecinin topu eline alması ve havada yana uzanması) ════════════════════════════════════════════════════════════
+   KÖK SEBEP: Detaylı modelde sevinç klibi yok; gol sevincinde "taç atışı" klibi oynuyordu (iki kol yukarı - aynı hareket
+   her golde). Beşlik ve sarılma da aynı klibe düşüyordu.
+   YÖNTEM (modelden bağımsız): Bir uzvu "model uzayında şu yöne baksın" diye hedeflemek. Kemiğin o anki yönü (kemikten
+   çocuğuna) ile hedef yön arasındaki dönüş dünya uzayında hesaplanıp kemiğin yerel dönüşüne çevrilir. Böylece hem
+   detaylı (Mixamo) hem hafif modelde aynı poz tanımı çalışır; eksen tahmini gerekmez. Animasyon karıştırıcısının
+   güncellemesinden SONRA uygulanır, ağırlıkla (0..1) yumuşakça girip çıkar.
+   Model uzayı: karakter +z'ye bakar, +y yukarı, karakterin SOLU +x. */
+var KEMIK_AD = {
+  kolSol:['LeftArm','L_UpperArm'], onKolSol:['LeftForeArm','L_LowerArm'], elSol:['LeftHand','L_Hand'],
+  kolSag:['RightArm','R_UpperArm'], onKolSag:['RightForeArm','R_LowerArm'], elSag:['RightHand','R_Hand'],
+  bacakSol:['LeftUpLeg','L_UpperLeg'], dizSol:['LeftLeg','L_LowerLeg'], ayakSol:['LeftFoot','L_Foot'],
+  bacakSag:['RightUpLeg','R_UpperLeg'], dizSag:['RightLeg','R_LowerLeg'], ayakSag:['RightFoot','R_Foot'],
+  govde:['Spine1','Spine'], gogus:['Spine2','Chest'], boyun:['Neck','Neck'], bas:['Head','Head']
+};
+var KEMIK_ZINCIR = [['kolSol','onKolSol'],['onKolSol','elSol'],['kolSag','onKolSag'],['onKolSag','elSag'],
+  ['bacakSol','dizSol'],['dizSol','ayakSol'],['bacakSag','dizSag'],['dizSag','ayakSag'],['govde','gogus'],['gogus','boyun'],['boyun','bas']];
+function _kemikKok(o){ var ud = o.userData, L = ud && ud.lod; return L ? (L.aktif ? L.hafif : L.detay) : o; }
+function _kemikler(o){
+  var kok = _kemikKok(o), ud = o.userData; ud._kemikOn = ud._kemikOn || {};
+  var key = kok.uuid; if(ud._kemikOn[key]) return ud._kemikOn[key];
+  var hepsi = {}; kok.traverse(function(b){ if(b.isBone) hepsi[b.name] = b; });
+  var K = {}; Object.keys(KEMIK_AD).forEach(function(k){ var a = KEMIK_AD[k]; K[k] = hepsi[a[0]] || hepsi[a[1]] || null; });
+  ud._kemikOn[key] = K; return K;
+}
+var _kq = { a:new THREE.Quaternion(), b:new THREE.Quaternion(), c:new THREE.Quaternion(), p:new THREE.Vector3(), q:new THREE.Vector3(), d:new THREE.Vector3(), t:new THREE.Vector3(), i:new THREE.Quaternion() };
+// Kemiği, çocuğuna giden yönü model uzayındaki hedef yöne (hx,hy,hz) çevirecek şekilde döndürür.
+function _kemikYonelt(o, kemik, cocuk, hx, hy, hz, w){
+  if(!kemik || !cocuk || w <= 0) return;
+  kemik.updateMatrixWorld(true);
+  kemik.getWorldPosition(_kq.p); cocuk.getWorldPosition(_kq.q);
+  _kq.d.subVectors(_kq.q, _kq.p); if(_kq.d.lengthSq() < 1e-8) return; _kq.d.normalize();
+  _kq.t.set(hx, hy, hz).normalize().applyQuaternion(o.getWorldQuaternion(_kq.c));
+  _kq.a.setFromUnitVectors(_kq.d, _kq.t);
+  if(w < 1) _kq.a.slerp(_kq.i.identity(), 1 - w);
+  kemik.getWorldQuaternion(_kq.b);
+  _kq.b.premultiply(_kq.a);                                    // yeni dünya dönüşü
+  if(kemik.parent){ kemik.parent.getWorldQuaternion(_kq.c); _kq.b.premultiply(_kq.c.invert()); }
+  kemik.quaternion.copy(_kq.b);
+}
+// Poz: { zincirAdı:[x,y,z], ... }. Sol/sağ simetrik tanım için 's' işareti çağıran tarafından verilir.
+var POZLAR = {
+  kollarYukari: { kolSol:[0.3,1,0.15], onKolSol:[0.1,1,0.1], kolSag:[-0.3,1,0.15], onKolSag:[-0.1,1,0.1] },
+  ucak:         { kolSol:[1,0.08,-0.2], onKolSol:[1,0.12,-0.1], kolSag:[-1,0.08,-0.2], onKolSag:[-1,0.12,-0.1], govde:[0,1,0.18] },
+  yumruk:       { kolSag:[-0.25,1,0.25], onKolSag:[-0.05,1,0], kolSol:[0.5,-0.6,0.5], onKolSol:[0.2,0.4,1] },
+  tribunV:      { kolSol:[0.75,1,0.2], onKolSol:[0.6,1,0.15], kolSag:[-0.75,1,0.2], onKolSag:[-0.6,1,0.15], gogus:[0,1,-0.25], boyun:[0,1,-0.35] },
+  gokyuzu:      { kolSol:[0.25,1,0.35], onKolSol:[0.05,1,0.25], kolSag:[-0.25,1,0.35], onKolSag:[-0.05,1,0.25], boyun:[0,1,-0.5] },
+  dizKayma:     { kolSol:[0.9,0.75,-0.1], onKolSol:[0.6,1,-0.1], kolSag:[-0.9,0.75,-0.1], onKolSag:[-0.6,1,-0.1],
+                  bacakSol:[0.12,-1,0.12], dizSol:[0.05,-0.08,-1], bacakSag:[-0.12,-1,0.12], dizSag:[-0.05,-0.08,-1], govde:[0,1,-0.35], gogus:[0,1,-0.3] },
+  sarilma:      { kolSol:[0.45,0.25,1], onKolSol:[-0.7,0.15,0.75], kolSag:[-0.45,0.25,1], onKolSag:[0.7,0.15,0.75] },
+  besElSag:     { kolSag:[-0.15,0.85,0.55], onKolSag:[-0.05,1,0.2] },
+  elleBas:      { kolSol:[0.9,0.55,0.25], onKolSol:[-0.6,0.6,0.1], kolSag:[-0.9,0.55,0.25], onKolSag:[0.6,0.6,0.1], boyun:[0,0.8,0.6] },
+  belde:        { kolSol:[0.75,-0.65,-0.1], onKolSol:[-0.3,-0.2,-0.5], kolSag:[-0.75,-0.65,-0.1], onKolSag:[0.3,-0.2,-0.5], boyun:[0,0.75,0.65] },
+  oturan:       { bacakSol:[0.08,0.05,1], dizSol:[0,-1,0.1], bacakSag:[-0.08,0.05,1], dizSag:[0,-1,0.1] },
+  // Kaleci: top kucakta (iki ön kol göğüs önünde), yana uzanma (sol/sağ)
+  topKucak:     { kolSol:[0.25,-0.35,0.9], onKolSol:[-0.75,0.3,0.6], kolSag:[-0.25,-0.35,0.9], onKolSag:[0.75,0.3,0.6], gogus:[0,1,0.25] },
+  topTut:       { kolSol:[0.18,0.1,1], onKolSol:[-0.15,0.35,1], kolSag:[-0.18,0.1,1], onKolSag:[0.15,0.35,1] },
+  uzanSol:      { kolSol:[1,0.55,0.15], onKolSol:[1,0.5,0.1], kolSag:[0.75,0.75,0.2], onKolSag:[0.85,0.55,0.1], bacakSag:[0.35,-1,0], bacakSol:[0.15,-1,0.05] },
+  uzanSag:      { kolSag:[-1,0.55,0.15], onKolSag:[-1,0.5,0.1], kolSol:[-0.75,0.75,0.2], onKolSol:[-0.85,0.55,0.1], bacakSol:[-0.35,-1,0], bacakSag:[-0.15,-1,0.05] }
+};
+// Pozu uygular. w: 0..1 ağırlık. Zincir sırası önemli: önce üst kol, sonra ön kol (ön kolun yönü üst koldan sonra ölçülür).
+function kemikPozUygula(o, pozAd, w){
+  try{
+    if(!o || !o.userData || !o.userData.hazirModel || !(w > 0)) return;
+    var P = typeof pozAd === 'string' ? POZLAR[pozAd] : pozAd; if(!P) return;
+    var K = _kemikler(o);
+    for(var i = 0; i < KEMIK_ZINCIR.length; i++){
+      var z = KEMIK_ZINCIR[i], h = P[z[0]]; if(!h) continue;
+      _kemikYonelt(o, K[z[0]], K[z[1]], h[0], h[1], h[2], Math.min(1, w));
+    }
+  }catch(e){ _sessiz(e, 'kemikPozUygula', 'saha_oyun'); }
+}
+
 /* Gövde parçaları: bir kez üretilir, bütün oyuncular paylaşır. Profil noktaları [yarıçap, y],
    y aşağıdan yukarı artar (Lathe normalleri böylece dışa bakar). */
 let _govdeGeo = null;
@@ -7091,36 +7334,58 @@ function yeniResmi(mat, x, z){
 }
 const hakem = yeniResmi(HAKEM_MAT, 0, 10);
 const yanHakemler = [ yeniResmi(YAN_MAT, -20, HWZ+1.8), yeniResmi(YAN_MAT, 20, -HWZ-1.8) ];
-function resmiHareket(r, hedef, hiz, dt, bakNoktasi){
+/* HAKEM HAREKETİ (2026-10-04-B, kullanıcı: "yan hakem, orta hakem ve futbolcuların yürüyüş ve koşuları daha gerçekçi olsun").
+   KÖK SEBEPLER: (1) Hakem hedefe sabit hızla (8-9 m/sn) gidip 0,5 m kala anında duruyordu - ivmelenme ve yavaşlama yoktu,
+   koş-dur titremesi oluyordu. (2) Animasyona HIZ yerine hedefe olan MESAFE veriliyordu: hakem dururken bile hedef 3 m
+   uzaktaysa koşu animasyonu oynuyor, hızlı kaçarken yürüyordu (ayaklar yerde kayıyordu). (3) Yan hakem koşarken bile
+   gövdesi hep sahaya dönüktü (yengeç gibi kayıyordu).
+   ŞİMDİ: Hız vektörü ivmeyle değişir (kalkış ~3,5 m/sn², fren ~6), hedefe yaklaşınca yavaşlar; yakın hedefte yürür.
+   Animasyon gerçek hızla oynar. Orta hakem hızlıyken koşu yönüne, yavaşken topa bakar. Yan hakem kısa mesafede sahaya
+   dönük yan adım atar (yavaş), uzun mesafede çizgi boyunca koşu yönüne döner, durunca yeniden sahaya döner. */
+function resmiHareket(r, hedef, hiz, dt, bakNoktasi, yanHakem){
+  if(!r.vel) r.vel = new THREE.Vector3();
   const d = hedef.clone().sub(r.obj.position).setY(0);
   const uz = d.length();
-  if (uz > 0.5){
-    d.normalize();
-    r.obj.position.x += d.x * hiz * dt;
-    r.obj.position.z += d.z * hiz * dt;
-  }
+  let istenen = 0;
+  if (uz > 0.35) istenen = Math.min(hiz, uz * 1.25, yanHakem && uz < 6 ? 2.6 : 99);   // yaklaşırken yavaşla; yan hakem yakın mesafede yan adım
+  const iv = new THREE.Vector3(); if (uz > 0.01) iv.copy(d).multiplyScalar(istenen / uz);
+  const fark = iv.sub(r.vel), hizlaniyor = istenen > r.vel.length();
+  const maxD = (hizlaniyor ? 3.6 : 6.5) * dt;
+  if (fark.length() > maxD) fark.setLength(maxD);
+  r.vel.add(fark);
+  r.obj.position.x += r.vel.x * dt; r.obj.position.z += r.vel.z * dt;
+  const sp = r.vel.length();
+  // Bakış: hızlıyken koşu yönü, yavaşken top/saha. Yan hakem 3,5 m/sn altında sahaya dönük (yan adım).
   const bak = bakNoktasi.clone().sub(r.obj.position).setY(0);
-  if (bak.lengthSq() > 0.01) r.obj.rotation.y = Math.atan2(bak.x, bak.z);
+  let hedefAci = bak.lengthSq() > 0.01 ? Math.atan2(bak.x, bak.z) : r.obj.rotation.y;
+  const kosuEsik = yanHakem ? 3.5 : 3.0;
+  if (sp > kosuEsik){
+    const kosuAci = Math.atan2(r.vel.x, r.vel.z), k = Math.min(1, (sp - kosuEsik) / 1.5);
+    let dd = kosuAci - hedefAci; while(dd > Math.PI) dd -= Math.PI*2; while(dd < -Math.PI) dd += Math.PI*2;
+    hedefAci += dd * k;
+  }
+  let fr = hedefAci - r.obj.rotation.y; while(fr > Math.PI) fr -= Math.PI*2; while(fr < -Math.PI) fr += Math.PI*2;
+  r.obj.rotation.y += fr * Math.min(1, dt * 6);
   const ud = r.obj.userData;
-    // Hakem/yardimci: ayni yuruyus islevi. Bayrak kaldirma kol animasyonunu EZER -
+    // Hakem/yardimci: ayni yuruyus islevi (gerçek hızla). Bayrak kaldirma kol animasyonunu EZER -
     // bayrak isareti oyunun akisini belirler, yuruyusten onceliklidir.
-    insanAdim(ud, dt, uz, true);
+    insanAdim(ud, dt, sp, true);
     if (r.bayrak > 0){
       r.bayrak -= dt;
       if(ud.kolR){ ud.kolR.omuz.rotation.x = -2.7; ud.kolR.dirsek.rotation.x = -0.1; }
-      else if(ud.hazirModel && !r.bayrakKlip){ r.bayrakKlip = true; modelTekSefer(ud, 'tac', 1.2); }   // kollar yukarı
-    } else r.bayrakKlip = false;
+      else if(ud.hazirModel){ try{ r.obj.updateMatrixWorld(true); kemikPozUygula(r.obj, { kolSag:[-0.15, 1, 0.2], onKolSag:[-0.05, 1, 0.1] }, Math.min(1, (2.2 - r.bayrak) * 4)); }catch(e){} }
+    }
   r.golge.position.set(r.obj.position.x, 0.02, r.obj.position.z);
 }
 const hkHedef = new THREE.Vector3();
 function hakemleriGuncelle(dt){
   hkHedef.set(Math.max(-HLX+5, Math.min(HLX-5, ball.position.x - 7*dirA)), 0,
               Math.max(-HWZ+5, Math.min(HWZ-5, ball.position.z + 9)));
-  resmiHareket(hakem, hkHedef, 8.2, dt, ball.position);
+  resmiHareket(hakem, hkHedef, 7.6, dt, ball.position, false);
   const t0 = new THREE.Vector3(Math.max(-HLX+2, Math.min(0, ball.position.x)), 0,  HWZ+1.8);
   const t1 = new THREE.Vector3(Math.max(0, Math.min(HLX-2, ball.position.x)), 0, -HWZ-1.8);
-  resmiHareket(yanHakemler[0], t0, 9, dt, new THREE.Vector3(t0.x, 0, 0));
-  resmiHareket(yanHakemler[1], t1, 9, dt, new THREE.Vector3(t1.x, 0, 0));
+  resmiHareket(yanHakemler[0], t0, 8, dt, new THREE.Vector3(yanHakemler[0].obj.position.x, 0, 0), true);
+  resmiHareket(yanHakemler[1], t1, 8, dt, new THREE.Vector3(yanHakemler[1].obj.position.x, 0, 0), true);
 }
 function bayrakKaldir(){ yanHakemler.forEach(y => y.bayrak = 2.2); }
 function resmiListesi(){ try{ return [hakem].concat(yanHakemler); }catch(e){ return []; } }
@@ -7241,6 +7506,11 @@ function _ozetSesCal(e){
     else if(e.k === 'z') tezahurat(!!e.a, true);
     else if(e.k === 'zil') stadyumZil();
     else if(e.k === 'n') gurultu(0.08, 0.2, 1400);
+    else if(e.k === 'o') sesOhh(e.a, true);
+    else if(e.k === 'y') sesYuh(e.a, true);
+    else if(e.k === 'al') sesAlkisDalga(e.b, e.a, true);
+    else if(e.k === 'ag') sesAg(true);
+    else if(e.k === 'ds'){ for(var i = 0; i < e.a; i++){ (function(i){ setTimeout(function(){ ton(1500, 1350, i === e.a - 1 ? 0.75 : 0.22, 'square', 0.12); }, i*420); })(i); } }
   }catch(x){}
 }
 function sesDuduk(uzun){ _sesKaydet('d', uzun ? 1 : 0); ton(1500, 1350, uzun ? 0.6 : 0.22, 'square', 0.12); try{ yayinSesOlay(uzun ? 'duduk2' : 'duduk1'); }catch(e){} }
@@ -7778,7 +8048,12 @@ function _spkIstatYorumu(){
     l.push(_spkSec(['Kanatları daha çok kullanmaları gerektiğini düşünüyorum.', 'Ceza sahası çevresinde biraz daha sabırlı olmak lazım.',
       'Savunma arkasına atılan toplar bu maçta çok etkili olabilir.', 'Orta saha ile forvet arasındaki mesafe biraz açılmış durumda.',
       'Duran toplar bu maçta belirleyici olabilir.', 'Pres ne kadar yüksek olursa top o kadar çabuk kazanılır.',
-      'Hızlı hücum geçişleri bu maçın anahtarı gibi görünüyor.']));
+      'Hızlı hücum geçişleri bu maçın anahtarı gibi görünüyor.',
+      'Tribünler takımını hiç yalnız bırakmıyor; bu atmosfer oyunculara güç veriyor.', 'Stat adeta bir kazan gibi kaynıyor.',
+      'Taraftarların bayrakları ve atkıları muhteşem bir görüntü oluşturuyor.', 'Ev sahibi tribünü her topla birlikte nefesini tutuyor.',
+      'Oyunun temposu düşmedi, iki takım da oldukça istekli.', 'Hakem bugün oyunu iyi yönetiyor, kartlara başvurmadan akışı koruyor.',
+      'Bek oyuncularının bindirmeleri çok önemli; kanatlarda sayısal üstünlük kurulabilir.', 'Savunma hattı biraz daha önde oynasa ara paslar kesilebilir.',
+      'Topu kaybeden takımın geri dönüş hızı bu maçta belirleyici.', 'İkinci toplarda kim daha diriyse oyunu o kontrol ediyor.']));
     return _spkSec(l);
   }catch(e){ return _spkSkorYorumu(); }
 }
@@ -7792,6 +8067,7 @@ function _spkKuyruk(rol, metin){
 }
 // Oyun olayları - kancalardan çağrılır.
 function spk(tur, v){
+  try{ if(running && !bitti) olaySesi(tur, v); }catch(e){}
   try{
     if(!_spkAcik() || !running || bitti) return;
     v = v || {};
@@ -7815,13 +8091,15 @@ function spk(tur, v){
       case 'sut':
         spkSoyle('spiker', ad ? _spkSec([ad + ' şutunu çekiyor!', ad + ' kaleyi yokluyor!', 'Ve ' + ad + ' vuruyor!', ad + ' sert vurdu!',
             ad + ' bekletmeden vuruşunu yaptı!', 'Şut ' + ad + ' ile!', ad + ' kaleyi gördü ve vurdu!', ad + ' ceza sahası dışından deniyor!',
-            ad + ' falsolu bir vuruş!', 'Ve ' + ad + ' denedi!'])
+            ad + ' falsolu bir vuruş!', 'Ve ' + ad + ' denedi!',
+            ad + ' plase vurdu!', ad + ' içeri kat edip vurdu!', ad + ' sert ve yerden!', ad + ' köşeyi düşündü!', ad + ' voleyi indirdi!'])
           : _spkSec(['Şut!', 'Kaleye doğru sert bir vuruş!', 'Vuruş geldi!', 'Kaleyi yokluyorlar!', 'Uzaktan bir deneme!']), 'sut', false, 2500);
         break;
       case 'kurtaris':
         spkSoyle('spiker', (ad ? ad + ' ' : 'Kaleci ') + _spkSec(['harika uzandı, gol değil!', 'gole izin vermiyor!', 'topu son anda çeliyor!',
           'kalesini kahramanca koruyor!', 'müthiş bir refleksle çıkardı!', 'yerinde bir müdahale, top kontrolünde.', 'iki elle kurtardı!',
-          'köşeye uçtu ve topu çeldi!', 'mükemmel bir kurtarış yaptı!']), 'kurtaris', false, 2500);
+          'köşeye uçtu ve topu çeldi!', 'mükemmel bir kurtarış yaptı!',
+          'havalandı ve parmak uçlarıyla çıkardı!', 'yan yattı, topu kucağına aldı!', 'son anda uzandı, gol yok!', 'kedi gibi uçtu!']), 'kurtaris', false, 2500);
         setTimeout(function(){ spkSoyle('yorumcu', _spkSec(['Kalecinin refleksleri takımını ayakta tutuyor.', 'Bu pozisyon gol olsa maçın hikâyesi değişirdi.',
           'Kaleci yerleşimi kusursuzdu, açıyı çok iyi kapattı.', 'İşte büyük kaleciyi farklı kılan anlar bunlar.', 'Şut iyiydi ama kaleci daha iyiydi.',
           'Bu kurtarış puan değerinde olabilir.']), 'kurtarisY', false, 30000); }, 2200);
@@ -7831,6 +8109,16 @@ function spk(tur, v){
           'Direkten döndü!', 'Ah! Top demire çarptı!', 'Direk! Kale çizgisinden geri geldi!', 'İnanılmaz! Top direkten oyun alanına döndü!']), 'direk', true);
         setTimeout(function(){ spkSoyle('yorumcu', _spkSec(['Birkaç santim... İşte futbol.', 'Bu pozisyon gol olsa maç bambaşka bir hal alırdı.',
           'Şans bugün o tarafa gülmüyor.', 'Direkler de bazen kalecinin en iyi dostudur.', 'Vuruş mükemmeldi, sadece biraz şanssızlık.']), 'direkY', false, 20000); }, 2400);
+        break;
+      case 'kacti':
+        spkSoyle('spiker', v.ust ? _spkSec([(ad ? ad + ' ' : '') + 'üstten auta! Top üst direğin üzerinden gitti.', 'Az üstten! ' + (ad ? ad + ' biraz aceleci davrandı.' : ''),
+            'Top üst ağlarda ama dışarıdan... ' + (ad ? ad + ' ' : '') + 'çok yaklaştı!', (ad ? ad + ' ' : 'Oyuncu ') + 'vurdu, top kalenin üzerinden auta.'])
+          : v.yakin ? _spkSec(['Az farkla dışarıda! ' + (ad ? ad + ' ellerini başına götürdü.' : ''), 'Ohh! Top direğin yanından auta çıktı!', (ad ? ad + ' ' : '') + 'çok yakındı! Top direği sıyırarak dışarı gitti.',
+            'Kıl payı! ' + (ad ? ad + ' bu pozisyona yanacak.' : 'Top dışarıda.'), 'İnanılmaz! Top kaleyi kıl payı ıskaladı!', (ad ? ad + ' ' : '') + 'kaleciyi geçti ama top az farkla dışarıda!'])
+          : _spkSec([(ad ? ad + ' ' : '') + 'vuruşunu yaptı ama top auta gitti.', 'İsabetsiz bir şut ' + (ad ? ad + ' ayağından.' : '.'), 'Kaleyi bulamadı; kale vuruşu.',
+            (ad ? ad + ' ' : '') + 'nişanı tutturamadı.', 'Şut çerçeveyi bulmadı.', (ad ? ad + ' ' : '') + 'uzaktan denedi, top kalenin epey dışından gitti.']), 'kacti', v.yakin, 3000);
+        if(v.yakin) setTimeout(function(){ spkSoyle('yorumcu', _spkSec(['Böyle pozisyonlar maçın sonunda çok aranır.', 'Biraz daha soğukkanlı olsa gol olabilirdi.',
+          'Vuruş tekniği iyiydi, sadece birkaç santim eksik kaldı.', 'Kaleci bu topa yetişemezdi; çerçeveyi bulsa goldü.', 'Bunu kaçırmak takım için pahalıya patlayabilir.']), 'kactiY', false, 25000); }, 2400);
         break;
       case 'serbest':
         spkSoyle('spiker', (ad ? ad + ' serbest vuruşu ' : 'Serbest vuruş ') + _spkSec(['direkt kaleye gönderiyor!', 'çekiyor!', 'kullanıyor, kaleye doğru!',
@@ -8071,6 +8359,151 @@ function _alkis(t, ses){
   var f = ac.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1400; f.Q.value = 0.8;
   var g = ac.createGain(); g.gain.value = ses;
   src.connect(f); f.connect(g); g.connect(sesCikis()); src.start(t);
+}
+/* ══ OLAY SESLERİ (2026-10-04-B, kullanıcı: "spiker ve yorumcu için olay sesleri ve maç önü/maç sonu sesleri") ══
+   Hepsi Web Audio ile ÜRETİLİR (dosya yok): kalabalığın "ooo"su (kaçan fırsat, kurtarış, direk), yuhalama ve
+   ıslıklar (ev sahibine kart / ofsayt), alkış dalgası (kurtarış, değişiklik, maç önü/sonu), ağlara giden topun
+   hışırtısı, üçlü bitiş düdüğü. Her biri SES_LOG'a yazılır - maç özetinde aynı anda aynı ses çalar.
+   Menüdeyken (_tribunTaban 0) çalmaz; maç sonu sesleri 'zorla' ile çalar. */
+function _olaySesHazir(zorla){ return ac && _sesUret() && !(window._sahaIzleModu && !zorla) && (zorla || (typeof _tribunTaban !== 'undefined' && _tribunTaban > 0)); }
+function _gurultuKaynak(t, sure){
+  var b = ac.createBuffer(1, Math.ceil(ac.sampleRate*sure), ac.sampleRate), d = b.getChannelData(0);
+  for(var i = 0; i < d.length; i++) d[i] = Math.random()*2-1;
+  var s = ac.createBufferSource(); s.buffer = b; s.start(t); return s;
+}
+// Kalabalığın "ooo"su: iki formantlı (o-u) süzülmüş uğultu, yükselip söner. g: 0-1 şiddet.
+function sesOhh(g, kayitsiz){
+  if(!kayitsiz) _sesKaydet('o', g);
+  if(!_olaySesHazir(kayitsiz)) return;
+  try{
+    g = Math.max(0.2, Math.min(1, g || 0.7));
+    var t = ac.currentTime + 0.02, sure = 1.9, out = ac.createGain();
+    out.gain.setValueAtTime(0.0001, t); out.gain.linearRampToValueAtTime(0.16*g, t + 0.28);
+    out.gain.setValueAtTime(0.16*g, t + 0.6); out.gain.exponentialRampToValueAtTime(0.0001, t + sure);
+    out.connect(sesCikis());
+    [[420, 300, 2.2], [880, 650, 3.0]].forEach(function(f){
+      var src = _gurultuKaynak(t, sure + 0.1), bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = f[2];
+      bp.frequency.setValueAtTime(f[0], t); bp.frequency.exponentialRampToValueAtTime(f[1], t + sure);
+      src.connect(bp); bp.connect(out);
+    });
+  }catch(e){ _sessiz(e, 'sesOhh', 'saha_ses'); }
+}
+// Yuhalama + ıslıklar: alçak "uuu" uğultusu ve dağınık parmak ıslıkları.
+function sesYuh(g, kayitsiz){
+  if(!kayitsiz) _sesKaydet('y', g);
+  if(!_olaySesHazir(kayitsiz)) return;
+  try{
+    g = Math.max(0.2, Math.min(1, g || 0.6));
+    var t = ac.currentTime + 0.02, sure = 2.4, out = ac.createGain();
+    out.gain.setValueAtTime(0.0001, t); out.gain.linearRampToValueAtTime(0.12*g, t + 0.4);
+    out.gain.setValueAtTime(0.12*g, t + 1.4); out.gain.exponentialRampToValueAtTime(0.0001, t + sure);
+    out.connect(sesCikis());
+    var src = _gurultuKaynak(t, sure + 0.1), lp = ac.createBiquadFilter(); lp.type = 'bandpass'; lp.frequency.value = 240; lp.Q.value = 1.8;
+    src.connect(lp); lp.connect(out);
+    var n = Math.round(3 + g*5);
+    for(var i = 0; i < n; i++){
+      var t1 = t + 0.15 + Math.random()*1.4, f0 = 2300 + Math.random()*900, d = 0.35 + Math.random()*0.5;
+      var o = ac.createOscillator(), og = ac.createGain(); o.type = 'sine';
+      o.frequency.setValueAtTime(f0, t1); o.frequency.linearRampToValueAtTime(f0 * (Math.random() < 0.5 ? 1.15 : 0.85), t1 + d);
+      og.gain.setValueAtTime(0.0001, t1); og.gain.linearRampToValueAtTime(0.018*g, t1 + 0.05); og.gain.exponentialRampToValueAtTime(0.0001, t1 + d);
+      o.connect(og); og.connect(sesCikis()); o.start(t1); o.stop(t1 + d + 0.05);
+    }
+  }catch(e){ _sessiz(e, 'sesYuh', 'saha_ses'); }
+}
+// Alkış dalgası: yüzlerce el çırpması - yoğunluk yükselip azalır.
+function sesAlkisDalga(sure, g, kayitsiz){
+  if(!kayitsiz) _sesKaydet('al', g, sure);
+  if(!_olaySesHazir(kayitsiz)) return;
+  try{
+    sure = sure || 2.5; g = Math.max(0.2, Math.min(1, g || 0.6));
+    var t = ac.currentTime + 0.02, n = Math.round(sure * 38 * g);
+    for(var i = 0; i < n; i++){
+      var u = Math.random(), zarf = Math.sin(Math.PI * Math.min(1, u * 1.15));
+      _alkis(t + u * sure, 0.05 * g * (0.4 + zarf * 0.6) * (0.6 + Math.random()*0.6));
+    }
+  }catch(e){ _sessiz(e, 'sesAlkisDalga', 'saha_ses'); }
+}
+// Topun ağlara gidişi: yüksek frekanslı kısa hışırtı.
+function sesAg(kayitsiz){
+  if(!kayitsiz) _sesKaydet('ag');
+  if(!_olaySesHazir(kayitsiz)) return;
+  try{
+    var t = ac.currentTime + 0.01, src = _gurultuKaynak(t, 0.5), hp = ac.createBiquadFilter(), g = ac.createGain();
+    hp.type = 'highpass'; hp.frequency.value = 2500;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.09, t + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+    src.connect(hp); hp.connect(g); g.connect(sesCikis());
+  }catch(e){ _sessiz(e, 'sesAg', 'saha_ses'); }
+}
+// Düdük serisi: devre arası iki (kısa-uzun), maç sonu üç (kısa-kısa-uzun).
+function sesDudukSeri(n){
+  try{
+    _sesKaydet('ds', n);
+    for(var i = 0; i < n; i++){ (function(i){ setTimeout(function(){ try{ ton(1500, 1350, i === n - 1 ? 0.75 : 0.22, 'square', 0.12); }catch(e){} }, i * 420); })(i); }
+    try{ yayinSesOlay('duduk2'); }catch(e){}
+  }catch(e){}
+}
+// Olay → tribün tepkisi. spk()'dan bağımsızdır: spiker kapalıyken de stat yaşar.
+// Ev sahibi tribünü çoğunlukta (takım 0): kendi oyuncusuna kart/ofsayt → yuha; rakibe → alkış.
+function olaySesi(tur, v){
+  try{
+    v = v || {}; var p = v.p, ev = p ? p.team === 0 : (v.takim === 0);
+    switch(tur){
+      case 'kurtaris': sesOhh(0.8); setTimeout(function(){ sesAlkisDalga(1.8, 0.45); }, 900); break;
+      case 'direk': sesOhh(1); break;
+      case 'kacti': sesOhh(v.yakin ? 0.95 : 0.6); break;
+      case 'sari': if(ev) sesYuh(0.55); else sesAlkisDalga(1.4, 0.35); break;
+      case 'kirmizi': if(ev) sesYuh(1); else sesAlkisDalga(2.2, 0.6); break;
+      case 'ofsayt': if(ev) sesYuh(0.35); break;
+      case 'faul': if(v.ihlalci && v.ihlalci.team === 1 && Math.random() < 0.5) sesYuh(0.35); break;
+      case 'penalti': if(v.takim === 1) sesYuh(0.9); break;
+      case 'degisiklik': sesAlkisDalga(2.4, 0.5); break;
+      case 'gol': sesAg(); break;
+      case 'devre': sesDudukSeri(2); setTimeout(function(){ sesAlkisDalga(3, 0.5); }, 900); break;
+    }
+  }catch(e){ _sessiz(e, 'olaySesi:' + tur, 'saha_ses'); }
+}
+/* MAÇ ÖNÜ (2026-10-04-B): takımlar tünelden çıkarken stat anonsu ve zil, tribünden alkış dalgaları;
+   spiker yayını açar, statı, hakemi ve havayı anlatır; yorumcu maç öncesi değerlendirmesini yapar. */
+function macOnuSesleri(){
+  try{
+    try{ stadyumZil(); }catch(e){}
+    setTimeout(function(){ sesAlkisDalga(4, 0.7); }, 1200);
+    setTimeout(function(){ sesAlkisDalga(3.5, 0.8); try{ tezahurat(true); }catch(e){} }, 5200);
+    if(!_spkAcik()) return;
+    SPK.sira = []; SPK.sonTur = {};
+    var ta = _spkTakim(0), tb = _spkTakim(1), s = new Date().getHours();
+    var selam = s < 11 ? 'Günaydın' : (s < 17 ? 'İyi günler' : (s < 22 ? 'İyi akşamlar' : 'İyi geceler'));
+    var hava = (typeof AYAR !== 'undefined' && AYAR.hava) || 'gunduz';
+    var havaCumle = { gece:'Işıklar yandı, gece maçının büyüsü statı sardı.', yagmur:'Yağmur zemini ağırlaştırdı; top bugün hızlı akacak.',
+      kar:'Karla kaplı bir akşam; oyuncular için zorlu bir zemin.', sis:'Sis tribünlerin üstüne çökmüş; görüş biraz kısıtlı.' }[hava]
+      || 'Hava futbol için ideal, zemin de oldukça iyi görünüyor.';
+    spkSoyle('spiker', _spkSec([
+      selam + ' sayın seyirciler! ' + ta + ' ile ' + tb + ' arasındaki karşılaşmaya hoş geldiniz.',
+      selam + ', futbolseverler! Bugün ' + ta + ' ile ' + tb + ' karşı karşıya geliyor; tribünler hıncahınç dolu.',
+      selam + '! Büyük maç günü: ' + ta + ' sahasında ' + tb + ' takımını konuk ediyor.' ]), 'macOnu1', true);
+    _spkKuyruk('spiker', _spkSec(['Takımlar tünelden sahaya çıkıyor; tribünlerden müthiş bir alkış var.',
+      'Oyuncular hakemlerin önderliğinde sahaya adım atıyor. Ses gerçekten çok yüksek!',
+      'Ve işte takımlar sahada! Taraftarlar bayraklarını ve atkılarını açtı.']) + ' ' + havaCumle);
+    _spkKuyruk('yorumcu', _spkSec([
+      ta + ' kendi seyircisi önünde oyunu domine etmek isteyecektir; ' + tb + ' ise kontra ataklarla etkili olmaya çalışacak.',
+      'İki takımın da son maçlardaki formu iyi. Orta saha mücadelesini kazanan sonuca daha yakın olur.',
+      'Bence bu maçta duran toplar ve kanat organizasyonları belirleyici olacak.',
+      'Erken bir gol iki takımın da planını değiştirir; ilk on beş dakikayı dikkatle izlemek lazım.',
+      tb + ' deplasmanda kolay puan bırakan bir takım değil; ' + ta + ' sabırlı olmak zorunda.' ]));
+    _spkKuyruk('spiker', _spkSec(['Hakem kura atışını yaptı, takımlar yerlerini alıyor.', 'Isınmalar bitti, oyuncular santra için hazırlanıyor.',
+      'Kaptanlar tokalaştı, flamalar değişildi. Birazdan ilk düdük!']));
+  }catch(e){ _sessiz(e, 'macOnuSesleri', 'saha_ses'); }
+}
+// MAÇ SONU: üçlü düdük; kazanana alkış dalgası ve tezahürat, ev sahibi kaybettiyse yuhalama.
+function macSonuSesleri(){
+  try{
+    sesDudukSeri(3);
+    setTimeout(function(){
+      if(skorA > skorB){ sesAlkisDalga(4, 0.9, true); try{ tezahurat(true, true); }catch(e){} }
+      else if(skorA < skorB){ sesYuh(0.9, true); setTimeout(function(){ sesAlkisDalga(2.5, 0.35, true); }, 2000); }
+      else sesAlkisDalga(3, 0.5, true);
+    }, 1400);
+  }catch(e){ _sessiz(e, 'macSonuSesleri', 'saha_ses'); }
 }
 function _nakaratNota(t, frek, sure, ses){
   // Kalabalık sesi: birbirinden hafif akortsuz 5 testere dalgası + "o" formantı süzgeci
@@ -10618,6 +11051,7 @@ function odaNetDurdur(){
     _odaNetDinleyiciler = [];
     window._sahaOdaHost = false; window._sahaOdaKonuk = false;
     window._sahaUzakGirdi = null; window._sahaOdaHedef = null;
+    ODANET.tampon = []; ODANET.ofs = null; ODANET.sonT = null;
   }catch(e){ _sessiz(e,'odaNetDurdur','saha_ag'); }
 }
 
@@ -10655,7 +11089,15 @@ function odaNetDurumYaz(){
          göremiyor, ekranda hiçbir açıklama çıkmıyordu. Duran topun TÜRÜ ve hangi takıma
          ait olduğu artık yayınlanıyor; konuk aynı bildirimi gösterir. */
       duran: (duran ? { tip: duran.tip, takim: duran.takim } : null),
-      gol: !!golBekleme
+      gol: !!golBekleme,
+      /* HAKEMLER (2026-10-04-B, kullanıcı: "online maçlarda top, oyuncular ve hakemlerin konumu ayrı ekranlarda
+         doğru hesaplanmıyor"): hakemler pakette YOKTU - konuğun ekranında orta hakem ve yan hakemler maç boyunca
+         başlangıç yerlerinde donuk duruyordu. [x, z, açı] × 3 (orta, yan 1, yan 2) + yan hakem bayrakları. */
+      h: diz([hakem, yanHakemler[0], yanHakemler[1]]),
+      hf: [(yanHakemler[0].bayrak > 0) ? 1 : 0, (yanHakemler[1].bayrak > 0) ? 1 : 0],
+      /* Kalecilerin plonjon yüksekliği / yatışı (konukta dalış görünsün): [A.y, A.rz, B.y, B.rz] */
+      gk: (function(){ var r = []; [teamA, teamB].forEach(function(T){ var g = T.find(function(q){ return q.gk; });
+        r.push(g ? y2(g.obj.position.y) : 0, g ? y2(g.obj.rotation.z) : 0); }); return r; })()
     }).catch(function(e){ _sessiz(e,'odaNetDurumYaz','saha_ag'); });
   }catch(e){ _sessiz(e,'odaNetDurumYaz','saha_ag'); }
 }
@@ -10717,78 +11159,100 @@ function odaUzakEylemIsle(){
 }
 
 // ── KONUK: gelen durumu çiz ─────────────────────────────────────────────────────────
+/* ── KONUK: gelen durumu çiz - ANLIK GÖRÜNTÜ ARA DEĞERLEMESİ (2026-10-04-B) ─────────────────────────────────
+   Kullanıcı: "online maçlarda top, oyuncular ve hakemlerin konumu ayrı ekranlarda doğru hesaplanmıyor".
+   KÖK SEBEPLER:
+   (1) İleri projeksiyon paketin yaşını Date.now() - h.t ile ölçüyordu: h.t HOST'un saati, Date.now() KONUĞUN
+       saati. İki cihazın saati arasındaki fark (çoğu telefonda yüzlerce ms, bazen saniyeler) doğrudan konum
+       hatasına dönüşüyordu - fark 0,3 sn sınırına takılıp her şey sürekli ileri/geri fırlatılıyordu.
+   (2) Hakemler pakette yoktu; konukta donuk duruyorlardı.
+   (3) Konukta oyuncuların yürüme/koşu animasyonu hiç oynamıyordu (insanAdim çağrılmıyordu) - figürler kayıyordu.
+   (4) Her kare hedefe %20 yaklaşan yumuşatma + projeksiyon, paket aralarında hızlanıp yavaşlayan "lastik" hareket
+       üretiyordu; şutta top kale ağzında geri sekiyor gibi görünüyordu.
+   ŞİMDİ: Gelen paketler bir tampona alınır. Saat farkı, (yerel saat - host saati) örneklerinin KAYAN MİNİMUMU
+   ile tahmin edilir (en hızlı ulaşan paket gerçek farka en yakındır). Konuk, host zamanında SABİT 150 ms geriden
+   çizer: iki gerçek paket arasında doğrusal ara değer alınır - top ve oyuncular host'taki yolun AYNISINI izler.
+   Paket gecikirse en fazla 200 ms, son iki paketin hızıyla ileri tahmin edilir. Hakemler de aynı yoldan gelir;
+   herkesin animasyonu çizilen gerçek hızla oynatılır. */
+var ODANET = { tampon:[], ofs:null, sonT:null, gecikme:150 };
+function _odaNetPaketAl(h){
+  if(!h || !h.t || h.t === ODANET.sonT) return;
+  ODANET.sonT = h.t;
+  var simdi = Date.now(), ornek = simdi - h.t;
+  // Kayan minimum: yeni örnek küçükse hemen alınır; büyükse çok yavaş yükselir (saat kayması / rota değişimi).
+  if(ODANET.ofs == null || ornek < ODANET.ofs) ODANET.ofs = ornek;
+  else ODANET.ofs += Math.min(4, (ornek - ODANET.ofs) * 0.02);
+  var T = ODANET.tampon;
+  if(T.length && h.t < T[T.length-1].t) return;            // sırası bozuk (eski) paket
+  T.push(h);
+  while(T.length > 24) T.shift();
+}
+function _odaAciAra(a, b, k){ var d = b - a; while(d > Math.PI) d -= Math.PI*2; while(d < -Math.PI) d += Math.PI*2; return a + d*k; }
 function odaNetKareAdimla(dt){
   var h = window._sahaOdaHedef; if(!h) return;
-  /* KÖK SEBEP (izole ölçümle bulundu): Yalnızca yumuşatma katsayısını ayarlamak
-     yetmiyordu - 10 sn koşu sonunda konuk 0,89 m (111 ms) geride kalıyordu. Sebebin
-     yarısı yumuşatma değil, PAKETİN KENDİSİNİN BAYAT olması: host T anında yazıyor,
-     paket konuğa vardığında host çoktan ilerlemiş oluyor.
-     ÇÖZÜM - İLERİ PROJEKSİYON: konuk, ardışık iki paketten hızı KENDİ türetir ve
-     hedefi paketin yaşı kadar ileri taşır. Hızı paketin içine koymak da olurdu ama
-     yükü ikiye katlardı; türetmek aynı sonucu bedavaya veriyor.
-     SINIR: projeksiyon en fazla 300 ms. Paket düşerse oyuncular sahadan uçmasın -
-     sınırsız projeksiyon, tek bir kayıp pakette figürleri tribüne gönderirdi. */
-  var lerp = Math.min(1, dt*12);
   try{
-    /* KÖK SEBEP (ölçümle yakalandı: projeksiyon eklendiği hâlde gerilik 0,89 m'de
-       kalmıştı): 'önceki' her karede geçerli pakete eşitleniyordu. Bir sonraki karede
-       önceki === h olduğu için h.t > onceki.t artık yanlış oluyor, dtP sıfırlanıyor ve
-       hız türetilemiyordu - projeksiyon yalnızca paketin geldiği TEK karede çalışıyor,
-       kalan beş karede hiç çalışmıyordu.
-       ÇÖZÜM: paket sırası ayrı tutulur; 'önceki' yalnızca GERÇEKTEN yeni bir paket
-       geldiğinde bir kaydırılır ve o paket aralığı boyunca sabit kalır. */
-    if(window._sahaOdaSonT !== h.t){
-      window._sahaOdaOnceki = window._sahaOdaSon || null;
-      window._sahaOdaSon = h;
-      window._sahaOdaSonT = h.t;
+    _odaNetPaketAl(h);
+    var T = ODANET.tampon; if(!T.length) return;
+    var cizT = Date.now() - (ODANET.ofs || 0) - ODANET.gecikme;   // host saatinde çizilecek an
+    // Aralığı bul: A.t <= cizT <= B.t
+    var A = null, B = null;
+    for(var i = T.length - 1; i >= 0; i--){ if(T[i].t <= cizT){ A = T[i]; B = T[i+1] || null; break; } }
+    var k = 0, ileri = 0;
+    if(!A){ A = T[0]; B = null; }                                // tampon henüz dolmadı: en eski paket
+    else if(B){ k = Math.max(0, Math.min(1, (cizT - A.t) / Math.max(1, B.t - A.t))); }
+    else {
+      // Yeni paket gecikti: son iki paketin hızıyla en fazla 200 ms ileri.
+      var Ao = T.length >= 2 ? T[T.length-2] : null;
+      if(Ao && A.t > Ao.t){ ileri = Math.min(0.2, (cizT - A.t)/1000); B = A; A = Ao; k = 1 + ileri * 1000 / (B.t - A.t); }
     }
-    var onceki = window._sahaOdaOnceki;
-    var dtP = (onceki && h.t && onceki.t && h.t > onceki.t) ? Math.min(0.5, (h.t - onceki.t)/1000) : 0;
-    var yas = 0;
-    try{ yas = Math.max(0, Math.min(0.3, (Date.now() - (h.t||Date.now()))/1000)); }catch(e){}
+    var ara = function(a, b){ return (b == null) ? a : a + (b - a) * k; };
+    // Iraksama: aynı aralıkta 8 m'den fazla sıçrama ışınlanmadır (santra, duran top, değişiklik) - ara değer alınmaz.
+    var sicrama = function(a, b){ return b != null && Math.abs(b - a) > 8; };
 
-    var ileri = function(yeniD, eskiD, i, eksen){
-      var yv = yeniD[i*3 + eksen];
-      if(yv === -999) return -999;
-      if(!dtP || !eskiD || eskiD[i*3 + eksen] == null || eskiD[i*3] === -999) return yv;
-      var hiz = (yv - eskiD[i*3 + eksen]) / dtP;
-      // 14 m/sn üstü bir "hız", ıraksamadan ya da oyuncu değişiminden gelmiştir;
-      // gerçek bir koşu değildir, projeksiyona katılmaz.
-      if(Math.abs(hiz) > 14) return yv;
-      return yv + hiz * yas;
-    };
-
-    if(h.top){
-      var tx = h.top.x, tz = h.top.z;
-      if(dtP && onceki && onceki.top){
-        var vx = (h.top.x - onceki.top.x)/dtP, vz = (h.top.z - onceki.top.z)/dtP;
-        // Top 40 m/sn'ye kadar çıkabilir (şut); oyuncudan daha geniş bir sınır gerekir.
-        if(Math.abs(vx) < 40 && Math.abs(vz) < 40){ tx += vx*yas; tz += vz*yas; }
-      }
-      ball.position.x += (tx - ball.position.x)*lerp;
-      ball.position.y += (h.top.y - ball.position.y)*lerp;
-      ball.position.z += (tz - ball.position.z)*lerp;
+    if(A.top){
+      var bt = B && B.top, tx, ty, tz;
+      if(bt && !sicrama(A.top.x, bt.x) && !sicrama(A.top.z, bt.z)){
+        tx = ara(A.top.x, bt.x); ty = Math.max(R_BALL, ara(A.top.y, bt.y)); tz = ara(A.top.z, bt.z);
+      } else { var s0 = bt || A.top; tx = s0.x; ty = s0.y; tz = s0.z; }
+      var bdx = tx - ball.position.x, bdz = tz - ball.position.z, bsp = Math.hypot(bdx, bdz);
+      if(bsp > 0.002 && bsp < 3){ var ax = new THREE.Vector3(bdz, 0, -bdx).normalize(); ball.rotateOnWorldAxis(ax, bsp / R_BALL); }
+      ball.position.set(tx, ty, tz);
+      try{ topGolge.position.set(tx, 0.02, tz); topGolge.scale.setScalar(0.55 / (1 + ty*0.25)); }catch(e){}
     }
-    var uygula = function(liste, a, eskiA){
+    var uygula = function(liste, a, b){
       if(!a || !a.length) return;
-      for(var i=0;i<liste.length && i*3+2 < a.length;i++){
-        var p = liste[i];
-        var x = ileri(a, eskiA, i, 0), z = ileri(a, eskiA, i, 1), r = a[i*3+2];
-        if(x === -999){ p.obj.visible = false; p.golge.visible = false; continue; }
-        p.obj.visible = true; p.golge.visible = true;
-        p.obj.position.x += (x - p.obj.position.x)*lerp;
-        p.obj.position.z += (z - p.obj.position.z)*lerp;
-        // Açı en kısa yoldan döndürülür; aksi halde -π/+π sınırında oyuncu bir anda
-        // kendi ekseninde tam tur atıyor gibi görünür.
-        var d = r - p.obj.rotation.y;
-        while(d >  Math.PI) d -= Math.PI*2;
-        while(d < -Math.PI) d += Math.PI*2;
-        p.obj.rotation.y += d*lerp;
-        p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
+      for(var i = 0; i < liste.length && i*3+2 < a.length; i++){
+        var p = liste[i], ax = a[i*3], az = a[i*3+1], ar = a[i*3+2];
+        if(ax === -999){ p.obj.visible = false; if(p.golge) p.golge.visible = false; continue; }
+        var bx = b ? b[i*3] : null, bz = b ? b[i*3+1] : null, br = b ? b[i*3+2] : null;
+        var x, z, r;
+        if(bx == null || bx === -999 || sicrama(ax, bx) || sicrama(az, bz)){ var son = (bx != null && bx !== -999) ? [bx, bz, br] : [ax, az, ar]; x = son[0]; z = son[1]; r = son[2]; }
+        else { x = ara(ax, bx); z = ara(az, bz); r = _odaAciAra(ar, br, Math.min(1, k)); }
+        p.obj.visible = true; if(p.golge) p.golge.visible = true;
+        var hiz = dt > 0 ? Math.hypot(x - p.obj.position.x, z - p.obj.position.z) / dt : 0;
+        if(hiz > 14) hiz = 0;                                     // ışınlanma: koşu animasyonu değil
+        p._netHiz = (p._netHiz || 0) + (hiz - (p._netHiz || 0)) * Math.min(1, dt * 8);
+        p.obj.position.x = x; p.obj.position.z = z; p.obj.rotation.y = r;
+        if(p.golge) p.golge.position.set(x, 0.02, z);
+        try{ insanAdim(p.obj.userData, dt, p._netHiz, true); }catch(e){}
       }
     };
-    uygula(teamA, h.a, onceki && onceki.a);
-    uygula(teamB, h.b, onceki && onceki.b);
+    uygula(teamA, A.a, B && B.a);
+    uygula(teamB, A.b, B && B.b);
+    // Hakemler: aynı ara değer + yan hakem bayrağı.
+    if(A.h){
+      var hl = [hakem, yanHakemler[0], yanHakemler[1]];
+      uygula(hl, A.h, B && B.h);
+      var hf = (B && B.hf) || A.hf || [0, 0];
+      [0, 1].forEach(function(j){ var r = yanHakemler[j], ud = r.obj.userData;
+        if(hf[j]){ if(ud.kolR){ ud.kolR.omuz.rotation.x = -2.7; ud.kolR.dirsek.rotation.x = -0.1; }
+          else if(ud.hazirModel){ try{ r.obj.updateMatrixWorld(true); kemikPozUygula(r.obj, { kolSag:[-0.15, 1, 0.2], onKolSag:[-0.05, 1, 0.1] }, 1); }catch(e){} } } });
+    }
+    // Kalecilerin dalış yüksekliği/yatışı.
+    var gkA = (B && B.gk) || A.gk;
+    if(gkA){ [teamA, teamB].forEach(function(Tm, j){ var g = Tm.find(function(q){ return q.gk; }); if(!g) return;
+      g.obj.position.y += ((gkA[j*2] || 0) - g.obj.position.y) * Math.min(1, dt*12);
+      g.obj.rotation.z += ((gkA[j*2+1] || 0) - g.obj.rotation.z) * Math.min(1, dt*12); }); }
     // Konuk KENDİ oyuncusunu görsün diye halka, host'un bildirdiği 2. oyuncuya konur.
     try{
       var k2 = (h.k2 >= 0) ? teamB[h.k2] : null;
@@ -11374,6 +11838,7 @@ function sahaKareOlc(dt){
     _kareOlcum.length = 0;
     // Uzak oyuncu eşiği kare hızına göre (bkz. lodGuncelle): yavaşsa daha çok oyuncu hafif çizilir.
     if(ort > 1/30) window._lodEsik = 16; else if(ort < 1/48) window._lodEsik = 30;
+    try{ otoKaliteDegerlendir(ort); }catch(e){}
     // 1/15 sn = 66ms: bu esigin altinda oyun akici sayilir. Ustunde surekli kalmak
     // kullanicinin "kasiyor" dedigi durumdur.
     if(ort > 0.066 && (Date.now() - _kareSonUyari) > 60000 && !document.hidden){
@@ -11388,10 +11853,39 @@ function sahaKareOlc(dt){
   }catch(e){_sessiz(e,'sahaKareOlc:2704','saha_oyun');}
 }
 
+/* ══ OTOMATİK KALİTE (2026-10-04-B, kullanıcı: "maç biraz ağır hareket ediyor, daha stabil olmalı") ══════════════
+   Maç sırasında kare süresi izlenir. Ortalama 40 kare/sn'nin altında kalırsa kalite bir kademe düşer, 57'nin
+   üstünde uzun süre kalırsa bir kademe geri çıkar (kullanıcının seçtiği grafik ayarını hiçbir zaman aşmaz):
+     1: taraftar animasyonu 15 kare/sn, stadyum ekranı daha seyrek
+     2: gerçek gölgeler kapanır
+     3: çözünürlük %80'e iner
+     4: ön sıralardaki 3B taraftarlar gizlenir (tribün dokusu kalır)
+   Kademeler arası 4 sn bekleme: tek bir yavaş an kalıcı karar vermez. */
+window._otoKalite = 0;
+var _otoK = { dusuk:0, yuksek:0, sonT:0 };
+function otoKaliteDegerlendir(ort){
+  if(typeof running === 'undefined' || !running || bitti || duraklat || document.hidden || window._sahaIzleModu) return;
+  var t = performance.now();
+  if(ort > 1/40){ _otoK.dusuk++; _otoK.yuksek = 0; } else if(ort < 1/57){ _otoK.yuksek++; _otoK.dusuk = 0; } else { _otoK.dusuk = Math.max(0, _otoK.dusuk - 1); }
+  if(t - _otoK.sonT < 4000) return;
+  if(_otoK.dusuk >= 3 && window._otoKalite < 4){ _otoK.sonT = t; _otoK.dusuk = 0; otoKaliteUygula(window._otoKalite + 1); }
+  else if(_otoK.yuksek >= 20 && window._otoKalite > 0){ _otoK.sonT = t; _otoK.yuksek = 0; otoKaliteUygula(window._otoKalite - 1); }
+}
+function otoKaliteUygula(sv){
+  try{
+    window._otoKalite = sv;
+    try{ golgeKalite(); if(sv >= 2) sun.castShadow = false; }catch(e){}
+    var taban = Math.min(devicePixelRatio, AYAR.grafik);
+    renderer.setPixelRatio(sv >= 3 ? Math.max(0.7, taban * 0.8) : taban);
+    try{ if(TARAFTAR && TARAFTAR.parca){ var g = sv < 4; TARAFTAR.parca.forEach(function(P){ ['forma','ten','sac','pant'].forEach(function(n){ P[n].visible = g; }); });
+      [TARAFTAR.atki, TARAFTAR.elSopa, TARAFTAR.elBez1, TARAFTAR.elBez2].forEach(function(m){ if(m) m.visible = g; }); } }catch(e){}
+  }catch(e){ _sessiz(e, 'otoKaliteUygula', 'saha_grafik'); }
+}
+
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-04-A';
+window.APP_BUILD = '2026-10-04-B';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -12302,6 +12796,9 @@ function torenBaslat(tur, hazirla, bitis, secenek){
         : players.filter(function(p){ return p.team === tk && !p.dis && !p.gk; })
                  .sort(function(a, b){ return a.obj.position.distanceTo(ball.position) - b.obj.position.distanceTo(ball.position); })[0];
       TOREN.golcu = golcu || null;
+      // SEVİNÇ TÜRÜ (2026-10-04-B): her golde farklı - uçak (kollar açık koşu), dizüstü kayma, yumruk sallayarak
+      // zıplama, taraftara dönüp kolları açma ve gökyüzünü işaret etme.
+      TOREN.sevinc = ['ucak','dizKayma','yumruk','tribun'][Math.floor(Math.random()*4)];
       const gz = golcu ? (Math.sign(golcu.obj.position.z) || 1) : 1;
       TOREN.kose = new THREE.Vector3(xs * (HLX - 2.2), 0, gz * (HWZ - 2.2));
       K.forEach(function(k){
@@ -12311,8 +12808,8 @@ function torenBaslat(tur, hazirla, bitis, secenek){
         if(!k.oyuncu){ k.rol = 'dur'; return; }
         if(k.ob === golcu){ k.rol = 'golcu'; return; }
         if(k.takim === tk && !k.ob.gk && o.position.distanceTo(TOREN.kose) < 42){
-          const a = Math.random() * Math.PI * 2, r = 1.3 + Math.random() * 1.4;
-          k.rol = 'kosan'; k.gecikme = 0.2 + Math.random() * 0.6;
+          const a = Math.random() * Math.PI * 2, r = 0.75 + Math.random() * 0.55;   // sarılmak için golcünün dibine
+          k.rol = 'kosan'; k.gecikme = 0.2 + Math.random() * 0.6; k.aci = a; k.yaricap = r;
           k.kutlamaYeri = new THREE.Vector3(TOREN.kose.x - xs * Math.abs(Math.cos(a)) * r, 0, TOREN.kose.z - gz * Math.abs(Math.sin(a)) * r);
         } else if(k.takim !== tk){
           k.rol = 'uzgun';
@@ -12408,6 +12905,7 @@ function torenAdim(dt){
       if(u > 0.2) hepsi = false;
     } else if(TOREN.faz === 'son' && k.uzgunSon){
       const u = _degYuru(o, k.kutlamaYeri.x, k.kutlamaYeri.z, 1.1, dt); hiz = u > 0.08 ? 1.1 : 0;
+      k.poz = 'belde'; k.pozW = Math.min(1, (k.pozW || 0) + dt);
       if(hiz === 0){
         // Kazananların kutlamasına dönük, başı önde; arada bir eller dizlerde gibi öne eğilir.
         o.rotation.y = Math.atan2(TOREN.kutlamaX - o.position.x, -o.position.z * 0.3);
@@ -12426,23 +12924,47 @@ function torenAdim(dt){
       }
     } else if(TOREN.faz === 'gol'){
       if(k.rol === 'golcu'){
-        const u = _degYuru(o, TOREN.kose.x, TOREN.kose.z, 7.2, dt); hiz = u > 0.1 ? 7.2 : 0;
-        if(u <= 0.1){
-          o.rotation.y = Math.atan2(-o.position.x, -o.position.z);                 // sahaya / tribüne dön
-          k.ziplaF += dt * 7; o.position.y = Math.abs(Math.sin(k.ziplaF)) * 0.4;
-          if(ud && ud.hazirModel && (!k.klipT || TOREN.t > k.klipT)){ k.klipT = TOREN.t + 1.5; modelTekSefer(ud, ud.anim && ud.anim.tek && ud.anim.tek.sevinc ? 'sevinc' : 'tac', 1.1); }
-          k.kolYukari = true;
+        const sv = TOREN.sevinc, K2 = TOREN.kose;
+        k.poz = null; k.pozW = Math.min(1, (k.pozW || 0) + dt * 3);
+        if(sv === 'dizKayma' && k.kayma){
+          // Dizüstü kayma: hız azalarak çimde kayar, kalça yere iner; durunca kollar havada diz çökmüş kalır.
+          const kk = k.kayma; kk.v = Math.max(0, kk.v - dt * 5.2);
+          o.position.x += kk.dx * kk.v * dt; o.position.z += kk.dz * kk.v * dt;
+          o.position.y += (-0.42 - o.position.y) * Math.min(1, dt * 9);
+          k.poz = 'dizKayma'; hiz = 0;
+          if(kk.v === 0){ k.nefes = (k.nefes || 0) + dt; o.position.y = -0.42 + Math.sin(k.nefes * 3) * 0.015; }
+        } else {
+          const u = _degYuru(o, K2.x, K2.z, 7.2, dt); hiz = u > 0.1 ? 7.2 : 0;
+          if(sv === 'ucak') k.poz = 'ucak';
+          if(sv === 'dizKayma' && u < 6.5 && !k.kayma){ const L2 = Math.max(0.01, u); k.kayma = { v:7.4, dx:(K2.x - o.position.x)/L2, dz:(K2.z - o.position.z)/L2 }; try{ gurultu(0.5, 0.06, 500); }catch(e){} }
+          if(u <= 0.1){
+            k.varis = (k.varis || 0) + dt;
+            if(sv === 'tribun'){
+              o.rotation.y = Math.atan2(Math.sign(K2.x) * 1, Math.sign(K2.z) * 0.6);   // tribüne (köşenin dışına) dön
+              k.poz = k.varis < 1.8 ? 'tribunV' : 'gokyuzu'; o.position.y = 0;
+            } else {
+              o.rotation.y = Math.atan2(-o.position.x, -o.position.z);              // sahaya dön
+              k.ziplaF += dt * 7; o.position.y = Math.abs(Math.sin(k.ziplaF)) * 0.42;
+              k.poz = sv === 'yumruk' ? 'yumruk' : 'kollarYukari';
+            }
+            if(ud && !ud.hazirModel) k.kolYukari = true;
+          }
         }
       } else if(k.rol === 'kosan'){
-        const u = _degYuru(o, k.kutlamaYeri.x, k.kutlamaYeri.z, 6.6, dt); hiz = u > 0.1 ? 6.6 : 0;
-        if(u <= 0.1){
-          const g = TOREN.golcu ? TOREN.golcu.obj.position : TOREN.kose;
+        // Takım arkadaşları golcünün etrafına toplanıp ona sarılır (golcü kayarken de onu takip eder).
+        const g = TOREN.golcu ? TOREN.golcu.obj.position : TOREN.kose;
+        const hx = g.x - Math.sign(g.x || 1) * Math.abs(Math.cos(k.aci)) * k.yaricap, hz = g.z - Math.sign(g.z || 1) * Math.abs(Math.sin(k.aci)) * k.yaricap;
+        const u = _degYuru(o, hx, hz, 6.8, dt); hiz = u > 0.15 ? 6.8 : 0;
+        k.poz = null;
+        if(u <= 0.6){
           o.rotation.y = Math.atan2(g.x - o.position.x, g.z - o.position.z);      // golcüye dön
-          k.ziplaF += dt * 6; o.position.y = Math.abs(Math.sin(k.ziplaF)) * 0.25;
-          k.kolYukari = true;
+          k.ziplaF += dt * 5; o.position.y = Math.abs(Math.sin(k.ziplaF)) * 0.12;
+          k.poz = 'sarilma'; k.pozW = Math.min(1, (k.pozW || 0) + dt * 2.5);
+          if(ud && !ud.hazirModel) k.kolYukari = true;
         }
       } else if(k.rol === 'uzgun'){
         const u = _degYuru(o, k.kutlamaYeri.x, k.kutlamaYeri.z, 1.4, dt); hiz = u > 0.1 ? 1.4 : 0;
+        k.poz = TOREN.fazT < 1.8 ? 'elleBas' : 'belde'; k.pozW = Math.min(1, (k.pozW || 0) + dt * 2);
         if(ud && ud.bas) ud.bas.rotation.x = 0.45;
       }
     } else if(TOREN.faz === 'son' && k.kutla){
@@ -12452,10 +12974,12 @@ function torenAdim(dt){
         o.rotation.y = Math.atan2(TOREN.kutlamaX * 2 - o.position.x, -o.position.z * 0.3);   // taraftara dön
         k.ziplaF += dt * 7;
         o.position.y = Math.abs(Math.sin(k.ziplaF)) * 0.35;
-        if(ud && ud.hazirModel && (!k.klipT || TOREN.t > k.klipT)){ k.klipT = TOREN.t + 1.6; modelTekSefer(ud, ud.anim && ud.anim.tek && ud.anim.tek.sevinc ? 'sevinc' : 'tac', 1.1); }
-      }
+        k.poz = (Math.floor((TOREN.fazT + k.stretch) / 2.2) % 3 === 2) ? 'tribunV' : 'kollarYukari'; k.pozW = 1;
+      } else k.poz = null;
     }
     if(ud){ try{ insanAdim(ud, dt, hiz, true); }catch(e){} }
+    // İskelet pozu (hazır modelde): animasyonun ÜSTÜNE uygulanır (bkz. İSKELET POZLARI).
+    if(ud && ud.hazirModel && k.poz){ try{ o.updateMatrixWorld(true); kemikPozUygula(o, k.poz, k.pozW == null ? 1 : k.pozW); }catch(e){} }
     // Kutu modelde kol pozları (hazır modelde klipler oynar)
     if(TOREN.faz === 'isinma' && k.esneme > 0){ k.esneme -= dt; kolDikey(ud); }
     if(TOREN.faz === 'son' && k.kutla && hiz === 0) kolDikey(ud);
@@ -12487,7 +13011,7 @@ function torenAdim(dt){
     torenBitir(false); return;
   } else if(TOREN.faz === 'son' && TOREN.fazT > 13){
     torenBitir(false); return;
-  } else if(TOREN.faz === 'gol' && TOREN.fazT > 4.6){
+  } else if(TOREN.faz === 'gol' && TOREN.fazT > 6.0){
     torenBitir(false); return;
   }
   if(TOREN.faz === 'cikis' && TOREN.t > 26){ torenBitir(false); return; }    // emniyet: takılırsa bitir
@@ -12511,30 +13035,6 @@ function torenAdim(dt){
     _torenKamera(dt, 0, 24, -S*(HWZ + 10), 0, 0, S*4);
   }
 }
-function degisimKuyruguIsle(){
-  if (TOREN.aktif) return;                        // tören sırasında değişiklik sahnesi başlamaz
-  try{
-    if(window._devreMenusu || _degAktif || !degisimKuyrugu.length) return;
-    let k = null;
-    while(degisimKuyrugu.length && !k){ const c = degisimKuyrugu.shift(); if(c && c.p && !c.p.dis) k = c; }
-    if(!k) return;
-    const p = k.p;
-    const sKam = (camera.position.z >= 0) ? 1 : -1;            // kameraya yakın taç çizgisi
-    const T = { x: Math.max(-HLX+8, Math.min(HLX-8, (k.t === 0 ? -1 : 1) * dirA * 4)), z: sKam * (HWZ + 0.1) };
-    // Giren oyuncu: aynı forma ile geçici model, çizginin dışında.
-    let gecici = null;
-    try{
-      gecici = makePlayer(p.gk ? (k.t === 0 ? MATS.ka : MATS.kb) : (k.t === 0 ? MATS.a : MATS.b));
-      gecici.position.set(T.x, 0, T.z + sKam*0.55);
-      gecici.rotation.y = Math.atan2(0, -sKam);                // sahaya bakar
-      scene.add(gecici);
-    }catch(e){ gecici = null; }
-    p.degAnim = { faz:'cik', t:0, yedekAd:k.yedekAd, cikanAd:p.ad, T:T, s:sKam, gecici:gecici };
-    _degAktif = p;
-    window._degKam = { x:T.x, z:T.z, s:sKam };
-    mesaj('DEĞİŞİKLİK', p.ad + ' ⇄ ' + k.yedekAd, 2200);
-  }catch(e){ _sessiz(e, 'degisimKuyruguIsle', 'saha_oynanis'); }
-}
 // Kol pozu (yalnızca kutu modelde uzuvlar var; hazır modelde hareketin kendisi yeterli).
 function _degKolPoz(ud, x, zIc){
   try{
@@ -12544,68 +13044,237 @@ function _degKolPoz(ud, x, zIc){
     ud.kolL.dirsek.rotation.x = -0.25; ud.kolR.dirsek.rotation.x = -0.25;
   }catch(e){}
 }
+/* ══ YEDEK KULÜBESİ (2026-10-04-B, kullanıcı: "çıkan oyuncu yedek kulübesindeki arkadaşlarının yanına oturacak") ═════
+   Her takımın kulübesinde yedekleri oturur (A takımı x<0 kulübesi, B x>0). Oturan figürler InstancedMesh ile çizilir
+   (forma + ten = takım başına 2 çizim çağrısı). Değişiklikte giren yedeğin koltuğu boşalır; çıkan oyuncu kulübeye
+   yürüyüp O koltuğa oturur. Kulübenin iki ucunda teknik ekip (koyu kıyafet) oturur. */
+var KULUBE = { hazir:false, t:[null, null] };
+function _kulubeGeo(){
+  function birlestir(parcalar){
+    var P = [], N = [];
+    parcalar.forEach(function(p){ var g = p[0].toNonIndexed(); var m = new THREE.Matrix4().compose(new THREE.Vector3(p[1], p[2], p[3]), new THREE.Quaternion().setFromEuler(new THREE.Euler(p[4]||0, 0, 0)), new THREE.Vector3(1,1,1));
+      g.applyMatrix4(m); P.push(g.attributes.position.array); N.push(g.attributes.normal.array); });
+    var top = P.reduce(function(a, b){ return a + b.length; }, 0), PA = new Float32Array(top), NA = new Float32Array(top), o = 0;
+    P.forEach(function(a, i){ PA.set(a, o); NA.set(N[i], o); o += a.length; });
+    var bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.BufferAttribute(PA, 3)); bg.setAttribute('normal', new THREE.BufferAttribute(NA, 3)); return bg;
+  }
+  // Oturan insan: oturak y=0.45; uyluk öne yatay, baldır dik, gövde hafif öne eğik. Yüz +z.
+  var forma = birlestir([
+    [new THREE.CylinderGeometry(0.19, 0.17, 0.52, 7), 0, 0.78, 0.0, 0.1],          // gövde
+    [new THREE.CylinderGeometry(0.07, 0.065, 0.42, 5), -0.11, 0.5, 0.2, Math.PI/2], // uyluk sol (öne)
+    [new THREE.CylinderGeometry(0.07, 0.065, 0.42, 5),  0.11, 0.5, 0.2, Math.PI/2],
+    [new THREE.CylinderGeometry(0.055, 0.05, 0.44, 5), -0.11, 0.24, 0.41],           // baldır
+    [new THREE.CylinderGeometry(0.055, 0.05, 0.44, 5),  0.11, 0.24, 0.41],
+    [new THREE.CylinderGeometry(0.05, 0.045, 0.42, 5), -0.21, 0.72, 0.1, 0.5],      // kollar dizlere doğru
+    [new THREE.CylinderGeometry(0.05, 0.045, 0.42, 5),  0.21, 0.72, 0.1, 0.5]
+  ]);
+  var ten = birlestir([
+    [new THREE.SphereGeometry(0.115, 7, 5), 0, 1.17, 0.03],
+    [new THREE.CylinderGeometry(0.05, 0.05, 0.1, 5), 0, 1.05, 0.02],
+    [new THREE.SphereGeometry(0.045, 4, 3), -0.2, 0.55, 0.28], [new THREE.SphereGeometry(0.045, 4, 3), 0.2, 0.55, 0.28]
+  ]);
+  return { forma:forma, ten:ten };
+}
+function kulubeKur(){
+  try{
+    if(KULUBE.hazir) return;
+    var G = _kulubeGeo();
+    [0, 1].forEach(function(t){
+      var sx = t === 0 ? -1 : 1, x0 = sx * 12, z0 = -(HWZ + 4.2) - 0.3;
+      var koltuk = [];
+      for(var i = 0; i < 10; i++) koltuk.push({ x:x0 - 4.5 + i, z:z0, ad:null, gorunur:false, ekip:(i === 0 || i === 9) });
+      var forma = new THREE.InstancedMesh(G.forma, new THREE.MeshLambertMaterial({ color:0xffffff }), 10);
+      var ten = new THREE.InstancedMesh(G.ten, new THREE.MeshLambertMaterial({ color:0xffffff }), 10);
+      [forma, ten].forEach(function(m){ m.instanceMatrix.setUsage(THREE.DynamicDrawUsage); scene.add(m); });
+      var TEN = [0xe0b48e, 0xc99d72, 0xb07d55, 0x8a5a3c, 0xd9a878];
+      for(var j = 0; j < 10; j++) ten.setColorAt(j, new THREE.Color(TEN[j % TEN.length]));
+      KULUBE.t[t] = { koltuk:koltuk, forma:forma, ten:ten };
+    });
+    KULUBE.hazir = true;
+  }catch(e){ _sessiz(e, 'kulubeKur', 'saha_grafik'); }
+}
+// Kulübeyi takımın güncel yedek listesine göre doldurur (maç başında ve takım/renk değişince).
+function kulubeYerlestir(){
+  try{
+    kulubeKur(); if(!KULUBE.hazir) return;
+    [0, 1].forEach(function(t){
+      var K = KULUBE.t[t], ye = (typeof yedekler !== 'undefined' && yedekler[t]) || [];
+      var oyuncuKoltuk = K.koltuk.filter(function(k){ return !k.ekip; });
+      oyuncuKoltuk.forEach(function(k, i){ k.ad = ye[i] ? ye[i].ad : null; k.gorunur = !!ye[i]; });
+      K.koltuk.forEach(function(k){ if(k.ekip){ k.gorunur = true; k.ad = '_ekip'; } });
+      kulubeCiz(t);
+    });
+  }catch(e){ _sessiz(e, 'kulubeYerlestir', 'saha_grafik'); }
+}
+function kulubeCiz(t){
+  try{
+    var K = KULUBE.t[t]; if(!K) return;
+    var tk = t === 0 ? takA() : takB(), m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s1 = new THREE.Vector3(1,1,1), s0 = new THREE.Vector3(0,0,0);
+    K.koltuk.forEach(function(k, i){
+      m4.compose(new THREE.Vector3(k.x, 0.08, k.z), q, k.gorunur ? s1 : s0);
+      K.forma.setMatrixAt(i, m4); K.ten.setMatrixAt(i, m4);
+      K.forma.setColorAt(i, new THREE.Color(k.ekip ? 0x23262c : (k.yelek ? 0xf0a020 : tk.jer)));
+    });
+    K.forma.instanceMatrix.needsUpdate = true; K.ten.instanceMatrix.needsUpdate = true;
+    if(K.forma.instanceColor) K.forma.instanceColor.needsUpdate = true;
+  }catch(e){ _sessiz(e, 'kulubeCiz', 'saha_grafik'); }
+}
+function kulubeKoltukBul(t, ad){
+  var K = KULUBE.t[t]; if(!K) return null;
+  return K.koltuk.find(function(k){ return !k.ekip && k.ad === ad; }) || K.koltuk.find(function(k){ return !k.ekip && !k.gorunur; }) || null;
+}
+
+/* ══ OYUNCU DEĞİŞİKLİĞİ SAHNESİ (2026-10-04-B yeniden, kullanıcı: "kamera çıkan oyuncuyu gösterecek; değişiklik
+   gerçekleşene kadar oyuncular beşlik çakıp sarılacaklar; giren oyuncu sahadaki yerine giderken çıkan oyuncu yedek
+   kulübesindeki arkadaşlarının yanına oturacak; birden fazla değişiklik tek seferde yapıldığında bu kadar detaya
+   girilmesin") ════════════════════════════════════════════════════════════════════════════════════════════════════
+   TEK DEĞİŞİKLİK: Değişiklik kendi takımının kulübesinin önündeki taç çizgisinde olur.
+     1) cik   : kamera çıkan oyuncuyu izler; oyuncu çizgiye yürür (dördüncü hakem tabelası gibi mesaj)
+     2) bes   : iki oyuncu yüz yüze, sağ eller havada beşlik (el çırpma sesi)
+     3) saril : sarılırlar (kollar birbirinin sırtında)
+     4) gir   : giren oyuncu sahadaki yerine koşar; çıkan oyuncu kulübeye yürür - kamera onu izler - giren yedeğin
+                boşalttığı koltuğa oturur, kamera oyuna döner.
+   TOPLU DEĞİŞİKLİK (aynı duraklamada 2+ değişiklik): hepsi aynı anda yapılır; yeni oyuncular çizgiden yerlerine koşar,
+   çıkanlar doğrudan kulübeye gider; kamera oyundan ayrılmaz, beşlik/sarılma yok. */
+function degisimKuyruguIsle(){
+  if (TOREN.aktif) return;
+  try{
+    if(window._devreMenusu || _degAktif || !degisimKuyrugu.length) return;
+    var gecerli = degisimKuyrugu.filter(function(c){ return c && c.p && !c.p.dis; });
+    degisimKuyrugu = [];
+    if(!gecerli.length) return;
+    kulubeKur();
+    if(gecerli.length > 1){ _degTopluBaslat(gecerli); return; }
+    var k = gecerli[0], p = k.p;
+    var bx = (k.t === 0 ? -1 : 1) * 12;
+    var T = { x: Math.max(-HLX+8, Math.min(HLX-8, bx * 0.55)), z: -(HWZ + 0.1) };
+    var s = -1;                                                // çizginin dışı = -z (kulübe tarafı)
+    var gecici = null;
+    try{
+      gecici = makePlayer(p.gk ? (k.t === 0 ? MATS.ka : MATS.kb) : (k.t === 0 ? MATS.a : MATS.b));
+      gecici.position.set(T.x, 0, T.z + s*0.6);
+      gecici.rotation.y = 0;                                   // sahaya (+z) bakar
+      scene.add(gecici);
+    }catch(e){ gecici = null; }
+    // Giren yedek kulübeden kalkar: koltuğu boşalır (çıkan oyuncu buraya oturacak).
+    var koltuk = kulubeKoltukBul(k.t, k.yedekAd);
+    if(koltuk){ koltuk.gorunur = false; kulubeCiz(k.t); }
+    p.degAnim = { faz:'cik', t:0, yedekAd:k.yedekAd, cikanAd:p.ad, T:T, s:s, gecici:gecici, koltuk:koltuk, takim:k.t };
+    _degAktif = p;
+    window._degKam = { mod:'takip', hedef:p.obj, x:T.x, z:T.z, s:s };
+    mesaj('DEĞİŞİKLİK', p.ad + ' ⇄ ' + k.yedekAd, 2400);
+    try{ spk('degisiklik', { p:p, cikan:p.ad }); }catch(e){}
+  }catch(e){ _sessiz(e, 'degisimKuyruguIsle', 'saha_oynanis'); }
+}
+function _degTopluBaslat(liste){
+  var animlar = [];
+  liste.forEach(function(k, i){
+    var p = k.p, t = k.t, bx = (t === 0 ? -1 : 1) * 12;
+    var cikanAd = p.ad, idx = (yedekler[t]||[]).findIndex(function(y){ return y.ad === k.yedekAd; });
+    var koltuk = kulubeKoltukBul(t, k.yedekAd);
+    var g = null;
+    try{ g = makePlayer(p.gk ? (t === 0 ? MATS.ka : MATS.kb) : (t === 0 ? MATS.a : MATS.b)); g.position.copy(p.obj.position); g.rotation.y = p.obj.rotation.y; scene.add(g); }catch(e){}
+    if(idx >= 0) oyuncuDegistir(t, p, idx);
+    // Giren oyuncu çizgiden başlar (kulübenin önü), çıkan (g) sahadaki yerinden kulübeye yürür.
+    p.obj.position.set(bx * 0.55 + (i - (liste.length-1)/2) * 1.4, 0, -(HWZ + 0.4));
+    animlar.push({ g:g, koltuk:koltuk, t:t });
+    if(koltuk){ koltuk.gorunur = false; }
+  });
+  [0,1].forEach(function(t){ try{ kulubeCiz(t); }catch(e){} });
+  window._degToplu = animlar;
+  mesaj('DEĞİŞİKLİK', liste.length + ' oyuncu değişikliği', 2000);
+}
+// Toplu değişiklikte çıkanların kulübeye yürüyüşü (oyun akarken de sürer; oyunu bekletmez).
+function degTopluAdim(dt){
+  var L = window._degToplu; if(!L || !L.length) return;
+  for(var i = L.length - 1; i >= 0; i--){
+    var a = L[i];
+    if(!a.g){ L.splice(i, 1); continue; }
+    var hx = a.koltuk ? a.koltuk.x : a.g.position.x, hz = a.koltuk ? a.koltuk.z + 1.2 : -(HWZ + 4);
+    var u = _degYuru(a.g, hx, hz, 4.5, dt);
+    try{ insanAdim(a.g.userData, dt, u > 0.05 ? 4.5 : 0, true); }catch(e){}
+    if(u < 0.1){
+      scene.remove(a.g);
+      if(a.koltuk){ a.koltuk.gorunur = true; a.koltuk.ad = '_cikan'; kulubeCiz(a.t); }
+      L.splice(i, 1);
+    }
+  }
+}
 function _degYuru(obj, hx, hz, hiz, dt){
   const dx = hx - obj.position.x, dz = hz - obj.position.z, uz = Math.hypot(dx, dz);
   if(uz > 0.03){
     const st = Math.min(uz, hiz*dt);
     obj.position.x += dx/uz*st; obj.position.z += dz/uz*st;
-    obj.rotation.y = Math.atan2(dx, dz);
+    let d = Math.atan2(dx, dz) - obj.rotation.y;               // yumuşak dönüş (ani sıçrama yok)
+    while(d > Math.PI) d -= Math.PI*2; while(d < -Math.PI) d += Math.PI*2;
+    obj.rotation.y += d * Math.min(1, dt * 10);
   }
   return uz;
+}
+function _degYuzYuze(a, b){
+  a.rotation.y = Math.atan2(b.position.x - a.position.x, b.position.z - a.position.z);
+  b.rotation.y = Math.atan2(a.position.x - b.position.x, a.position.z - b.position.z);
 }
 function degisimAnimAdim(p, dt){
   const a = p.degAnim; a.t += dt;
   p.tcd = Math.max(p.tcd, 0.4); p.cd = Math.max(p.cd, 0.4);   // sahnede topa dokunmaz
   const g = a.gecici, s = a.s, T = a.T;
-  const bulus = { x: T.x, z: T.z - s*0.5 };                    // çıkanın duracağı yer (çizginin içi)
-  let hiz = 0;
+  let hiz = 0, gHiz = 0, pPoz = null, gPoz = null, w = 1;
   if(a.faz === 'cik'){
-    const uz = _degYuru(p.obj, bulus.x, bulus.z, 5.2, dt); hiz = uz > 0.03 ? 5.2 : 0;
+    const uz = _degYuru(p.obj, T.x, T.z - s*0.55, 5.0, dt); hiz = uz > 0.05 ? 5.0 : 0;
     if(g){ g.rotation.y = Math.atan2(p.obj.position.x - g.position.x, p.obj.position.z - g.position.z); }
     if(uz < 0.08 || a.t > 12){ a.faz = 'bes'; a.t = 0; }
   } else if(a.faz === 'bes'){
-    // Yüz yüze, iki el havada beşlik.
-    if(g) p.obj.rotation.y = Math.atan2(g.position.x - p.obj.position.x, g.position.z - p.obj.position.z);
-    if(g) g.rotation.y = Math.atan2(p.obj.position.x - g.position.x, p.obj.position.z - g.position.z);
+    if(g) _degYuzYuze(p.obj, g);
     if(!a.cirp && a.t > 0.45){ a.cirp = true; try{ gurultu(0.06, 0.22, 2200); }catch(e){} }
-    // Hazır modelde kol pozu verilemez (kemikler animasyonda): beşlik için "Sevinc" klibi (kollar havada).
-    if(!a.besKlip){ a.besKlip = true; [p.obj.userData, g && g.userData].forEach(function(u){ if(u && u.hazirModel) modelTekSefer(u, 'sevinc', 1.4); }); }
+    pPoz = gPoz = 'besElSag'; w = Math.min(1, a.t / 0.3);
     if(a.t > 1.0){ a.faz = 'saril'; a.t = 0; }
   } else if(a.faz === 'saril'){
-    // Birbirlerine yaklaşıp sarılırlar (orta noktaya doğru).
     const mx = T.x, mz = T.z;
-    _degYuru(p.obj, mx, mz - s*0.21, 1.2, dt);
-    if(g) _degYuru(g, mx, mz + s*0.21, 1.2, dt);
-    if(g){ p.obj.rotation.y = Math.atan2(g.position.x - p.obj.position.x, g.position.z - p.obj.position.z);
-           g.rotation.y = Math.atan2(p.obj.position.x - g.position.x, p.obj.position.z - g.position.z); }
-    if(a.t > 1.3){
-      // DEĞİŞİKLİK İŞLENİR: sahadaki oyuncu artık girendir.
+    _degYuru(p.obj, mx, mz - s*0.28, 1.2, dt);
+    if(g) _degYuru(g, mx, mz + s*0.28, 1.2, dt);
+    if(g) _degYuzYuze(p.obj, g);
+    pPoz = gPoz = 'sarilma'; w = Math.min(1, a.t / 0.35);
+    if(a.t > 1.4){
+      // DEĞİŞİKLİK İŞLENİR: sahadaki oyuncu artık girendir; geçici model çıkan oyuncu olur.
       const t = p.team, idx = (yedekler[t]||[]).findIndex(y => y.ad === a.yedekAd);
       if(idx >= 0) oyuncuDegistir(t, p, idx);
       a.faz = 'gir'; a.t = 0;
+      if(g) window._degKam = { mod:'takip', hedef:g, x:T.x, z:T.z, s:s, kulube:true };   // kamera çıkanı kulübeye kadar izler
     }
   } else if(a.faz === 'gir'){
     const uz = _degYuru(p.obj, p.home.x, p.home.z, 6.6, dt); hiz = uz > 0.03 ? 6.6 : 0;
-    if(g){                                                     // çıkan kulübeye yürür
-      const gu = _degYuru(g, T.x + (T.x >= 0 ? 4 : -4), T.z + s*5, 4.2, dt);
-      try{ insanAdim(g.userData, dt, gu > 0.03 ? 4.2 : 0, true); }catch(e){}
-      if(gu < 0.3 && !a.gSil){ a.gSil = true; scene.remove(g); a.gecici = null; }
+    if(g && !a.gOturdu){
+      const k = a.koltuk, hx = k ? k.x : T.x + (T.x >= 0 ? 4 : -4), hz = k ? k.z + 0.9 : T.z + s*5;
+      const gu = _degYuru(g, hx, hz, 3.6, dt); gHiz = gu > 0.05 ? 3.6 : 0;
+      if(gu < 0.08){
+        // Koltuğun önüne vardı: döner ve oturur (geçici model kalkar, kulübede oturan figür görünür).
+        a.gOturdu = true; scene.remove(g); a.gecici = null;
+        if(k){ k.gorunur = true; k.ad = a.cikanAd; kulubeCiz(a.takim); }
+        a.oturT = a.t;
+      }
     }
-    if(a.t > 1.2) window._degKam = null;                        // kamera oyuna döner
-    if(uz < 1.5 || a.t > 8){
-      if(a.gecici){ scene.remove(a.gecici); a.gecici = null; }
+    if(a.gOturdu && a.t - a.oturT > 0.8) window._degKam = null;   // oturduktan kısa süre sonra kamera oyuna döner
+    if(a.t > 9 && window._degKam) window._degKam = null;
+    if((uz < 1.5 && (a.gOturdu || !g)) || a.t > 11){
+      if(a.gecici){ scene.remove(a.gecici); a.gecici = null; if(a.koltuk){ a.koltuk.gorunur = true; a.koltuk.ad = a.cikanAd; kulubeCiz(a.takim); } }
       delete p.degAnim; _degAktif = null; window._degKam = null;
-      degisimKuyruguIsle();                                     // sıradaki değişiklik
+      degisimKuyruguIsle();
       return;
     }
   }
   p.gx = 0; p.gz = 0; p.vel.set(0, 0, 0);
   p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
   try{ insanAdim(p.obj.userData, dt, hiz, true); }catch(e){}
-  if(g && a.faz !== 'gir'){ try{ insanAdim(g.userData, dt, 0, true); }catch(e){} }
-  // Pozlar insanAdim'dan SONRA uygulanır (yoksa yürüyüş salınımı ezerdi).
-  if(a.faz === 'bes'){ const kx = -2.35 - Math.sin(Math.min(1, a.t/0.45)*Math.PI)*0.25; _degKolPoz(p.obj.userData, kx, 0.15); if(g) _degKolPoz(g.userData, kx, 0.15); }
-  if(a.faz === 'saril'){ _degKolPoz(p.obj.userData, -1.45, -0.55); if(g) _degKolPoz(g.userData, -1.45, -0.55); }
+  const gg = a.gecici;
+  if(gg){ try{ insanAdim(gg.userData, dt, gHiz, true); }catch(e){} }
+  // Pozlar insanAdim'dan SONRA (hazır modelde iskelet pozu, kutu modelde kol pozu).
+  if(pPoz){
+    try{ p.obj.updateMatrixWorld(true); kemikPozUygula(p.obj, pPoz, w); }catch(e){}
+    if(gg){ try{ gg.updateMatrixWorld(true); kemikPozUygula(gg, gPoz, w); }catch(e){} }
+    if(a.faz === 'bes'){ const kx = -2.35; _degKolPoz(p.obj.userData, kx, 0.15); if(gg) _degKolPoz(gg.userData, kx, 0.15); }
+    if(a.faz === 'saril'){ _degKolPoz(p.obj.userData, -1.45, -0.55); if(gg) _degKolPoz(gg.userData, -1.45, -0.55); }
+  }
 }
 function degisiklikYap(o){
   const t = (o===1) ? 1 : 0;
@@ -13507,6 +14176,77 @@ const TAKTIK = { a:{ ileri:0, baski:7 }, b:{ ileri:0, baski:7 } };
 // tuttuguna gore yumusakca (bIleriSmooth ile) hedefe yaklastirilir - bkz. bTaktikGuncelle().
 let bIleriSmooth = 0;
 let bSpin = 0, topKilit = 0;
+let _gkTutan = null;                          // topu ELİNDE tutan kaleci (o sürede top fiziği işlemez)
+/* KALECİ TOPU ELDE TUTAR (2026-10-04-B). Top kalecinin ellerine bağlanır: normal tutuşta gövde önünde bel
+   hizası, sert şutta göğse bastırılmış. Ağırlık w (0-1) pozun ve topun ellere oturmasını yumuşatır. */
+function gkTopuEleAl(gk, w){
+  const o = gk.obj, ry = o.rotation.y, kucak = gk._eldePoz === 'topKucak';
+  const ileri = kucak ? 0.3 : 0.42, yuk = kucak ? 1.12 : 1.0;
+  let hx = o.position.x + Math.sin(ry)*ileri, hz = o.position.z + Math.cos(ry)*ileri, hy = o.position.y + yuk;
+  if (gk.dalisT > 0){
+    // Plonjonda yakaladı: top uzanan ellerde - gövdenin dalış yanında, gövdeyle aynı yükseklikte.
+    const yn = gk._dalisYon || 1, sx = Math.cos(ry) * yn, sz = -Math.sin(ry) * yn;
+    hx = o.position.x + sx*1.05 + Math.sin(ry)*0.25; hz = o.position.z + sz*1.05 + Math.cos(ry)*0.25; hy = o.position.y + 0.38;
+  }
+  const k = gk.dalisT > 0 ? 0.6 : 0.3;
+  ball.position.x += (hx - ball.position.x) * k; ball.position.z += (hz - ball.position.z) * k; ball.position.y += (hy - ball.position.y) * k;
+  bVel.set(0, 0, 0); bSpin = 0;
+  topGolge.position.set(ball.position.x, 0.02, ball.position.z); topGolge.scale.setScalar(0.55 / (1 + ball.position.y*0.25));
+}
+// Kaleci topu şu an ELLE oynayabilir mi: kendi ceza sahası içinde ve geri pas değil (Kural 12).
+function _gkElleAlabilir(gk){
+  const _ks = -gk.dir;
+  if (!(ball.position.x*_ks > HLX-16.5 && Math.abs(ball.position.z) < 20.15)) return false;
+  if (sonDokunan === gk.team && sonDokunanOyuncu && sonDokunanOyuncu !== gk
+      && (sonVurusTuru === 'pas' || sonVurusTuru === 'surus' || sonVurusTuru === 'tac' || sonVurusTuru === 'sut')) return false;
+  return true;
+}
+function gkEldeBirak(){ if (_gkTutan){ _gkTutan.elde = 0; _gkTutan = null; } }
+// Her karede (oyuncu döngüsünde) topu tutan kaleci için çağrılır; true dönerse normal hareket atlanır.
+function gkEldeAdim(p, dt){
+  if (!(p.elde > 0) || _gkTutan !== p) return false;
+  if (duran || golBekleme || !running || bitti){ gkEldeBirak(); return false; }
+  p.elde -= dt; p._eldeT = (p._eldeT || 0) + dt;
+  // Yerinde durur, yavaşça sahaya döner; plonjondan sonra yerden kalkar.
+  p.vel && p.vel.multiplyScalar(Math.pow(0.02, dt)); p.gx = 0; p.gz = 0;
+  if (!(p.dalisT > 0)){
+    let fr = Math.atan2(p.dir, 0) - p.obj.rotation.y; while (fr > Math.PI) fr -= Math.PI*2; while (fr < -Math.PI) fr += Math.PI*2;
+    p.obj.rotation.y += fr * Math.min(1, dt * 2.5);
+  }
+  gkDalisGorsel(p, dt);
+  const ud = p.obj.userData;
+  insanAdim(ud, dt, 0, true);
+  const w = Math.min(1, p._eldeT / 0.22);
+  if (ud.hazirModel && !(p.dalisT > 0)){ try{ p.obj.updateMatrixWorld(true); kemikPozUygula(p.obj, p._eldePoz || 'topTut', w); }catch(e){} }
+  gkTopuEleAl(p, w);
+  p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
+  if (p.elde <= 0){
+    _gkTutan = null; p.elde = 0; topKilit = 0; p.cd = 0;
+    p._eldenAt = true;
+    try{ aiVurus(p); }catch(e){}
+    p._eldenAt = false;
+  }
+  return true;
+}
+/* PLONJON GÖRSELİ (2026-10-04-B, kullanıcı: "havaya yan şekilde uzanamıyor"): dalış süresince gövde topun
+   yüksekliğine göre yay çizerek yerden kalkar. Ayrıntılı modelde plonjon klibi gövdeyi yatırır; hafif modelde
+   klip yok - gövde dalış yönüne yatırılır ve kollar uzan pozuyla topa uzanır. Dalış bitince yumuşakça yere iner. */
+function gkDalisGorsel(p, dt){
+  const o = p.obj, ud = o.userData;
+  if (p.dalisT > 0 && p._dalisSure){
+    const pr = Math.max(0, Math.min(1, 1 - p.dalisT / p._dalisSure));
+    const yay = Math.sin(Math.min(1, pr * 1.35) * Math.PI);
+    o.position.y = Math.max(0, yay * (p._dalisH || 0));
+    const hafif = !ud.hazirModel || (ud.lod && ud.lod.aktif);
+    if (hafif){
+      o.rotation.z = -(p._dalisYon || 1) * Math.min(1.25, pr * 3.2) * (pr > 0.8 ? (1 - pr) * 5 : 1);
+      if (ud.hazirModel){ try{ o.updateMatrixWorld(true); kemikPozUygula(o, (p._dalisYon || 1) > 0 ? 'uzanSol' : 'uzanSag', Math.min(1, pr * 4)); }catch(e){} }
+    }
+  } else if (o.position.y !== 0 || o.rotation.z !== 0){
+    o.position.y = Math.max(0, o.position.y - dt * 3.5);
+    o.rotation.z *= Math.pow(0.002, dt); if (Math.abs(o.rotation.z) < 0.01) o.rotation.z = 0;
+  }
+}
 const AYAR = { radar:true, tip:!isTouch, sure:150, zor:1.0, ses:true, tekrar:true, grafik:2,
                ta:0, tb:1, diz:'4-4-2', dizB:'4-4-2', baski:7, agirlik:0, hata:false,
   hava:'gece' };   // varsayilan: mevcut gorunum korunur, kullanici isterse degistirir
@@ -13561,6 +14301,7 @@ function ayarUygula(){
   havaUygula();
   renderer.setPixelRatio(Math.min(devicePixelRatio, AYAR.grafik));
   golgeKalite();
+  try{ if(window._otoKalite) otoKaliteUygula(window._otoKalite); }catch(e){}
   // Grafik değişince oyuncu modeli de değişebilir (Yüksek: detaylı, diğerleri: hafif).
   if(window._sonGrafik !== AYAR.grafik){ window._sonGrafik = AYAR.grafik; try{ oyunculariModeleGecir(); }catch(e){} }
   // KOK SEBEP (kullanici: "oyunda kadraja giren taraftar alani TV sekmesinde gorunmuyor"):
@@ -14121,11 +14862,22 @@ function _gkHedef(p){
   p._dalisX = null;
   // 1) Kaleye gelen şut: hizadaki kesişme noktasına; yetişemeyecekse plonjon.
   var t = duran ? null : _gkSutTahmin(p);
+  // TEPKİ SÜRESİ (2026-10-04-B, kullanıcı: "gol atma sorunu var"): kaleci şutu ANINDA görüyordu - her şut
+  // vurulduğu karede hesaplanıp kesişme noktasına koşuluyordu. Artık güce bağlı 0,12-0,36 sn gecikmeyle fark
+  // eder; bu sürede eski açı kapatma hedefinde kalır. Köşeye sert şut gerçekten gol olabilir.
+  if (t){
+    if (p._gkTepki == null) p._gkTepki = 0.12 + (1 - nit(p,'nKal',0.4)) * 0.2 + Math.random() * 0.06;
+    if (p._gkTepki > 0){ p._gkTepki -= STEP; if (p._gkTepki > 0) t = null; }
+  } else p._gkTepki = null;
   p._gkAlarm = !!t;
   if (t){
     var mesafe = Math.abs(t.z - gp.z);
     if (mesafe > 0.9 && t.t < 0.6 && !(p._dalisCd > 0)){
-      p.dalis = t.z; p._dalisX = gp.x; p.dalisT = 0.85; p._dalisCd = 1.6;
+      p.dalis = t.z; p._dalisX = gp.x; p.dalisT = 0.85; p._dalisSure = 0.85; p._dalisCd = 1.6;
+      // Topun kaleci hizasına geldiğindeki yüksekliği: yüksek topa HAVADA yana uzanır (gövde yerden kalkar).
+      var _yTop = ball.position.y + bVel.y * t.t - 10.5 * t.t * t.t;
+      p._dalisH = Math.max(0.05, Math.min(1.05, _yTop - 0.55));
+      p._dalisYon = (t.z - gp.z) * (-Math.sin(p.obj.rotation.y)) >= 0 ? 1 : -1;      // +1 = kalecinin solu
       try{ if (p.obj.userData.hazirModel){ var _solZ = -Math.sin(p.obj.rotation.y);
         modelTekSefer(p.obj.userData, (t.z - gp.z) * _solZ >= 0 ? 'plonjonSol' : 'plonjonSag', 1.6); } }catch(e){}
       return new THREE.Vector3(gp.x, 0, t.z);
@@ -14222,8 +14974,13 @@ function aiHedef(p, kovalayan){
   t.z = Math.max(-HWZ+3, Math.min(HWZ-3, t.z));
   return t;
 }
-function aiVurus(p){
-  // Bilgisayar oyuncusunun sutu: insan sutuyle ayni ayak secimi (topun hangi yanda oldugu).
+// Bilgisayar oyuncusunun şut animasyonu: insan şutuyla aynı ayak seçimi (topun hangi yanda olduğu).
+// KÖK SEBEP (2026-10-04-B, kullanıcı: "maç biraz ağır hareket ediyor"): bu blok aiVurus'un EN BAŞINDAYDI ve
+// aiVurus her karede HER yapay zekâ oyuncusu için çağrılıyor - top 1,2 m'nin altındayken (neredeyse her an) 20
+// oyuncunun şut klibi her karede baştan başlatılıyordu (2 sn'de ~2500 kez). Koşu klipleri 0,15 ağırlığa
+// bastırıldığı için oyuncular şut pozunun ilk karesinde kayıyordu - hem ağır/donuk görünüm hem boşa işlemci.
+// Artık klip yalnızca GERÇEKTEN vuruş yapıldığında bir kez oynar.
+function _aiVurusAnim(p){
   try{
     if(p && p.obj && p.obj.userData.hazirModel && ball.position.y <= 1.2){
       var _yx = (ball.position.x - p.obj.position.x)*Math.cos(p.obj.rotation.y)
@@ -14231,7 +14988,12 @@ function aiVurus(p){
       modelTekSefer(p.obj.userData, _yx >= 0 ? 'sutSag' : 'sutSol', 1.5);
     }
   }catch(e){_sessiz(e,'aiVurus:4082','saha_oynanis');}
+}
+function aiVurus(p){
   if (p.cd > 0 || !yakin(p, 1.5)) return;
+  // Kaleci, ceza sahasında sert/havadan gelen topu AYAKLA uzaklaştırmaz: kurtarış mantığı (eline alma, uzanma,
+  // çelme) devreye girer. Önceden her karede çağrılan bu işlev şutu ayakla anında karşılıyordu.
+  if (p.gk && !p._eldenAt && (Math.hypot(bVel.x, bVel.z) > 7 || ball.position.y > 0.95) && _gkElleAlabilir(p)) return;
   if (arkadasSuruyor(p)) return;          // topu süren arkadaşının ayağından almaz
   if (ofsaytMi(p)){ ofsaytCal(p); return; }
   topaDokundu(p);
@@ -14239,8 +15001,12 @@ function aiVurus(p){
   if (p.gk){
     if (Math.random() < 0.5 && pasVer(p, p.team)){        // elle atış
       p.cd = 0.9; p.tcd = 0.5;
+      try{ if (p._eldenAt && p.obj.userData.hazirModel) modelTekSefer(p.obj.userData, 'elleAtis', 1.6); }catch(e){}
       return;
     }
+    // Elden uzağa vuruş: top bırakılır, düşerken (yarım vole) vurulur.
+    if (p._eldenAt){ ball.position.y = 0.45; try{ if (p.obj.userData.hazirModel) modelTekSefer(p.obj.userData, 'sutSag', 1.5); }catch(e){} }
+    else _aiVurusAnim(p);
     // Topu uzaklaştırma: güçlü kaleci daha uzağa ve daha isabetli (2026-09-27-G).
     const _k = nit(p,'nKal',0.4);
     const d = new THREE.Vector3(p.dir, 0, (Math.random()-0.5)*(1.1 - _k*0.7)).normalize();
@@ -14273,6 +15039,7 @@ function aiVurus(p){
   if (uzak < 27 && Math.random() < sutSansi){
     const d = kale.sub(ball.position).setY(0).normalize();
     const _ss = (26 + Math.random()*6) * nit(p,'nSut',1);
+    _aiVurusAnim(p);
     bVel.set(d.x*_ss, 2.6, d.z*_ss);
     topKilit = 0.3;
     p.cd = 0.5; p.tcd = 0.4;
@@ -14290,6 +15057,7 @@ function aiVurus(p){
     return;
   }
   if (!pasVer(p, p.team)){
+    _aiVurusAnim(p);
     bVel.set(p.dir*20, 3, (Math.random()-0.5)*9);
     topKilit = 0.3;
     p.cd = 0.4; p.tcd = 0.4; sonDokunan = p.team; sonDokunanOyuncu = p;
@@ -14310,9 +15078,14 @@ function topKontrol(dt){
   const _surulen = !!(_sahip && !_sahip.dis && sonVurusTuru === 'surus'
     && Math.hypot(ball.position.x - _sahip.obj.position.x, ball.position.z - _sahip.obj.position.z) < 1.6);
   let p = null, bd = 1.45;
+  const _topHizK = Math.hypot(bVel.x, bVel.z);
   for (const q of players){
     if (q.dis || q.cd > 0 || q.tcd > 0 || q.kayma > 0) continue;
     if (_surulen && q !== _sahip && q.team === _sahip.team) continue;
+    // KALECİ ELLE ALACAĞI TOPU AYAKLA/GÖĞÜSLE KESMEZ (2026-10-04-B, kullanıcı: "kaleci tek bir hareketle topu
+    // tutuyor"): ceza sahasında sert ya da havadan gelen top kalecinin kurtarış mantığına bırakılır (eline alır,
+    // uzanır, çeler). Önceden bu topu sıradan oyuncu gibi ayağıyla/göğsüyle anında yavaşlatıyordu.
+    if (q.gk && (ball.position.y > 0.95 || _topHizK > 7) && _gkElleAlabilir(q)) continue;
     let d = Math.hypot(ball.position.x - q.obj.position.x, ball.position.z - q.obj.position.z);
     if (q === sonDokunanOyuncu) d -= 0.35;
     if (d < bd){ bd = d; p = q; }
@@ -14489,6 +15262,14 @@ function duvarKur(takim){
 }
 function duranBaslat(tip, takim, x, z, sec){
   sec = sec || {};
+  // KAÇAN FIRSAT: şut auta çıktıysa (kale vuruşu ya da kalecinin dokunmadığı korner değil) tribün "ooo" der,
+  // spiker kaçan pozisyonu anlatır. Çıkış noktası top yerleştirilmeden önce alınır.
+  try{
+    if (tip === 'kale' && sonVurusTuru === 'sut' && sonDokunanOyuncu && sonDokunanOyuncu.team !== takim){
+      const _cz = Math.abs(ball.position.z), _cy = ball.position.y;
+      if (_cz < GOAL_HW + 9) spk('kacti', { p:sonDokunanOyuncu, yakin:(_cz < GOAL_HW + 2.5 && _cy < GOAL_H + 1.5), ust:(_cy >= GOAL_H && _cz < GOAL_HW + 1) });
+    }
+  }catch(e){}
   ball.position.set(x, R_BALL, z); bVel.set(0,0,0);
   sonDokunan = takim; sonDokunanOyuncu = null; sonVurusTuru = '';
   ofsaytTemizle(); avantaj = null; duranSonrasi = null;
@@ -14562,6 +15343,8 @@ function duranCalistir(){
       const _dogru = Math.random() < 0.28 + _kk*0.42;
       const _taraf = _dogru ? Math.sign(_pz) : -Math.sign(_pz);
       savGK.dalis = _taraf * Math.min(3.4, Math.abs(_pz) * (0.8 + Math.random()*0.35)); savGK.dalisT = 1.3;
+      savGK._dalisSure = 1.3; savGK._dalisH = 0.15 + Math.random()*0.6;
+      savGK._dalisYon = (savGK.dalis - savGK.obj.position.z) * (-Math.sin(savGK.obj.rotation.y)) >= 0 ? 1 : -1;
       // Plonjon yönü: kalecinin SOL eli dünyada (-sin(ry)) z yönüne bakar; dalış o yöndeyse
       // sola atlama klibi (Kaleci_Plonjon_1), değilse sağa (Kaleci_Plonjon_2).
       try{ if (savGK && savGK.obj.userData.hazirModel){
@@ -15730,6 +16513,7 @@ function update(dt){
     if (p.dalisT > 0) p.dalisT -= dt;
     if (p._dalisCd > 0) p._dalisCd -= dt;
     if (p.degAnim){ degisimAnimAdim(p, dt); return; }     // saha kenarına yürüyen/dönen oyuncu
+    if (p.gk && p.elde > 0 && gkEldeAdim(p, dt)) return;   // topu elinde tutan kaleci
     if (kaymaKontrol(p, dt)){
       p.obj.position.x = Math.max(-HLX-1.5, Math.min(HLX+1.5, p.obj.position.x));
       p.obj.position.z = Math.max(-HWZ-1.5, Math.min(HWZ+1.5, p.obj.position.z));
@@ -15808,6 +16592,7 @@ function update(dt){
 
     const ud = p.obj.userData;
     insanAdim(ud, dt, Math.hypot(p.gx || 0, p.gz || 0), true);   // GERÇEK ilerleme hızı
+    if (p.gk) gkDalisGorsel(p, dt);
     p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
   });
 
@@ -15883,9 +16668,11 @@ function update(dt){
     faulKontrol(dt);
   }
   hakemleriGuncelle(dt);
+  try{ degTopluAdim(dt); }catch(e){}
 
   /* --- top fiziği --- */
-  if (frozen <= 0 && !duran){
+  if (_gkTutan && !(_gkTutan.elde > 0)) _gkTutan = null;
+  if (frozen <= 0 && !duran && !_gkTutan){
     bVel.y -= 21 * dt;
     ball.position.addScaledVector(bVel, dt);
     if (ball.position.y < R_BALL){
@@ -15936,6 +16723,7 @@ function update(dt){
     /* kaleci kurtarışı */
     players.forEach(gk => {
       if (!gk.gk || gk.dis || gk.cd > 0) return;
+      if (!_gkElleAlabilir(gk)) return;
       // Kural 12: Kaleci topu ELLE yalnızca KENDİ ceza sahasında tutabilir. Önceden sahanın
       // her yerinde tutuyordu. Kendi kalesi -dir yönünde.
       const _ks = -gk.dir;
@@ -15952,10 +16740,29 @@ function update(dt){
       // topu tutamayıp ÇELER (top oyunda kalır) - güçlü kaleci çoğunlukla bloke eder.
       const _kk = nit(gk,'nKal',0.4);
       // Plonjondayken erişim artar (uzanma): yana +0,9 m.
-      const _uz = (gk.dalisT > 0) ? 0.9 : 0;
-      if (gk.obj.position.distanceTo(ball.position) < (1.45 + _kk*0.5 + _uz) && ball.position.y < 2.4 + _kk*0.4){
+      // Plonjonda erişim güce bağlı (eskiden herkese sabit +0,9 m).
+      const _uz = (gk.dalisT > 0) ? 0.45 + _kk*0.55 : 0;
+      // Erişim gövdeye göre ölçülür: eskiden AYAK noktasına 3B uzaklık alınıyordu - göğüs/baş hizasında tam
+      // üstüne gelen top (y 1,6-2,2) "erişilemez" sayılıp kalecinin içinden geçiyordu.
+      const _gyx = Math.hypot(ball.position.x - gk.obj.position.x, ball.position.z - gk.obj.position.z);
+      const _gyv = Math.max(0, Math.abs(ball.position.y - (gk.obj.position.y + 1.0)) - 1.15);
+      if (Math.hypot(_gyx, _gyv) < (1.45 + _kk*0.5 + _uz) && ball.position.y < gk.obj.position.y + 2.4 + _kk*0.4){
         const hizli = Math.hypot(bVel.x, bVel.z) > 12;
-        if (hizli && Math.random() > 0.35 + _kk*0.55){
+        // KÖŞEYE SERT ŞUT (2026-10-04-B): direğe yakın / yüksek sert şutta kaleci uzansa da yetişemeyebilir.
+        // Karar ŞUT BAŞINA BİR KEZ verilir (her karede zar atılsaydı birkaç kare içinde yine tutardı).
+        if (hizli){
+          const _kose = Math.max(0, (Math.abs(ball.position.z) - (GOAL_HW - 1.6)) / 1.6);
+          const _yuk = ball.position.y > 1.7 ? 1 : 0;
+          const _kac = (0.12 + _kose*0.4 + _yuk*0.15 + (gk.dalisT > 0 ? 0.08 : 0)) * (1.25 - _kk*0.7);
+          if (Math.random() < _kac){ gk.cd = 0.55; return; }   // top kalecinin elinden sıyrılır, kaleye devam eder
+        }
+        // Çelme mi bloke mi: gövdesine gelen şutu kucaklar, uzanarak yetiştiği topu çeler (eskiden merkeze gelen
+        // şut da %43 çelinip ceza sahasında kalıyordu).
+        const _gdx = ball.position.x - gk.obj.position.x, _gdz = ball.position.z - gk.obj.position.z;
+        const _gdy = Math.max(0, Math.abs(ball.position.y - (gk.obj.position.y + 1.0)) - 0.5);
+        const _erisim = Math.hypot(_gdx, _gdz, _gdy) / (1.45 + _kk*0.5 + _uz);   // 0 = tam gövdesine
+        const _celme = Math.max(0.05, Math.min(0.85, 0.08 + _erisim*0.55 + (gk.dalisT > 0 ? 0.18 : 0) - _kk*0.3));
+        if (hizli && Math.random() < _celme){
           const _yan = Math.sign(ball.position.z - gk.obj.position.z) || (Math.random() < 0.5 ? -1 : 1);
           bVel.set(gk.dir * (4 + Math.random()*4), 2.5, _yan * (7 + Math.random()*5));
           gk.cd = 0.6; topKilit = 0.25; sonDokunan = gk.team; sonDokunanOyuncu = gk; sonVurusTuru = 'sekme';
@@ -15967,8 +16774,14 @@ function update(dt){
           return;
         }
         bVel.set(0,0,0);
-        ball.position.set(gk.obj.position.x + gk.dir*0.6, R_BALL, gk.obj.position.z);
-        gk.cd = 0.7; topKilit = 0.8; sonDokunan = gk.team; sonDokunanOyuncu = gk; sonVurusTuru = 'sekme';
+        // TOP ELDE (2026-10-04-B, kullanıcı: "kaleci tek bir hareketle topu tutuyor, topu eline alamıyor"):
+        // eskiden top anında kalecinin ayağının önüne ışınlanıyor ve 0,6 sn sonra vuruluyordu. Artık kaleci topu
+        // ELLERİNE alır (sert şutta göğsüne bastırır), bir süre tutar, sonra elle atar ya da uzağa vurur (gkEldeAdim).
+        gk.elde = hizli ? 1.5 : 1.15; gk._eldeT = 0; gk._eldePoz = hizli ? 'topKucak' : 'topTut';
+        _gkTutan = gk;
+        try{ if (gk.obj.userData.hazirModel && !(gk.dalisT > 0)) modelTekSefer(gk.obj.userData, 'tutma', 1.5); }catch(e){}
+        gkTopuEleAl(gk, 0);
+        gk.cd = gk.elde + 0.3; topKilit = gk.elde + 0.15; sonDokunan = gk.team; sonDokunanOyuncu = gk; sonVurusTuru = 'sekme';
         ofsaytTemizle(); duranSonrasi = null;
         if (hizli){
           (gk.team === 0 ? istat.b : istat.a).isabet++; (gk.team === 0 ? istat.a : istat.b).kurtaris++; sesTribun(0.12, 1.4);
@@ -15977,7 +16790,6 @@ function update(dt){
         }
         mesaj('', 'Kaleci topu aldı', 900);
         if (!hizli){ try{ spk('kaleciAldi', { p:gk }); }catch(e){} }
-        setTimeout(() => { if (running && !bitti && !duran) aiVurus(gk); }, 600);
       }
     });
 
@@ -16080,7 +16892,12 @@ function update(dt){
      ŞİMDİ kamera taç çizgisi BOYUNCA, hafif içeriden (3/4 profil) bakar: iki oyuncu
      yan yana görünür. Bakış noktası da yumuşak geçişli ve sabit tutulur - görüntü
      titremez, ani dönmez. */
-  if (_dk){
+  if (_dk && _dk.mod === 'takip' && _dk.hedef){
+    // 2026-10-04-B: kamera hedef oyuncuyu (önce çıkan oyuncu, sonra kulübeye yürüyen) sahanın içinden 3/4 açıyla izler.
+    const hp = _dk.hedef.position, kx = hp.x > 0 ? -1 : 1;
+    camHedef.set(hp.x + kx*4.8, _dk.kulube ? 2.9 : 2.3, Math.min(HWZ - 2, hp.z - _dk.s*(_dk.kulube ? 7.5 : 5.2)));
+    bakHedef.set(hp.x, 1.1, hp.z);
+  } else if (_dk){
     const kx = _dk.x > 0 ? -1 : 1;                           // saha ortasına doğru taraftan
     camHedef.set(_dk.x + kx*5.2, 2.1, _dk.z - _dk.s*3.4);
     bakHedef.set(_dk.x, 1.15, _dk.z);
@@ -16149,8 +16966,9 @@ function devreArasi(){
   }catch(e){_sessiz(e,'devreArasi:5182','saha_oynanis');}
   devre = 2; frozen = 2.6; dirA = _odaKameraModu() ? -1 : _devreYonu(2); golBekleme = false;   // son saniye golünün bekleyişi 2. yarıya taşınmasın
   saat = HALF; uzatmaHesapla();
-  sesDuduk(true);
+  // Devre düdüğü (iki kez) olaySesi('devre') içinde çalar; spiker kapalıyken de.
   try{ spk('devre'); }catch(e){}
+  if(!(running && !bitti)) sesDuduk(true);
   mesaj('DEVRE ARASI', _odaKameraModu() ? 'Saha değişti — hücum yönün yine sağa' : ('Taraflar değişti — hücum yönün artık ' + (dirA > 0 ? 'sağa' : 'sola')), 2400);
   // TÖREN: oyuncular ve hakemler soyunma odasına yürür, sonra devre arası menüsü açılır.
   if (_torenUygun()) torenBaslat('devre', null, function(){ if (!bitti) devreMenusuAc(); });
@@ -16247,7 +17065,7 @@ function bitir(){
   // daha çalışmayabilir; son durum burada elle gönderilir (bkz. odaNetDurumYaz notu).
   try{ if(window._sahaOdaHost){ odaNetDurumYaz(); setTimeout(odaNetDurdur, 1200); } }
   catch(e){_sessiz(e,'bitir:odaNet','saha_ag');}
-  sesDuduk(true); sesTribun(0.2, 3);
+  sesTribun(0.2, 3); macSonuSesleri();
   document.getElementById('tekrarEt').style.opacity = '0';
   document.getElementById('end-skor').textContent = `${skorA} - ${skorB}`;
   document.getElementById('end-h').textContent =
@@ -16317,31 +17135,35 @@ var _stadEkran = (function(){
       var HB = W/8, HV = W/2, H = HB + HV;
       var g = new THREE.Group();
       // Kasa: ekranın arkası ve kenarları - sırttan bakınca da bir nesne görünsün.
-      var kasa = new THREE.Mesh(new THREE.BoxGeometry(W+0.5, H+0.5, 0.35), kasaMat);
-      kasa.position.set(0, H/2, -0.2); g.add(kasa);
+      var kasa = new THREE.Mesh(new THREE.BoxGeometry(W+0.6, H+0.6, 1.4), kasaMat);
+      kasa.position.set(0, H/2, -0.72); g.add(kasa);
       var yayin = new THREE.Mesh(new THREE.PlaneGeometry(W, HV), yayinMat);
       yayin.position.set(0, HV/2, 0.0); g.add(yayin);
       var baslik = new THREE.Mesh(new THREE.PlaneGeometry(W, HB), baslikMat);
       baslik.position.set(0, HV + HB/2, 0.0); g.add(baslik);
-      // İki ayak: ekran havada asılı durmasın.
+      // ÇATIDAN ASILI (2026-10-04-B, referans görsel): iki çelik halat ekranı çatı kenarına bağlar.
+      var halatBoy = Math.max(0.5, 33.2 - (yAlt + H));
       [-1,1].forEach(function(s){
-        var ayak = new THREE.Mesh(new THREE.BoxGeometry(0.35, yAlt+0.01, 0.35), ayakMat);
-        ayak.position.set(s*W*0.35, -yAlt/2, -0.2); g.add(ayak);
+        var halat = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, halatBoy, 4), ayakMat);
+        halat.position.set(s*W*0.38, H + halatBoy/2, -0.7); g.add(halat);
       });
+      // LED çerçeve şeridi (alt kenar): ekran gece de belirgin dursun.
+      var serit = new THREE.Mesh(new THREE.BoxGeometry(W+0.6, 0.18, 1.42), new THREE.MeshBasicMaterial({ color:0x6fc3ff, fog:false }));
+      serit.position.set(0, -0.3, -0.72); g.add(serit);
       g.position.set(x, yAlt, z);
-      g.lookAt(0, yAlt, 0);                 // ön yüz (+Z) sahanın ortasına bakar
+      g.lookAt(0, yAlt - 7, 0);             // ön yüz (+Z) sahaya bakar, hafif aşağı eğik
       scene.add(g);
       // Kadraj testi için sınır küresi (ekranlar sabit, bir kez hesaplanır).
       var merkez = new THREE.Vector3(x, yAlt + H/2, z);
       E.ekranlar.push({ grup:g, kure:new THREE.Sphere(merkez, Math.hypot(W, H)/2 + 0.5),
                         uzunKenar:uzunKenar, taraf:taraf });
     }
-    // Uzun kenarlar: panolar z=HWZ+7 (kalınlık 0.4), ilk basamağın önü z=HWZ+8.4.
-    ekranKur(13, 0, 1.4,  (HWZ+7.8), true,  1);
-    ekranKur(13, 0, 1.4, -(HWZ+7.8), true, -1);
-    // Kale arkaları: ilk basamak (y<=2.8) x=HLX+9.4'ten başlar, ikincinin önü HLX+12.4.
-    ekranKur(16,  (HLX+10.4), 3.0, 0, false,  1);
-    ekranKur(16, -(HLX+10.4), 3.0, 0, false, -1);
+    // ÇATIDAN ASILI DEV EKRANLAR (2026-10-04-B): uzun kenarların ortasında ve kale arkalarında, çatının iç
+    // kenarının hemen altında. Uzak uzun kenardaki ekran yayın kamerasının kadrajının üst kısmında görünür.
+    ekranKur(17, 0, 21.5,  (STAD.AZ + 20.5), true,  1);
+    ekranKur(17, 0, 21.5, -(STAD.AZ + 20.5), true, -1);
+    ekranKur(19,  (STAD.AX + 20.5), 20.5, 0, false,  1);
+    ekranKur(19, -(STAD.AX + 20.5), 20.5, 0, false, -1);
   }catch(e){ try{ if(window.DiagSaha) DiagSaha('stadEkranKur', e); }catch(_e){} }
 
   // ── BAŞLIK VERİSİ: skorbordla (#board) AYNI kaynaktan okunur - oyunda da seyirci
@@ -16446,6 +17268,7 @@ var _stadEkran = (function(){
        dönüyor. Ölçüm ortalama üzerinden - tek bir yavaş kare kalıcı karar vermesin. */
     var aralik = (AYAR.grafik >= 2) ? 2 : (AYAR.grafik >= 1.5 ? 3 : 4);
     aralik += (E.yavasKademe || 0) * 2;                 // pahalıysa seyrekleştir
+    aralik += (window._otoKalite || 0) >= 1 ? 2 : 0;     // otomatik kalite düştüyse daha da seyrek
     if (E.kare % aralik !== 0) return;
     // Kadrajda görünen bir ekran yoksa yayın çizilmez - en büyük tasarruf burası.
     camera.updateMatrixWorld();
@@ -17360,6 +18183,7 @@ function basla(yeniMod){
   _sonTacDk = -999;
   sonPasOyuncu = null; sonPasTakim = -1;
   yedekleriKur();          // her mac 5 hak ve dolu yedek kulubesiyle baslar
+  try{ window._degToplu = []; kulubeYerlestir(); }catch(e){}   // kulübede yedekler oturur (bkz. YEDEK KULÜBESİ)
   olaylar.push({ type:'match_start', min:1, player:'', player2:'', team:'home' });
   bitti = false; frozen = 1.0; tekrar = null;
   istat.a = bosIstat(); istat.b = bosIstat();
@@ -17367,7 +18191,8 @@ function basla(yeniMod){
   window._yorgunUyari = false;
   players.forEach(p => { p.sakat = false; p.kond = 100; });
   players.forEach(p => { p.dis = false; p.sari = 0; p.kos = false; p.kayma = 0; p.toparlan = 0;
-                         p.dalisT = 0; p.obj.rotation.x = 0; p.obj.visible = true; p.golge.visible = true; });
+                         p.dalisT = 0; p.elde = 0; p.obj.rotation.x = 0; p.obj.rotation.z = 0; p.obj.position.y = 0; p.obj.visible = true; p.golge.visible = true; });
+  _gkTutan = null;
   // FİKSTÜR MAÇI (2026-09-27-E): iki takım da KADRO ekranında kaydettiği dizilişle çıkar.
   // Önceden rakip bu cihazın yerel ayarıyla (AYAR.dizB) diziliyordu; rakibin sürükle-bırak
   // ile kurduğu diziliş ve yerleşim maça yansımıyordu. Kadro sırası dizilişe göre yazıldığı
@@ -17411,6 +18236,7 @@ function basla(yeniMod){
   // TÖREN: tünelden çıkış + 10 sn ısınma, sonra santra (bkz. TÖRENLER).
   if (_torenUygun()){
     torenBaslat('giris', null, function(){ frozen = 1.0; kickoff(0); _baslaMesaj(); });
+    try{ macOnuSesleri(); }catch(e){}
   } else _baslaMesaj();
   window._torenAtla = false;
   try{ if(window._sahaAktifFikstur) sahaCanliYaz(true); }catch(e){_sessiz(e,'basla:5795','saha_oynanis');}
