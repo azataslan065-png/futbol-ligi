@@ -267,6 +267,15 @@ body.bg-anim-sway #bgFixedLayer{transform-origin:center;animation:bgSway calc(7s
 .live-pill.lp-fav .lp-dot{animation:lp 1s infinite;background:#fff}
 @keyframes lp{0%,100%{opacity:1}50%{opacity:.65}}
 @keyframes standingsLivePulse{0%,100%{background-color:rgba(124,58,237,.06)}50%{background-color:rgba(124,58,237,.16)}}
+/* CANLI TABLO KARTLARI (2026-10-05-C, kullanıcı: "iki takım kartı çok parlak; tema renginin biraz
+   açığı veya koyusu olsun"). Sabit mor yerine temanın kendi yüzey (--s2) ve vurgu (--ac) renginden
+   türetilir: koyu modda yüzeyin biraz AÇIĞI, açık modda biraz KOYUSU. Nabız da aynı ton içinde,
+   göz yormayacak genlikte kalır. color-mix desteklemeyen tarayıcı eski hafif tona düşer. */
+.st-canli{background:rgba(124,58,237,.06);background:color-mix(in srgb,var(--s2) 86%,var(--ac) 14%);animation:stCanliNabiz 2.4s ease-in-out infinite;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ac) 28%,transparent)}
+[data-theme="light"] .st-canli{background:color-mix(in srgb,var(--s2) 90%,#000 6%);background:color-mix(in srgb,color-mix(in srgb,var(--s2) 92%,#000 8%) 88%,var(--ac) 12%)}
+@keyframes stCanliNabiz{0%,100%{filter:none}50%{filter:brightness(1.06) saturate(1.05)}}
+[data-theme="light"] .st-canli{animation-name:stCanliNabizA}
+@keyframes stCanliNabizA{0%,100%{filter:none}50%{filter:brightness(.96)}}
 @keyframes rankLinePulse{0%,100%{opacity:1}50%{opacity:.4}}
 .topbar-btns{display:flex;gap:.1rem;flex-shrink:0}
 .tb-btn{background:transparent;border:none;color:var(--mu);font-size:1rem;cursor:pointer;padding:.3rem;min-width:32px;min-height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;transition:.15s;touch-action:manipulation}
@@ -2644,11 +2653,37 @@ window.addEventListener('unhandledrejection',function(e){
         {mesaj:((e&&e.reason&&(e.reason.message||e.reason))||'bilinmeyen')+''},15000);
   }catch(_e){}
 });
+/* KENDİLİĞİNDEN AÇILAN PENCERE SENSÖRÜ (2026-10-05-C, kullanıcı: "rastgele açılan tüm pencereleri analiz et").
+   Alt pencere (#sheetWrap) kullanıcı son 2,5 sn içinde dokunmadan/tuşa basmadan açılırsa, hangi ekranın açıldığı
+   (PTSheetNav damgası / _diagScreen) ve o anki sekme kaydedilir - "kendi kendine açılan pencere" artık tahmin
+   edilmez, raporda görünür. Davranışı DEĞİŞTİRMEZ, yalnızca ölçer. */
+(function ptPencereSensoru(){
+  try{
+    var sonEtk=0;
+    ['pointerdown','keydown','touchstart'].forEach(function(t){ window.addEventListener(t,function(){ sonEtk=Date.now(); },true); });
+    var bagla=function(){
+      var w=document.getElementById('sheetWrap'); if(!w){ setTimeout(bagla,600); return; }
+      var acik=w.classList.contains('open');
+      new MutationObserver(function(){
+        var simdi=w.classList.contains('open');
+        if(simdi&&!acik&&Date.now()-sonEtk>2500){
+          try{ if(window.DiagCore&&DiagCore.kaydet) DiagCore.kaydet('pt_ui','uyari','Pencere kullanıcı dokunmadan açıldı',
+            {ekran:window._diagScreen||'?',damga:(window.PTSheetNav&&PTSheetNav.son)||'',sekme:(typeof _tab!=='undefined'?_tab:''),
+             sonEtkilesimMs:Date.now()-sonEtk,
+             anlami:'Bir alt pencere kullanıcı isteği olmadan açıldı (canlı güncelleme, bildirim ya da zamanlayıcı).',
+             oneri:'Kayıttaki ekran adını açan kod yolunu inceleyin; canlı yeniden çizim yalnızca zaten açık pencereyi tazelemeli.'},20000); }catch(_e){}
+        }
+        acik=simdi;
+      }).observe(w,{attributes:true,attributeFilter:['class']});
+    };
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',bagla); else bagla();
+  }catch(e){}
+})();
 const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-05-B';
+window.APP_BUILD='2026-10-05-C';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -2879,9 +2914,15 @@ window._authSonda={durum:'ortam-uygun-değil',hata:null,uid:null,ms:null,kaynak:
 // kalıcı olması gereken bir admin tercihidir. D nesnesi her lig değişiminde TAMAMEN
 // yenilendiği için, bu ayrı/global bir yoldan (globalAdminSettings), lig bağımsız olarak
 // dinlenir.
-window._globalSettingsSectionOrder=null;
+// Son bilinen sıra cihazda saklanır: sunucu cevabı gelmeden açılan Ayarlar ekranı varsayılan
+// sırayla çizilip sonra yer değiştirmesin (kullanıcı bunu "sıralama bozuluyor" olarak görüyordu).
+window._globalSettingsSectionOrder=(function(){try{var v=JSON.parse(localStorage.getItem('pt__ayarSira')||'null');return Array.isArray(v)&&v.length?v:null;}catch(e){return null;}})();
 db.ref('globalAdminSettings/settingsSectionOrder').on('value',s=>{
-  window._globalSettingsSectionOrder=s.val()||null;
+  var _v=s.val();
+  // Firebase diziyi bazen nesne olarak döndürür ({0:'a',1:'b'}) - sıra dizisine çevrilir.
+  if(_v&&!Array.isArray(_v)&&typeof _v==='object'){_v=Object.keys(_v).sort(function(a,b){return a-b;}).map(function(k){return _v[k];});}
+  window._globalSettingsSectionOrder=(Array.isArray(_v)&&_v.length)?_v.filter(function(x){return typeof x==='string';}):null;
+  try{ if(window._globalSettingsSectionOrder)localStorage.setItem('pt__ayarSira',JSON.stringify(window._globalSettingsSectionOrder)); else localStorage.removeItem('pt__ayarSira'); }catch(e){}
   // HATA DÜZELTMESİ (kullanıcı bildirdi: "sıralama uygulandığında ... eski hâline dönüyor"):
   // Sıralama Firebase'den güncellendiğinde, kullanıcı Ayarlar ekranını O SIRADA AÇIK
   // TUTUYORSA ekran ESKİ sırayı göstermeye devam ediyordu (yeni sıra yalnızca ekran kapatılıp
@@ -4681,8 +4722,17 @@ function renderTempPasswordHint(){
   const tp=window._pendingLoginTempPassword;
   if(!tp){hintEl.innerHTML='';return;}
   const seenKey='pt_tempPwSeen_'+(window._pendingLoginVisitorId||'')+'_'+tp;
+  /* GEÇİCİ ŞİFRE GÖRÜNMÜYORDU (2026-10-05-C) KÖK SEBEP: İpucu ilk çizildiği AN "görüldü" diye
+     işaretleniyordu; hemen ardından canlı dinleyicinin ilk geri çağrısı (aynı değerle, anında
+     gelir) ipucunu yeniden çiziyor ve "daha önce gösterildi" yazısına çeviriyordu - şifre
+     ekranda bir kare bile kalmıyordu. Artık ilk görülme ZAMANI saklanır; şifre bu cihazda
+     15 dakika boyunca (ya da başarılı girişle silinene kadar) görünür kalır. */
   let alreadySeen=false;
-  try{alreadySeen=!!localStorage.getItem(seenKey);}catch(e){DiagSil('renderTempPasswordHint',e);}
+  try{
+    const ilk=Number(localStorage.getItem(seenKey))||0;
+    if(ilk>1)alreadySeen=(Date.now()-ilk)>15*60*1000;
+    else if(localStorage.getItem(seenKey)==='1'){localStorage.setItem(seenKey,String(Date.now()));}
+  }catch(e){DiagSil('renderTempPasswordHint',e);}
   if(alreadySeen){
     hintEl.innerHTML=`<div style="background:var(--s2);border:1.5px solid var(--br);border-radius:10px;padding:.5rem .6rem;margin-top:.4rem;text-align:center">
       <!-- TEŞHİS RAPORU DÜZELTMESİ ("kontrast 3.56:1 · yazı rgb(136,136,187)"): rgb(136,136,187)
@@ -4697,9 +4747,11 @@ function renderTempPasswordHint(){
   hintEl.innerHTML=`<div style="background:var(--glow);border:1.5px solid var(--ac);border-radius:10px;padding:.5rem .6rem;margin-top:.4rem;text-align:center">
     <div style="font-size:.68rem;font-weight:800;color:var(--ac3);margin-bottom:.2rem">🔑 Admin Geçici Şifre Gönderdi</div>
     <div style="font-size:1rem;font-weight:900;letter-spacing:.05em;color:var(--tx)">${tp}</div>
-    <div style="font-size:.6rem;color:var(--mu);margin-top:.2rem">Bu şifreyle veya kendi şifrenizle giriş yapabilirsiniz - güvenliğiniz için bir daha gösterilmeyecek, not almayı unutmayın</div>
+    <div style="font-size:.6rem;color:var(--mu);margin-top:.2rem">Bu şifreyle veya kendi şifrenizle giriş yapabilirsiniz - güvenliğiniz için 15 dakika sonra gizlenecek, not almayı unutmayın</div>
   </div>`;
-  try{localStorage.setItem(seenKey,'1');}catch(e){DiagSil('renderTempPasswordHint',e);}
+  try{ if(!(Number(localStorage.getItem(seenKey))>1))localStorage.setItem(seenKey,String(Date.now())); }catch(e){DiagSil('renderTempPasswordHint',e);}
+  // Şifre alanı gizliyse (kullanıcı henüz "Giriş"e basmadıysa) ipucu görünmez kalırdı - alan açılır.
+  try{ const w=document.getElementById('loginPwWrap'); if(w&&w.style.display==='none')w.style.display='block'; }catch(e){}
 }
 function showLoginPasswordField(label,hint){
   const wrap=document.getElementById('loginPwWrap');
@@ -5185,7 +5237,7 @@ function loadProfileAndEnter(name,pendingFav){
       try{ _prefYaz('pt__profSon_'+visitorId, { favTeam:_favTeam||null, palette:_curPalette||'', mode:_curMode||'dark', avatar:_userAvatar||null }); }catch(e){}
       if(existingProfile.prefs){
         applySyncedPrefsAndCheckChanged(existingProfile.prefs, existingProfile.prefsZaman);
-        if(typeof applyFontFamily==='function')applyFontFamily();
+        ptPrefDegiskenleriYenile();
       }
     }else if(pendingFav){
       _favTeam=pendingFav;
@@ -5206,8 +5258,11 @@ function registerVisitor(name,isNew){
     favTeam:_favTeam||null,
     palette:_curPalette||'',
     mode:_curMode||'dark',
-    avatar:_userAvatar||null,
-    prefs:collectSyncedPrefs()
+    avatar:_userAvatar||null
+    // prefs BİLEREK yazılmıyor (2026-10-05-C): tüm ayarları toptan yazmak, bulut okuması
+    // başarısız olduğunda bu cihazın VARSAYILAN değerleriyle kullanıcının kayıtlı seçimlerini
+    // eziyordu ("kapattığım ayar sonraki girişte açık"). Ayarlar yalnızca değişen alanları
+    // zaman damgasıyla gönderen syncProfileToFirebase() ile gider.
   };
   const updateData={
     name:name,
@@ -5222,6 +5277,7 @@ function registerVisitor(name,isNew){
   });
   // Global profil yolu: sezon/lig değişse de kalıcı kalır.
   firebase.database().ref('userProfiles/'+visitorId).update(profileData).catch(()=>{});
+  try{ syncProfileToFirebase(); }catch(e){}
   startPresenceTracking();
   // KULLANICI TALEBİ: Admin bu kullanıcıyı susturursa (yorum/sohbet yazamasın), bunu ANINDA
   // (gerçek zamanlı) yakalayabilmek için kendi susturma durumumuzu dinleriz.
@@ -5267,7 +5323,7 @@ const SYNCED_PREF_KEYS=['pt_favVideos','pt_videoHistory',
   'pt_clockMode','pt_voiceAnnouncer','pt_voiceAnnouncePrefs','pt_eventSoundOn','pt_eventSoundPrefs',
   'pt_weeklySummaryOff','pt_autoDarkMode','pt_autoDarkStart','pt_autoDarkEnd',
   'pt_hideTypingFromOthers','pt_quietHoursOn','pt_quietHoursStart','pt_quietHoursEnd',
-  'pt_videoOrder_tv','pt_videoOrder_video'];
+  'pt_videoOrder_tv','pt_videoOrder_video','pt_notify','pt_notifPrefs','pt_videoGorunum'];
 /* AYARLARIN KENDİLİĞİNDEN GERİ DÖNMESİ (2026-09-27-I, kullanıcı: "kullanıcı bazı ayarları
    açıp kapatıyor veya düzenliyor, bunlar sonradan değişiyor")
    KÖK SEBEP: Senkronizasyon "son yazan kazanır" + "HEPSİNİ yaz" şeklindeydi. Herhangi bir
@@ -5314,6 +5370,28 @@ function collectSyncedPrefs(){
 // FARK varsa (bu cihazda farklıysa), fonksiyon true döner - çağıran taraf bu durumda
 // sayfayı YENİDEN YÜKLEYEREK tüm değişkenlerin güncel localStorage'dan taze başlamasını
 // sağlar. Fark yoksa (zaten aynıysa) hiçbir şey yapılmaz, gereksiz yeniden yükleme olmaz.
+/* AYARLARIN GİRİŞTE GERİ AÇILMASI (2026-10-05-C, kullanıcı: "Arkaplan rengini palete göre
+   senkronize et ve Canlı maç sesli anonsu gibi ayarları kapatıyorum, sonraki girişte tekrar
+   açılıyor") KÖK SEBEP: Bu ayarlar sayfa yüklenirken BİR KEZ localStorage'dan okunan
+   değişkenlerde yaşıyor (_bgPaletteSyncEnabled, _voiceAnnouncerOn ...). Giriş anında buluttaki
+   değer localStorage'a yazılıyor ama ÇALIŞAN değişken eski (varsayılan=açık) kalıyordu -
+   anahtar açık görünüyor, davranış açık sürüyordu. Ayrıca yaşı bilinmeyen yerel varsayılan
+   (damga=1) buluttaki gerçek seçimi yenebiliyordu. Bu fonksiyon girişten sonra TÜM bu
+   değişkenleri localStorage'dan tazeler ve görünümü yeniden uygular. */
+function ptPrefDegiskenleriYenile(){
+  const adim=function(ad,fn){ try{ fn(); }catch(e){ try{ DiagSil('ptPrefDegiskenleriYenile:'+ad,e,{anlami:'Buluttan gelen ayar bu oturuma uygulanamadı - sayfa yenilenene kadar eski değer görünebilir.'}); }catch(_d){} } };
+  adim('bgSync',function(){ _bgPaletteSyncEnabled=localStorage.getItem('pt_bgPaletteSync')!=='off'; });
+  adim('anons',function(){ _voiceAnnouncerOn=localStorage.getItem('pt_voiceAnnouncer')==='1'; });
+  adim('serit',function(){ _liveTickerEnabled=localStorage.getItem('pt_liveTicker')==='on'; });
+  adim('font',function(){ _fontFamily=localStorage.getItem('pt_fontFamily')||'outfit'; });
+  adim('tepki',function(){ _reactionPack=localStorage.getItem('pt_reactionPack')||''; });
+  adim('olaySes',function(){ _eventSoundOnUI=localStorage.getItem('pt_eventSoundOn')!=='0'; });
+  adim('videoGorunum',function(){ if(typeof _videoGorunum!=='undefined')_videoGorunum=localStorage.getItem('pt_videoGorunum')||'liste'; });
+  adim('fontUygula',function(){ if(typeof applyFontFamily==='function')applyFontFamily(); });
+  adim('arkaplan',function(){ if(typeof applyBgTheme==='function')applyBgTheme(); });
+  adim('gece',function(){ if(typeof applyAutoDarkModeIfNeeded==='function')applyAutoDarkModeIfNeeded(); });
+  adim('serit2',function(){ if(typeof renderLiveTicker==='function')renderLiveTicker(); });
+}
 function applySyncedPrefsAndCheckChanged(prefs, uzakZaman){
   if(!prefs)return false;
   const zaman=prefDegisiklikleriDamgala(), son=_prefOku('pt__prefSon');
@@ -5324,7 +5402,9 @@ function applySyncedPrefsAndCheckChanged(prefs, uzakZaman){
     if(localStorage.getItem(k)===prefs[k])return;
     const uz=Number(uzakZaman[k])||0, yz=Number(zaman[k])||0;
     // Bu cihazdaki değer daha yeniyse (kullanıcı burada değiştirdi) bulut EZMEZ.
-    if(yz>uz)return;
+    // yz===1: yaşı bilinmeyen cihaz değeri (çoğunlukla varsayılan) - buluttaki gerçek kullanıcı
+    // seçimini EZMEMELİ (2026-10-05-C: "kapattığım ayar sonraki girişte açılıyor").
+    if(yz>uz && yz>1)return;
     changed=true;localStorage.setItem(k,prefs[k]);
     son[k]=prefs[k]; zaman[k]=uz;
   });
@@ -7428,7 +7508,7 @@ const DEFAULT_EVENT_EMOJIS={
   goal:'⚽',pen_goal:'🎯',pen_miss:'❌',pen_awarded:'🥅',og:'🔴',
   yellow:'🟨',red:'🟥',yellow2red:'🟨🟥',sub:'🔄',
   foul:'🟠',offside:'🚩',corner:'🚩',throwin:'↩️',flow:'📊',
-  match_start:'🏁',match_end:'⏹️',extra_time:'⏱️',free_comment:'💬',assist:'👟'
+  match_start:'🏁',match_end:'⏹️',extra_time:'⏱️',free_comment:'💬',assist:'👟',post:'🔩'
 };
 // HATA DÜZELTMESİ (kullanıcı bildirdi: "kullanıcı tepki emojisine tıklayınca gif sayfasına
 // atıyor" - kök sebep: "hayalet tıklama"): Mobil tarayıcılar bir dokunuştan SONRA gecikmeli
@@ -9159,8 +9239,8 @@ function renderStandings(){
     // rengi şeffaf (transparent) oluyor - görünmez ama YER KAPLAMAYA devam ediyor, böylece
     // hiçbir satır diğerine göre kaymıyor.
     const borderStyle=renderRankNoteLineStyle(rn?rn.color:'transparent');
-    const bgStyle=isLiveTeam&&_liveTableOn?'background:rgba(124,58,237,.06);animation:standingsLivePulse 2s infinite':'';
-    html+=`<div class="st-row" style="${bgStyle};${borderStyle}" onclick="showTeamDetail('${t.id}')">
+    const bgStyle='';
+    html+=`<div class="st-row${isLiveTeam&&_liveTableOn?' st-canli':''}" style="${bgStyle};${borderStyle}" onclick="showTeamDetail('${t.id}')">
       <div class="st-rank-cluster">
         <div class="rank-num" style="color:var(--st-rank-color,var(--tx));${stAlignStyle('rank',pos)}">${i+1}</div>
         ${rankChangeArrowHtml(t.id,pos)}
@@ -9520,7 +9600,7 @@ function renderStandingsPreviewCard(highlightTeamIds,fullList,liveOverrideMatch)
     ${rows.map((t)=>{
       const realRank=standings.findIndex(s=>s.id===t.id)+1;
       const isHl=hl.indexOf(t.id)>=0;
-      return `<div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .4rem;font-size:.74rem;${isHl?'background:rgba(124,58,237,.15);border:1.5px solid var(--ac);border-radius:9px;margin-bottom:.2rem':''}">
+      return `<div style="display:flex;align-items:center;gap:.5rem;padding:.32rem .4rem;font-size:.74rem;${isHl?'border:1.5px solid color-mix(in srgb,var(--ac) 55%,transparent);border-radius:9px;margin-bottom:.2rem':''}" class="${isHl?'st-canli':''}">
       <span style="width:16px;color:${isHl?'var(--ac3)':'var(--mu)'};font-weight:700">${realRank}</span>
       ${t.logo?`<img src="${t.logo}" style="width:18px;height:18px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:'<span>⚽</span>'}
       <span style="flex:1;font-weight:${isHl?'900':'700'}">${t.name}</span>
@@ -9962,6 +10042,7 @@ let _voiceAnnouncerOn=localStorage.getItem('pt_voiceAnnouncer')==='1';
 window.quickToggleVoiceAnnouncer=function(){
   _voiceAnnouncerOn=!_voiceAnnouncerOn;
   localStorage.setItem('pt_voiceAnnouncer',_voiceAnnouncerOn?'1':'0');
+  syncProfileToFirebase();
   showToast(_voiceAnnouncerOn?'🔊 Sesli anons açıldı':'🔇 Sesli anons kapatıldı');
   renderMatchDetailContent();
 };
@@ -16358,6 +16439,7 @@ window.toggleNotifTypePref=function(key){
   if(key==='goal')p.goals=p.goal;
   if(key==='matchResult')p.matchEnd=p.matchResult;
   localStorage.setItem('pt_notifPrefs',JSON.stringify(p));
+  syncProfileToFirebase();
   openNotifManage();
 };
 window.openNotifManage=function(){
@@ -17139,6 +17221,32 @@ function ptAnlatimCumlesi(e,durum){
     else if(durum.oncekiFark===-1)baglam='Skor eşitlendi.';
     else if(durum.oncekiFark<-1)baglam=`${takim} farkı ${Math.abs(durum.oncekiFark)-1}'e indirdi.`;
     else baglam=`${takim} farkı ${durum.oncekiFark+1}'e çıkardı.`;
+    /* GERÇEK AYRINTI (2026-10-05-C, kullanıcı: "Messi ceza sahası dışından gol attığında anlatım bunu farklı
+       yorumluyor, olayları rastgele yazıyor"): SAHA artık golün nereden/nasıl atıldığını (e.detay: bölge, mesafe,
+       vuruş türü, duran top, direkten içeri) gönderiyor. Ayrıntı varsa cümle YALNIZCA ondan kurulur; "savunmayı
+       geçerek" gibi olayda olmayan şeyler eklenmez. Ayrıntısız eski kayıtlar aşağıdaki genel kalıplarla anlatılır. */
+    const dt=(!pen&&e.detay&&typeof e.detay==='object')?e.detay:null;
+    if(dt&&dt.bolge){
+      const mes=Number(dt.mesafe)||0;
+      const yer=dt.bolge==='disari'?(mes>=25?`${mes} metreden`:'ceza sahası dışından'):dt.bolge==='altipas'?'altıpasın içinden':(dt.aci==='dar'?'dar açıdan':'ceza sahası içinden');
+      const asistAd=e.player2||'';
+      const nasil=dt.vurus==='kafa'?'kafa vuruşuyla':dt.vurus==='vole'?'voleyle':(dt.bolge==='disari'?'sert bir şutla':'');
+      const kaynak=dt.duran==='korner'?' Gol korner organizasyonundan geldi.':dt.duran==='serbest'?'':dt.duran==='tac'?' Atak bir taç atışıyla başlamıştı.':'';
+      const direk=dt.direk?' Top direği yalayıp ağlara gitti.':'';
+      if(dt.duran==='serbest'&&dt.vurus!=='kafa'){
+        return sec([
+          `${evreSoz} ${ad} serbest vuruşu ${yer} doğrudan ağlara gönderdi!${direk} ${baglam}`,
+          `${dk}. dakikada ${ad} frikikten ${yer} kaleciyi avlayarak golü attı.${direk} ${baglam}`,
+          `${ad}, ${mes?mes+' metre mesafedeki ':''}serbest vuruşu barajın üzerinden filelere yolladı.${direk} ${baglam}`
+        ]);
+      }
+      const ast=asistAd?(dt.vurus==='kafa'?`${asistAd}'nin ortasında`:`${asistAd}'nin ${dt.pasTur==='ara'?'ara pasıyla':dt.pasTur==='uzun'?'uzun pasıyla':'pasıyla'}`):'';
+      return sec([
+        `${evreSoz}${ast?' '+ast:''} ${ad} ${yer} ${nasil?nasil+' ':''}${K.golAtti}.${direk}${kaynak} ${baglam}`,
+        `${dk}. dakikada ${ad} ${yer} ${nasil||'vurdu'}${nasil?' golü buldu':' ve topu ağlara gönderdi'}${ast?' ('+(asistAd)+' asisti)':''}.${direk}${kaynak} ${baglam}`,
+        `${evreSoz} ${ad}, ${yer} ${nasil?nasil+' ':''}${K.golKaydetti}${ast?'; pas '+asistAd+'\'dan':''}.${direk}${kaynak} ${baglam}`
+      ].map(x=>x.replace(/\s+/g,' ').replace(/ \./g,'.')));
+    }
     return sec(pen?[
       `${evreSoz} penaltı noktasına ${ad} geçti ve tereddüt etmeden ağları havalandırdı. ${baglam}`,
       `${dk}. dakikada kazanılan penaltıyı ${ad} gole çevirdi. ${baglam}`,
@@ -17148,10 +17256,21 @@ function ptAnlatimCumlesi(e,durum){
     ]:[
       `${evreSoz}${asist} ${ad} ${K.golAtti}. ${baglam}`,
       `${dk}. dakikada ${ad}${asist} ${K.golAtti}. ${baglam}`,
-      `${evreSoz} ${ad}, ${rakip} savunmasını ${K.savunmaGecti} ${K.golAtti}. ${baglam}`,
+      `${evreSoz} ${ad} ${K.golAtti}. ${baglam}`,
       `${ad} fırsatı değerlendirdi${asist} ve ${K.golKaydetti}. ${baglam}`,
       `${evreSoz} ağlar havalandı. Golü ${ad} kaydetti${asist?' ('+e.player2+' asisti)':''}. ${baglam}`,
       `${rakip} savunmasındaki boşluğu ${ad} değerlendirdi ve ${K.golAtti}. ${baglam}`
+    ]);
+  }
+  // DİREK (2026-10-05-C): SAHA'dan gelen gerçek "top direkten döndü" olayı - şutun konumuyla.
+  if(e.type==='post'){
+    const dt=e.detay||{}, mes=Number(dt.mesafe)||0;
+    const yer=dt.bolge==='disari'?(mes>=25?`${mes} metreden`:'ceza sahası dışından'):dt.bolge==='altipas'?'yakın mesafeden':dt.bolge==='ceza'?'ceza sahası içinden':'';
+    const nasil=dt.vurus==='kafa'?'kafa vuruşu':dt.duran==='serbest'?'serbest vuruşu':'şutu';
+    return sec([
+      `${evreSoz} ${ad}${yer?' '+yer:''} denedi; ${nasil} direkten döndü! ${takim} golü kıl payı kaçırdı.`,
+      `${dk}. dakikada ${ad} ${yer?yer+' ':''}vurdu, top direğe çarptı. ${rakip} kalesi büyük tehlike atlattı.`,
+      `${evreSoz} direk ${rakip} kalesini kurtardı: ${ek(ad,'in')} ${nasil} demirden geri geldi.`
     ]);
   }
   // Penaltı olaylarının TAMAMI (kullanıcı talebi): kazanılan, kaçan ve gole çevrilen.
@@ -23394,7 +23513,10 @@ try{
 function ptMacKartArka(){ return window._ptMacKartArka||PT_MAC_KART_VARSAYILAN; }
 function _ptMacLogo(url, ad, boy){
   var harf=String(ad||'?').trim().charAt(0).toUpperCase()||'?';
-  var ic=url?'<img src="'+escAttr(url)+'" style="width:100%;height:100%;object-fit:contain;display:block" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{textContent:\''+harf.replace(/'/g,'')+'\'}))"/>':harf;
+  // Logo kenarındaki siyah kırpma artığı, puan tablosundaki AYNI temizleyiciyle (_processLogoImg,
+  // kenardan flood-fill) şeffaflaştırılır - TV kartında bu çağrı eksikti (2026-10-05-C, "TV
+  // sekmesindeki logoların etrafındaki siyahlıklar").
+  var ic=url?'<img src="'+escAttr(url)+'" style="width:100%;height:100%;object-fit:contain;display:block" onload="try{_processLogoImg(this)}catch(e){}" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{textContent:\''+harf.replace(/'/g,'')+'\'}))"/>':harf;
   return '<div style="width:'+boy+';aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:50%;'
     +(url?'':'background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.55);')
     +'color:#fff;font-weight:900;font-size:1.1rem;filter:drop-shadow(0 3px 6px rgba(0,0,0,.65))">'+ic+'</div>';
@@ -23875,6 +23997,44 @@ function saveVideoScreenOrder(tab,ids){
   try{localStorage.setItem('pt_videoOrder_'+tab,JSON.stringify(ids));}catch(e){try{DiagSil('yerelKayit:pt_videoOrder_',e,{anahtar:'pt_videoOrder_',anlami:'Tercih ekranda uygulandı ama cihaza yazılamadı - sayfa yenilenince eski hâline döner.',oneri:'En sık sebep depolama kotasının dolması ya da gizli sekmede çalışmak. Önbelleği temizleyin ya da normal sekmeye geçin.'});}catch(_d){}}
   if(typeof syncProfileToFirebase==='function')syncProfileToFirebase();
 }
+/* KANAL SIRASININ ESKİ HÂLİNE DÖNMESİ (2026-10-05-C, kullanıcı: "kumanda kanal sıralaması
+   yapılan düzenlemeden sonra eski haline dönüyor"). KÖK SEBEPLER:
+   1) TV listesinde canlı maç kartları HER ZAMAN en üste çekiliyor. Taşıma, maç kartı ile normal
+      kanal arasında yer değiştirince kayıtta değişiklik oluyor ama ekran aynı kalıyordu
+      (kullanıcı "değişmedi/geri döndü" görüyordu).
+   2) Kayıt yalnızca O AN görünen kanallarla yeniden yazılıyordu - gizlenmiş kanallar ve o an
+      oynamayan maçlar sıradan düşüyor, geri geldiklerinde sona atılıyor, sıra kayıyordu.
+   3) İki cihazlı kumandada sıra yalnızca TELEFONA yazılıyordu; TV kendi eski sırasıyla
+      çalmaya devam ediyordu (kanal numaraları uyuşmuyordu).
+   4) Girişte profil kaydı tüm ayarları (eski yerel sıra dahil) buluta toptan yazıyordu.
+   ÇÖZÜM: Tek ortak taşıma fonksiyonu - yalnızca AYNI gruptaki (maç↔maç, kanal↔kanal) komşuyla
+   yer değiştirir, listede olmayan eski kayıtları yerinde korur; kumanda TV'ye de bildirir. */
+function ptSiraTasiOrtak(tab,tam,id,yon){
+  try{
+    var i=-1;for(var n=0;n<tam.length;n++)if(tam[n]&&tam[n].id===id){i=n;break;}
+    if(i<0)return 'yok';
+    var grup=!!tam[i].isMatchCard, j=i+(yon<0?-1:1);
+    while(j>=0&&j<tam.length&&!!tam[j].isMatchCard!==grup)j+=(yon<0?-1:1);
+    if(j<0||j>=tam.length)return yon<0?'ust':'alt';
+    var ids=tam.map(function(x){return x.id;});
+    var t=ids[i];ids[i]=ids[j];ids[j]=t;
+    // Listede olmayan (gizli / o an yayında olmayan) kayıtlar eski komşularının ardında kalır.
+    var eski=getVideoScreenOrder(tab)||[], var_={};ids.forEach(function(x){var_[x]=1;});
+    var sonuc=ids.slice();
+    eski.forEach(function(oid,k){
+      if(var_[oid])return;
+      var once=null;for(var m=k-1;m>=0;m--){if(var_[eski[m]]||sonuc.indexOf(eski[m])>=0){once=eski[m];break;}}
+      var at=once==null?0:sonuc.indexOf(once)+1;
+      sonuc.splice(at,0,oid);
+    });
+    saveVideoScreenOrder(tab,sonuc);
+    return 'ok';
+  }catch(e){
+    try{DiagSil('ptSiraTasiOrtak',e,{anlami:'Kanal sırası kaydedilemedi - liste eski sırada kalır.'});}catch(_d){}
+    return 'hata';
+  }
+}
+window.ptSiraTasiOrtak=ptSiraTasiOrtak;
 // KULLANICI TALEBİ ("TV ve video sekmesindeki kategoriler birbirinden bağımsız olsun"):
 // Kategori süzgeci tek bir değişkende tutuluyordu ve sekme değiştirince OLDUĞU GİBİ
 // kalıyordu. TV'de "Haber" seçiliyken video sekmesine geçilince süzgeç hâlâ "Haber" oluyor,
@@ -23986,32 +24146,37 @@ window.toggleVideoScreenReorder=function(){
   renderVideoScreenList();
 };
 window.moveVideoScreenItem=function(tab,id,dir){
-  const all=(tab==='tv')?ptTumKanallar():(D.videoLinks||[]);
-  let list=all.filter(function(v){return tab==='tv'?!!v.isLive:!v.isLive;});
-  const activeCat=window._videoScreenCategory||'';
-  if(activeCat)list=list.filter(function(v){return v.category===activeCat;});
-  const savedOrder=getVideoScreenOrder(tab);
+  // Ekrandaki listeyle BİREBİR aynı tam liste (gizliler hariç, kişisel sıra + maçlar üstte).
+  var all=(tab==='tv')?ptTumKanallar():((window.D&&D.videoLinks)||[]);
+  var list=all.filter(function(v){return v&&!v.gizli&&(tab==='tv'?!!v.isLive:!v.isLive);});
+  var savedOrder=getVideoScreenOrder(tab);
   if(savedOrder.length){
-    const orderIdx=new Map(savedOrder.map((oid,i)=>[oid,i]));
+    var orderIdx=new Map(savedOrder.map(function(oid,i){return [oid,i];}));
     list=list.slice().sort(function(a,b){
-      const ai=orderIdx.has(a.id)?orderIdx.get(a.id):Infinity;
-      const bi=orderIdx.has(b.id)?orderIdx.get(b.id):Infinity;
+      var ai=orderIdx.has(a.id)?orderIdx.get(a.id):Infinity;
+      var bi=orderIdx.has(b.id)?orderIdx.get(b.id):Infinity;
       return ai-bi;
     });
   }
-  const ids=list.map(v=>v.id);
-  const idx=ids.indexOf(id);
-  const newIdx=idx+dir;
-  if(idx<0||newIdx<0||newIdx>=ids.length)return;
-  const tmp=ids[idx];ids[idx]=ids[newIdx];ids[newIdx]=tmp;
-  // Diğer kategorilerdeki/filtre dışı kalan öğelerin mevcut sırasını KORUMAK için, önceki
-  // tam kayıtlı sıradaki bu sekmeye ait OLMAYAN kısımlar aynen bırakılıp sadece bu görünümün
-  // ID'leri güncellenir.
-  const fullOrder=getVideoScreenOrder(tab);
-  const idsSet=new Set(ids);
-  const merged=ids.slice();
-  fullOrder.forEach(function(oid){if(!idsSet.has(oid))merged.push(oid);});
-  saveVideoScreenOrder(tab,merged);
+  if(tab==='tv')list=window.ptMacKartlariOne(list);
+  // Kategori süzgeci açıksa komşu, süzgeçteki bir sonraki görünen kanaldır.
+  var activeCat=window._videoScreenCategory||'';
+  if(activeCat){
+    var gor=list.filter(function(v){return v.category===activeCat;});
+    var gi=gor.findIndex(function(v){return v.id===id;}), hedef=gor[gi+(dir<0?-1:1)];
+    if(gi<0||!hedef){showToast(dir<0?'Zaten en üstte':'Zaten en altta');return;}
+    var ids=list.map(function(v){return v.id;});
+    ids.splice(ids.indexOf(id),1);
+    var hi=ids.indexOf(hedef.id);
+    ids.splice(dir<0?hi:hi+1,0,id);
+    var eski=getVideoScreenOrder(tab)||[];
+    eski.forEach(function(oid){ if(ids.indexOf(oid)<0)ids.push(oid); });
+    saveVideoScreenOrder(tab,ids);
+    renderVideoScreenList();
+    return;
+  }
+  var r=ptSiraTasiOrtak(tab,list,id,dir);
+  if(r==='ust')showToast('Zaten en üstte'); else if(r==='alt')showToast('Zaten en altta');
   renderVideoScreenList();
 };
 // KULLANICI TALEBİ ("kanal numarası girme butonunun yanına kayıtlı kanalların olduğu bir
@@ -24068,14 +24233,11 @@ window.remoteCtrlSiraModu=function(){window._remoteCtrlSira=!window._remoteCtrlS
 // aynı gerekçe oynatıcı içi kumandadaki ptpChSiraTasi notunda yazılı.
 window.remoteCtrlSiraTasi=function(id,yon){
   var canli=!!window._remoteCtrlListMode,tab=canli?'tv':'video';
-  var tam=remoteCtrlPlaylist(canli);
-  var i=-1;for(var n=0;n<tam.length;n++)if(tam[n].id===id){i=n;break;}
-  if(i<0)return;
-  var j=i+(yon<0?-1:1);
-  if(j<0||j>=tam.length){showToast(yon<0?'Zaten en üstte':'Zaten en altta');return;}
-  var ids=tam.map(function(x){return x.id;});
-  var t=ids[i];ids[i]=ids[j];ids[j]=t;
-  if(typeof saveVideoScreenOrder==='function')saveVideoScreenOrder(tab,ids);
+  var tam=remoteCtrlPlaylist(canli).filter(function(x){return x&&!x.gizli;});
+  var r=ptSiraTasiOrtak(tab,tam,id,yon);
+  if(r==='ust'||r==='alt'){showToast(r==='ust'?'Zaten en üstte':'Zaten en altta');return;}
+  // TV de aynı sırayı kullansın - aksi halde kanal numaraları iki cihazda farklı olur.
+  try{ if(r==='ok')sendRemoteCommand('siraYaz',{tab:tab,ids:getVideoScreenOrder(tab)}); }catch(e){}
   renderRemoteControllerScreen();
 };
 function remoteCtrlChannelRowsHtml(isLive){
@@ -30838,14 +31000,8 @@ function ptpUstBarParcalari(){
     if(!S||!id)return;
     var canli=chModu(),tab=canli?'tv':'video';
     var tam=playlist(canli);
-    var i=-1;
-    for(var n=0;n<tam.length;n++)if(tam[n].id===id){i=n;break;}
-    if(i<0)return;
-    var j=i+(yon<0?-1:1);
-    if(j<0||j>=tam.length){showToastMsg(yon<0?'Zaten en üstte':'Zaten en altta');return;}
-    var ids=tam.map(function(x){return x.id;});
-    var tmp=ids[i];ids[i]=ids[j];ids[j]=tmp;
-    if(typeof saveVideoScreenOrder==='function')saveVideoScreenOrder(tab,ids);
+    var r=ptSiraTasiOrtak(tab,tam,id,yon);
+    if(r==='ust'||r==='alt'){showToastMsg(r==='ust'?'Zaten en üstte':'Zaten en altta');return;}
     renderChannelListOverlay();
     // TV/Video sekmesi açıksa oradaki liste de anında güncellenir - iki görünüm ayrışmasın.
     try{if(typeof renderVideoScreenList==='function'&&document.getElementById('videoScreenList'))renderVideoScreenList();}catch(e){}
@@ -32062,6 +32218,17 @@ function ptpUstBarParcalari(){
         // dokunarak sarmak HER ZAMAN aynı miktarda ilerler.
         else if(cmd.action==='seek'){var _yon=Number(cmd.value)<0?-1:1;seekBy(_yon*Number(pref('skip',10)));}
         else if(cmd.action==='togglemute')toggleMute();
+        // Kumandada kanal sırası değişti: TV aynı sırayı kendi kaydına yazar (numaralar eşleşsin).
+        else if(cmd.action==='siraYaz'){
+          try{
+            var _sv=cmd.value||{};
+            if((_sv.tab==='tv'||_sv.tab==='video')&&Array.isArray(_sv.ids)){
+              saveVideoScreenOrder(_sv.tab,_sv.ids.filter(function(x){return typeof x==='string';}));
+              if(S.chOpen&&typeof renderChannelListOverlay==='function')renderChannelListOverlay();
+              try{if(document.getElementById('videoScreenList'))renderVideoScreenList();}catch(_e){}
+            }
+          }catch(e){try{DiagSil('remoteCmd:siraYaz',e,{anlami:'Kumandadan gelen kanal sırası TV\'ye uygulanamadı.'});}catch(_d){}}
+        }
         // KULLANICI TALEBİ ("yayın geri sarıldığında kumanda üzerinden canlıya dönülsün"):
         // Telefon kumandasındaki "🔴 Canlı" tuşundan gelen komut - geri sarılmış canlı
         // yayını en güncel (canlı) uca döndürür.
@@ -33130,6 +33297,7 @@ window.toggleNotifyPref=function(){
   localStorage.setItem('pt_notify',cur?'0':'1');
   const sw=document.getElementById('notifySw');
   if(sw)sw.classList.toggle('on',!cur);
+  syncProfileToFirebase();
   showToast(cur?'🔕 Bildirim kapatıldı':'🔔 Bildirim açıldı');
 };
 
