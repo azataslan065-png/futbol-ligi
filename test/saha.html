@@ -8830,6 +8830,7 @@ function _aktifModel(){
           // Model EZAMANSIZ gelir; oyuncular çoktan kurulmuş olabilir - yerinde değiştirilir.
           try{ oyunculariModeleGecir(); }catch(e){_sessiz(e,'insanAdim:1076','saha_oyun');}
           try{ taraftarModeleGecir(); }catch(e){}
+          _sahaOnDerle(ad);
           try{ if(typeof KALABALIK !== 'undefined' && KALABALIK.hazir && !KALABALIK._modelli){ _kalabalikAtlasCiz(0); _kalabalikAtlasCiz(1); } }catch(e){}
         }catch(e){ _modelAdim(ad, 'hata: ' + String(e && e.message || e).slice(0, 80)); _sessiz(e, 'insanModeliYukle:' + ad, 'saha_oyun'); }
       };
@@ -8877,6 +8878,20 @@ function hazirRenkSenk(){
 }
 // Sahadaki oyunculari hazir modele gecirir (bkz. yukleyicideki kok sebep notu).
 // Konum, yon ve gorunurluk korunur; oyuncu nesnesi (p) ayni kalir, yalnizca p.obj degisir.
+/* GÖLGELENDİRİCİ ÖN DERLEME (2026-10-20-A, teşhis "Donma: ekran 6915 ms durdu", Redmi 9A, online maç başı). Bir malzeme
+   ilk kez çizildiğinde ekran kartı programını derler; zayıf telefonda onlarca malzeme ilk karede birden derlenince ekran
+   saniyelerce donar - maç başlarken. Model hazır olunca, maç başlamadan (menü / bekleme ekranında) sahne bir kez derlenir;
+   maçın ilk karesi hazır programlarla çizilir. Maç sürüyorsa yapılmaz (o anda zaten çiziliyor). */
+function _sahaOnDerle(neden){
+  try{ if(typeof renderer === 'undefined' || !renderer.compile) return;
+    setTimeout(function(){ try{
+      if(typeof running !== 'undefined' && running && !bitti) return;
+      var t0 = performance.now(), p0 = renderer.info.programs ? renderer.info.programs.length : 0;
+      renderer.compile(scene, camera);
+      window._sahaOnDerleme = { neden:neden, ms:Math.round(performance.now() - t0), yeni:(renderer.info.programs ? renderer.info.programs.length : 0) - p0 };
+    }catch(e){ _sessiz(e, 'sahaOnDerle', 'saha_grafik'); } }, 400);
+  }catch(e){}
+}
 function oyunculariModeleGecir(){
   if(typeof players === 'undefined' || !players || !players.length) return;
   players.forEach(function(p){
@@ -18112,7 +18127,7 @@ function sahaPikselOranUygula(){
     if(window.SAHA_HAFIF_CIHAZ) pr = Math.min(pr, 1.5);
     if(window.SAHA_COK_ZAYIF) pr = Math.min(pr, 1.25);
     if((window._otoKalite || 0) >= 4) pr = Math.min(pr, 1.25);
-    if((window._otoKalite || 0) >= 5) pr = Math.min(pr, 1);      // (2026-10-17-E) yalnızca çok zayıf cihaz: 4. kademe de yetmezse 1x
+    if((window._otoKalite || 0) >= 5) pr = Math.min(pr, window.SAHA_COK_ZAYIF ? 0.85 : 1);      // (2026-10-17-E) yalnızca çok zayıf cihaz: 4. kademe de yetmezse 1x; (2026-10-20-A) çok zayıf cihazda 0,85x (piksel ~%28 az; arayüz yazıları etkilenmez)
     if(Math.abs(renderer.getPixelRatio() - pr) > 0.01){ renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight); }
   }catch(e){ _sessiz(e, 'sahaPikselOranUygula', 'saha_grafik'); }
 }
@@ -18133,7 +18148,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-19-A';
+window.APP_BUILD = '2026-10-20-A';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -19669,6 +19684,10 @@ function _yanModelYap(mat){
   g.traverse(function(o){ if(o.isMesh) o.castShadow = false; });
   return g;
 }
+/* ÇOK ZAYIF CİHAZDA KULÜBE (2026-10-20-A, teşhis Redmi 9A / PowerVR GE8320: maçta 5-10 kare/sn). ÖLÇÜM (çok zayıf modda tek
+   kare): ~257 bin üçgen, bunun 215 bini insan figürleri (figür başına ~5 bin, iskeletli). 22 oyuncu + 3 hakem dışında kulübede
+   oturan 16 yedek / ekip figürü ~80 bin üçgen ve her karede iskelet hesabı demekti - yayın kamerasında ekranın kenarında
+   birkaç piksellik süs. Çok zayıf cihazda kulübe koltukları boş görünür (teknik direktörler kalır); diğer cihazlarda değişiklik yok. */
 function _kulubeModelKur(t){
   var K = KULUBE.t[t]; if(!K || !_aktifModel()) return;
   K.model = K.model || [];
@@ -19681,7 +19700,7 @@ function _kulubeModelKur(t){
       g.userData._faz = Math.random() * 6.28; g.userData._kulube = true;
       scene.add(g); K.model[i] = g;
     }
-    K.model[i].visible = !!k.gorunur;
+    K.model[i].visible = !!k.gorunur && !window.SAHA_COK_ZAYIF;   // (2026-10-20-A) bkz. ÇOK ZAYIF CİHAZDA KULÜBE
   });
   K.model.forEach(function(g){ if(g) _renkSenkObj(g); });
 }
@@ -24598,39 +24617,39 @@ function topuGeriVer(){
   sonDokunan = 0; sonDokunanOyuncu = p; ofsaytTemizle();
   olayMesaj('', 'Top sende', 700);
 }
+/* HUD YAZIMI (2026-10-20-A, teşhis "hud() uzun sürdü 60ms", Redmi 9A): hud() her karede çağrılıyor ve 8 öğeye
+   değer değişmese de yazıyordu; her yazım tarayıcıya stil/düzen hesabı yaptırır, zayıf telefonda kareyi uzatır. Artık
+   yalnızca DEĞİŞEN değer yazılır (çoğu karede hiçbiri). Karşılaştırma öğenin KENDİ değeriyle yapılır (okuma düzen hesabı
+   gerektirmez): başka bir kod (ör. izleyici tabelası) aynı öğeye yazsa da tutarsızlık olmaz. */
+function _hudYaz(id, alan, v){ var el = document.getElementById(id); if(!el) return;
+  if(alan === 't'){ if(el.textContent !== v) el.textContent = v; }
+  else { var k = '_hud_' + alan; if(el[k] !== v){ el[k] = v; el.style[alan] = v; } } }   // stil tarayıcıda biçim değiştirir (renk -> rgb): son yazılan değer öğede tutulur
 function hud(){
   // Kondisyon gostergesi: kontrol edilen oyuncunun degeri. Renk esikleri dususun
   // hissedilir oldugu noktalara denk gelir.
   try{
     const kp = ctrl;
     const k = (kp && kp.kond!=null) ? Math.round(kp.kond) : 100;
-    const bar = document.getElementById('kondBar');
-    const yz  = document.getElementById('kondYuzde');
-    if(bar){
-      bar.style.width = Math.max(0,Math.min(100,(k-25)/75*100)) + '%';
-      bar.style.background = k>70 ? '#2fae7a' : (k>45 ? '#e4b23c' : '#d8443a');
-    }
-    if(yz) yz.textContent = k;
-    const dh = document.getElementById('degHak');
-    if(dh) dh.textContent = (degisiklikHakki && degisiklikHakki[0]!=null) ? degisiklikHakki[0] : 5;
+    _hudYaz('kondBar', 'width', Math.max(0,Math.min(100,(k-25)/75*100)) + '%');
+    _hudYaz('kondBar', 'background', k>70 ? '#2fae7a' : (k>45 ? '#e4b23c' : '#d8443a'));
+    _hudYaz('kondYuzde', 't', String(k));
+    _hudYaz('degHak', 't', String((degisiklikHakki && degisiklikHakki[0]!=null) ? degisiklikHakki[0] : 5));
   }catch(e){_sessiz(e,'hud:4491','saha_oynanis');}
   tabelaYonUygula();
-  document.getElementById('sa').textContent = skorA;
-  document.getElementById('sb').textContent = skorB;
+  _hudYaz('sa', 't', String(skorA));
+  _hudYaz('sb', 't', String(skorB));
   // FUTBOL SAATİ (2026-09-22-M): 1. yarı 1'-45', 2. yarı 46'-90' - gerçek oyun süresi ne
   // olursa olsun (yönetici belirler) bu aralığa ölçeklenir. "1."/"2." ibaresi kaldırıldı.
   // Uzatma, hakem açıkladıktan sonra dakikanın yanında görünür: 45' +2.
-  const _dv = document.getElementById('devre');
   if (mod === 'antrenman'){
     const mm = Math.floor(saat/60), ss = Math.floor(saat%60);
-    _dv.textContent = 'ANT'; _dv.style.display = ''; _dv.style.marginRight = '6px';
-    document.getElementById('sure').textContent = `${mm}:${ss<10?'0'+ss:ss}`;
-    document.getElementById('uzatma').textContent = '';
+    _hudYaz('devre', 't', 'ANT'); _hudYaz('devre', 'display', ''); _hudYaz('devre', 'marginRight', '6px');
+    _hudYaz('sure', 't', `${mm}:${ss<10?'0'+ss:ss}`);
+    _hudYaz('uzatma', 't', '');
   } else {
-    _dv.textContent = ''; _dv.style.display = 'none';
-    document.getElementById('sure').textContent = saatMetni(macSaniye());
-    document.getElementById('uzatma').textContent = (uzatmaVerildi && uzatma > 0)
-      ? '+' + Math.round(uzatma / Math.max(1,HALF) * 45) : '';
+    _hudYaz('devre', 't', ''); _hudYaz('devre', 'display', 'none');
+    _hudYaz('sure', 't', saatMetni(macSaniye()));
+    _hudYaz('uzatma', 't', (uzatmaVerildi && uzatma > 0) ? '+' + Math.round(uzatma / Math.max(1,HALF) * 45) : '');
   }
 }
 const rc = document.getElementById('radar').getContext('2d');
@@ -30745,10 +30764,17 @@ var SAHA_CIHAZ = (function(){
       bildir('cozum', '⚙️ Cihaz zorlanıyor: grafik hafifletildi. Sonraki maç daha akıcı olacak.'); }
   }
   // Donma: her karede ölçülür (requestAnimationFrame - oyun döngüsünden bağımsız, döngü kopsa bile çalışır).
+  function _prSay(){ try{ return renderer.info.programs ? renderer.info.programs.length : 0; }catch(e){ return 0; } }
+  function _evre(){ try{ return [typeof TOREN !== 'undefined' && TOREN.aktif ? 'tören:' + (TOREN.faz || '') : '', window._santra ? 'santra' : '',
+    (typeof duran !== 'undefined' && duran) ? 'duran:' + duran.tip : '', (typeof devre !== 'undefined') ? 'devre ' + devre : '',
+    (typeof saat !== 'undefined') ? 'saat ' + Math.round(saat) : ''].filter(Boolean).join(' · '); }catch(e){ return ''; } }
+  S.prog = _prSay();
   (function kareIzle(){ requestAnimationFrame(function(){ var t = performance.now(), d = t - S.kareSon; S.kareSon = t;
+    var _pg = _prSay(), _yeniPg = _pg - (S.prog || 0); S.prog = _pg;     // (2026-10-20-A) donma karesinde derlenen gölgelendirici sayısı: kök sebebi ayırır
     if(d > 700 && d < 8000 && maçta()){ S.donmaSay.push(t); S.donmaSay = S.donmaSay.filter(function(x){ return t - x < 30000; });
       kayit('saha_grafik', 'kasma', 'Donma: ekran ' + Math.round(d) + ' ms durdu', { sure:Math.round(d) + 'ms', fps:Math.round(typeof fps !== 'undefined' ? fps : 0), kalite:window._otoKalite || 0,
-        durum:(window._sahaOdaHost ? 'online (kuran)' : (window._sahaOdaKonuk ? 'online (konuk)' : 'tek cihaz')), anlami:'Tarayıcı bu sürede ekranı hiç yenileyemedi.',
+        durum:(window._sahaOdaHost ? 'online (kuran)' : (window._sahaOdaKonuk ? 'online (konuk)' : 'tek cihaz')), evre:_evre(), yeniGolgelendirici:_yeniPg,
+        onDerleme:window._sahaOnDerleme ? (window._sahaOnDerleme.ms + ' ms, ' + window._sahaOnDerleme.yeni + ' program') : 'yapılmadı', anlami:'Tarayıcı bu sürede ekranı hiç yenileyemedi.',
         oneri:'Arka plandaki uygulamaları kapatın; tekrarlıyorsa grafik otomatik hafifletilir.' });
       if(S.donmaSay.length >= 3) kaliteyiDusur('30 sn içinde 3 donma'); }
     kareIzle(); }); })();
