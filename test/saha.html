@@ -47,6 +47,14 @@
     var eskiyeDon = function(el, neden){                               // güvenli geri dönüş: öğe normal sesli çalar
       var B = el._bsz; if(!B || B.eski) return; B.eski = true; D.hata = neden || '';
       try{ if(B.g) B.g.disconnect(); }catch(e){}
+      /* (2026-10-23-B, kullanıcı: "ekran kapatıldığında veya arka plana alındığında ses yankılı geliyor"). KÖK SEBEP - BU HATAYI BEN
+         EKLEDİM: öğe normal sesli çalmaya döndürülürken Web Audio yolu (yakalanan ses akışı) KAPATILMIYORDU; aynı ses hem öğeden hem
+         ses motorundan, aralarında küçük bir gecikmeyle iki kez çalıyordu (yankı). Artık geri dönüşte ses motoru yolu tamamen kesilir. */
+      try{ if(B.kaynak) B.kaynak.disconnect(); }catch(e){}
+      try{ if(B.giris) B.giris.disconnect(); }catch(e){}
+      try{ if(B.cikis) B.cikis.disconnect(); }catch(e){}
+      try{ if(B.st) B.st.getAudioTracks().forEach(function(t){ try{ t.stop(); }catch(_e){} }); }catch(e){}
+      B.kaynak = null;
       try{ delete el.muted; }catch(e){}
       gercekSessiz(el, B.m);
     };
@@ -143,6 +151,7 @@
     // oynatmayı açtıysa öğe normal (sesli) oynatmaya bırakılır.
     D.serbest = function(el){ try{ if(el && el._bsz && !el._bsz.eski) eskiyeDon(el, 'arka planda oynatma'); }catch(e){} };
     D.uyandir = function(){ try{ if(ctx && ctx.state !== 'running' && !document.hidden) ctx.resume(); }catch(e){} };
+    D.surdur = function(){ try{ if(ctx && ctx.state !== 'running') ctx.resume(); }catch(e){} };   // arka planda da (gizliyken) motoru açık tutar
     try{ document.addEventListener('visibilitychange', function(){ if(!document.hidden) D.uyandir(); }); }catch(e){}
     D.graf = function(el){ var B = hazirla(el); if(!B || B.eski) return null; if(!grafKur(el)) return null; return { ctx:ctx, giris:B.giris, cikis:B.cikis }; };
     var ozPlay = P.play;
@@ -11877,6 +11886,39 @@ let benimKayit = null;      // kullanicilar/{uid}
 let magazaHavuz = {};       // oyuncuHavuzu tumu
 try{
   firebase.initializeApp(FB);
+/* DİNLEYİCİ KURTARMA (2026-10-23-B). KÖK SEBEP (bakım ekranı açılmıyor, canlı maç izleyicisi "tek açı"da donuk kalıyor): sayfa,
+   anonim kimlik oturumu açılmadan veritabanını dinlemeye başlıyordu. Kurallar "auth != null" istediği için o ilk dinleme
+   "izin yok" (permission_denied) ile reddediliyor ve Firebase bu dinleyiciyi KALICI olarak iptal ediyor; kimlik bir saniye sonra
+   gelse de veri bir daha hiç gelmiyordu. Hata işleyicisi verilmemiş HER dinleyici izin hatasında artan aralıkla (1-15 sn, en çok
+   40 kez) yeniden kurulur; dinleyici bu arada kapatılırsa (off) bekleyen deneme iptal edilir. Hata işleyicisi olan dinleyicilere
+   dokunulmaz (kendi kurtarmalarını yapıyorlar). */
+(function(){ try{
+  var Q = window.firebase && firebase.database && firebase.database.Query && firebase.database.Query.prototype;
+  if(!Q || Q._dinleyiciKurtarma || typeof Q.on !== 'function') return; Q._dinleyiciKurtarma = true;
+  var orjOn = Q.on, orjOff = Q.off, bekleyen = [];
+  var ayni = function(a, b){ try{ return a === b || (a && a.isEqual && a.isEqual(b)); }catch(e){ return false; } };
+  Q.on = function(tur, cb, iptal, bag){
+    if(typeof cb !== 'function' || typeof iptal === 'function') return orjOn.apply(this, arguments);
+    if(iptal && typeof iptal === 'object' && bag === undefined) bag = iptal;
+    var ref = this, n = 0;
+    var hata = function(err){
+      try{
+        if(!/permission/i.test(String((err && (err.code || err.message)) || '')) || n >= 40) return;
+        n++;
+        var k = { ref:ref, tur:tur, cb:cb, t:null };
+        k.t = setTimeout(function(){ var i = bekleyen.indexOf(k); if(i < 0) return; bekleyen.splice(i, 1);
+          try{ orjOn.call(ref, tur, cb, hata, bag); }catch(e){} }, Math.min(15000, 1000 * n));
+        bekleyen.push(k);
+      }catch(e){}
+    };
+    return orjOn.call(this, tur, cb, hata, bag);
+  };
+  if(typeof orjOff === 'function') Q.off = function(tur, cb){
+    try{ for(var i = bekleyen.length - 1; i >= 0; i--){ var k = bekleyen[i];
+      if((!cb || k.cb === cb) && (!tur || k.tur === tur) && ayni(k.ref, this)){ clearTimeout(k.t); bekleyen.splice(i, 1); } } }catch(e){}
+    return orjOff.apply(this, arguments);
+  };
+}catch(e){} })();
   fbDb = firebase.database();
   // ══════════════════════════════════════════════════════════════════════════════════════
   // TEST ORTAMI - AYRI VERI KOKU
@@ -18347,7 +18389,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-23-A';
+window.APP_BUILD = '2026-10-23-B';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;

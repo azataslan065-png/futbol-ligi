@@ -2137,6 +2137,14 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
       </div>
       <button class="btn bp" onclick="changeMasterPassword()" style="width:100%"> Şifreyi Değiştir</button>
       <div id="masterPwMsg" style="font-size:.64rem;margin-top:.5rem;line-height:1.6"></div>
+      <!-- (2026-10-23-B, kullanıcı: "yönetici şifresini değiştirebiliyor, e-postasını da güncelleyebilsin") -->
+      <div style="border-top:1px solid var(--bd,rgba(255,255,255,.08));margin:.8rem 0 .6rem"></div>
+      <div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.05em">Yönetici E-postasını Değiştir</div>
+      <div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.5">Şu anki e-posta: <b id="admSuankiEposta" style="color:var(--tx)">-</b><br>Yeni adrese bir onay bağlantısı gönderilir; bağlantıya tıklayınca e-posta değişir ve panele yeni adresle girersiniz. Tıklanana kadar eski adres geçerli kalır.</div>
+      <div class="field" style="margin-bottom:.4rem"><span class="lbl">Yeni E-posta</span><input id="newAdmEmail" type="email" placeholder="yeni@ornek.com" autocomplete="off"/></div>
+      <div class="field" style="margin-bottom:.4rem"><span class="lbl">Mevcut Şifre</span><input id="admEmailPw" type="password" placeholder="Onay için mevcut şifreniz"/></div>
+      <button class="btn bp" onclick="changeAdminEmail()" style="width:100%">E-postayı Değiştir</button>
+      <div id="admEmailMsg" style="font-size:.64rem;margin-top:.5rem;line-height:1.6"></div>
       <!-- KULLANICI TALEBİ: "Bu cihazda beni hatırla" yalnızca giriş ekranında değil, panel
            içinden de değiştirilebilsin. Giriş ekranı, zaten oturum açıkken görünmediği için
            tercihi sonradan kapatmanın tek yolu çıkış yapmaktı - bu ise gereksizdi. -->
@@ -2437,6 +2445,39 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
 // uyarılar) TAMAMEN kaldırıldı.
 var FB = {apiKey:"AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY",authDomain:"superlig-208e3.firebaseapp.com",databaseURL:"https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app",projectId:"superlig-208e3",storageBucket:"superlig-208e3.firebasestorage.app",messagingSenderId:"879221404148",appId:"1:879221404148:web:daae84d7187311400209a1"};
 firebase.initializeApp(FB);
+/* DİNLEYİCİ KURTARMA (2026-10-23-B). KÖK SEBEP (bakım ekranı açılmıyor, canlı maç izleyicisi "tek açı"da donuk kalıyor): sayfa,
+   anonim kimlik oturumu açılmadan veritabanını dinlemeye başlıyordu. Kurallar "auth != null" istediği için o ilk dinleme
+   "izin yok" (permission_denied) ile reddediliyor ve Firebase bu dinleyiciyi KALICI olarak iptal ediyor; kimlik bir saniye sonra
+   gelse de veri bir daha hiç gelmiyordu. Hata işleyicisi verilmemiş HER dinleyici izin hatasında artan aralıkla (1-15 sn, en çok
+   40 kez) yeniden kurulur; dinleyici bu arada kapatılırsa (off) bekleyen deneme iptal edilir. Hata işleyicisi olan dinleyicilere
+   dokunulmaz (kendi kurtarmalarını yapıyorlar). */
+(function(){ try{
+  var Q = window.firebase && firebase.database && firebase.database.Query && firebase.database.Query.prototype;
+  if(!Q || Q._dinleyiciKurtarma || typeof Q.on !== 'function') return; Q._dinleyiciKurtarma = true;
+  var orjOn = Q.on, orjOff = Q.off, bekleyen = [];
+  var ayni = function(a, b){ try{ return a === b || (a && a.isEqual && a.isEqual(b)); }catch(e){ return false; } };
+  Q.on = function(tur, cb, iptal, bag){
+    if(typeof cb !== 'function' || typeof iptal === 'function') return orjOn.apply(this, arguments);
+    if(iptal && typeof iptal === 'object' && bag === undefined) bag = iptal;
+    var ref = this, n = 0;
+    var hata = function(err){
+      try{
+        if(!/permission/i.test(String((err && (err.code || err.message)) || '')) || n >= 40) return;
+        n++;
+        var k = { ref:ref, tur:tur, cb:cb, t:null };
+        k.t = setTimeout(function(){ var i = bekleyen.indexOf(k); if(i < 0) return; bekleyen.splice(i, 1);
+          try{ orjOn.call(ref, tur, cb, hata, bag); }catch(e){} }, Math.min(15000, 1000 * n));
+        bekleyen.push(k);
+      }catch(e){}
+    };
+    return orjOn.call(this, tur, cb, hata, bag);
+  };
+  if(typeof orjOff === 'function') Q.off = function(tur, cb){
+    try{ for(var i = bekleyen.length - 1; i >= 0; i--){ var k = bekleyen[i];
+      if((!cb || k.cb === cb) && (!tur || k.tur === tur) && ayni(k.ref, this)){ clearTimeout(k.t); bekleyen.splice(i, 1); } } }catch(e){}
+    return orjOff.apply(this, arguments);
+  };
+}catch(e){} })();
 /* ══════════════════════════════════════════════════════════════════════════════════════════
    TEST ORTAMI - AYRI VERİTABANI KÖKÜ (aynısı Puan Tablosu tarafında da var)
    Adres "/test/" içeriyorsa bütün veri yolları "test/" önekiyle yazılır; gerçek veriye hiç
@@ -2787,7 +2828,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-23-A';
+window.APP_BUILD='2026-10-23-B';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -18176,6 +18217,46 @@ function syncBeniHatirlaKutusu(){
     var k=qs('admHatirlaAyar');
     if(k)k.checked=(localStorage.getItem('adm_beniHatirla')==='1');
   }catch(e){self.__ds&&self.__ds(17971,e)}
+}
+/* YÖNETİCİ E-POSTASI DEĞİŞTİRME (2026-10-23-B). Firebase, e-posta değişikliğini doğrudan yazdırmaz (e-posta numaralandırma
+   koruması açık projelerde updateEmail reddedilir); doğru yol verifyBeforeUpdateEmail: yeni adrese onay bağlantısı gider,
+   tıklanınca e-posta değişir. Önce mevcut şifreyle kimlik tazelenir (hassas işlem). Yönetici yetkisi uid'e bağlı olduğu için
+   (admins/<uid>) e-posta değişince yetki kaybolmaz. Cihazda hatırlanan giriş adresi de yeni adrese çevrilir. */
+function admSuankiEpostaCiz(){
+  try{ var el=qs('admSuankiEposta'); if(!el)return; var u=firebase.auth().currentUser; el.textContent=(u&&!u.isAnonymous&&u.email)?u.email:'(e-postalı oturum yok)'; }catch(e){}
+}
+try{ setTimeout(function(){ try{ firebase.auth().onAuthStateChanged(function(){ admSuankiEpostaCiz(); }); }catch(e){} },0); }catch(e){}
+function changeAdminEmail(){
+  var kutu=qs('admEmailMsg');
+  var yaz=function(h){if(kutu)kutu.innerHTML=h;};
+  var yeni=((qs('newAdmEmail')||{}).value||'').trim();
+  var pw=(qs('admEmailPw')||{}).value||'';
+  var u=null;
+  try{u=(window.firebase&&firebase.auth)?firebase.auth().currentUser:null;}catch(e){}
+  if(!u||u.isAnonymous||!u.email){yaz('<b style="color:#f87171">Önce yönetici e-postanızla giriş yapmalısınız.</b>');return;}
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(yeni)){yaz('<b style="color:#f87171">Geçerli bir e-posta girin.</b>');return;}
+  if(yeni.toLowerCase()===String(u.email).toLowerCase()){yaz('<b style="color:#f87171">Yeni e-posta mevcut adresle aynı.</b>');return;}
+  if(!pw){yaz('<b style="color:#f87171">Onay için mevcut şifrenizi girin.</b>');return;}
+  if(typeof u.verifyBeforeUpdateEmail!=='function'){yaz('<b style="color:#f87171">Bu tarayıcıdaki Firebase sürümü e-posta değişikliğini desteklemiyor.</b>');return;}
+  yaz(' Gönderiliyor...');
+  var cred=firebase.auth.EmailAuthProvider.credential(u.email,pw);
+  u.reauthenticateWithCredential(cred)
+    .then(function(){return u.verifyBeforeUpdateEmail(yeni);})
+    .then(function(){
+      try{ logAction(' Yönetici e-postası değişikliği istendi: '+yeni); }catch(e){}
+      try{ localStorage.setItem('adm_lastEmail',yeni); }catch(e){}
+      if(qs('newAdmEmail'))qs('newAdmEmail').value='';
+      if(qs('admEmailPw'))qs('admEmailPw').value='';
+      yaz('<b style="color:#22c55e"> Onay bağlantısı '+escHtml(yeni)+' adresine gönderildi.</b> Bağlantıya tıkladıktan sonra panele yeni e-postayla girin (şifre aynı kalır). Gelen kutusu ve spam klasörüne bakın.');
+      toast(' Onay e-postası gönderildi');
+    })
+    .catch(function(e){
+      var k=(e&&e.code)||'';
+      var m=k==='auth/email-already-in-use'?'Bu e-posta başka bir hesapta kayıtlı.'
+        :k==='auth/requires-recent-login'?'Güvenlik için çıkış yapıp yeniden girin, sonra tekrar deneyin.'
+        :(typeof _authHataTr==='function'?_authHataTr(e):((e&&e.message)||'değiştirilemedi'));
+      yaz('<b style="color:#f87171"> '+escHtml(m)+'</b>');
+    });
 }
 function changeMasterPassword(){
   var kutu=qs('masterPwMsg');

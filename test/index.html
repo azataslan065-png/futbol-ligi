@@ -47,6 +47,14 @@
     var eskiyeDon = function(el, neden){                               // güvenli geri dönüş: öğe normal sesli çalar
       var B = el._bsz; if(!B || B.eski) return; B.eski = true; D.hata = neden || '';
       try{ if(B.g) B.g.disconnect(); }catch(e){}
+      /* (2026-10-23-B, kullanıcı: "ekran kapatıldığında veya arka plana alındığında ses yankılı geliyor"). KÖK SEBEP - BU HATAYI BEN
+         EKLEDİM: öğe normal sesli çalmaya döndürülürken Web Audio yolu (yakalanan ses akışı) KAPATILMIYORDU; aynı ses hem öğeden hem
+         ses motorundan, aralarında küçük bir gecikmeyle iki kez çalıyordu (yankı). Artık geri dönüşte ses motoru yolu tamamen kesilir. */
+      try{ if(B.kaynak) B.kaynak.disconnect(); }catch(e){}
+      try{ if(B.giris) B.giris.disconnect(); }catch(e){}
+      try{ if(B.cikis) B.cikis.disconnect(); }catch(e){}
+      try{ if(B.st) B.st.getAudioTracks().forEach(function(t){ try{ t.stop(); }catch(_e){} }); }catch(e){}
+      B.kaynak = null;
       try{ delete el.muted; }catch(e){}
       gercekSessiz(el, B.m);
     };
@@ -143,6 +151,7 @@
     // oynatmayı açtıysa öğe normal (sesli) oynatmaya bırakılır.
     D.serbest = function(el){ try{ if(el && el._bsz && !el._bsz.eski) eskiyeDon(el, 'arka planda oynatma'); }catch(e){} };
     D.uyandir = function(){ try{ if(ctx && ctx.state !== 'running' && !document.hidden) ctx.resume(); }catch(e){} };
+    D.surdur = function(){ try{ if(ctx && ctx.state !== 'running') ctx.resume(); }catch(e){} };   // arka planda da (gizliyken) motoru açık tutar
     try{ document.addEventListener('visibilitychange', function(){ if(!document.hidden) D.uyandir(); }); }catch(e){}
     D.graf = function(el){ var B = hazirla(el); if(!B || B.eski) return null; if(!grafKur(el)) return null; return { ctx:ctx, giris:B.giris, cikis:B.cikis }; };
     var ozPlay = P.play;
@@ -2856,6 +2865,39 @@ setTimeout(_adjustTopbarSpacing,300); // Fontlar/ikonlar geç yüklenirse yükse
 <script>
 const FB={apiKey:"AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY",authDomain:"superlig-208e3.firebaseapp.com",databaseURL:"https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app",projectId:"superlig-208e3",storageBucket:"superlig-208e3.firebasestorage.app",messagingSenderId:"879221404148",appId:"1:879221404148:web:daae84d7187311400209a1"};
 const app=firebase.initializeApp(FB);
+/* DİNLEYİCİ KURTARMA (2026-10-23-B). KÖK SEBEP (bakım ekranı açılmıyor, canlı maç izleyicisi "tek açı"da donuk kalıyor): sayfa,
+   anonim kimlik oturumu açılmadan veritabanını dinlemeye başlıyordu. Kurallar "auth != null" istediği için o ilk dinleme
+   "izin yok" (permission_denied) ile reddediliyor ve Firebase bu dinleyiciyi KALICI olarak iptal ediyor; kimlik bir saniye sonra
+   gelse de veri bir daha hiç gelmiyordu. Hata işleyicisi verilmemiş HER dinleyici izin hatasında artan aralıkla (1-15 sn, en çok
+   40 kez) yeniden kurulur; dinleyici bu arada kapatılırsa (off) bekleyen deneme iptal edilir. Hata işleyicisi olan dinleyicilere
+   dokunulmaz (kendi kurtarmalarını yapıyorlar). */
+(function(){ try{
+  var Q = window.firebase && firebase.database && firebase.database.Query && firebase.database.Query.prototype;
+  if(!Q || Q._dinleyiciKurtarma || typeof Q.on !== 'function') return; Q._dinleyiciKurtarma = true;
+  var orjOn = Q.on, orjOff = Q.off, bekleyen = [];
+  var ayni = function(a, b){ try{ return a === b || (a && a.isEqual && a.isEqual(b)); }catch(e){ return false; } };
+  Q.on = function(tur, cb, iptal, bag){
+    if(typeof cb !== 'function' || typeof iptal === 'function') return orjOn.apply(this, arguments);
+    if(iptal && typeof iptal === 'object' && bag === undefined) bag = iptal;
+    var ref = this, n = 0;
+    var hata = function(err){
+      try{
+        if(!/permission/i.test(String((err && (err.code || err.message)) || '')) || n >= 40) return;
+        n++;
+        var k = { ref:ref, tur:tur, cb:cb, t:null };
+        k.t = setTimeout(function(){ var i = bekleyen.indexOf(k); if(i < 0) return; bekleyen.splice(i, 1);
+          try{ orjOn.call(ref, tur, cb, hata, bag); }catch(e){} }, Math.min(15000, 1000 * n));
+        bekleyen.push(k);
+      }catch(e){}
+    };
+    return orjOn.call(this, tur, cb, hata, bag);
+  };
+  if(typeof orjOff === 'function') Q.off = function(tur, cb){
+    try{ for(var i = bekleyen.length - 1; i >= 0; i--){ var k = bekleyen[i];
+      if((!cb || k.cb === cb) && (!tur || k.tur === tur) && ayni(k.ref, this)){ clearTimeout(k.t); bekleyen.splice(i, 1); } } }catch(e){}
+    return orjOff.apply(this, arguments);
+  };
+}catch(e){} })();
 /* ══════════════════════════════════════════════════════════════════════════════════════════
    TEST ORTAMI - AYRI VERİTABANI KÖKÜ
    SORUN: Test kopyası ile yayındaki kopya AYNI veritabanını kullanıyordu. Şeritte de böyle
@@ -3068,7 +3110,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-23-A';
+window.APP_BUILD='2026-10-23-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -28254,6 +28296,24 @@ function ptpGomuluMedya(kap,ilkIfr){
     if(typeof i.currentTime==='number'&&i.currentTime!==D.pos){D.pos=i.currentTime;olay('timeupdate');}
     if(typeof i.volume==='number')D.vol=Math.max(0,Math.min(1,i.volume/100));
     if(typeof i.muted==='boolean')D.mut=i.muted;
+    /* YOUTUBE SES BEKÇİSİ (2026-10-23-B, kullanıcı: "YouTube linki bir video izlendiğinde bazen ses gelmiyor"). KÖK SEBEP: gömme
+       otomatik oynatma için zorunlu olarak SESSİZ (mute=1) açılıyor; sesi açan 'unMute' komutu ise oynatıcı açılırken bir kez,
+       çoğu zaman YouTube penceresi henüz hazır olmadan gönderiliyordu. Hazır olmayan pencere komutu sessizce yutuyor, video sessiz
+       kalıyordu (pencere ne kadar hızlı yüklendiyse o kadar "bazen"). Yedek pencere geçişinde tekrar eden komutlar vardı, ilk
+       pencerede yoktu. ŞİMDİ: YouTube'un kendi durum paketi "oynuyor ve sessiz" derken kullanıcı sesi açık istiyorsa ses komutu
+       yeniden gönderilir (1,2 sn arayla, pencere başına en çok 10 kez). */
+    try{
+      if(/youtube(-nocookie)?\.com$/.test(host)&&i.muted===true&&!ISTEK.mut&&(i.playerState===1||(i.playerState==null&&!D.duraklad))){
+        var _sb=kap._ptpSesBekci||(kap._ptpSesBekci={ifr:null,n:0,t:0});
+        if(_sb.ifr!==kap._ptpAktifIfr){_sb.ifr=kap._ptpAktifIfr;_sb.n=0;_sb.t=0;}
+        if(_sb.n<10&&Date.now()-_sb.t>1200){
+          _sb.n++;_sb.t=Date.now();
+          komut('setVolume',[Math.round((ISTEK.vol>0?ISTEK.vol:1)*100)]);
+          komut('unMute');
+          if(_sb.n===10)try{DiagSil('ytSesAcilmadi',new Error('unMute 10 kez reddedildi'),{anlami:'YouTube videosu sessiz kaldı; tarayıcı dokunuşsuz ses açmaya izin vermiyor olabilir.',oneri:'Kullanıcı ses düğmesine basınca açılır.'});}catch(_d){}
+        }
+      }
+    }catch(_sbe){}
     if(typeof i.playbackRate==='number')D.rate=i.playbackRate;
     if(typeof i.playerState==='number'&&i.playerState>=0){
       var durakladYeni=!(i.playerState===1||i.playerState===3);
@@ -29219,18 +29279,19 @@ function ptpUstBarParcalari(){
         oneri:'Tarayıcı Media Session desteklemiyor olabilir. Doğrudan medya kaynaklarında çalışır, gömülü platformlarda platform kararı geçerlidir.'});}catch(_d){self.__ds&&self.__ds(29087,_d)}
     }
   }
-  /* ARKA PLANDA OYNATMA (2026-10-23-A, kullanıcı: "TV izlerken uygulama arka plana alınınca ya da ekran kapanınca akış bazen
-     duruyor; kullanıcı TV ayarlarından bunu açıp kapatabiliyor"). KÖK SEBEP: "Arka planda oynat" ayarı yalnızca medya kartını
-     kuruyordu, kart da kaldırılınca ayarın hiçbir etkisi kalmamıştı. Yayın, medya kartı çıkmasın diye GERÇEKTE SESSİZ oynatılıp
-     sesi ayrıca çalınıyor; Chrome sessiz videoyu sayfa gizlenince güç tasarrufu için duraklatıyor ("paused to save power") -
-     yayın ekran kapanınca kesiliyordu (sayfanın ne kadar hızlı gizlendiğine göre "bazen"). ŞİMDİ: ayar açıkken sayfa gizlenirken
-     oynayan yayın normal sesli oynatmaya bırakılır (tarayıcı arka planda sürdürür; bu durumda bildirim panelinde medya kartı
-     görünebilir - arka planda çalmanın tarayıcıdaki karşılığı budur). Tarayıcı yine de duraklatırsa hemen yeniden başlatılır. */
+  /* ARKA PLANDA OYNATMA (2026-10-23-B, kullanıcı: "2026-09-14-M'de yayın arka planda durmuyor; yaptığın düzenlemede ses yankılı geliyor
+     ve bildirim kartı çıkıyor - kartı kaldır"). A sürümünde sayfa gizlenince yayın normal sesli oynatmaya bırakılıyordu: medya
+     kartı çıkıyor ve (geri dönüş hatası yüzünden) ses iki kez çalıyordu. Bu kaldırıldı; yayın gizliyken de BİLDİRİMSİZ yoldan
+     (sessiz öğe + ses motoru) çalmaya devam eder. 2026-09-14-M'den farkı: o sürümde öğe doğrudan sesli çalıyordu (tarayıcı onu
+     arka planda sürdürür ama kart da gösterir); kartsız oynatmada öğe gerçekte sessiz olduğu için tarayıcı onu arka planda
+     "görüntü-yalnız" sayıp DURAKLATABİLİYOR (bu "bazen duruyor"un sebebi). Ayar açıksa: gizliyken gelen her duraklatma anında
+     geri alınır, ses motoru askıya alınırsa yeniden açılır, dönüşte yayın kaldığı yerden sürdürülür. */
   (function ptpArkaPlanOynat(){
     if(window._ptpArkaPlanKuruldu)return; window._ptpArkaPlanKuruldu=true;
     var oynuyordu=false, sonGizlenme=0;
     var ac=function(){ try{ return !!pref('arkaPlan',false); }catch(e){ return false; } };
-    var devam=function(v){ try{ if(v&&v.paused&&!v.ended){ var p=v.play(); if(p&&p.catch)p.catch(function(e){ try{DiagSil('ptpArkaPlanDevam',e,{anlami:'Arka planda yayın yeniden başlatılamadı.'});}catch(_e){} }); } }catch(e){} };
+    var motor=function(){ try{ if(window.ptBildirimsizSes&&ptBildirimsizSes.surdur)ptBildirimsizSes.surdur(); }catch(e){} };
+    var devam=function(v){ try{ motor(); if(v&&v.paused&&!v.ended){ var p=v.play(); if(p&&p.catch)p.catch(function(e){ try{DiagSil('ptpArkaPlanDevam',e,{anlami:'Arka planda yayın yeniden başlatılamadı.'});}catch(_e){} }); } }catch(e){} };
     document.addEventListener('visibilitychange',function(){
       try{
         if(!S||!S.video)return;
@@ -29239,9 +29300,8 @@ function ptpUstBarParcalari(){
           sonGizlenme=Date.now();
           oynuyordu=!v.paused&&!v.ended;
           if(!oynuyordu||!ac())return;
-          if(window.ptBildirimsizSes&&ptBildirimsizSes.serbest)ptBildirimsizSes.serbest(v);
-          setTimeout(function(){ if(document.hidden&&ac())devam(v); },350);
-          setTimeout(function(){ if(document.hidden&&ac())devam(v); },1500);
+          motor();
+          [300,1200,3000].forEach(function(ms){ setTimeout(function(){ if(document.hidden&&ac()&&oynuyordu)devam(v); },ms); });
         }else if(oynuyordu&&v.paused&&!v.ended){
           devam(v);   // dönüşte de duraklamış kaldıysa sürdürülür
         }
@@ -29252,9 +29312,12 @@ function ptpUstBarParcalari(){
       try{
         if(!S||!S.video||e.target!==S.video||!document.hidden||!oynuyordu||!ac())return;
         if(Date.now()-sonGizlenme>6*3600e3)return;
-        setTimeout(function(){ if(document.hidden)devam(S.video); },250);
+        setTimeout(function(){ if(document.hidden)devam(S.video); },150);
+        setTimeout(function(){ if(document.hidden)devam(S.video); },1500);
       }catch(_e){}
     },true);
+    // Ekran kapalıyken ses motoru askıya alınırsa (bazı cihazlar) 5 sn'de bir yoklanır.
+    setInterval(function(){ try{ if(document.hidden&&oynuyordu&&ac()&&S&&S.video){ motor(); if(S.video.paused&&!S.video.ended)devam(S.video); } }catch(e){} },5000);
   })();
   function ptpMerkezMaske(){
     try{
@@ -33307,7 +33370,7 @@ function ptpUstBarParcalari(){
             // KULLANICI TALEBİ: "Kumandayı ayarlardan değil, oynatıcıya doğrudan dokununca
             // görsün." Artık 'nin ardındaki gizli bir sekme değil, üst çubukta HER ZAMAN
             // görünür, tek dokunuşla açılan bir düğme - bkz. openChannelListOverlay().
-            +'<button class="ptp-btn" id="ptpChlist" title="Kanallar" onclick="PTPlayer.openChannelList()"></button>'
+            +'<button class="ptp-btn" id="ptpChlist" title="Kanallar / Kumanda" onclick="PTPlayer.openChannelList()"></button>'
             +'<button class="ptp-btn" id="ptpPip" title="Küçük pencere"></button>'
             +'<button class="ptp-btn" id="ptpSet" title="Ayarlar"></button>'
           +'</div>'
