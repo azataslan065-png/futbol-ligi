@@ -3120,7 +3120,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-23-E';
+window.APP_BUILD='2026-10-23-F';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -29294,7 +29294,30 @@ function ptpUstBarParcalari(){
         oneri:'Tarayıcı Media Session desteklemiyor olabilir. Doğrudan medya kaynaklarında çalışır, gömülü platformlarda platform kararı geçerlidir.'});}catch(_d){self.__ds&&self.__ds(29087,_d)}
     }
   }
-    /* ARKA PLAN TEŞHİSİ (2026-10-23-E). Arka planda yayının durması ve bildirim kartı telefonda oluşuyor, buradan ölçülemiyor. Sayfa
+    /* ARKA PLAN - KARTSIZ (2026-10-23-F, kullanıcı ekran görüntüleriyle: "canlı yayın bildirim kartını kaldır"). Karttaki "Puan Tablosu •
+     azataslan065-png.github.io" yazısı uygulamanın değil, Chrome'un kendi kartıdır: sesli çalan her video için tarayıcı açar. Kartsız
+     oynatmada video gerçekte sessiz çalar, ses ses motorundan verilir (bkz. BİLDİRİMSİZ OYNATMA); Chrome bu durumda videoyu arka planda
+     duraklatabildiği için gizliyken gelen her duraklatma anında geri alınır ve ses motoru açık tutulur. "Bildirim kartını gizle"
+     kapatılırsa 09-14-M davranışı (sesli video, kart görünür) geri gelir. YouTube kartı YouTube'un kendi oynatıcısından gelir; sayfa ona
+     dokunamaz. */
+  (function ptpKartsizArkaPlan(){
+    if(window._ptpKartsizKuruldu)return; window._ptpKartsizKuruldu=true;
+    var oynuyordu=false;
+    var kartsiz=function(){ try{ return !!(S&&S.video&&S.video._bsz&&!S.video._bsz.eski); }catch(e){ return false; } };
+    var motor=function(){ try{ if(window.ptBildirimsizSes&&ptBildirimsizSes.surdur)ptBildirimsizSes.surdur(); }catch(e){} };
+    var devam=function(){ try{ motor(); var v=S&&S.video; if(v&&v.paused&&!v.ended&&!S.kullaniciDuraklatti){ var p=v.play(); if(p&&p.catch)p.catch(function(){}); } }catch(e){} };
+    document.addEventListener('visibilitychange',function(){
+      try{ if(!S||!S.video)return;
+        if(document.hidden){ oynuyordu=!S.video.paused&&!S.video.ended; if(oynuyordu&&kartsiz()){ motor(); [300,1200,3000].forEach(function(ms){ setTimeout(function(){ if(document.hidden&&oynuyordu)devam(); },ms); }); } }
+        else if(oynuyordu&&kartsiz()&&S.video.paused)devam();
+      }catch(e){}
+    },true);
+    document.addEventListener('pause',function(e){
+      try{ if(!S||e.target!==S.video||!document.hidden||!oynuyordu||!kartsiz())return; setTimeout(devam,150); setTimeout(devam,1500); }catch(_e){}
+    },true);
+    setInterval(function(){ try{ if(document.hidden&&oynuyordu&&kartsiz())devam(); }catch(e){} },5000);
+  })();
+  /* ARKA PLAN TEŞHİSİ (2026-10-23-E). Arka planda yayının durması ve bildirim kartı telefonda oluşuyor, buradan ölçülemiyor. Sayfa
      gizlenince ve oynatıcı gizliyken duraklarsa o anki durum teşhis kaydına yazılır (TV & Video Oynatıcı modülü): hangi medya öğeleri
      çalıyor, sessiz mi, ses hangi yoldan çıkıyor, medya oturumu dolu mu, ayar açık mı. */
   (function ptpArkaPlanTeshis(){
@@ -32924,6 +32947,7 @@ function ptpUstBarParcalari(){
       // ayarlarında değil. Varsayılan KAPALI: arka planda çalmak veri ve pil harcar,
       // kullanıcı istemeden başlamamalı.
       h+=opt(' Arka planda oynat',pref('arkaPlan',false),'toggle:arkaplan');
+      h+=opt(' Bildirim kartını gizle',pref('kartsiz',true),'toggle:kartsiz');
       // NOT: Burada "⛶ Kanal değişince tam ekranda kal" ayarı vardı. Kanal değişiminde tam
       // ekranın korunması sorunu çözülemedi (bkz. tamEkranAlgilanmadi teşhis kaydı: bu
       // ortamda tam ekran güvenilir biçimde algılanamıyor) ve ayar da işe yaramadı.
@@ -33088,6 +33112,15 @@ function ptpUstBarParcalari(){
         setPref('arkaPlan',_yeni);
         try{ptpMedyaOturumu(_yeni);}catch(e){self.__ds&&self.__ds(32860,e)}
         showToastMsg(_yeni?' Arka planda oynat: açık':' Arka planda oynat: kapalı');
+        panelYenile('main');return;
+      }
+      /* (2026-10-23-F) Bildirim kartını gizle: açıkken doğrudan yayınlar (m3u8/mp4) bildirimsiz yoldan çalar (bkz. ARKA PLAN - KARTSIZ). */
+      if(a==='toggle:kartsiz'){
+        var _k=!pref('kartsiz',true); setPref('kartsiz',_k);
+        try{ if(S&&S.video&&S.video.tagName==='VIDEO'){
+          if(_k){ S.video.removeAttribute('data-bildirimli'); if(window.ptBildirimsizSes&&ptBildirimsizSes.graf)ptBildirimsizSes.graf(S.video); }
+          else { S.video.setAttribute('data-bildirimli','1'); if(window.ptBildirimsizSes&&ptBildirimsizSes.serbest)ptBildirimsizSes.serbest(S.video); } } }catch(e){}
+        showToastMsg(_k?' Bildirim kartı gizli':' Bildirim kartı gösterilir');
         panelYenile('main');return;
       }
       if(a==='toggle:remoteLock'){setPref('remoteAutoLock',!pref('remoteAutoLock',true));panelYenile('main');return;}
@@ -33308,7 +33341,7 @@ function ptpUstBarParcalari(){
         // (16:9 oran, yükseklik) değişmiyor; sayfa düzeni hiç oynamıyor.
         +'<div class="ptp-rot" id="ptpRot">'
         +'<video class="ptp-video" id="ptpVideo" playsinline webkit-playsinline preload="metadata" '
-          +'crossorigin="anonymous" data-fit="contain" data-bildirimli="1" '+(airplayVar?'x-webkit-airplay="allow" ':'')+'></video>'
+          +'crossorigin="anonymous" data-fit="contain" '+(pref('kartsiz',true)?'':'data-bildirimli="1" ')+(airplayVar?'x-webkit-airplay="allow" ':'')+'></video>'
         // KULLANICI TALEBİ: Geçiş donmuş karesi - bkz. .ptp-freeze CSS notu. Video ile AYNI
         // sınıfı (.ptp-video) paylaşır ki boyutlandırma/object-fit kuralları otomatik uysun,
         // ayrıca kendi konumlandırma/opaklık katmanı için .ptp-freeze eklenir. Varsayılan
