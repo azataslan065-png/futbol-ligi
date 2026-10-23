@@ -137,6 +137,13 @@
       }catch(e){ return null; }
     };
     D.hazirla = hazirla;
+    // (2026-10-23-A) Ses motoru uyandırma: arka plandan / kilit ekranından dönünce askıda kalan motor sessizlik demekti.
+    // (2026-10-23-A) Arka planda oynatma: tarayıcı (Chrome) SESSİZ medyayı sayfa arka plana geçince "güç tasarrufu" için
+    // duraklatıyor; bildirimsiz oynatmada öğe gerçekte sessiz olduğundan yayın arka planda kesiliyordu. Kullanıcı arka planda
+    // oynatmayı açtıysa öğe normal (sesli) oynatmaya bırakılır.
+    D.serbest = function(el){ try{ if(el && el._bsz && !el._bsz.eski) eskiyeDon(el, 'arka planda oynatma'); }catch(e){} };
+    D.uyandir = function(){ try{ if(ctx && ctx.state !== 'running' && !document.hidden) ctx.resume(); }catch(e){} };
+    try{ document.addEventListener('visibilitychange', function(){ if(!document.hidden) D.uyandir(); }); }catch(e){}
     D.graf = function(el){ var B = hazirla(el); if(!B || B.eski) return null; if(!grafKur(el)) return null; return { ctx:ctx, giris:B.giris, cikis:B.cikis }; };
     var ozPlay = P.play;
     P.play = function(){ try{ hazirla(this); var b = this._bsz; if(b && !b.eski && !b.m){ grafKur(this); try{ ctx && ctx.resume(); }catch(e){} } }catch(e){} return ozPlay.apply(this, arguments); };
@@ -632,6 +639,7 @@
   body.hud-gizli #board, body.hud-gizli #tip, body.hud-gizli #radar, body.hud-gizli #kondKutu, body.hud-gizli #msg,
   body.hud-gizli #power, body.hud-gizli #power2, body.hud-gizli #tekrarEt, body.hud-gizli #touch, body.hud-gizli #ayarBtn, body.hud-gizli #kamBtn, body.izle-modu #kamBtn{display:none!important}
   /* İzleyici (canlı yayın) sayfasında oyuncuya özgü göstergeler hiç görünmez (ayarUygula açsa bile). */
+  body.izle-modu.iz-skorsuz #board, body.izle-modu.iz-skorsuz #golBant, body.izle-modu.iz-skorsuz #radar{display:none!important}
   body.izle-modu #tip, body.izle-modu #kondKutu, body.izle-modu #power, body.izle-modu #power2, body.izle-modu #touch{display:none!important}
   #macSonuEkran .ms-izle{max-width:380px;max-height:48%;padding:10px 14px;background:rgba(9,16,12,.66)}
   #macSonuEkran .ms-izle .ms-ist{gap:4px;margin-top:4px}
@@ -1008,7 +1016,7 @@
   .pz-m{flex:1;min-width:0;font-size:12px} .pz-m small{display:block;opacity:.6;font-size:10.5px} .pz-t{font-weight:900;font-size:12.5px}
   .lg-gorev{margin-bottom:6px} .gv{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:12px;background:rgba(255,255,255,.04);margin:6px 0;border:1px solid transparent}
   .gv.tamam{border-color:rgba(242,194,48,.55);background:rgba(242,194,48,.08)} .gv.alindi{opacity:.6}
-  .gv-ik{font-size:20px} .gv-m{flex:1;min-width:0} .gv-m b{font-size:12.5px} .gv-m small{font-size:10.5px;opacity:.6}
+  .gv-ik{font-size:20px} .gv-m{flex:1;min-width:0} .gv-m b{font-size:12.5px} .gv-m small{font-size:10.5px;opacity:.6} .gv-m small.gv-k{display:block;opacity:.55;margin-top:1px}
   .gv-bar{height:5px;border-radius:3px;background:rgba(255,255,255,.1);margin:4px 0 2px;overflow:hidden} .gv-bar i{display:block;height:100%;background:linear-gradient(90deg,#2fae7a,#7ee08a)}
   .gv-od{font-size:11.5px;font-weight:800;opacity:.75;white-space:nowrap} .gv-al{border:0;border-radius:9px;padding:7px 10px;font:inherit;font-size:11.5px;font-weight:900;background:#f2c230;color:#1b2340;cursor:pointer;white-space:nowrap}
   .tr-suz{display:flex;flex-direction:column;gap:6px;margin:0 0 10px}
@@ -12141,6 +12149,12 @@ function _sahaBakimDinle(){
       }, function(err){
         try{ if(window.DiagSaha) DiagSaha('kureselBakimOkuma', err, {
           anlami:'Küresel bakım durumu okunamadı; yalnızca sezon düğümüne bakılıyor.'}); }catch(e){self.__ds&&self.__ds(12021,e)}
+        /* (2026-10-23-A, kullanıcı: "admin bakıma alıyor fakat bakım ekranı açılmıyor"). KÖK SEBEP: dinleyici açılışta,
+           anonim oturum açılmadan kuruluyordu; kural "auth != null" istediği için okuma reddedilip dinleyici KALICI
+           olarak iptal ediliyor, bayrak da 'dinleniyor' kaldığı için bir daha kurulmuyordu. Artık yeniden denenir. */
+        window._sahaKureselBakimDinleniyor = false;
+        window._sahaBakimDeneme = (window._sahaBakimDeneme || 0) + 1;
+        if(window._sahaBakimDeneme <= 40) setTimeout(_sahaBakimDinle, Math.min(15000, 1200 * window._sahaBakimDeneme));
       });
     }
     if(!sahaLigId) return;
@@ -12378,14 +12392,10 @@ function _sahaMuzikSec(){
     A = aday();
     if(!A.length) A = L.map(function(x, i){ return i; });
   }
-  var sec;
-  if(SAHA_SES.karisik) sec = A[Math.floor(Math.random() * A.length)];
-  else {
-    var sonI = -1; for(var k = 0; k < n; k++) if(L[k].url === t.son) sonI = k;
-    sec = A[0];
-    for(var j = 0; j < A.length; j++) if(A[j] > sonI){ sec = A[j]; break; }   // son çalınandan sonraki ilk çalınmamış
-  }
-  return sec;
+  /* HER ZAMAN KARIŞIK (2026-10-23-A, kullanıcı: "müzikler belirli bir sıraya göre çalıyor; her seferinde rastgele müzik
+     çalacak şekilde düzenlenmeli"). Yöneticinin "sırayla" seçeneği kaldırıldı: sıradaki parça daima bu turda henüz
+     çalınmamışlar arasından RASTGELE seçilir; her girişte de rastgele bir parçayla başlanır (son çalınan hariç). */
+  return A[Math.floor(Math.random() * A.length)];
 }
 function _sahaMuzikCalindi(url){
   var t = SAHA_SES.tur || (SAHA_SES.tur = _sahaMuzikTurOku());
@@ -12422,6 +12432,36 @@ function sahaMuzikDenetle(){
     if(ctx.state === 'suspended'){ try{ ctx.resume(); }catch(e){self.__ds&&self.__ds(12300,e)} }
     SAHA_SES.gain.gain.value = _sahaMuzikDuzey();
     if(_el){ try{ _el.volume = Math.max(0, Math.min(1, _sahaMuzikDuzey())); if(_el.paused && !_el.ended && _el.currentSrc) _el.play().catch(function(){}); }catch(e){} }
+    /* MÜZİK BEKÇİSİ (2026-10-23-A, kullanıcı: "bazı durumlarda arka plan müziği çalmıyor"). KÖK SEBEPLER: (1) akışla çalan
+       parça ağ takıldığında ne hata ne bitiş olayı üretiyor, öğe sonsuza dek "yükleniyor"da kalıyordu - SAHA_SES.src dolu
+       olduğu için yeni parça da hiç başlatılmıyordu; (2) çözme yolunda fetch/çözme takılırsa 'yukleniyor' bayrağı hiç
+       temizlenmiyor, müzik o oturumda bir daha başlamıyordu; (3) arka plandan dönünce akışın bağlı olduğu ses motoru
+       askıda kalabiliyordu. ŞİMDİ: sayfa açıkken parça 15 sn ilerlemezse atlanır (art arda 3 kez olursa akış yolu bırakılıp
+       çözme yoluna geçilir); 30 sn'yi aşan yükleme sıfırlanır; ses motoru her denetimde uyandırılır. */
+    try{
+      var _kul = !navigator.userActivation || navigator.userActivation.hasBeenActive;
+      if(_el && _kul && !_el.ended){
+        var W = SAHA_SES.bekci || (SAHA_SES.bekci = {});
+        var ct = _el.currentTime || 0, simdiB = Date.now();
+        if(W.son && simdiB - W.son > 3000) W.z = simdiB;          // denetim aralığı kesildiyse (arka plan, maç) süre yeniden başlar
+        W.son = simdiB;
+        if(W.el !== _el){ W.el = _el; W.t = ct; W.z = simdiB; }
+        else if(Math.abs(ct - W.t) > 0.05){ W.t = ct; W.z = simdiB; W.ard = 0; }
+        else if(simdiB - W.z > 15000){
+          var _u = String(_el.currentSrc || _el.src || '');
+          DiagSaha('sahaMuzikTakildi', new Error('Parça 15 sn ilerlemedi'), { tur:'medya', url:_u.slice(0,120), readyState:_el.readyState, networkState:_el.networkState, paused:_el.paused,
+            anlami:'Arka plan müziği takıldı; sıradaki parçaya geçildi.' });
+          W.ard = (W.ard || 0) + 1; W.el = null;
+          if(W.ard >= 3) SAHA_SES.akisYok = true;
+          if(_u) SAHA_SES.hata[_u] = simdiB + 60000;
+          _sahaMuzikDur(); if(SAHA_SES.liste.length > 1) _sahaMuzikSiradaki(true);
+          return;
+        }
+      }
+      if(window.ptBildirimsizSes && window.ptBildirimsizSes.uyandir) window.ptBildirimsizSes.uyandir();
+      if(SAHA_SES.yukleniyor){ if(!SAHA_SES.yukZ) SAHA_SES.yukZ = Date.now(); else if(Date.now() - SAHA_SES.yukZ > 30000){ SAHA_SES.hata[SAHA_SES.yukleniyor] = Date.now() + 60000; SAHA_SES.yukleniyor = ''; SAHA_SES.yukZ = 0; } }
+      else SAHA_SES.yukZ = 0;
+    }catch(e){ _sessiz(e, 'sahaMuzikBekci', 'saha_ses'); }
     if(SAHA_SES.src || SAHA_SES.yukleniyor) return;
     if(SAHA_SES.basaSar || SAHA_SES.ilk !== true){
       SAHA_SES.basaSar = false; SAHA_SES.ilk = true;
@@ -12478,7 +12518,7 @@ function sahaSesDinle(){
       SAHA_SES.tus = /^(https?:|data:audio\/)/.test(String(v.tusSesi || '')) ? String(v.tusSesi) : '';
       SAHA_SES.tusSv = v.tusSeviye != null ? Number(v.tusSeviye) : 60;
       SAHA_SES.muzSv = v.muzikSeviye != null ? Number(v.muzikSeviye) : 45;
-      SAHA_SES.karisik = v.karisik !== false;     // (2026-10-06-L) varsayılan: rastgele; yönetici kapatırsa sırayla
+      SAHA_SES.karisik = true;     // (2026-10-23-A) her zaman karışık (bkz. HER ZAMAN KARIŞIK)
       var m = v.muzikler || {};
       SAHA_SES.liste = Object.keys(m).map(function(k){ return m[k]; }).filter(function(x){ return x && /^(https?:|data:audio\/)/.test(String(x.url || '')); })
         .sort(function(a, b){ return (a.sira || 0) - (b.sira || 0); });
@@ -13628,50 +13668,103 @@ function _sahaOdulYatir(anahtar, tur, tutar, etiket){
    görevler bugünün (Türkiye saati, cihaz saati) maçlarına, haftalık görevler pazartesi başlayan haftaya bakar. Tamamlanan görevin
    ödülü "Ödülü al" ile alınır: kullanicilar/{uid}/gorev/{dönem}_{id} transaction (iki kez alınamaz), SL bakiyeye eklenir ve
    kazancKayit'a yazılır. Tutarları yönetici belirler (globalAdminSettings/sahaGorevOdul/{id}); girilmemişse varsayılan. */
-var SAHA_GOREVLER = [
-  { id:'g_oyna2', d:'gun', ikon:'', ad:'2 maç oyna', hedef:2, odul:60, say:function(L){ return L.length; } },
-  { id:'g_kazan1', d:'gun', ikon:'', ad:'1 maç kazan', hedef:1, odul:80, say:function(L){ return L.filter(function(x){ return x.ben > x.rak; }).length; } },
-  { id:'g_gol3', d:'gun', ikon:'', ad:'3 gol at', hedef:3, odul:70, say:function(L){ return L.reduce(function(t, x){ return t + (Number(x.ben) || 0); }, 0); } },
-  { id:'h_oyna6', d:'hafta', ikon:'', ad:'6 maç oyna', hedef:6, odul:250, say:function(L){ return L.length; } },
-  { id:'h_lig2', d:'hafta', ikon:'', ad:'2 lig maçı kazan', hedef:2, odul:300, say:function(L){ return L.filter(function(x){ return x.tur === 'lig' && x.ben > x.rak; }).length; } },
-  { id:'h_temiz2', d:'hafta', ikon:'', ad:'2 maçta gol yeme', hedef:2, odul:250, say:function(L){ return L.filter(function(x){ return x.rak === 0; }).length; } }
+/* GÖREVLER - YÖNETİCİ TANIMLI (2026-10-23-A, kullanıcı: "görevlerde kullanıcıdan örnek olarak 50 gol isteniyor fakat kullanıcı
+   kaç gol attığını bilmiyor; görevleri admin belirleyip koşulları sağlayacak ve aynı ekranda ne kadar Saha Lirası kazanılacağını
+   da belirleyecek, tasarımı yeniden yap"). ESKİ: günlük/haftalık görevler ve başarımlar kodda sabitti; başarımlar ilerleme
+   göstermeden ("Toplam 50 gol at") listeleniyor, yönetici yalnızca tutarı değiştirebiliyordu.
+   YENİ: Görevlerin tamamı yöneticinin tanımı (globalAdminSettings/sahaGorevler/{id} = {ad, tur:'gun'|'hafta'|'kalici', olcut,
+   hedef, odul, aktif, sira}). Her görevin yanında ilerleme görünür ("37 / 50 gol") ve tamamlanınca "Ödülü al". Yönetici hiç
+   görev tanımlamadıysa eski görev/başarım listesi (yöneticinin eski tutar ayarlarıyla) kullanılır.
+   İlerleme, oyuncunun kayıtlı maç geçmişinden (macGecmisi) hesaplanır: günlük = bugünün maçları, haftalık = pazartesi
+   başlayan hafta, kalıcı = bütün maçlar. Ödül kaydı eskisiyle aynı yerde (gün/hafta: gorev/{dönem}_{id}, kalıcı:
+   basarim/{id}) - daha önce kazanılmış başarımlar "alındı" görünür, ikinci kez verilmez. */
+var GOREV_OLCUT = {
+  mac:         { ad:'Maç oyna',                   birim:'maç',   ik:'',     f:function(L){ return L.length; } },
+  galibiyet:   { ad:'Maç kazan',                  birim:'galibiyet', ik:'', f:function(L){ return L.filter(function(x){ return x.ben > x.rak; }).length; } },
+  ligMac:      { ad:'Lig maçı oyna',              birim:'maç',   ik:'', f:function(L){ return L.filter(function(x){ return x.tur === 'lig'; }).length; } },
+  ligGalibiyet:{ ad:'Lig maçı kazan',             birim:'galibiyet', ik:'', f:function(L){ return L.filter(function(x){ return x.tur === 'lig' && x.ben > x.rak; }).length; } },
+  arkadasMac:  { ad:'Arkadaş maçı oyna',          birim:'maç',   ik:'', f:function(L){ return L.filter(function(x){ return x.tur === 'arkadas'; }).length; } },
+  aiGalibiyet: { ad:'Yapay zekâya karşı kazan',   birim:'galibiyet', ik:'', f:function(L){ return L.filter(function(x){ return x.tur === 'ai' && x.ben > x.rak; }).length; } },
+  gol:         { ad:'Gol at',                     birim:'gol',   ik:'',     f:function(L){ return L.reduce(function(t, x){ return t + (Number(x.ben) || 0); }, 0); } },
+  temiz:       { ad:'Gol yemeden maç bitir',      birim:'maç',   ik:'',    f:function(L){ return L.filter(function(x){ return x.rak === 0; }).length; } },
+  seri:        { ad:'Art arda kazan',             birim:'maç üst üste', ik:'', f:function(L){ var s = 0, m = 0; L.forEach(function(x){ s = x.ben > x.rak ? s + 1 : 0; m = Math.max(m, s); }); return m; } },
+  yenilmez:    { ad:'Art arda kaybetme',          birim:'maç üst üste', ik:'', f:function(L){ var s = 0, m = 0; L.forEach(function(x){ s = x.ben >= x.rak ? s + 1 : 0; m = Math.max(m, s); }); return m; } },
+  tekMacGol:   { ad:'Tek maçta gol at',           birim:'gol (en iyi maç)', ik:'', f:function(L){ return L.reduce(function(m, x){ return Math.max(m, Number(x.ben) || 0); }, 0); } },
+  fark:        { ad:'Farklı kazan (gol farkı)',   birim:'fark (en iyi maç)', ik:'', f:function(L){ return L.reduce(function(m, x){ return Math.max(m, (Number(x.ben) || 0) - (Number(x.rak) || 0)); }, 0); } },
+  hatTrick:    { ad:'Hat-trick yap (bir oyuncu 3 gol)', birim:'hat-trick', ik:'', f:function(L){ return L.filter(function(x){ var c = {}; return (x.golcu || []).some(function(a){ c[a] = (c[a] || 0) + 1; return c[a] >= 3; }); }).length; } }
+};
+window.GOREV_OLCUT = GOREV_OLCUT;
+var GOREV_VARSAYILAN = [
+  ['g_oyna2','gun','2 maç oyna','mac',2,60], ['g_kazan1','gun','1 maç kazan','galibiyet',1,80], ['g_gol3','gun','3 gol at','gol',3,70],
+  ['h_oyna6','hafta','6 maç oyna','mac',6,250], ['h_lig2','hafta','2 lig maçı kazan','ligGalibiyet',2,300], ['h_temiz2','hafta','2 maçta gol yeme','temiz',2,250],
+  ['ilkGalibiyet','kalici','İlk galibiyet','galibiyet',1,100], ['ilkLig','kalici','Lig zaferi','ligGalibiyet',1,200], ['kaleSaglam','kalici','Kale sağlam','temiz',1,100],
+  ['hatTrick','kalici','Hat-trick','hatTrick',1,150], ['farkAt','kalici','Farklı galibiyet','fark',4,150], ['golYagmuru','kalici','Gol yağmuru','tekMacGol',5,150],
+  ['seri3','kalici','Üst üste 3','seri',3,200], ['yenilmez5','kalici','Yenilmez','yenilmez',5,250], ['galibiyet10','kalici','10 galibiyet','galibiyet',10,300],
+  ['mac25','kalici','Tecrübeli','mac',25,250], ['gol50','kalici','50 gol','gol',50,300]
 ];
-window._sahaGorevOdul = {};
+window.GOREV_VARSAYILAN = GOREV_VARSAYILAN;
+window._sahaGorevOdul = {}; window._sahaGorevTanim = null;
 (function gorevAyarDinle(){
   try{
     if(typeof fbHazir === 'undefined' || !fbHazir || !fbDb){ setTimeout(gorevAyarDinle, 900); return; }
     fbDb.ref('globalAdminSettings/sahaGorevOdul').on('value', function(sn){ window._sahaGorevOdul = sn.val() || {}; });
+    fbDb.ref('globalAdminSettings/sahaGorevler').on('value', function(sn){ window._sahaGorevTanim = sn.val() || null; try{ if(typeof sayLigCiz === 'function') sayLigCiz(); }catch(e){} },
+      function(){ setTimeout(gorevAyarDinle, 3000); });
   }catch(e){ setTimeout(gorevAyarDinle, 1500); }
 })();
-function gorevOdulu(g){ var v = (window._sahaGorevOdul || {})[g.id]; return (v != null && isFinite(Number(v)) && Number(v) >= 0) ? Math.floor(Number(v)) : g.odul; }
+function _gorevSayi(v, d){ v = Number(v); return (isFinite(v) && v >= 0) ? Math.floor(v) : d; }
+function gorevListesi(){
+  var T = window._sahaGorevTanim, L = [];
+  if(T && typeof T === 'object' && Object.keys(T).length){
+    Object.keys(T).forEach(function(id){
+      var g = T[id]; if(!g || g.aktif === false || !GOREV_OLCUT[g.olcut]) return;
+      var tur = (g.tur === 'hafta' || g.tur === 'kalici') ? g.tur : 'gun';
+      L.push({ id:id, d:tur, ad:String(g.ad || GOREV_OLCUT[g.olcut].ad), olcut:g.olcut, hedef:Math.max(1, _gorevSayi(g.hedef, 1)), odul:_gorevSayi(g.odul, 0), sira:Number(g.sira) || 0 });
+    });
+    return L.sort(function(a, b){ return a.sira - b.sira; });
+  }
+  var eskiGv = window._sahaGorevOdul || {}, eskiBs = window._sahaBasarimOdul || {};
+  return GOREV_VARSAYILAN.map(function(v, i){
+    var o = (v[1] === 'kalici' ? eskiBs : eskiGv)[v[0]];
+    return { id:v[0], d:v[1], ad:v[2], olcut:v[3], hedef:v[4], odul:(o != null ? _gorevSayi(o, v[5]) : v[5]), sira:i };
+  });
+}
 function _gorevDonem(d){
   var n = new Date();
+  if(d === 'kalici') return { anahtar:'', bas:0, son:Infinity };
   if(d === 'gun'){ var b = new Date(n.getFullYear(), n.getMonth(), n.getDate()); return { anahtar:_bugunTR(0), bas:b.getTime(), son:b.getTime() + 864e5 }; }
   var gun = (n.getDay() + 6) % 7, p = new Date(n.getFullYear(), n.getMonth(), n.getDate() - gun);
   return { anahtar:'h' + p.getFullYear() + ('0' + (p.getMonth() + 1)).slice(-2) + ('0' + p.getDate()).slice(-2), bas:p.getTime(), son:p.getTime() + 7 * 864e5 };
 }
 function gorevDurumlari(){
-  var T = sahaGecmisListe(), alinan = (benimKayit && benimKayit.gorev) || {};
-  return SAHA_GOREVLER.map(function(g){
-    var D = _gorevDonem(g.d), L = T.filter(function(x){ return x.ts >= D.bas && x.ts < D.son; });
-    var n = Math.min(g.hedef, g.say(L)), an = D.anahtar + '_' + g.id;
-    return { g:g, n:n, tamam:n >= g.hedef, alindi:!!alinan[an], anahtar:an, D:D };
+  var T = sahaGecmisListe(), alinan = (benimKayit && benimKayit.gorev) || {}, bas = (benimKayit && benimKayit.basarim) || {};
+  return gorevListesi().map(function(g){
+    var D = _gorevDonem(g.d), L = g.d === 'kalici' ? T : T.filter(function(x){ return x.ts >= D.bas && x.ts < D.son; });
+    var ham = 0; try{ ham = GOREV_OLCUT[g.olcut].f(L) || 0; }catch(e){}
+    var an = g.d === 'kalici' ? g.id : (D.anahtar + '_' + g.id);
+    var kayit = g.d === 'kalici' ? bas[g.id] : alinan[an];
+    return { g:g, ham:ham, n:Math.min(g.hedef, ham), tamam:ham >= g.hedef, alindi:!!kayit, kayit:kayit, anahtar:an, D:D };
   });
 }
 function _gorevHtml(){
   var G = gorevDurumlari();
-  var kalan = function(D){ var ms = D.son - Date.now(), sa = Math.floor(ms / 36e5); return sa >= 24 ? Math.floor(sa / 24) + ' gün ' + (sa % 24) + ' sa' : sa + ' sa ' + Math.floor(ms % 36e5 / 6e4) + ' dk'; };
-  var blok = function(d, bas){
-    var l = G.filter(function(x){ return x.g.d === d; });
-    return '<div class="lg-baslik"' + (d === 'gun' ? ' style="margin-top:0"' : '') + '>' + bas + ' <small style="opacity:.6;font-weight:600">· ' + kalan(l[0].D) + ' kaldı</small></div>'
-      + l.map(function(x){
-        var y = Math.round(x.n / x.g.hedef * 100), od = gorevOdulu(x.g);
-        return '<div class="gv' + (x.alindi ? ' alindi' : (x.tamam ? ' tamam' : '')) + '"><span class="gv-ik">' + x.g.ikon + '</span><div class="gv-m"><b>' + esc(x.g.ad) + '</b>'
-          + '<div class="gv-bar"><i style="width:' + y + '%"></i></div><small>' + x.n + '/' + x.g.hedef + '</small></div>'
-          + (x.alindi ? '<span class="gv-od">✓ ' + od + ' SL</span>' : (x.tamam ? '<button type="button" class="gv-al" onclick="gorevOdulAl(\'' + x.g.id + '\')">+' + od + ' SL al</button>' : '<span class="gv-od">+' + od + ' SL</span>')) + '</div>';
-      }).join('');
+  if(!G.length) return '<div class="lg-gorev"><div class="sh-bos">Şu an tanımlı görev yok.</div></div>';
+  var kalan = function(D){ if(!isFinite(D.son)) return ''; var ms = D.son - Date.now(), sa = Math.floor(ms / 36e5); return ' <small style="opacity:.6;font-weight:600">· ' + (sa >= 24 ? Math.floor(sa / 24) + ' gün ' + (sa % 24) + ' sa' : sa + ' sa ' + Math.floor(ms % 36e5 / 6e4) + ' dk') + ' kaldı</small>'; };
+  var satir = function(x){
+    var O = GOREV_OLCUT[x.g.olcut], y = Math.round(x.n / x.g.hedef * 100), od = x.kayit && x.kayit.odul != null ? x.kayit.odul : x.g.odul;
+    var kosul = O.ad + ' · hedef ' + x.g.hedef + ' ' + O.birim;
+    return '<div class="gv' + (x.alindi ? ' alindi' : (x.tamam ? ' tamam' : '')) + '"><span class="gv-ik">' + O.ik + '</span><div class="gv-m"><b>' + esc(x.g.ad) + '</b>'
+      + (x.g.ad !== O.ad ? '<small class="gv-k">' + esc(kosul) + '</small>' : '')
+      + '<div class="gv-bar"><i style="width:' + y + '%"></i></div><small>' + x.n + ' / ' + x.g.hedef + ' ' + esc(O.birim) + '</small></div>'
+      + (x.alindi ? '<span class="gv-od">✓ ' + od + ' SL</span>' : (x.tamam ? '<button type="button" class="gv-al" onclick="gorevOdulAl(\'' + x.g.id + '\')">+' + od + ' SL al</button>' : '<span class="gv-od">+' + od + ' SL</span>')) + '</div>';
   };
-  return '<div class="lg-gorev">' + blok('gun', ' Günlük görevler') + blok('hafta', ' Haftalık görevler') + '</div>';
+  var blok = function(d, bas){
+    var l = G.filter(function(x){ return x.g.d === d; }); if(!l.length) return '';
+    var ek = d === 'kalici' ? ' <b>' + l.filter(function(x){ return x.alindi; }).length + '/' + l.length + '</b>' : kalan(l[0].D);
+    return '<div class="lg-baslik">' + bas + ek + '</div>' + l.map(satir).join('');
+  };
+  return '<div class="lg-gorev">' + blok('gun', ' Günlük görevler') + blok('hafta', ' Haftalık görevler') + blok('kalici', ' Başarımlar') + '</div>'
+    + '<div class="lg-not">İlerleme, kayıtlı maç geçmişinden hesaplanır (lig, arkadaş ve yapay zekâ maçları).</div>';
 }
 function gorevBildir(){
   var gor = {}; try{ gor = JSON.parse(localStorage.getItem('saha-gorev-bildir') || '{}') || {}; }catch(e){}
@@ -13683,39 +13776,20 @@ function gorevOdulAl(id){
     if(!fbHazir || !benimUid) return;
     var x = gorevDurumlari().filter(function(y){ return y.g.id === id; })[0];
     if(!x || !x.tamam || x.alindi) return;
-    var od = gorevOdulu(x.g);
-    fbDb.ref('kullanicilar/' + benimUid + '/gorev/' + x.anahtar).transaction(function(cur){ return cur ? undefined : { ts:Date.now(), odul:od }; })
+    var od = x.g.odul, kalici = x.g.d === 'kalici';
+    var yol = 'kullanicilar/' + benimUid + (kalici ? '/basarim/' + x.g.id : '/gorev/' + x.anahtar);
+    fbDb.ref(yol).transaction(function(cur){ return cur ? undefined : { ts:Date.now(), odul:od }; })
       .then(function(r){
         if(!r || !r.committed){ sahaBildir('Bu görevin ödülü zaten alınmış'); return; }
-        benimKayit.gorev = Object.assign({}, benimKayit.gorev || {}); benimKayit.gorev[x.anahtar] = { ts:Date.now(), odul:od };
-        return _sahaOdulYatir('gorev_' + x.anahtar, 'gorev', od, x.g.ad).then(function(){ sahaBildir(x.g.ikon + ' Görev tamam: ' + x.g.ad + ' · +' + od + ' SL'); sayLigCiz(); });
+        var hed = kalici ? 'basarim' : 'gorev';
+        benimKayit[hed] = Object.assign({}, benimKayit[hed] || {}); benimKayit[hed][kalici ? x.g.id : x.anahtar] = { ts:Date.now(), odul:od };
+        return _sahaOdulYatir((kalici ? 'basarim_' : 'gorev_') + x.anahtar, kalici ? 'basarim' : 'gorev', od, x.g.ad)
+          .then(function(){ sahaBildir(GOREV_OLCUT[x.g.olcut].ik + ' ' + x.g.ad + ' · +' + od + ' SL'); sayLigCiz(); });
       }).catch(function(e){ DiagSaha('gorevOdul', e, { anlami:'Görev ödülü yazılamadı.' }); sahaBildir('Ödül alınamadı'); });
   }catch(e){ _sessiz(e, 'gorevOdulAl', 'saha_ag'); }
 }
-var _basarimKontrolde = false;
-function sahaBasarimKontrol(){
-  try{
-    if(_basarimKontrolde || !fbHazir || !benimUid || !kayitliMi()) return;
-    var L = sahaGecmisListe(), sahip = (benimKayit && benimKayit.basarim) || {};
-    var yeni = SAHA_BASARIMLAR.filter(function(b){ return !sahip[b.id] && b.k(L); });
-    if(!yeni.length) return;
-    _basarimKontrolde = true;
-    var sira = Promise.resolve();
-    yeni.forEach(function(b, i){
-      sira = sira.then(function(){
-        var odul = basarimOdulu(b);
-        return fbDb.ref('kullanicilar/' + benimUid + '/basarim/' + b.id).transaction(function(cur){ return cur ? undefined : { ts:Date.now(), odul:odul }; })
-          .then(function(r){
-            if(!r || !r.committed) return;
-            return _sahaOdulYatir('basarim_' + b.id, 'basarim', odul, b.ad).then(function(){
-              setTimeout(function(){ sahaBildir(b.ikon + ' Başarım: ' + b.ad + (odul ? ' · +' + odul + ' SL' : ''), 4000); }, i * 4200);
-            });
-          });
-      });
-    });
-    sira.catch(function(err){ DiagSaha('basarim', err, { anlami:'Başarım ödülü yazılamadı.' }); }).then(function(){ _basarimKontrolde = false; });
-  }catch(e){ _basarimKontrolde = false; _sessiz(e, 'sahaBasarimKontrol', 'saha_ag'); }
-}
+// Başarımlar artık görevlerle aynı yoldan "Ödülü al" ile alınır; kendiliğinden ödül verilmez - yalnızca bildirim.
+function sahaBasarimKontrol(){ try{ gorevBildir(); }catch(e){ _sessiz(e, 'sahaBasarimKontrol', 'saha_ag'); } }
 function _bugunTR(gunFark){ var d = new Date(Date.now() + (gunFark || 0) * 864e5); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
 var _gunlukDenendi = '';
 function sahaGunlukOdulKontrol(){
@@ -13739,11 +13813,32 @@ function sahaGunlukOdulKontrol(){
     }).catch(function(err){ _gunlukDenendi = ''; DiagSaha('gunlukOdul', err, { anlami:'Günlük ödül yatırılamadı.' }); });
   }catch(e){ _sessiz(e, 'sahaGunlukOdulKontrol', 'saha_ag'); }
 }
+/* SEZON ADI (2026-10-23-A, kullanıcı: "sezon ödüllerim kısmında 'mtdzcqcim400' şeklinde ne olduğu belirsiz bir yazı var").
+   KÖK SEBEP: yönetici paneli ödül kaydına sezonun adı yerine (ad alanı boş kaldığında) lig KİMLİĞİNİ yazıyordu. Eski kayıtlar
+   için ad, sezon listesinden (leaguesMeta) bulunur; bulunamazsa kimlik yerine "Sezon" yazar. */
+window._sahaLigAdlari = window._sahaLigAdlari || null;
+function _sahaLigAdlariYukle(){
+  if(window._sahaLigAdlari || window._sahaLigAdYukleniyor || !fbHazir || !fbDb) return;
+  window._sahaLigAdYukleniyor = true;
+  fbDb.ref('leaguesMeta').once('value').then(function(sn){
+    var m = sn.val() || {}, a = {};
+    Object.keys(m).forEach(function(id){ var x = m[id] || {}; if(x.name || x.seasonName){ a[id] = x.name || x.seasonName; a[id.replace(/[.#$\[\]\/]/g, '_')] = a[id]; } });
+    window._sahaLigAdlari = a; window._sahaLigAdYukleniyor = false;
+    try{ sahaSayfaTazele('lig'); }catch(e){}
+  }).catch(function(){ window._sahaLigAdYukleniyor = false; });
+}
+function _sahaSezonAdi(x){
+  var ad = String((x && x.lig) || ''), A = window._sahaLigAdlari || {};
+  var kimlikMi = !ad || (ad === x._k) || (/^[a-z0-9_\-]{8,}$/i.test(ad) && /\d/.test(ad) && /[a-z]/i.test(ad));
+  if(!kimlikMi) return ad;
+  return A[x._k] || A[ad] || 'Sezon';
+}
 function _ligSezonOdulHtml(){
-  var g = (benimKayit && benimKayit.sezonOdul) || {}, l = Object.keys(g).map(function(k){ return g[k]; }).filter(Boolean).sort(function(a, b){ return (b.ts||0) - (a.ts||0); });
+  var g = (benimKayit && benimKayit.sezonOdul) || {}, l = Object.keys(g).map(function(k){ var x = g[k]; if(x && typeof x === 'object'){ x = Object.assign({}, x); x._k = k; } return x; }).filter(Boolean).sort(function(a, b){ return (b.ts||0) - (a.ts||0); });
   if(!l.length) return '';
+  _sahaLigAdlariYukle();
   return '<div class="lg-baslik"> Sezon ödüllerim</div>' + l.map(function(x){
-    return '<div class="lg-gecmis G"><span class="lg-sonuc"></span><div class="lg-g-ad"><b>' + esc(x.lig || 'Sezon') + '</b><small>'
+    return '<div class="lg-gecmis G"><span class="lg-sonuc"></span><div class="lg-g-ad"><b>' + esc(_sahaSezonAdi(x)) + '</b><small>'
       + esc((x.kalem || []).map(function(y){ return y.ad; }).join(' · ')) + '</small></div><b class="lg-skor">+' + (Number(x.tutar)||0).toLocaleString('tr-TR') + '</b></div>'; }).join('');
 }
 function _ligBasarimHtml(){
@@ -13754,17 +13849,10 @@ function _ligBasarimHtml(){
     var al = i <= seri, tut = A.taban + A.artis * (i - 1);
     gunler += '<span class="gn' + (al ? ' al' : '') + (!bugunAlindi && i === seri + 1 ? ' sira' : '') + '"><small>' + i + '. gün</small><b>' + tut + '</b></span>';
   }
-  var kaz = SAHA_BASARIMLAR.filter(function(b){ return sahip[b.id]; }).length;
   return _gorevHtml() + '<div class="lg-gunluk"><div class="lg-baslik"> Günlük giriş ödülü</div>'
     + '<div class="lg-gunler">' + gunler + '</div>'
     + '<div class="lg-not">' + (bugunAlindi ? 'Bugünün ödülünü aldın (' + (g.tutar || 0) + ' SL). Yarın gir, seri devam etsin.' : 'Her gün SAHA\'ya gir; seri bozulmazsa ödül her gün artar (en çok ' + A.gun + '. gün tutarı).') + '</div></div>'
-    + _ligSezonOdulHtml()
-    + '<div class="lg-baslik">Başarımlar <b>' + kaz + '/' + SAHA_BASARIMLAR.length + '</b></div><div class="lg-basarim">'
-    + SAHA_BASARIMLAR.map(function(b){
-        var s = sahip[b.id];
-        return '<div class="bs' + (s ? ' al' : '') + '"><span class="ik">' + (s ? b.ikon : '') + '</span><b>' + esc(b.ad) + '</b><small>' + esc(b.ac) + '</small>'
-          + '<span class="od">' + (s ? '✓ ' + (s.odul != null ? s.odul : basarimOdulu(b)) + ' SL' : '+' + basarimOdulu(b) + ' SL') + '</span></div>';
-      }).join('') + '</div>';
+    + _ligSezonOdulHtml();
 }
 /* NASIL OYNANIR REHBERİ (2026-10-10-B, onaylanan öneri 7). İlk girişte (takım kaydı tamamlanınca) bir kez açılır; sonra
    Ayarlar > "Nasıl oynanır?" ile istenildiği zaman. Sayfalar: SAHA'ya hoş geldin · dokunmatik · klavye · konsol kolu ·
@@ -18259,7 +18347,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-20-C';
+window.APP_BUILD = '2026-10-23-A';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -20781,6 +20869,14 @@ function sahaCanliYaz(ilkYazim){
         saniye: Math.round(macSaniye()*10)/10, hiz: 2700 / Math.max(1, HALF),
         akiyor: saatAkiyor(), ts: Date.now()
       };
+      /* MAÇ EVRESİ (2026-10-23-A, kullanıcı: "maç başladığında skorboard görünecek, devre arası veya maç sonu ise görünmeyecek; oyuncular
+         maça girince kamera tünele gitsin"). İzleyici skorbordu ve sinematik kameraları bu alana göre yönetir:
+         tunel = tünel çıkışı (giriş / 2. yarı), devre = devre arası, bitti = maç sonu, oyun = maç akıyor (gol töreni dahil). */
+      try{ var _tf = 'oyun';
+        if(bitti) _tf = 'bitti';
+        else if(typeof TOREN !== 'undefined' && TOREN.aktif) _tf = ({ giris:'tunel', ikinci:'tunel', devre:'devre', son:'bitti' })[TOREN.tur] || 'oyun';
+        else if(window._sahaDevreFaz && devre === 2) _tf = 'devre';
+        g[yol+'/tabela'].faz = _tf; }catch(_f){}
       // Gol bandı (5 sn) ve değişiklik bandı izleyiciye de gider (bkz. golBantGoster / degBantCiz).
       if (window._golBantDurum && Date.now() - window._golBantDurum.ts < 5500) g[yol+'/tabela'].gb = window._golBantDurum;
       /* İZLEYİCİ FORMASI VE TÖREN KAMERASI (2026-10-18-K, kullanıcı: "soyunma odasına giriş-çıkışlarda ve devre aralarında kamera görüntüleri
@@ -21290,6 +21386,7 @@ function dizil(){
   });
 }
 function kickoff(byTeam){
+  window._sahaDevreFaz = false;
   golBekleme = false;   // santra: gol sonrası duraklama bitti (bkz. update/durma)
   duranSonrasi = null; sonVurusTuru = '';
   bekleyenKartlariGoster();
@@ -27483,6 +27580,7 @@ function devreArasi(){
                      player:'', player2:'', team:'home' });
     olaylar.push({ type:'half_time', min:45, player:'', player2:'', team:'home' });
   }catch(e){_sessiz(e,'devreArasi:5182','saha_oynanis');}
+  window._sahaDevreFaz = true;   // izleyiciye 'devre' evresi (skorbord gizli) - kickoff'ta kapanır
   devre = 2; frozen = 2.6; dirA = _odaKameraModu() ? -1 : _devreYonu(2); golBekleme = false;   // son saniye golünün bekleyişi 2. yarıya taşınmasın
   saat = HALF; uzatmaHesapla();
   // Devre düdüğü (iki kez) olaySesi('devre') içinde çalar; spiker kapalıyken de.
@@ -30139,8 +30237,14 @@ function _sahaIzleVeriUygula(m){
     homeJer: (typeof m.homeJer==='number') ? m.homeJer : null,
     awayJer: (typeof m.awayJer==='number') ? m.awayJer : null,
     tabela: (m.tabela && typeof m.tabela==='object') ? m.tabela : null,
-    yon: (m.izleYon && typeof m.izleYon==='object') ? m.izleYon : null
+    yon: (m.izleYon && typeof m.izleYon==='object') ? m.izleYon : null,
+    sahaMode: !!m.sahaMode, manuel: !m.sahaMode && !m.tabela && ((Number(m.minute) || 0) > 0 || (Number(m.homeGoals) || 0) + (Number(m.awayGoals) || 0) > 0)
   };
+  // Tabela tazeliği: yalnızca tabela.ts DEĞİŞTİĞİNDE "son canlı veri" anı güncellenir. Sayfa açıldığında gelen eski bir tabela
+  // (yarıda kalmış önceki deneme) taze sayılmasın diye ilk görüşte ts 30 sn'den eskiyse bayat kabul edilir (bkz. _izFaz).
+  try{ var _tbx = window._sahaIzleHedef.tabela;
+    if(_tbx && _tbx.ts !== window._izTabelaTs){ var _ilk = window._izTabelaTs == null; window._izTabelaTs = _tbx.ts;
+      window._izTabelaAlinma = (_ilk && Math.abs(Date.now() - (Number(_tbx.ts) || 0)) > 30000) ? 0 : Date.now(); } }catch(e){}
   // İzlenen maçın stadı: ev sahibinin stadı (yalnızca değişince yeniden kurulur).
   try{ stadyumUygula(); }catch(e){ _sessiz(e, '_sahaIzleVeriUygula:stadyum', 'saha_izle'); }
   /* İZLEYİCİ HAVASI (2026-10-18-C, kullanıcı: "kullanıcı maçı normal havada oynarken izleyici farklı bir hava durumu ekranı görüyor"). KÖK SEBEP:
@@ -30560,8 +30664,9 @@ function _sahaIzleKareAdimla(dt){
   // tamamen boşsa (gerçek bir konum akışı hiç yoksa) dokunulmuyor - oyuncular sayfa açılışındaki
   // varsayılan diziliş konumunda (dizil()) görünmeye devam ediyor; yalnızca GERÇEK bir konum
   // akışı geldiğinde (dizi doluysa) canlı takip devreye giriyor.
-  if(h.home && h.home.length) _sahaIzleTakimUygula(teamB, h.home, lerp, dt, xYon);   // ev sahibi - mavi (2D mini-saha ile aynı renk kuralı)
-  if(h.away && h.away.length) _sahaIzleTakimUygula(teamA, h.away, lerp, dt, xYon);   // deplasman - kırmızı
+  var _izBek = _izFaz() === 'bekleme';   // bekleme: eski/bayat konumlarla oyuncular görünür olmasın (bkz. _izBeklemeSahnesi)
+  if(h.home && h.home.length && !_izBek) _sahaIzleTakimUygula(teamB, h.home, lerp, dt, xYon);   // ev sahibi - mavi (2D mini-saha ile aynı renk kuralı)
+  if(h.away && h.away.length && !_izBek) _sahaIzleTakimUygula(teamA, h.away, lerp, dt, xYon);   // deplasman - kırmızı
   // KULLANICI TALEBİ (2026-09-18-E, ekran görüntüsü ile: "kamera açısını böyle yap ama topu
   // takip etsin"): Seyirci kamerası önceden KENDİ (daha zayıf, 0.55/0.35 katsayılı) bir
   // formülle çalışıyordu ve top sık sık kadraj dışında kalıyordu. Artık asıl OYUN kamerasıyla
@@ -30589,17 +30694,79 @@ function _sahaIzleKareAdimla(dt){
   // İzleyici de aynı duran top kadrajını görür - oyuncuyla aynı yayını izliyorlar.
   var _izDuranKam = duranKameraHarmanla(dt, camHedef, bakHedef);
   /* (2026-10-18-K) Tören (tünel çıkışı, soyunma odasına giriş, devre arası): oyuncunun tören kamerası izlenir (bkz. İZLEYİCİ FORMASI VE TÖREN KAMERASI). */
-  var _tk = null; try{ var _tb = window._sahaIzleHedef && window._sahaIzleHedef.tabela; if(_tb && _tb.tk && _tb.tk.c) _tk = _tb.tk;   /* tk yalnızca tören sürerken yazılır; tabela her yazımda baştan yazıldığı için tören bitince kendiliğinden kalkar */ }catch(_e){}
+  /* TÜNELE UÇUŞ (2026-10-23-A, kullanıcı: "iki takım oyuncusu maça girdiği zaman kamera açısı o an hangisiyse direkt o açıdan tünele doğru
+     gidip oyuncu çıkışlarını göstermeli"). ÖNCEKİ: tören kamerası gelince kamera tören konumuna KESİLİYORDU (anlık sıçrama). ŞİMDİ kamera o anki
+     konumu ve bakışından tören kamerasına ~2,6 sn'de yumuşakça uçar (gol töreninde 1,2 sn); uçuş bitince tören kamerasını izler. */
+  var _tk = null; try{ var _tb = window._sahaIzleHedef && window._sahaIzleHedef.tabela; if(_tb && _tb.tk && _tb.tk.c && _tb.tk.b) _tk = _tb.tk; }catch(e){}   /* tk yalnızca tören sürerken yazılır */
+  var _faz = _izFaz();
+  _izSkorbordGorunur(_faz === 'oyun' || _faz === 'manuel');
+  _izBeklemeSahnesi(_faz === 'bekleme');
   if(_tk){ camHedef.set(_tk.c[0], _tk.c[1], _tk.c[2]); bakHedef.set(_tk.b[0], _tk.b[1], _tk.b[2]); window._izBakZson = bakHedef.z;
+    if(!window._izTkAktif){ window._izTkAktif = true;
+      window._izUcus = { t:0, sure:(_faz === 'oyun' ? 1.2 : 2.6), c:camera.position.clone(), b:_izBak.clone(), f:(window._izSonFov || camera.fov) }; }
+    var _u = window._izUcus;
+    if(_u && _u.t < _u.sure){ _u.t += dt; var _e = Math.min(1, _u.t / _u.sure); _e = _e * _e * (3 - 2 * _e);
+      camera.position.lerpVectors(_u.c, camHedef, _e); _izBak.lerpVectors(_u.b, bakHedef, _e);
+      if(_tk.f){ var _fv = _u.f + (_tk.f - _u.f) * _e; if(Math.abs(camera.fov - _fv) > 0.05){ camera.fov = _fv; camera.updateProjectionMatrix(); } }
+      camera.lookAt(_izBak); return; }
     if(_tk.f && Math.abs(camera.fov - _tk.f) > 0.05){ camera.fov = _tk.f; camera.updateProjectionMatrix(); }
-    if(!window._izTkAktif){ window._izTkAktif = true; camera.position.copy(camHedef); }
-    camera.position.lerp(camHedef, Math.min(1, dt * 5)); camera.lookAt(bakHedef); return; }
-  if(window._izTkAktif){ window._izTkAktif = false; camera.position.copy(camHedef); }
+    camera.position.lerp(camHedef, Math.min(1, dt * 5)); _izBak.copy(bakHedef); camera.lookAt(_izBak); return; }
+  if(window._izTkAktif){ window._izTkAktif = false; window._izUcus = null; if(_faz === 'oyun') camera.position.copy(camHedef); }
+  /* SİNEMATİK KAMERALAR (2026-10-23-A, kullanıcı: "skorboard olmadan farklı açılardan - tribün, kale, kuş bakışı, saha içinde gezen kamera").
+     Maç akmıyorken (oyuncular henüz girmedi, devre arası) yayın tek açıda durmaz; rastgele sırayla değişen planlar gösterilir. */
+  if(_faz !== 'oyun' && _faz !== 'manuel'){
+    var _sn = izleSinematik(dt); camera.position.copy(_sn.c); _izBak.copy(_sn.b); camera.lookAt(_izBak); window._izSonFov = camera.fov; return; }
+  window._IZS = null;
   var _yon = _izDuranKam ? null : izleYonetmen(dt);
   if(_yon){ camHedef.copy(_yon.c); bakHedef.copy(_yon.b); if(_yon.kes){ camera.position.copy(camHedef); window._izBakZson = bakHedef.z; } }
   else if(window._IZY && window._IZY.mod !== 'yayin'){ window._IZY.mod = 'yayin'; camera.position.copy(camHedef); }
   camera.position.lerp(camHedef, Math.min(1, dt * (_izDuranKam ? 4.5 : (_yon ? 4.0 : (_acilKilit ? 9.0 : 3.0)))));
-  camera.lookAt(bakHedef);
+  _izBak.copy(bakHedef); camera.lookAt(bakHedef);
+}
+var _izBak = new THREE.Vector3(0, 0.6, 0);   // izleyici kamerasının o anki bakış noktası (tünele uçuşun başlangıcı)
+/* MAÇ EVRESİ (izleyici): bekleme = oyuncular henüz maça girmedi / canlı veri yok, tunel = tünel çıkışı, devre = devre arası,
+   bitti = maç sonu, oyun = maç akıyor, manuel = saha motoruyla oynanmayan (yöneticinin elle yürüttüğü) maç. Eski sürüm oyuncu evre
+   göndermiyorsa tören kamerası varken 'tunel', yokken 'oyun' sayılır. */
+function _izFaz(){
+  var h = window._sahaIzleHedef; if(!h) return 'bekleme';
+  if(h.played) return 'bitti';
+  var tb = h.tabela;
+  if(!tb) return h.manuel ? 'manuel' : 'bekleme';
+  if(Date.now() - (window._izTabelaAlinma || 0) > 25000) return 'bekleme';
+  if(tb.faz) return String(tb.faz);
+  return (tb.tk && tb.tk.c) ? 'tunel' : 'oyun';
+}
+function _izSkorbordGorunur(v){
+  try{ if(window._izSkorV === v) return; window._izSkorV = v; document.body.classList.toggle('iz-skorsuz', !v); }catch(e){}
+}
+/* Bekleme: oyuncular henüz sahaya çıkmadı - saha boş görünür (sayfa açılışındaki dizilişte duran oyuncular gizlenir). Canlı konum
+   gelince _sahaIzleTakimUygula görünürlüğü kendisi yönetir. */
+function _izBeklemeSahnesi(v){
+  try{ if(window._izBekV === v) return; window._izBekV = v;
+    var hep = (typeof players !== 'undefined' ? players : []).concat([hakem], yanHakemler);
+    hep.forEach(function(p){ if(!p) return; if(p.obj) p.obj.visible = !v; if(p.golge) p.golge.visible = !v; });
+    if(typeof ball !== 'undefined' && ball) ball.visible = !v;
+    try{ if(typeof topGolge !== 'undefined' && topGolge) topGolge.visible = !v; }catch(_g){}
+  }catch(e){ _sessiz(e, '_izBeklemeSahnesi', 'saha_izle'); }
+}
+/* Sinematik planlar: her plan ~6,5 sn, sıra her seferinde rastgele (aynı plan art arda gelmez), planlar arası kesme. u = plan içi ilerleme. */
+var IZ_PLANLAR = ['tribun', 'kale', 'kus', 'gezen', 'vinc', 'yorunge'];
+function izleSinematik(dt){
+  var S = window._IZS;
+  if(!S || S.t >= S.sure){
+    var onceki = S ? S.ad : null, aday = IZ_PLANLAR.filter(function(x){ return x !== onceki; });
+    S = window._IZS = { ad:aday[Math.floor(Math.random() * aday.length)], t:0, sure:6.5, sx:Math.random() < 0.5 ? -1 : 1, sz:Math.random() < 0.5 ? -1 : 1, a0:Math.random() * Math.PI * 2 };
+  }
+  S.t += dt;
+  var u = Math.min(1, S.t / S.sure), e = u * u * (3 - 2 * u), V = THREE.Vector3, r;
+  if(S.ad === 'tribun') r = { c:new V(S.sx * (-34 + 68 * e), 16, S.sz * (HWZ + 12)), b:new V(S.sx * (-34 + 68 * e) * 0.6, 0, S.sz * 4), f:50 };
+  else if(S.ad === 'kale') r = { c:new V(S.sx * (HLX + 7), 5.5, -9 + 18 * e), b:new V(S.sx * HLX * 0.35, 1, 0), f:56 };
+  else if(S.ad === 'kus'){ var ak = S.a0 + u * 0.5; r = { c:new V(Math.cos(ak) * 14, 74, Math.sin(ak) * 14), b:new V(0, 0, 0), f:52 }; }
+  else if(S.ad === 'gezen'){ var gx = S.sx * (-38 + 76 * u), gz = S.sz * (8 + 6 * Math.sin(u * 3)); r = { c:new V(gx, 1.8, gz), b:new V(gx + S.sx * 16, 1.4, gz * 0.4), f:62 }; }
+  else if(S.ad === 'vinc') r = { c:new V(S.sx * (HLX + 4), 4 + 15 * e, S.sz * (HWZ + 4)), b:new V(0, 0, 0), f:56 };
+  else { var ao = S.a0 + u * 0.9; r = { c:new V(Math.cos(ao) * 46, 13, Math.sin(ao) * 30), b:new V(0, 0.5, 0), f:52 }; }
+  if(Math.abs(camera.fov - r.f) > 0.05){ camera.fov = r.f; camera.updateProjectionMatrix(); }
+  return r;
 }
 /* YAYIN YÖNETMENİ (2026-10-18-J, kullanıcı: "canlı yayında sadece yayın kamerası, kale arkası ve yan kameralar olmalı"). İzleyicinin kamerası
    oyuncudan bağımsızdır; gerçek bir maç yayını gibi üç kamera arasında KESMELİ geçiş yapar:

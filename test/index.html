@@ -137,6 +137,13 @@
       }catch(e){ return null; }
     };
     D.hazirla = hazirla;
+    // (2026-10-23-A) Ses motoru uyandırma: arka plandan / kilit ekranından dönünce askıda kalan motor sessizlik demekti.
+    // (2026-10-23-A) Arka planda oynatma: tarayıcı (Chrome) SESSİZ medyayı sayfa arka plana geçince "güç tasarrufu" için
+    // duraklatıyor; bildirimsiz oynatmada öğe gerçekte sessiz olduğundan yayın arka planda kesiliyordu. Kullanıcı arka planda
+    // oynatmayı açtıysa öğe normal (sesli) oynatmaya bırakılır.
+    D.serbest = function(el){ try{ if(el && el._bsz && !el._bsz.eski) eskiyeDon(el, 'arka planda oynatma'); }catch(e){} };
+    D.uyandir = function(){ try{ if(ctx && ctx.state !== 'running' && !document.hidden) ctx.resume(); }catch(e){} };
+    try{ document.addEventListener('visibilitychange', function(){ if(!document.hidden) D.uyandir(); }); }catch(e){}
     D.graf = function(el){ var B = hazirla(el); if(!B || B.eski) return null; if(!grafKur(el)) return null; return { ctx:ctx, giris:B.giris, cikis:B.cikis }; };
     var ozPlay = P.play;
     P.play = function(){ try{ hazirla(this); var b = this._bsz; if(b && !b.eski && !b.m){ grafKur(this); try{ ctx && ctx.resume(); }catch(e){} } }catch(e){} return ozPlay.apply(this, arguments); };
@@ -3061,7 +3068,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-20-C';
+window.APP_BUILD='2026-10-23-A';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5357,6 +5364,16 @@ window.doEnter=function(){
 // ikisinden HERHANGİ BİRİ aktifse bakım aktiftir. Yalnızca küresel düğüme bakmak,
 // henüz küresel düğüme yazmamış eski bir panelin bakımını görmezden gelmek olurdu.
 window._ptKureselBakim=null;
+/* DİNLEYİCİ YENİDEN DENEME (2026-10-23-A, kullanıcı: "admin uygulamaları bakıma alıyor fakat bakım ekranı açılmıyor").
+   KÖK SEBEP: ortak düğümlerin (bakım, TV listesi, görünüm, canlı maç, sohbet) dinleyicileri sayfa açılır açılmaz
+   kuruluyor; o anda anonim oturum henüz açılmamış oluyor. Kurallar "auth != null" istediği için Firebase okumayı
+   reddediyor ve REDDEDİLEN DİNLEYİCİYİ KALICI OLARAK İPTAL EDİYOR - oturum bir saniye sonra açılsa da dinleyici bir
+   daha kurulmuyordu. Bakım açıldığında haber hiç gelmiyor, ekran da açılmıyordu (sayfa geç açılan cihazlarda
+   çalıştığı için "bazen" görünüyordu). Artık reddedilen dinleyici artan aralıklarla yeniden kurulur. */
+window.ptYenidenDene=function(fn,ad){
+  try{ var k='_ptYD_'+ad, n=(window[k]||0)+1; window[k]=n; if(n>40)return;
+    setTimeout(function(){ try{ fn(); }catch(e){ DiagSil('ptYenidenDene:'+ad,e); } }, Math.min(15000, 1200*n)); }catch(e){}
+};
 function ptKureselBakimDinle(){
   try{
     firebase.database().ref('globalConfig/maintenance').on('value',function(sn){
@@ -5379,6 +5396,7 @@ function ptKureselBakimDinle(){
       if(window.DiagCore&&DiagCore.kaydet)
         DiagCore.kaydet('pt_maintenance','hata','Küresel bakım durumu okunamadı',
           {kod:(err&&err.code)||'?',mesaj:(err&&err.message)||''},30000);
+      ptYenidenDene(ptKureselBakimDinle,'bakim');
     });
   }catch(e){DiagSil('ptKureselBakimDinle',e);}
 }
@@ -6526,7 +6544,7 @@ function ptOrtakGorunumDinle(){
       try{ applyTheme(); }catch(e){self.__ds&&self.__ds(6419,e)}
       try{ if(typeof applyBgTheme==='function') applyBgTheme(); }catch(e){self.__ds&&self.__ds(6420,e)}
       try{ if(typeof applyCardStyle==='function') applyCardStyle(); }catch(e){self.__ds&&self.__ds(6421,e)}
-    },function(err){ DiagSil('ptOrtakGorunumDinle',err); });
+    },function(err){ DiagSil('ptOrtakGorunumDinle',err); ptYenidenDene(ptOrtakGorunumDinle,'ptOrtakGorunumDinle'); });
   }catch(e){ DiagSil('ptOrtakGorunumDinle',e); }
 }
 function ptOrtakGorunumUygula(){
@@ -6550,7 +6568,7 @@ function ptOrtakCanliDinle(){
       window._ptOrtakCanli = sn.val() || null;
       try{ if(typeof renderVideoScreen==='function' && document.getElementById('videoScreen')) renderVideoScreen(); }catch(e){self.__ds&&self.__ds(6444,e)}
       try{ if(typeof updateVideoLinkBadge==='function') updateVideoLinkBadge(); }catch(e){self.__ds&&self.__ds(6445,e)}
-    },function(err){ DiagSil('ptOrtakCanliDinle',err); });
+    },function(err){ DiagSil('ptOrtakCanliDinle',err); ptYenidenDene(ptOrtakCanliDinle,'ptOrtakCanliDinle'); });
   }catch(e){ DiagSil('ptOrtakCanliDinle',e); }
 }
 /* SOHBET ORTAK - EZİLME DÜZELTMESİ (kullanıcı: "sohbetler veri tabanı ortak olmamış")
@@ -6565,7 +6583,7 @@ function ptOrtakSohbetDinle(){
       window._ptOrtakSohbet = sn.val() || {};
       ptOrtakSohbetUygula();
       try{ if(typeof scheduleChatRenderSafely==='function') scheduleChatRenderSafely(); }catch(e){self.__ds&&self.__ds(6460,e)}
-    },function(err){ DiagSil('ptOrtakSohbetDinle',err); });
+    },function(err){ DiagSil('ptOrtakSohbetDinle',err); ptYenidenDene(ptOrtakSohbetDinle,'ptOrtakSohbetDinle'); });
   }catch(e){ DiagSil('ptOrtakSohbetDinle',e); }
 }
 function ptOrtakSohbetUygula(){
@@ -6578,7 +6596,7 @@ function ptOrtakTvDinle(){
       window._ptOrtakTv = Array.isArray(v) ? v : (v ? Object.values(v) : null);
       ptOrtakTvUygula();
       try{ if(typeof renderVideoScreenList==='function' && document.getElementById('videoScreenList')) renderVideoScreenList(); }catch(e){self.__ds&&self.__ds(6473,e)}   // (2026-10-05-E) _curTab hiç tanımlı değildi - ReferenceError sessizce yutuluyor, açık TV listesi hiç tazelenmiyordu (boş catch sensörü yakaladı)
-    },function(err){ DiagSil('ptOrtakTvDinle',err); });
+    },function(err){ DiagSil('ptOrtakTvDinle',err); ptYenidenDene(ptOrtakTvDinle,'ptOrtakTvDinle'); });
   }catch(e){ DiagSil('ptOrtakTvDinle',e); }
 }
 function ptOrtakTvUygula(){
@@ -26508,7 +26526,7 @@ function remoteCtrlSettingsHtml(data){
     h+=remoteCtrlSettingsOpt(' Döngü (loop)',s.loop,'remoteCtrlSend(\'toggleloop\')');
     h+=remoteCtrlSettingsOpt(' Otomatik oynat',s.autoplay,'remoteCtrlSend(\'toggleautoplay\')');
     h+=remoteCtrlSettingsOpt(' Veri tasarrufu',s.dataSaver,'remoteCtrlSend(\'togglesaver\')');
-    h+=remoteCtrlSettingsOpt(' Tam ekranda yön çevir',s.autoRotate,'remoteCtrlSend(\'toggleautorotate\')');
+    h+=remoteCtrlSettingsOpt(' Tam ekranda yön çevir',s.autoRotate,'remoteCtrlSend(\'toggleautorotate\')');
     h+=remoteCtrlSettingsOpt(' Kumanda aktifken ekranı otomatik kilitle',s.remoteAutoLock,'remoteCtrlSend(\'toggleremotelock\')');
     h+=remoteCtrlSettingsOpt(' Video bilgileri',false,'remoteCtrlSettingsNav(\'info\')');
   }else if(st==='speed'){
@@ -27414,7 +27432,7 @@ window.PTFrame=(function(){
           +'<div class="ptp-title">'+(baslik||'').replace(/</g,'&lt;')+'</div>'
           +'<button class="ptp-btn" id="ptfFit" title="Ekran Modu"></button>'
           +'<button class="ptp-btn" id="ptfExpand" title="Tam ekran"></button>'
-          +'<button class="ptp-btn" id="ptfRc" title="Kanallar / Kumanda"></button>'
+          +'<button class="ptp-btn" id="ptfRc" title="Kanallar / Kumanda"></button>'
           +'<button class="ptp-btn" id="ptfRot" title="Dikey / Yatay"></button>'
           +'<button class="ptp-btn" id="ptfClose" title="Kapat">✕</button>'
         +'</div>'
@@ -27466,7 +27484,7 @@ window.PTFrame=(function(){
       var sira=['contain','fill','cover'];
       A.fit=sira[(sira.indexOf(A.fit)+1)%3];
       olcuUygula();
-      bildir(({contain:' Ekrana Sığdır',fill:' Genişlet',cover:' Sığdırmak İçin Kırp'})[A.fit]);
+      bildir(({contain:' Ekrana Sığdır',fill:' Genişlet',cover:' Sığdırmak İçin Kırp'})[A.fit]);
     });
     tikla('ptfRot',function(){dikeyYatay();});
     tikla('ptfLock',function(){kilit(true);});
@@ -27801,7 +27819,7 @@ window.PTFrame=(function(){
     if(a==='fstoggle'){tamEkranDegistir();setTimeout(ptfKumandaCiz,200);return;}
     if(a.indexOf('fit:')===0){
       A.fit=a.slice(4);olcuUygula();ptfKumandaCiz();
-      bildir(({contain:' Ekrana Sığdır',fill:' Genişlet',cover:' Sığdırmak İçin Kırp'})[A.fit]);
+      bildir(({contain:' Ekrana Sığdır',fill:' Genişlet',cover:' Sığdırmak İçin Kırp'})[A.fit]);
       return;
     }
     if(a==='C'){A.buf='';ptfKumandaCiz();return;}
@@ -28988,7 +29006,14 @@ function ptpYayinBindirmeGuncelle(){
 
     // Alt serit: mac belirlendikten sonra, her tazelemede (2 sn) guncellenir.
     try{ ptBirazdanSeridi(m); }catch(e){self.__ds&&self.__ds(28883,e)}
-    if(!m){ sk.style.display='none'; }
+    /* SKORBORD EVRESİ (2026-10-23-A, kullanıcı: "maç başladığında skorboard görünecek, devre arası veya maç sonu ise görünmeyecek").
+       SAHA'da oynanan maçta oyuncunun cihazı tabela.faz gönderir (tunel / devre / bitti / oyun). Skorbord yalnızca 'oyun'da görünür;
+       oyuncular henüz maça girmemişken (SAHA maçı, tabela yok ya da 60 sn'den eski) de gizlenir. Yöneticinin elle yürüttüğü maç etkilenmez. */
+    var _skGizle = false;
+    try{ if(m){ var _tbf = (m.tabela && typeof m.tabela === 'object') ? m.tabela : null, _sahaM = !!(m.sahaMode || m.sahaOnayli);
+      if(_tbf && _tbf.faz && _tbf.faz !== 'oyun') _skGizle = true;
+      else if(_sahaM && (!_tbf || Math.abs(Date.now() - (Number(_tbf.ts) || 0)) > 60000)) _skGizle = true; } }catch(_fe){}
+    if(!m || _skGizle){ sk.style.display='none'; if(m) window._ptTabelaliMac = !!m.tabela; }
     else{
       var h = (D.teams[m.homeId]||{}), a = (D.teams[m.awayId]||{});
       var kodH = (h.short || (h.name||'').slice(0,3) || 'EV').toLocaleUpperCase('tr');
@@ -29194,6 +29219,43 @@ function ptpUstBarParcalari(){
         oneri:'Tarayıcı Media Session desteklemiyor olabilir. Doğrudan medya kaynaklarında çalışır, gömülü platformlarda platform kararı geçerlidir.'});}catch(_d){self.__ds&&self.__ds(29087,_d)}
     }
   }
+  /* ARKA PLANDA OYNATMA (2026-10-23-A, kullanıcı: "TV izlerken uygulama arka plana alınınca ya da ekran kapanınca akış bazen
+     duruyor; kullanıcı TV ayarlarından bunu açıp kapatabiliyor"). KÖK SEBEP: "Arka planda oynat" ayarı yalnızca medya kartını
+     kuruyordu, kart da kaldırılınca ayarın hiçbir etkisi kalmamıştı. Yayın, medya kartı çıkmasın diye GERÇEKTE SESSİZ oynatılıp
+     sesi ayrıca çalınıyor; Chrome sessiz videoyu sayfa gizlenince güç tasarrufu için duraklatıyor ("paused to save power") -
+     yayın ekran kapanınca kesiliyordu (sayfanın ne kadar hızlı gizlendiğine göre "bazen"). ŞİMDİ: ayar açıkken sayfa gizlenirken
+     oynayan yayın normal sesli oynatmaya bırakılır (tarayıcı arka planda sürdürür; bu durumda bildirim panelinde medya kartı
+     görünebilir - arka planda çalmanın tarayıcıdaki karşılığı budur). Tarayıcı yine de duraklatırsa hemen yeniden başlatılır. */
+  (function ptpArkaPlanOynat(){
+    if(window._ptpArkaPlanKuruldu)return; window._ptpArkaPlanKuruldu=true;
+    var oynuyordu=false, sonGizlenme=0;
+    var ac=function(){ try{ return !!pref('arkaPlan',false); }catch(e){ return false; } };
+    var devam=function(v){ try{ if(v&&v.paused&&!v.ended){ var p=v.play(); if(p&&p.catch)p.catch(function(e){ try{DiagSil('ptpArkaPlanDevam',e,{anlami:'Arka planda yayın yeniden başlatılamadı.'});}catch(_e){} }); } }catch(e){} };
+    document.addEventListener('visibilitychange',function(){
+      try{
+        if(!S||!S.video)return;
+        var v=S.video;
+        if(document.hidden){
+          sonGizlenme=Date.now();
+          oynuyordu=!v.paused&&!v.ended;
+          if(!oynuyordu||!ac())return;
+          if(window.ptBildirimsizSes&&ptBildirimsizSes.serbest)ptBildirimsizSes.serbest(v);
+          setTimeout(function(){ if(document.hidden&&ac())devam(v); },350);
+          setTimeout(function(){ if(document.hidden&&ac())devam(v); },1500);
+        }else if(oynuyordu&&v.paused&&!v.ended){
+          devam(v);   // dönüşte de duraklamış kaldıysa sürdürülür
+        }
+      }catch(e){self.__ds&&self.__ds(29090,e)}
+    },true);
+    // Medya olayları kabarcıklanmaz; belge düzeyinde YAKALAMA aşamasında dinlenir.
+    document.addEventListener('pause',function(e){
+      try{
+        if(!S||!S.video||e.target!==S.video||!document.hidden||!oynuyordu||!ac())return;
+        if(Date.now()-sonGizlenme>6*3600e3)return;
+        setTimeout(function(){ if(document.hidden)devam(S.video); },250);
+      }catch(_e){}
+    },true);
+  })();
   function ptpMerkezMaske(){
     try{
       if(!S||!S.root)return;
