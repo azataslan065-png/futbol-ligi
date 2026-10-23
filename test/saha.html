@@ -7595,15 +7595,75 @@ function stadLedCiz(){
   }catch(e){ _sessiz(e, 'stadLedCiz', 'saha_grafik'); }
 }
 
-{
-  const d = new THREE.MeshLambertMaterial({ color:0xf0f2f2 });
-  const b = new THREE.MeshLambertMaterial({ color:0xf0c14b, side:THREE.DoubleSide });
-  [-1,1].forEach(sx => [-1,1].forEach(sz => {
-    const p = new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.06,1.6,6), d);
-    p.position.set(sx*(HLX-0.3), 0.8, sz*(HWZ-0.3)); scene.add(p);
-    const f = new THREE.Mesh(new THREE.PlaneGeometry(0.55,0.35), b);
-    f.position.set(sx*(HLX-0.3) - sx*0.3, 1.45, sz*(HWZ-0.3)); scene.add(f);
-  }));
+/* KÖŞE BAYRAKLARI (2026-10-23-E, kullanıcı: "köşe bayrakları ev sahibi takımın renklerini ve logosunu barındıracak ve rüzgâra
+   bağlı olarak dalgalanacak"). ÖNCEDEN: dört köşede tek parça, sabit sarı bir düzlem. ŞİMDİ: bayrak bezi ince ızgaralı bir
+   düzlemdir; dokusu ev sahibi takımın forma renkleri (çapraz iki renk) ve ortasında logosudur (logo okunamazsa takım kodu).
+   RÜZGÂR: yönü ve gücü yavaşça değişir; hava durumuna göre güçlenir (yağmur, kar) ya da zayıflar (sis). Bez rüzgârın estiği
+   yöne döner, gücüyle orantılı dalgalanır; rüzgâr zayıfken direğe doğru sarkar. Oyun ve canlı izleme ekranında aynı çalışır. */
+var RUZGAR = { aci:Math.random() * Math.PI * 2, hedefAci:0, guc:0.5, t:0, degT:0 };
+var KBAYRAK = { liste:[], imza:'', tuval:null, doku:null, W:0.64, H:0.42 };
+(function koseBayraklariKur(){
+  try{
+    const d = new THREE.MeshLambertMaterial({ color:0xf0f2f2 });
+    const c = document.createElement('canvas'); c.width = 256; c.height = 168; KBAYRAK.tuval = c;
+    const x = c.getContext('2d'); x.fillStyle = '#f0c14b'; x.fillRect(0, 0, 256, 168);
+    KBAYRAK.doku = new THREE.CanvasTexture(c);
+    const bm = new THREE.MeshLambertMaterial({ map:KBAYRAK.doku, side:THREE.DoubleSide });
+    [-1,1].forEach(sx => [-1,1].forEach(sz => {
+      const px = sx*(HLX-0.3), pz = sz*(HWZ-0.3);
+      const p = new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.045,1.6,6), d);
+      p.position.set(px, 0.8, pz); scene.add(p);
+      const geo = new THREE.PlaneGeometry(KBAYRAK.W, KBAYRAK.H, 12, 4); geo.translate(KBAYRAK.W / 2, 0, 0);   // sol kenar direkte
+      const g = new THREE.Group(); g.position.set(px, 1.6 - KBAYRAK.H / 2 - 0.02, pz); scene.add(g);
+      const m = new THREE.Mesh(geo, bm); g.add(m);
+      KBAYRAK.liste.push({ g:g, m:m, taban:Float32Array.from(geo.attributes.position.array), faz:Math.random() * 6 });
+    }));
+  }catch(e){ _sessiz(e, 'koseBayraklariKur', 'saha_grafik'); }
+})();
+function koseBayrakRenk(){
+  try{
+    if(!KBAYRAK.tuval || typeof takA !== 'function') return;
+    var ev = (typeof STAD !== 'undefined' && STAD.evTaraf) ? 1 : 0;
+    var tk = ev ? takB() : takA(), L = (typeof taraftarLogolari === 'function') ? taraftarLogolari() : ['', ''], url = L[ev] || '';
+    var kod = (document.querySelector('#board .kod.' + (ev ? 'b' : 'a')) || {}).textContent || tk.kod || '';
+    var r1 = tk.jer, r2 = (tk.shr === tk.jer) ? 0xffffff : tk.shr;
+    var imza = [r1, r2, url, kod].join('|'); if(imza === KBAYRAK.imza) return; KBAYRAK.imza = imza;
+    var ciz = function(img){ try{
+      var x = KBAYRAK.tuval.getContext('2d'), W = 256, H = 168;
+      x.fillStyle = hx(r1); x.fillRect(0, 0, W, H);
+      x.fillStyle = hx(r2); x.beginPath(); x.moveTo(W, 0); x.lineTo(W, H); x.lineTo(0, H); x.closePath(); x.fill();   // çapraz iki renk
+      x.fillStyle = 'rgba(255,255,255,.9)'; x.beginPath(); x.arc(W/2, H/2, 58, 0, Math.PI*2); x.fill();
+      x.strokeStyle = hx(r1); x.lineWidth = 6; x.stroke();
+      if(img){ var k = Math.min(84/img.width, 84/img.height); x.drawImage(img, W/2 - img.width*k/2, H/2 - img.height*k/2, img.width*k, img.height*k); }
+      else { x.fillStyle = hx(r1); x.font = '900 40px system-ui,Arial,sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(String(kod).slice(0, 4), W/2, H/2 + 2); }
+      KBAYRAK.doku.needsUpdate = true; }catch(e){ _sessiz(e, 'koseBayrakCiz', 'saha_grafik'); } };
+    ciz(null);
+    if(url){ var im = new Image(); im.crossOrigin = 'anonymous'; im.onload = function(){ if(KBAYRAK.imza === imza) ciz(im); }; im.src = url; }   // izinsiz sunucu: kodlu bayrak kalır
+  }catch(e){ _sessiz(e, 'koseBayrakRenk', 'saha_grafik'); }
+}
+function _ruzgarTaban(){ try{ return ({ gunduz:0.45, aksam:0.4, gece:0.35, sisli:0.18, yagmur:0.8, kar:0.62 })[AYAR.hava] || 0.45; }catch(e){ return 0.45; } }
+function koseBayrakAdim(dt){
+  try{
+    if(!KBAYRAK.liste.length || !(dt > 0)) return;
+    dt = Math.min(dt, 0.1);
+    var R = RUZGAR; R.t += dt; R.degT -= dt;
+    if(R.degT <= 0){ R.degT = 6 + Math.random() * 10; R.hedefAci = R.aci + (Math.random() - 0.5) * 1.4; R.hedefGuc = Math.max(0.08, Math.min(1, _ruzgarTaban() + (Math.random() - 0.5) * 0.35)); }
+    R.aci += (R.hedefAci - R.aci) * Math.min(1, dt * 0.25);
+    R.guc += ((R.hedefGuc == null ? _ruzgarTaban() : R.hedefGuc) - R.guc) * Math.min(1, dt * 0.3);
+    var guc = Math.max(0.05, R.guc * (0.85 + 0.15 * Math.sin(R.t * 1.7) * Math.sin(R.t * 0.63)));   // esinti
+    var W = KBAYRAK.W, frek = 4 + guc * 7, gen = 0.025 + guc * 0.09, sark = (1 - guc) * 0.42;
+    KBAYRAK.liste.forEach(function(B){
+      B.g.rotation.y = -R.aci;   // bez rüzgârın estiği yöne
+      var pos = B.m.geometry.attributes.position, a = pos.array, t0 = B.taban;
+      for(var i = 0; i < a.length; i += 3){
+        var x0 = t0[i], y0 = t0[i+1], u = x0 / W;                         // u: direkten uzaklık (0..1)
+        var dal = Math.sin(R.t * frek + B.faz - x0 * 9) * gen * u + Math.sin(R.t * frek * 1.7 + B.faz + x0 * 5 + y0 * 6) * gen * 0.35 * u;
+        var kis = 1 - sark * u * 0.55;                                    // zayıf rüzgârda bez kısalır (sarkar)
+        a[i] = x0 * kis; a[i+1] = y0 - sark * u * u * 0.32; a[i+2] = dal;
+      }
+      pos.needsUpdate = true;
+    });
+  }catch(e){ _sessiz(e, 'koseBayrakAdim', 'saha_grafik'); }
 }
 /* ══ TARAFTARLAR (2026-09-27-H) ═════════════════════════════════════════════════════════
    KULLANICI TALEBİ: "Taraftarlar daha gerçekçi olsun; her takımın kendi taraftarı olsun,
@@ -7887,6 +7947,7 @@ function _tfBayrakCiz(b, renk1, renk2, kod, img){
 // yoksa (imza aynı) hiçbir şey yeniden çizilmez.
 function taraftarRenkUygula(){
   try{
+    try{ koseBayrakRenk(); }catch(e){}
     try{ if (typeof kulubeCiz==='function'){ kulubeCiz(0); kulubeCiz(1); } }catch(e){self.__ds&&self.__ds(7766,e)}
     try{ if (typeof tdRenk==='function') tdRenk(); }catch(e){self.__ds&&self.__ds(7767,e)}
     try{ if (typeof KALABALIK !== 'undefined' && KALABALIK.hazir){ _kalabalikAtlasCiz(0); _kalabalikAtlasCiz(1); } }catch(e){self.__ds&&self.__ds(7768,e)}
@@ -18399,7 +18460,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-23-D';
+window.APP_BUILD = '2026-10-23-E';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -29055,6 +29116,7 @@ function loop(){
   // Kare hizi sensoru: surekli dusuk hiz kayda gecer (bkz. sahaKareOlc).
   try{ sahaKareOlc(ham); }catch(e){_sessiz(e,'loop:5644','saha_oyun');}
   if (!window._klipCiz){ try{ taraftarHareket(ham); }catch(e){_sessiz(e,'loop:5645','saha_oyun');} }
+  try{ koseBayrakAdim(ham); }catch(e){}
   if (!window._sahaIzleModu){ try{ kolOku(); }catch(e){_sessiz(e,'loop:5646','saha_oyun');} }    // konsol kolu (bkz. KONSOL KOLU)
   fpsSay++; fpsSure += ham;
   if (fpsSure >= 0.5){ fps = fpsSay / fpsSure; fpsSay = 0; fpsSure = 0; }
@@ -29398,6 +29460,7 @@ function basla(yeniMod){
   if (mod === 'antrenman'){
     teamB.forEach(p => { if (!p.gk){ p.dis = true; p.obj.visible = false; p.golge.visible = false; } });
   }
+  try{ koseBayrakRenk(); }catch(e){}
   uzatmaHesapla();
   kickoff(0);
   ctrl2 = (mod === 'iki') ? (teamB.filter(p => !p.gk && sahada(p)).pop() || teamB[1]) : null;
@@ -30313,6 +30376,7 @@ function _sahaIzleVeriUygula(m){
   try{ if(window._sahaIzleHedef.yon) dirA = (window._sahaIzleHedef.yon.dirA < 0) ? -1 : 1; }catch(e){_sessiz(e,'_sahaIzleVeriUygula:6342','saha_izle');}
   _sahaIzleFormaUygula(window._sahaIzleHedef.homeJer, window._sahaIzleHedef.awayJer);
   _sahaIzleKadroUygula();
+  try{ koseBayrakRenk(); }catch(e){}
   try{
     var dk = Math.max(0, Math.min(120, Math.round(m.minute||0)));
     document.getElementById('sa').textContent = m.homeGoals||0;
@@ -30710,6 +30774,7 @@ function _sahaIzleKareAdimla(dt){
      KÖK SEBEP: maç verisi henüz gelmemişken (ya da gelmezken) bu işlev en başta çıkıyordu; kamera açılıştaki konumda donuk kalıyor,
      izleyici tek açı görüyordu. Artık veri yokken de bekleme sahnesi (boş saha, skorbord yok, değişen sinematik açılar) oynar. */
   if(!h){
+    try{ izBeklemeSes(dt, true); }catch(e){}
     try{ _izSkorbordGorunur(false); _izBeklemeSahnesi(true);
       var _sn0 = izleSinematik(dt); camera.position.copy(_sn0.c); _izBak.copy(_sn0.b); camera.lookAt(_izBak); window._izSonFov = camera.fov; }catch(e){ _sessiz(e, 'izleBekleme', 'saha_izle'); }
     return;
@@ -30783,6 +30848,7 @@ function _sahaIzleKareAdimla(dt){
   var _faz = _izFaz();
   _izSkorbordGorunur(_faz === 'oyun' || _faz === 'manuel');
   _izBeklemeSahnesi(_faz === 'bekleme');
+  izBeklemeSes(dt, _faz === 'bekleme');
   if(_tk){ camHedef.set(_tk.c[0], _tk.c[1], _tk.c[2]); bakHedef.set(_tk.b[0], _tk.b[1], _tk.b[2]); window._izBakZson = bakHedef.z;
     if(!window._izTkAktif){ window._izTkAktif = true;
       window._izUcus = { t:0, sure:(_faz === 'oyun' ? 1.2 : 2.6), c:camera.position.clone(), b:_izBak.clone(), f:(window._izSonFov || camera.fov) }; }
@@ -30804,6 +30870,127 @@ function _sahaIzleKareAdimla(dt){
   else if(window._IZY && window._IZY.mod !== 'yayin'){ window._IZY.mod = 'yayin'; camera.position.copy(camHedef); }
   camera.position.lerp(camHedef, Math.min(1, dt * (_izDuranKam ? 4.5 : (_yon ? 4.0 : (_acilKilit ? 9.0 : 3.0)))));
   _izBak.copy(bakHedef); camera.lookAt(bakHedef);
+}
+/* BEKLEME YAYINI SESİ (2026-10-23-E, kullanıcı: "TV sekmesinde canlı maç bekleme ekranındayken spiker, yorumcu ve taraftar sesleri
+   olmalı; spiker ve yorumcu için çok sayıda kelime ekleyerek anlatımı güçlendir"). Oyuncular sahaya çıkmadan önce (bekleme evresi)
+   izleyici sessiz bir stat görüyordu. Artık: tribün uğultusu yükselip alçalır, aralıklarla tezahürat yükselir; spiker maç önü
+   anonslarını, yorumcu maç önü değerlendirmelerini sırayla yapar (cümleler karışık sırayla, tekrar etmeden). Takım, stat ve hava
+   adları maç verisinden gelir; veri yoksa genel cümleler kullanılır. Ses, izleyici sesi açtığında (oynatıcıya dokunuş) başlar. */
+var IZB_SPIKER = [
+  'İyi akşamlar sayın seyirciler, karşılaşmanın başlamasına sayılı dakikalar kaldı.',
+  'Merhaba, {stad} içinden canlı yayındayız; {ev} ile {dep} birazdan karşı karşıya gelecek.',
+  'Ev sahibi {ev}, konuk ekip {dep}. Tribünler şimdiden dolmaya başladı.',
+  'Stadın atmosferi harika; taraftarlar takımlarını sahada görmek için sabırsızlanıyor.',
+  'Hava durumu: {hava}. Zemin maç için hazır görünüyor.',
+  'Oyuncular soyunma odasında son taktik toplantısını yapıyor.',
+  'Teknik ekipler son hazırlıklarını tamamlıyor, hakemler de birazdan sahada olacak.',
+  'Tünelin ağzında hareketlilik var, takımlar her an sahaya çıkabilir.',
+  'Bu karşılaşma ligin kaderini etkileyebilecek maçlardan biri.',
+  '{ev} taraftarları kale arkasındaki tribünde koreografisini hazırladı.',
+  '{dep} taraftarları da deplasmanda takımını yalnız bırakmadı.',
+  'Saha görevlileri son kontrolleri yapıyor, kale fileleri gerildi.',
+  'Köşe bayrakları yerinde, toplar hazır; büyük heyecan birazdan başlıyor.',
+  'İki takımın da kadroları açıklandı, sürpriz isimler var mı göreceğiz.',
+  '{ev} kendi sahasında taraftarının önünde puan arıyor.',
+  '{dep} bu deplasmandan eli boş dönmek istemiyor.',
+  'Tribünlerden yükselen tezahüratlar stadı adeta inletiyor.',
+  'Maç öncesi ısınmalar tamamlandı, oyuncular soyunma odasına döndü.',
+  'Kameralarımız stadın her köşesinde; maçın hiçbir anını kaçırmayacaksınız.',
+  'Hakem kurulu bu maç için deneyimli bir ekip görevlendirdi.',
+  'Birazdan oyuncular tünelden çıkacak ve seremoni başlayacak.',
+  'Futbolseverler, {stad} bu akşam bayram yeri gibi.',
+  'Yayınımıza yeni katılanlar için hatırlatalım: {ev} ile {dep} karşılaşmasını izliyorsunuz.',
+  'Son dakikalarda tribünlere akın devam ediyor.',
+  'Rüzgârın etkisi köşe bayraklarında açıkça görülüyor; bu, uzun topları etkileyebilir.',
+  '{ev} son maçlarındaki formunu sürdürmek istiyor.',
+  '{dep} ise savunmadaki eksiklerini kapatmış görünüyor.',
+  'Ve stat spikeri takımların kadrolarını okumaya hazırlanıyor.',
+  'Isınma bölgesinde yedek oyuncular da hazır bekliyor.',
+  'Teknik direktörler kulübenin önünde son notlarını alıyor.',
+  'Taraftarlar atkılarını havaya kaldırdı; tribünler rengârenk.',
+  'Bu maçın galibi puan tablosunda önemli bir adım atacak.',
+  'Saha ışıkları yandı, her şey hazır.',
+  'Kale arkasındaki tribünden davul sesleri geliyor.',
+  'Oyuncular tünelde sıraya girmek üzere.',
+  'Maç başlamadan önce son kez stadı yukarıdan gösterelim.',
+  'Az sonra hakemin düdüğüyle mücadele başlayacak.',
+  'Sayın seyirciler, büyük karşılaşmaya çok az kaldı; bizden ayrılmayın.',
+  'Stadın girişlerinde yoğunluk sürüyor, taraftarlar yerlerini alıyor.',
+  '{ev} kaptanı soyunma odasında takım arkadaşlarına konuşma yapıyor.',
+  '{dep} oyuncuları deplasman tribününü selamlamak için hazırlanıyor.',
+  'Ev sahibi ekip son iç saha maçında taraftarını sevindirmişti.',
+  'Konuk ekip deplasmanda zor rakip olduğunu kanıtlamak istiyor.',
+  'Bugün sahada hem taktik hem de mücadele göreceğiz.'
+];
+var IZB_YORUMCU = [
+  'Bence bu maçta orta saha mücadelesi belirleyici olacak.',
+  'Ev sahibi avantajı önemli ama {dep} kontra ataklarda çok tehlikeli.',
+  'İlk gol maçın kaderini belirler; erken gol gelirse oyun açılır.',
+  '{ev} topa sahip olmak isteyecek, {dep} ise alanları kapatacak gibi görünüyor.',
+  'Kanat oyunu bu maçta çok önemli olacak, bekler sık sık bindirme yapacak.',
+  'Duran toplar bu tür maçlarda farkı yaratır.',
+  'Savunma arkasına atılacak toplar {dep} için büyük silah olabilir.',
+  'Taraftar desteği oyunculara ekstra enerji verir, bunu sahada göreceğiz.',
+  'İki teknik direktör de birbirini çok iyi tanıyor; satranç maçı izleyebiliriz.',
+  'Pres yoğunluğu ilk yarım saatte çok yüksek olacaktır.',
+  'Kalecilerin uzun top dağıtımı oyunun temposunu belirleyecek.',
+  'Bu zeminde kısa pas oyunu çok etkili olur.',
+  'Hava şartları uzun topların kontrolünü zorlaştırabilir.',
+  'Bence {ev} ilk dakikalarda baskılı başlayacak.',
+  '{dep} sabırlı oynarsa bu deplasmandan puanla dönebilir.',
+  'Disiplin çok önemli; gereksiz kartlar dengeleri bozabilir.',
+  'Yedek kulübesinin derinliği ikinci yarıda fark yaratır.',
+  'Bu maçta bireysel yetenekler kilidi açan isim olabilir.',
+  'Geçiş oyunlarında hızlı olan takım kazanır.',
+  'Savunma hattı ile orta saha arasındaki mesafe kısa tutulmalı.',
+  'Tempo düşerse {dep} için işler kolaylaşır.',
+  'Ev sahibi kendi taraftarı önünde hata yapmaktan kaçınmalı.',
+  'Ceza sahası dışından şut atan oyunculara dikkat etmek gerek.',
+  'Kondisyon son yirmi dakikada belirleyici olacak.',
+  'Takımın lideri olan oyuncuların bu maçta sorumluluk alması lazım.',
+  'Bence beraberlik iki takım için de yetersiz bir sonuç olur.',
+  'Hakem kararları bu tür gergin maçlarda çok tartışılır.',
+  'İlk yarıyı golsüz kapatmak isteyen bir takım varsa, o {dep} olur.',
+  'Hücum hattındaki uyum, son haftalarda {ev} için olumlu bir işaret.',
+  'Kornerlerde boy avantajı olan taraf öne çıkabilir.',
+  'Oyunun kırılma anları genelde devre arasından hemen sonra gelir.',
+  'Bu tür maçlarda soğukkanlılık her şeydir.',
+  'Bence seyirciyi gollü bir maç bekliyor.',
+  'Teknik direktörün oyuna müdahalesi maçın gidişatını değiştirebilir.',
+  'Topu kaybettikten sonraki ilk beş saniye çok kritik.',
+  'Savunmadaki iletişim, özellikle duran toplarda önemli.',
+  'İki takım da kazanmak için sahaya çıkacak, bu bizim için iyi haber.',
+  'Ben ev sahibinin biraz daha şanslı olduğunu düşünüyorum ama futbolda her şey olur.',
+  'Saha içinde liderlik eden oyuncu takımını sırtlayabilir.',
+  'Bu karşılaşmayı kim kazanırsa özgüven depolar.'
+];
+var _IZB = { sonraki:0, konusuyor:false, sira:{}, sonTez:0, girdi:false, rol:'spiker' };
+function _izbKarisik(ad, havuz){ var S = _IZB.sira; if(!S[ad] || !S[ad].length){ S[ad] = havuz.slice(); for(var i = S[ad].length - 1; i > 0; i--){ var j = Math.floor(Math.random() * (i + 1)); var t = S[ad][i]; S[ad][i] = S[ad][j]; S[ad][j] = t; } } return S[ad].pop(); }
+function _izbBaglam(){
+  var h = window._sahaIzleHedef || {}, T = window._sahaIzleTakimlar || {}, ev = (T[h.homeId] || {}), dep = (T[h.awayId] || {});
+  var hv = ''; try{ hv = ((HAVALAR.filter(function(x){ return x.k === AYAR.hava; })[0]) || {}).ad || ''; }catch(e){}
+  return { ev:ev.name || 'ev sahibi takım', dep:dep.name || 'konuk takım', stad:String(ev.stadium || '').trim() || ((ev.name ? ev.name + ' stadı' : 'stadyum')), hava:hv ? hv.toLocaleLowerCase('tr-TR') : 'maç için uygun' };
+}
+function izBeklemeSes(dt, aktif){
+  try{
+    if(!aktif){ _IZB.girdi = false; return; }
+    if(typeof _izleSesAcik === 'undefined' || !_izleSesAcik) return;
+    var simdi = Date.now();
+    if(!_IZB.girdi){ _IZB.girdi = true; _IZB.sonraki = simdi + 2500; _IZB.sonTez = simdi + 6000 + Math.random() * 6000; try{ sesTribun(0.09, 3); }catch(e){} }
+    // Taraftar: tezahürat ve tribün dalgalanması
+    if(simdi > _IZB.sonTez){ _IZB.sonTez = simdi + 16000 + Math.random() * 20000;
+      try{ tezahurat(Math.random() < 0.4, true); }catch(e){}
+      try{ sesTribun(0.12 + Math.random() * 0.06, 4); setTimeout(function(){ try{ sesTribun(0.07, 3); }catch(e){} }, 4500); }catch(e){} }
+    // Spiker / yorumcu
+    if(_IZB.konusuyor || simdi < _IZB.sonraki) return;
+    var rol = _IZB.rol; _IZB.rol = (rol === 'spiker' && Math.random() < 0.75) ? 'yorumcu' : 'spiker';
+    var b = _izbBaglam(), m = _izbKarisik(rol, rol === 'spiker' ? IZB_SPIKER : IZB_YORUMCU)
+      .replace(/\{ev\}/g, b.ev).replace(/\{dep\}/g, b.dep).replace(/\{stad\}/g, b.stad).replace(/\{hava\}/g, b.hava);
+    _IZB.konusuyor = true;
+    var bitti = false, son = function(){ if(bitti) return; bitti = true; _IZB.konusuyor = false; _IZB.sonraki = Date.now() + (rol === 'spiker' ? 1500 : 4000) + Math.random() * 4000; };
+    setTimeout(son, 15000);
+    _spkOku(m, rol, son);
+  }catch(e){ _IZB.konusuyor = false; _sessiz(e, 'izBeklemeSes', 'saha_izle'); }
 }
 var _izBak = new THREE.Vector3(0, 0.6, 0);   // izleyici kamerasının o anki bakış noktası (tünele uçuşun başlangıcı)
 /* MAÇ EVRESİ (izleyici): bekleme = oyuncular henüz maça girmedi / canlı veri yok, tunel = tünel çıkışı, devre = devre arası,
@@ -30832,7 +31019,10 @@ function _izBeklemeSahnesi(v){
   }catch(e){ _sessiz(e, '_izBeklemeSahnesi', 'saha_izle'); }
 }
 /* Sinematik planlar: her plan ~6,5 sn, sıra her seferinde rastgele (aynı plan art arda gelmez), planlar arası kesme. u = plan içi ilerleme. */
-var IZ_PLANLAR = ['tribun', 'kale', 'kus', 'gezen', 'vinc', 'yorunge'];
+/* (2026-10-23-E, kullanıcı: "daha fazla kamera açısı eklenebilir") 6 plana 8 yeni plan eklendi: tünel ağzı, kale içi (file arkasından
+   alçak), dron (sahanın boyunca uçuş), orta yuvarlak (alçak dönüş), köşe bayrağı yakın planı, üst tribün, kenar çizgisi yürüyüşü,
+   çapraz örümcek kamera. */
+var IZ_PLANLAR = ['tribun', 'kale', 'kus', 'gezen', 'vinc', 'yorunge', 'tunel', 'kaleIci', 'dron', 'ortaDaire', 'korner', 'ustTribun', 'kenar', 'orumcek'];
 function izleSinematik(dt){
   var S = window._IZS;
   if(!S || S.t >= S.sure){
@@ -30846,6 +31036,16 @@ function izleSinematik(dt){
   else if(S.ad === 'kus'){ var ak = S.a0 + u * 0.5; r = { c:new V(Math.cos(ak) * 14, 74, Math.sin(ak) * 14), b:new V(0, 0, 0), f:52 }; }
   else if(S.ad === 'gezen'){ var gx = S.sx * (-38 + 76 * u), gz = S.sz * (8 + 6 * Math.sin(u * 3)); r = { c:new V(gx, 1.8, gz), b:new V(gx + S.sx * 16, 1.4, gz * 0.4), f:62 }; }
   else if(S.ad === 'vinc') r = { c:new V(S.sx * (HLX + 4), 4 + 15 * e, S.sz * (HWZ + 4)), b:new V(0, 0, 0), f:56 };
+  else if(S.ad === 'tunel'){ var tz = (typeof TUNEL !== 'undefined' && TUNEL.agizZ) ? TUNEL.agizZ : (HWZ + 0.9), ts = tz >= 0 ? 1 : -1;
+    r = { c:new V(-3 + 6 * e, 2.2, tz + ts * 2.5), b:new V(0, 1.2, tz - ts * 30), f:58 }; }
+  else if(S.ad === 'kaleIci') r = { c:new V(S.sx * (HLX + 1.6), 1.1, S.sz * (1.5 + 1.5 * e)), b:new V(S.sx * (HLX - 30), 1.4, -S.sz * 6), f:64 };
+  else if(S.ad === 'dron'){ var dx = S.sx * (-HLX + 2 * HLX * e); r = { c:new V(dx, 22 - 6 * Math.sin(u * Math.PI), S.sz * 18), b:new V(dx + S.sx * 25, 0, 0), f:55 }; }
+  else if(S.ad === 'ortaDaire'){ var oa = S.a0 + u * 1.3; r = { c:new V(Math.cos(oa) * 12, 2.4, Math.sin(oa) * 12), b:new V(0, 0.8, 0), f:60 }; }
+  else if(S.ad === 'korner'){ var kx = S.sx * (HLX - 0.3), kz = S.sz * (HWZ - 0.3);
+    r = { c:new V(kx - S.sx * (3.2 + 1.2 * e), 1.5, kz - S.sz * (2.6 + 0.8 * e)), b:new V(kx, 1.3, kz), f:44 }; }
+  else if(S.ad === 'ustTribun') r = { c:new V(S.sx * 10, 30, S.sz * (HWZ + 26)), b:new V(-S.sx * 8 * e, 0, 0), f:46 - 8 * e };
+  else if(S.ad === 'kenar'){ var kx2 = S.sx * (-40 + 80 * e); r = { c:new V(kx2, 1.5, S.sz * (HWZ + 1.8)), b:new V(kx2 * 0.4, 1, 0), f:58 }; }
+  else if(S.ad === 'orumcek'){ var ox = S.sx * (-45 + 90 * e), oz = S.sz * (-25 + 50 * e); r = { c:new V(ox, 30, oz), b:new V(ox * 0.3, 0, oz * 0.3), f:54 }; }
   else { var ao = S.a0 + u * 0.9; r = { c:new V(Math.cos(ao) * 46, 13, Math.sin(ao) * 30), b:new V(0, 0.5, 0), f:52 }; }
   if(Math.abs(camera.fov - r.f) > 0.05){ camera.fov = r.f; camera.updateProjectionMatrix(); }
   return r;
