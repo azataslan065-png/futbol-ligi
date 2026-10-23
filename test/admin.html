@@ -2452,31 +2452,41 @@ firebase.initializeApp(FB);
    40 kez) yeniden kurulur; dinleyici bu arada kapatılırsa (off) bekleyen deneme iptal edilir. Hata işleyicisi olan dinleyicilere
    dokunulmaz (kendi kurtarmalarını yapıyorlar). */
 (function(){ try{
-  var Q = window.firebase && firebase.database && firebase.database.Query && firebase.database.Query.prototype;
-  if(!Q || Q._dinleyiciKurtarma || typeof Q.on !== 'function') return; Q._dinleyiciKurtarma = true;
-  var orjOn = Q.on, orjOff = Q.off, bekleyen = [];
+  var DB = window.firebase && firebase.database; if(!DB) return;
+  var bekleyen = [];
   var ayni = function(a, b){ try{ return a === b || (a && a.isEqual && a.isEqual(b)); }catch(e){ return false; } };
-  Q.on = function(tur, cb, iptal, bag){
-    if(typeof cb !== 'function' || typeof iptal === 'function') return orjOn.apply(this, arguments);
-    if(iptal && typeof iptal === 'object' && bag === undefined) bag = iptal;
-    var ref = this, n = 0;
-    var hata = function(err){
-      try{
-        if(!/permission/i.test(String((err && (err.code || err.message)) || '')) || n >= 40) return;
-        n++;
-        var k = { ref:ref, tur:tur, cb:cb, t:null };
-        k.t = setTimeout(function(){ var i = bekleyen.indexOf(k); if(i < 0) return; bekleyen.splice(i, 1);
-          try{ orjOn.call(ref, tur, cb, hata, bag); }catch(e){} }, Math.min(15000, 1000 * n));
-        bekleyen.push(k);
-      }catch(e){}
+  /* (2026-10-23-C) Hem Query hem Reference: SDK'da Reference kendi 'on' işlevini taşıyabiliyor; yalnızca Query sarıldığında
+     fbDb.ref(...).on(...) çağrıları kurtarmaya HİÇ girmiyordu (B sürümünde canlı izleyicinin düzelmemesinin sebebi). */
+  // 'on' işlevinin GERÇEK sahibi prototip zincirinde aranır (Query dışa açılmamış olabilir; Reference onu miras alır).
+  var sahip = function(P){ while(P && !Object.prototype.hasOwnProperty.call(P, 'on')) P = Object.getPrototypeOf(P); return P; };
+  var protolar = [];
+  [DB.Query && DB.Query.prototype, DB.Reference && DB.Reference.prototype].forEach(function(P){ var o = sahip(P); if(o && o !== Object.prototype && protolar.indexOf(o) < 0) protolar.push(o); });
+  protolar.forEach(function(Q){
+    if(!Q || !Object.prototype.hasOwnProperty.call(Q, 'on') || Q._dinleyiciKurtarma) return; Q._dinleyiciKurtarma = true;
+    var orjOn = Q.on, orjOff = Object.prototype.hasOwnProperty.call(Q, 'off') ? Q.off : null;
+    Q.on = function(tur, cb, iptal, bag){
+      if(typeof cb !== 'function' || typeof iptal === 'function') return orjOn.apply(this, arguments);
+      if(iptal && typeof iptal === 'object' && bag === undefined) bag = iptal;
+      var ref = this, n = 0;
+      var hata = function(err){
+        try{
+          try{ var _y = ''; try{ _y = decodeURIComponent(String(ref.toString()).replace(/^https?:\/\/[^\/]+/, '')); }catch(_e){} if(self.__fbRed) self.__fbRed(_y, tur, err); }catch(_x){}
+          if(!/permission/i.test(String((err && (err.code || err.message)) || '')) || n >= 40) return;
+          n++;
+          var k = { ref:ref, tur:tur, cb:cb, t:null };
+          k.t = setTimeout(function(){ var i = bekleyen.indexOf(k); if(i < 0) return; bekleyen.splice(i, 1);
+            try{ orjOn.call(ref, tur, cb, hata, bag); }catch(e){} }, Math.min(15000, 1000 * n));
+          bekleyen.push(k);
+        }catch(e){}
+      };
+      return orjOn.call(this, tur, cb, hata, bag);
     };
-    return orjOn.call(this, tur, cb, hata, bag);
-  };
-  if(typeof orjOff === 'function') Q.off = function(tur, cb){
-    try{ for(var i = bekleyen.length - 1; i >= 0; i--){ var k = bekleyen[i];
-      if((!cb || k.cb === cb) && (!tur || k.tur === tur) && ayni(k.ref, this)){ clearTimeout(k.t); bekleyen.splice(i, 1); } } }catch(e){}
-    return orjOff.apply(this, arguments);
-  };
+    if(orjOff) Q.off = function(tur, cb){
+      try{ for(var i = bekleyen.length - 1; i >= 0; i--){ var k = bekleyen[i];
+        if((!cb || k.cb === cb) && (!tur || k.tur === tur) && ayni(k.ref, this)){ clearTimeout(k.t); bekleyen.splice(i, 1); } } }catch(e){}
+      return orjOff.apply(this, arguments);
+    };
+  });
 }catch(e){} })();
 /* ══════════════════════════════════════════════════════════════════════════════════════════
    TEST ORTAMI - AYRI VERİTABANI KÖKÜ (aynısı Puan Tablosu tarafında da var)
@@ -2828,7 +2838,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-23-B';
+window.APP_BUILD='2026-10-23-D';
 
 
 var DIAG_AUTH_MOD='adm_settings';

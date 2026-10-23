@@ -11893,31 +11893,41 @@ try{
    40 kez) yeniden kurulur; dinleyici bu arada kapatılırsa (off) bekleyen deneme iptal edilir. Hata işleyicisi olan dinleyicilere
    dokunulmaz (kendi kurtarmalarını yapıyorlar). */
 (function(){ try{
-  var Q = window.firebase && firebase.database && firebase.database.Query && firebase.database.Query.prototype;
-  if(!Q || Q._dinleyiciKurtarma || typeof Q.on !== 'function') return; Q._dinleyiciKurtarma = true;
-  var orjOn = Q.on, orjOff = Q.off, bekleyen = [];
+  var DB = window.firebase && firebase.database; if(!DB) return;
+  var bekleyen = [];
   var ayni = function(a, b){ try{ return a === b || (a && a.isEqual && a.isEqual(b)); }catch(e){ return false; } };
-  Q.on = function(tur, cb, iptal, bag){
-    if(typeof cb !== 'function' || typeof iptal === 'function') return orjOn.apply(this, arguments);
-    if(iptal && typeof iptal === 'object' && bag === undefined) bag = iptal;
-    var ref = this, n = 0;
-    var hata = function(err){
-      try{
-        if(!/permission/i.test(String((err && (err.code || err.message)) || '')) || n >= 40) return;
-        n++;
-        var k = { ref:ref, tur:tur, cb:cb, t:null };
-        k.t = setTimeout(function(){ var i = bekleyen.indexOf(k); if(i < 0) return; bekleyen.splice(i, 1);
-          try{ orjOn.call(ref, tur, cb, hata, bag); }catch(e){} }, Math.min(15000, 1000 * n));
-        bekleyen.push(k);
-      }catch(e){}
+  /* (2026-10-23-C) Hem Query hem Reference: SDK'da Reference kendi 'on' işlevini taşıyabiliyor; yalnızca Query sarıldığında
+     fbDb.ref(...).on(...) çağrıları kurtarmaya HİÇ girmiyordu (B sürümünde canlı izleyicinin düzelmemesinin sebebi). */
+  // 'on' işlevinin GERÇEK sahibi prototip zincirinde aranır (Query dışa açılmamış olabilir; Reference onu miras alır).
+  var sahip = function(P){ while(P && !Object.prototype.hasOwnProperty.call(P, 'on')) P = Object.getPrototypeOf(P); return P; };
+  var protolar = [];
+  [DB.Query && DB.Query.prototype, DB.Reference && DB.Reference.prototype].forEach(function(P){ var o = sahip(P); if(o && o !== Object.prototype && protolar.indexOf(o) < 0) protolar.push(o); });
+  protolar.forEach(function(Q){
+    if(!Q || !Object.prototype.hasOwnProperty.call(Q, 'on') || Q._dinleyiciKurtarma) return; Q._dinleyiciKurtarma = true;
+    var orjOn = Q.on, orjOff = Object.prototype.hasOwnProperty.call(Q, 'off') ? Q.off : null;
+    Q.on = function(tur, cb, iptal, bag){
+      if(typeof cb !== 'function' || typeof iptal === 'function') return orjOn.apply(this, arguments);
+      if(iptal && typeof iptal === 'object' && bag === undefined) bag = iptal;
+      var ref = this, n = 0;
+      var hata = function(err){
+        try{
+          try{ var _y = ''; try{ _y = decodeURIComponent(String(ref.toString()).replace(/^https?:\/\/[^\/]+/, '')); }catch(_e){} if(self.__fbRed) self.__fbRed(_y, tur, err); }catch(_x){}
+          if(!/permission/i.test(String((err && (err.code || err.message)) || '')) || n >= 40) return;
+          n++;
+          var k = { ref:ref, tur:tur, cb:cb, t:null };
+          k.t = setTimeout(function(){ var i = bekleyen.indexOf(k); if(i < 0) return; bekleyen.splice(i, 1);
+            try{ orjOn.call(ref, tur, cb, hata, bag); }catch(e){} }, Math.min(15000, 1000 * n));
+          bekleyen.push(k);
+        }catch(e){}
+      };
+      return orjOn.call(this, tur, cb, hata, bag);
     };
-    return orjOn.call(this, tur, cb, hata, bag);
-  };
-  if(typeof orjOff === 'function') Q.off = function(tur, cb){
-    try{ for(var i = bekleyen.length - 1; i >= 0; i--){ var k = bekleyen[i];
-      if((!cb || k.cb === cb) && (!tur || k.tur === tur) && ayni(k.ref, this)){ clearTimeout(k.t); bekleyen.splice(i, 1); } } }catch(e){}
-    return orjOff.apply(this, arguments);
-  };
+    if(orjOff) Q.off = function(tur, cb){
+      try{ for(var i = bekleyen.length - 1; i >= 0; i--){ var k = bekleyen[i];
+        if((!cb || k.cb === cb) && (!tur || k.tur === tur) && ayni(k.ref, this)){ clearTimeout(k.t); bekleyen.splice(i, 1); } } }catch(e){}
+      return orjOff.apply(this, arguments);
+    };
+  });
 }catch(e){} })();
   fbDb = firebase.database();
   // ══════════════════════════════════════════════════════════════════════════════════════
@@ -18389,7 +18399,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-23-B';
+window.APP_BUILD = '2026-10-23-D';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -30280,7 +30290,9 @@ function _sahaIzleVeriUygula(m){
     awayJer: (typeof m.awayJer==='number') ? m.awayJer : null,
     tabela: (m.tabela && typeof m.tabela==='object') ? m.tabela : null,
     yon: (m.izleYon && typeof m.izleYon==='object') ? m.izleYon : null,
-    sahaMode: !!m.sahaMode, manuel: !m.sahaMode && !m.tabela && ((Number(m.minute) || 0) > 0 || (Number(m.homeGoals) || 0) + (Number(m.awayGoals) || 0) > 0)
+    /* manuel: yöneticinin SAHA dışında elle yürüttüğü maç (skor/dakika panelden). SAHA'ya onaylı (sahaOnayli) bir maç hiçbir zaman
+       manuel sayılmaz - önceki denemelerden kalan dakika/skor alanları yüzünden bekleme sahnesi yerine düz yayın kamerası açılıyordu. */
+    sahaMode: !!m.sahaMode, manuel: !m.sahaMode && !m.sahaOnayli && !m.tabela && !!m.isLive && ((Number(m.minute) || 0) > 0 || (Number(m.homeGoals) || 0) + (Number(m.awayGoals) || 0) > 0)
   };
   // Tabela tazeliği: yalnızca tabela.ts DEĞİŞTİĞİNDE "son canlı veri" anı güncellenir. Sayfa açıldığında gelen eski bir tabela
   // (yarıda kalmış önceki deneme) taze sayılmasın diye ilk görüşte ts 30 sn'den eskiyse bayat kabul edilir (bkz. _izFaz).
@@ -30419,9 +30431,29 @@ function _ozetEtiketKoru(){ var e = document.getElementById('msEtiket'); if(e &&
 function _sahaIzleFirebaseDinle(mod){
   if(!fbHazir){ setTimeout(function(){ _sahaIzleFirebaseDinle(mod); }, 200); return; }
   try{
-    fbDb.ref('leagues/'+mod.ligId+'/matches/'+mod.matchId).on('value', function(sn){
-      _sahaIzleVeriUygula(sn.val());
-    });
+    /* CANLI VERİ GÜVENCESİ (2026-10-23-C). Dinleyici kimlik oturumu açılmadan kurulursa veritabanı "izin yok" diyerek onu kalıcı
+       iptal ediyordu; izleyiciye hiç veri gelmiyordu. Artık: (1) iptal edilen dinleyici artan aralıkla yeniden kurulur, (2) 8 sn
+       boyunca hiç veri gelmezse 5 sn'de bir doğrudan okunur (dinleyici sessizce kopmuş olsa bile maç akışı gelir), (3) sebep
+       teşhis kaydına yazılır. */
+    var _yol = 'leagues/'+mod.ligId+'/matches/'+mod.matchId, _deneme = 0;
+    window._izVeriSonAn = 0; window._izDinleyiciKuruldu = Date.now();
+    var _al = function(sn){ window._izVeriSonAn = Date.now(); _sahaIzleVeriUygula(sn.val()); };
+    var _kur = function(){
+      fbDb.ref(_yol).on('value', _al, function(err){
+        _deneme++;
+        try{ DiagSaha('izleDinleyiciIptal', err, { modul:'saha_izle', yol:_yol, deneme:_deneme, kimlik:(function(){ try{ var u = firebase.auth().currentUser; return u ? (u.isAnonymous ? 'anonim' : 'hesap') : 'yok'; }catch(e){ return '?'; } })(),
+          anlami:'Canlı maç izleyicisine veri gelmiyor; yeniden bağlanılıyor.' }); }catch(_d){}
+        if(_deneme < 60) setTimeout(_kur, Math.min(15000, 1000 * _deneme));
+      });
+    };
+    _kur();
+    setInterval(function(){
+      try{
+        if(Date.now() - (window._izVeriSonAn || window._izDinleyiciKuruldu) < 8000) return;
+        fbDb.ref(_yol).once('value').then(function(sn){ window._izVeriSonAn = Date.now(); _sahaIzleVeriUygula(sn.val()); }).catch(function(err){
+          if(!window._izOkumaHataYazildi){ window._izOkumaHataYazildi = true; try{ DiagSaha('izleOkumaHata', err, { modul:'saha_izle', yol:_yol, anlami:'Canlı maç verisi okunamıyor.' }); }catch(_d){} } });
+      }catch(e){}
+    }, 5000);
   }catch(e){_sessiz(e,'_sahaIzleFirebaseDinle:6367','saha_izle');}
   _sahaIzleKadroDinle(mod);
 }
@@ -30673,7 +30705,15 @@ function _sahaIzleTakimUygula(pool, arr, lerp, dt, xYon){
 }
 // loop() içinden HER KAREDE çağrılır (bkz. aşağıdaki loop() değişikliği).
 function _sahaIzleKareAdimla(dt){
-  var h = window._sahaIzleHedef; if(!h)return;
+  var h = window._sahaIzleHedef;
+  /* (2026-10-23-C, kullanıcı: "admin maçı canlıya alınca, oyunculardan hiçbiri SAHA'ya girmemiş olsa bile çeşitli açılar olmalı").
+     KÖK SEBEP: maç verisi henüz gelmemişken (ya da gelmezken) bu işlev en başta çıkıyordu; kamera açılıştaki konumda donuk kalıyor,
+     izleyici tek açı görüyordu. Artık veri yokken de bekleme sahnesi (boş saha, skorbord yok, değişen sinematik açılar) oynar. */
+  if(!h){
+    try{ _izSkorbordGorunur(false); _izBeklemeSahnesi(true);
+      var _sn0 = izleSinematik(dt); camera.position.copy(_sn0.c); _izBak.copy(_sn0.b); camera.lookAt(_izBak); window._izSonFov = camera.fov; }catch(e){ _sessiz(e, 'izleBekleme', 'saha_izle'); }
+    return;
+  }
   try{ _sahaIzleSaatTik(); }catch(e){_sessiz(e,'_sahaIzleKareAdimla:6598','saha_izle');}
   var lerp = Math.min(1, dt*6);
   // Ev perspektifi -> oyuncunun dünyası: homeX = (benHome ? 1 : -1) * x * dirA / HLX

@@ -2872,31 +2872,41 @@ const app=firebase.initializeApp(FB);
    40 kez) yeniden kurulur; dinleyici bu arada kapatılırsa (off) bekleyen deneme iptal edilir. Hata işleyicisi olan dinleyicilere
    dokunulmaz (kendi kurtarmalarını yapıyorlar). */
 (function(){ try{
-  var Q = window.firebase && firebase.database && firebase.database.Query && firebase.database.Query.prototype;
-  if(!Q || Q._dinleyiciKurtarma || typeof Q.on !== 'function') return; Q._dinleyiciKurtarma = true;
-  var orjOn = Q.on, orjOff = Q.off, bekleyen = [];
+  var DB = window.firebase && firebase.database; if(!DB) return;
+  var bekleyen = [];
   var ayni = function(a, b){ try{ return a === b || (a && a.isEqual && a.isEqual(b)); }catch(e){ return false; } };
-  Q.on = function(tur, cb, iptal, bag){
-    if(typeof cb !== 'function' || typeof iptal === 'function') return orjOn.apply(this, arguments);
-    if(iptal && typeof iptal === 'object' && bag === undefined) bag = iptal;
-    var ref = this, n = 0;
-    var hata = function(err){
-      try{
-        if(!/permission/i.test(String((err && (err.code || err.message)) || '')) || n >= 40) return;
-        n++;
-        var k = { ref:ref, tur:tur, cb:cb, t:null };
-        k.t = setTimeout(function(){ var i = bekleyen.indexOf(k); if(i < 0) return; bekleyen.splice(i, 1);
-          try{ orjOn.call(ref, tur, cb, hata, bag); }catch(e){} }, Math.min(15000, 1000 * n));
-        bekleyen.push(k);
-      }catch(e){}
+  /* (2026-10-23-C) Hem Query hem Reference: SDK'da Reference kendi 'on' işlevini taşıyabiliyor; yalnızca Query sarıldığında
+     fbDb.ref(...).on(...) çağrıları kurtarmaya HİÇ girmiyordu (B sürümünde canlı izleyicinin düzelmemesinin sebebi). */
+  // 'on' işlevinin GERÇEK sahibi prototip zincirinde aranır (Query dışa açılmamış olabilir; Reference onu miras alır).
+  var sahip = function(P){ while(P && !Object.prototype.hasOwnProperty.call(P, 'on')) P = Object.getPrototypeOf(P); return P; };
+  var protolar = [];
+  [DB.Query && DB.Query.prototype, DB.Reference && DB.Reference.prototype].forEach(function(P){ var o = sahip(P); if(o && o !== Object.prototype && protolar.indexOf(o) < 0) protolar.push(o); });
+  protolar.forEach(function(Q){
+    if(!Q || !Object.prototype.hasOwnProperty.call(Q, 'on') || Q._dinleyiciKurtarma) return; Q._dinleyiciKurtarma = true;
+    var orjOn = Q.on, orjOff = Object.prototype.hasOwnProperty.call(Q, 'off') ? Q.off : null;
+    Q.on = function(tur, cb, iptal, bag){
+      if(typeof cb !== 'function' || typeof iptal === 'function') return orjOn.apply(this, arguments);
+      if(iptal && typeof iptal === 'object' && bag === undefined) bag = iptal;
+      var ref = this, n = 0;
+      var hata = function(err){
+        try{
+          try{ var _y = ''; try{ _y = decodeURIComponent(String(ref.toString()).replace(/^https?:\/\/[^\/]+/, '')); }catch(_e){} if(self.__fbRed) self.__fbRed(_y, tur, err); }catch(_x){}
+          if(!/permission/i.test(String((err && (err.code || err.message)) || '')) || n >= 40) return;
+          n++;
+          var k = { ref:ref, tur:tur, cb:cb, t:null };
+          k.t = setTimeout(function(){ var i = bekleyen.indexOf(k); if(i < 0) return; bekleyen.splice(i, 1);
+            try{ orjOn.call(ref, tur, cb, hata, bag); }catch(e){} }, Math.min(15000, 1000 * n));
+          bekleyen.push(k);
+        }catch(e){}
+      };
+      return orjOn.call(this, tur, cb, hata, bag);
     };
-    return orjOn.call(this, tur, cb, hata, bag);
-  };
-  if(typeof orjOff === 'function') Q.off = function(tur, cb){
-    try{ for(var i = bekleyen.length - 1; i >= 0; i--){ var k = bekleyen[i];
-      if((!cb || k.cb === cb) && (!tur || k.tur === tur) && ayni(k.ref, this)){ clearTimeout(k.t); bekleyen.splice(i, 1); } } }catch(e){}
-    return orjOff.apply(this, arguments);
-  };
+    if(orjOff) Q.off = function(tur, cb){
+      try{ for(var i = bekleyen.length - 1; i >= 0; i--){ var k = bekleyen[i];
+        if((!cb || k.cb === cb) && (!tur || k.tur === tur) && ayni(k.ref, this)){ clearTimeout(k.t); bekleyen.splice(i, 1); } } }catch(e){}
+      return orjOff.apply(this, arguments);
+    };
+  });
 }catch(e){} })();
 /* ══════════════════════════════════════════════════════════════════════════════════════════
    TEST ORTAMI - AYRI VERİTABANI KÖKÜ
@@ -3110,7 +3120,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-23-B';
+window.APP_BUILD='2026-10-23-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -27074,7 +27084,7 @@ function buildVideoEmbedHtml(url,basSn,bitSn){
       // ptAttachStreamPlayer devreye girip akışı çözer. Her iki durumda da ekranda SADECE
       // oynatıcı vardır, hiçbir site içeriği yoktur.
       if(ptIsStreamUrl(url))window._ptPendingStreamUrl=url;
-      return `<video id="ptVideoEl" src="${ptIsStreamUrl(url)?'':url}" controls autoplay playsinline style="width:100%;border-radius:14px;background:#000"></video>`;
+      return `<video id="ptVideoEl" data-bildirimli="1" src="${ptIsStreamUrl(url)?'':url}" controls autoplay playsinline style="width:100%;border-radius:14px;background:#000"></video>`;
     }
     return '';
   }catch(e){
@@ -29251,9 +29261,10 @@ function ptpUstBarParcalari(){
   function ptpMedyaOturumu(acik){
     try{
       if(!('mediaSession' in navigator))return;
-      // (2026-10-16-A, kullanıcı: "bildirim panelindeki medya kartını engelle") Medya oturumu artık hiç kurulmaz; açık
-      // çağrılar da kartı temizler (bkz. BİLDİRİMSİZ OYNATMA).
-      acik=false;
+      /* (2026-10-23-D, kullanıcı: "TV arka planda çalmayı 2026-09-14-M gibi yap"). 16-A'da medya oturumu kapatılmış ve TV
+         oynatıcısı bildirimsiz (sessiz öğe + ses motoru) yola alınmıştı; Chrome sessiz öğeyi arka planda duraklattığı için yayın
+         "bazen" duruyordu. 09-14-M'deki davranışa dönüldü: TV videosu doğrudan sesli çalar (bkz. data-bildirimli), "Arka planda
+         oynat" açıkken medya oturumu kurulur. Bu yolun bedeli bildirim alanındaki medya kartıdır (09-14-M'de de vardı). */
       if(!acik){
         navigator.mediaSession.metadata=null;
         ['play','pause','previoustrack','nexttrack'].forEach(function(a){
@@ -29279,47 +29290,7 @@ function ptpUstBarParcalari(){
         oneri:'Tarayıcı Media Session desteklemiyor olabilir. Doğrudan medya kaynaklarında çalışır, gömülü platformlarda platform kararı geçerlidir.'});}catch(_d){self.__ds&&self.__ds(29087,_d)}
     }
   }
-  /* ARKA PLANDA OYNATMA (2026-10-23-B, kullanıcı: "2026-09-14-M'de yayın arka planda durmuyor; yaptığın düzenlemede ses yankılı geliyor
-     ve bildirim kartı çıkıyor - kartı kaldır"). A sürümünde sayfa gizlenince yayın normal sesli oynatmaya bırakılıyordu: medya
-     kartı çıkıyor ve (geri dönüş hatası yüzünden) ses iki kez çalıyordu. Bu kaldırıldı; yayın gizliyken de BİLDİRİMSİZ yoldan
-     (sessiz öğe + ses motoru) çalmaya devam eder. 2026-09-14-M'den farkı: o sürümde öğe doğrudan sesli çalıyordu (tarayıcı onu
-     arka planda sürdürür ama kart da gösterir); kartsız oynatmada öğe gerçekte sessiz olduğu için tarayıcı onu arka planda
-     "görüntü-yalnız" sayıp DURAKLATABİLİYOR (bu "bazen duruyor"un sebebi). Ayar açıksa: gizliyken gelen her duraklatma anında
-     geri alınır, ses motoru askıya alınırsa yeniden açılır, dönüşte yayın kaldığı yerden sürdürülür. */
-  (function ptpArkaPlanOynat(){
-    if(window._ptpArkaPlanKuruldu)return; window._ptpArkaPlanKuruldu=true;
-    var oynuyordu=false, sonGizlenme=0;
-    var ac=function(){ try{ return !!pref('arkaPlan',false); }catch(e){ return false; } };
-    var motor=function(){ try{ if(window.ptBildirimsizSes&&ptBildirimsizSes.surdur)ptBildirimsizSes.surdur(); }catch(e){} };
-    var devam=function(v){ try{ motor(); if(v&&v.paused&&!v.ended){ var p=v.play(); if(p&&p.catch)p.catch(function(e){ try{DiagSil('ptpArkaPlanDevam',e,{anlami:'Arka planda yayın yeniden başlatılamadı.'});}catch(_e){} }); } }catch(e){} };
-    document.addEventListener('visibilitychange',function(){
-      try{
-        if(!S||!S.video)return;
-        var v=S.video;
-        if(document.hidden){
-          sonGizlenme=Date.now();
-          oynuyordu=!v.paused&&!v.ended;
-          if(!oynuyordu||!ac())return;
-          motor();
-          [300,1200,3000].forEach(function(ms){ setTimeout(function(){ if(document.hidden&&ac()&&oynuyordu)devam(v); },ms); });
-        }else if(oynuyordu&&v.paused&&!v.ended){
-          devam(v);   // dönüşte de duraklamış kaldıysa sürdürülür
-        }
-      }catch(e){self.__ds&&self.__ds(29090,e)}
-    },true);
-    // Medya olayları kabarcıklanmaz; belge düzeyinde YAKALAMA aşamasında dinlenir.
-    document.addEventListener('pause',function(e){
-      try{
-        if(!S||!S.video||e.target!==S.video||!document.hidden||!oynuyordu||!ac())return;
-        if(Date.now()-sonGizlenme>6*3600e3)return;
-        setTimeout(function(){ if(document.hidden)devam(S.video); },150);
-        setTimeout(function(){ if(document.hidden)devam(S.video); },1500);
-      }catch(_e){}
-    },true);
-    // Ekran kapalıyken ses motoru askıya alınırsa (bazı cihazlar) 5 sn'de bir yoklanır.
-    setInterval(function(){ try{ if(document.hidden&&oynuyordu&&ac()&&S&&S.video){ motor(); if(S.video.paused&&!S.video.ended)devam(S.video); } }catch(e){} },5000);
-  })();
-  function ptpMerkezMaske(){
+    function ptpMerkezMaske(){
     try{
       if(!S||!S.root)return;
       var _m=S.root.querySelector('.ptp-merkez-maske');
@@ -33311,7 +33282,7 @@ function ptpUstBarParcalari(){
         // (16:9 oran, yükseklik) değişmiyor; sayfa düzeni hiç oynamıyor.
         +'<div class="ptp-rot" id="ptpRot">'
         +'<video class="ptp-video" id="ptpVideo" playsinline webkit-playsinline preload="metadata" '
-          +'crossorigin="anonymous" data-fit="contain" '+(airplayVar?'x-webkit-airplay="allow" ':'')+'></video>'
+          +'crossorigin="anonymous" data-fit="contain" data-bildirimli="1" '+(airplayVar?'x-webkit-airplay="allow" ':'')+'></video>'
         // KULLANICI TALEBİ: Geçiş donmuş karesi - bkz. .ptp-freeze CSS notu. Video ile AYNI
         // sınıfı (.ptp-video) paylaşır ki boyutlandırma/object-fit kuralları otomatik uysun,
         // ayrıca kendi konumlandırma/opaklık katmanı için .ptp-freeze eklenir. Varsayılan
