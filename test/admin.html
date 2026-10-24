@@ -2145,6 +2145,14 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
       <div class="field" style="margin-bottom:.4rem"><span class="lbl">Mevcut Şifre</span><input id="admEmailPw" type="password" placeholder="Onay için mevcut şifreniz"/></div>
       <button class="btn bp" onclick="changeAdminEmail()" style="width:100%">E-postayı Değiştir</button>
       <div id="admEmailMsg" style="font-size:.64rem;margin-top:.5rem;line-height:1.6"></div>
+      <!-- (2026-10-24-I) Saha oyuncularına duyuru: sahaDuyuru/{id} yazılır, oyuncular SAHA'da bir pencerede okur. -->
+      <div style="border-top:1px solid var(--bd,rgba(255,255,255,.08));margin:.8rem 0 .6rem"></div>
+      <div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.05em">SAHA Oyuncularına Duyuru</div>
+      <div style="font-size:.7rem;color:var(--mu);margin-bottom:.5rem;line-height:1.5">Gönderilen duyuru, uygulamayı açan her oyuncuya bir pencerede gösterilir (maç sırasında maç bitince).</div>
+      <div class="field" style="margin-bottom:.4rem"><span class="lbl">Başlık</span><input id="duyBaslik" type="text" maxlength="80" placeholder="Örn. Bakım çalışması"/></div>
+      <div class="field" style="margin-bottom:.4rem"><span class="lbl">Metin</span><textarea id="duyMetin" rows="3" maxlength="1000" placeholder="Oyunculara iletilecek mesaj" style="width:100%"></textarea></div>
+      <button class="btn bp" onclick="sahaDuyuruGonder()" style="width:100%">Duyuruyu Gönder</button>
+      <div id="duyMsg" style="font-size:.64rem;margin-top:.5rem;line-height:1.6"></div>
       <!-- KULLANICI TALEBİ: "Bu cihazda beni hatırla" yalnızca giriş ekranında değil, panel
            içinden de değiştirilebilsin. Giriş ekranı, zaten oturum açıkken görünmediği için
            tercihi sonradan kapatmanın tek yolu çıkış yapmaktı - bu ise gereksizdi. -->
@@ -2838,7 +2846,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-24-H';
+window.APP_BUILD='2026-10-24-X';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -18236,6 +18244,18 @@ function admSuankiEpostaCiz(){
   try{ var el=qs('admSuankiEposta'); if(!el)return; var u=firebase.auth().currentUser; el.textContent=(u&&!u.isAnonymous&&u.email)?u.email:'(e-postalı oturum yok)'; }catch(e){}
 }
 try{ setTimeout(function(){ try{ firebase.auth().onAuthStateChanged(function(){ admSuankiEpostaCiz(); }); }catch(e){} },0); }catch(e){}
+/* YÖNETİCİ DUYURUSU (2026-10-24-I): sahaDuyuru/{id} yazar; SAHA oyuncuları okur. Gönderen e-postası kaydedilmez (oyuncular görmesin). */
+function sahaDuyuruGonder(){
+  var b = (document.getElementById('duyBaslik').value || '').trim(), m = (document.getElementById('duyMetin').value || '').trim();
+  var k = document.getElementById('duyMsg');
+  function say(t, ok){ k.style.color = ok ? '#34d27b' : '#ff8a80'; k.textContent = t; }
+  if(!b || !m){ say('Başlık ve metin boş olamaz.', false); return; }
+  if(!firebase.auth().currentUser){ say('Oturum bulunamadı; yeniden giriş yapın.', false); return; }
+  if(!confirm('Tüm SAHA oyuncularına bu duyuru gönderilsin mi?')) return;
+  firebase.database().ref('sahaDuyuru').push({ baslik: b.slice(0, 80), metin: m.slice(0, 1000), ts: firebase.database.ServerValue.TIMESTAMP })   // sunucu saati: admin cihazının saati ileri olsa da oyuncular sonraki duyuruları kaçırmaz
+    .then(function(){ say('Duyuru gönderildi.', true); document.getElementById('duyBaslik').value = ''; document.getElementById('duyMetin').value = ''; })
+    .catch(function(e){ say('Gönderilemedi: ' + ((e && e.message) || e), false); });
+}
 function changeAdminEmail(){
   var kutu=qs('admEmailMsg');
   var yaz=function(h){if(kutu)kutu.innerHTML=h;};
