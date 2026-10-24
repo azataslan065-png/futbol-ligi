@@ -772,6 +772,13 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
 .sup-alt{display:flex;align-items:center;gap:.5rem;margin-top:.45rem;font-size:.66rem;color:var(--mu);flex-wrap:wrap}.sup-alt b{color:var(--tx)}.sup-alt button{margin-left:auto}
 .sup-durum{font-size:.6rem;font-weight:800;padding:.1rem .45rem;border-radius:999px;background:var(--glow,rgba(124,58,237,.15));color:var(--tx)}
 </style>
+<style id="admLogoZemin2026D">
+/* (2026-10-25-D, "kanal, lig ve diğer logoların kenarlarında siyahlık olmasın"): logo yüklüyken yükleme kutusunun koyu zemini/kesik
+   kenarlığı, admin üst çubuğundaki ve giriş ekranı önizlemesindeki renkli kutu kalkar - logo kendi şekliyle görünür. */
+.pbox:has(img){background:transparent !important;border-color:transparent !important}
+#topLogo:has(img){background:transparent !important;border-radius:0 !important}
+#loginPreviewFullOv .lp-logo:has(img){background:transparent !important;box-shadow:none !important;border-radius:0 !important}
+</style>
 </head>
 <body>
 
@@ -1121,7 +1128,7 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
     <div class="card" id="admLogoOnarKart" style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">
       <div style="flex:1 1 220px;min-width:0">
         <div style="font-size:.78rem;font-weight:800">Logo kenarlarını onar</div>
-        <div style="font-size:.66rem;color:var(--mu);line-height:1.5">Eski yüklemeler JPEG kaydedildiği için bazı takım logolarının kenarı siyah. Bütün liglerdeki ve kalıcı havuzdaki logolar taranır; siyah zeminli olanlar şeffaf PNG olarak yeniden yüklenir. Puan Tablosu ve SAHA otomatik güncellenir.</div>
+        <div style="font-size:.66rem;color:var(--mu);line-height:1.5">Eski yüklemeler JPEG kaydedildiği için bazı logoların kenarı siyah. Takım, lig, kanal, sponsor, şerit, sohbet hesabı ve rozeti, giriş ekranı ve canlı yayın rozeti logoları taranır; siyah zeminli olanlar şeffaf PNG olarak yeniden yüklenir. Puan Tablosu ve SAHA otomatik güncellenir.</div>
         <div id="admLogoOnarMsg" style="font-size:.68rem;margin-top:.3rem"></div>
       </div>
       <button class="btn bg" id="admLogoOnarBtn" onclick="admLogolariOnar()" style="flex:0 0 auto">Logoları onar</button>
@@ -2856,7 +2863,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-25-B';
+window.APP_BUILD='2026-10-25-D';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5235,7 +5242,7 @@ function compressLogoImage(file,cb,maxPx,onErr,folder,temizle){
     // NOT: Kanvas ÖNCEDEN herhangi bir renkle doldurulmuyor - PNG şeffaf kalabilsin diye
     // bilinçli olarak boş bırakılıyor (JPEG'in aksine PNG şeffaflığı sorunsuz taşır).
     c.getContext('2d').drawImage(img,0,0,c.width,c.height);
-    if(temizle){try{admLogoKenarTemizle(c);}catch(_t){}}   // takım logosu: kenara bağlı siyah zemin saydamlaştırılır
+    if(temizle!==false){try{admLogoKenarTemizle(c);}catch(_t){}}   // (2026-10-25-D) bütün logo yüklemeleri: kenara bağlı siyah zemin saydamlaştırılır (uygulama simgesi hariç: temizle=false)
     c.toBlob(function(blob){
       if(!blob){toast(' Logo işlenemedi','er');if(onErr)onErr();return;}
       var path=(folder||'videolinks-logo')+'/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.png';
@@ -5279,7 +5286,7 @@ function admPngYukle(canvas){
   return new Promise(function(res,rej){
     canvas.toBlob(function(blob){
       if(!blob){rej(new Error('PNG üretilemedi'));return;}
-      var path='team-logos/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.png';
+      var path='logos/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.png';
       supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET).upload(path,blob,{cacheControl:'3600',upsert:false,contentType:'image/png'})
         .then(function(r){if(r.error)throw r.error;var pub=supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET).getPublicUrl(path);var u=pub&&pub.data&&pub.data.publicUrl;if(!u)throw new Error('Herkese açık link alınamadı');res(u);})
         .catch(rej);
@@ -5290,20 +5297,40 @@ function admLogolariOnar(){
   var msg=qs('admLogoOnarMsg'),btn=qs('admLogoOnarBtn');
   var yaz=function(t,ok){if(!msg)return;msg.style.color=ok===false?'#ff8a80':(ok?'#34d27b':'var(--mu)');msg.textContent=t;};
   if(!supabaseClient){yaz('Yükleme servisi kullanılamıyor; sayfayı yenileyip tekrar deneyin.',false);return;}
-  if(!confirm('Kayıtlı bütün takım logoları taranacak; kenarı siyah olanlar şeffaf PNG olarak yeniden yüklenecek. Devam edilsin mi?'))return;
+  if(!confirm('Kayıtlı bütün logolar (takım, lig, kanal, sponsor, şerit, sohbet hesabı, giriş ekranı, canlı yayın rozeti) taranacak; kenarı siyah olanlar şeffaf PNG olarak yeniden yüklenecek. Devam edilsin mi?'))return;
   if(btn)btn.disabled=true;
-  yaz('Takımlar okunuyor…');
+  yaz('Logolar okunuyor…');
   var harita={};
-  var ekle=function(url,yol){if(!url||typeof url!=='string')return;url=url.trim();if(!url)return;(harita[url]=harita[url]||[]).push(yol);};
+  var ekle=function(url,yol){if(!url||typeof url!=='string')return;url=url.trim();if(!url)return;(harita[url]=harita[url]||[]).push(yol);};   // aynı adres birden çok yerde kullanılıyorsa hepsi birlikte güncellenir
   db.ref('leaguesMeta').once('value').then(function(ms){
     var ligler=Object.keys(ms.val()||{});
     if(typeof _curLeagueId!=='undefined'&&_curLeagueId&&ligler.indexOf(_curLeagueId)<0)ligler.push(_curLeagueId);
-    return Promise.all(ligler.map(function(lid){return db.ref('leagues/'+lid+'/teams').once('value').then(function(s2){var T=s2.val()||{};Object.keys(T).forEach(function(tid){ekle(T[tid]&&T[tid].logo,'leagues/'+lid+'/teams/'+tid+'/logo');});});}));
+    // (2026-10-25-D) takım logolarına ek olarak her ligin lig logosu, şerit logosu, kanal (video bağlantısı) logoları ve sponsor görselleri
+    var liste=function(v,taban,alan){if(!v||typeof v!=='object')return;Object.keys(v).forEach(function(k){var x=v[k];if(x&&typeof x==='object')ekle(x[alan],taban+'/'+k+'/'+alan);});};
+    return Promise.all(ligler.map(function(lid){var L='leagues/'+lid;return Promise.all([
+      db.ref(L+'/teams').once('value').then(function(s2){var T=s2.val()||{};Object.keys(T).forEach(function(tid){ekle(T[tid]&&T[tid].logo,L+'/teams/'+tid+'/logo');});}),
+      db.ref(L+'/logoUrl').once('value').then(function(s2){ekle(s2.val(),L+'/logoUrl');}),
+      db.ref(L+'/tickerCustomLogo').once('value').then(function(s2){ekle(s2.val(),L+'/tickerCustomLogo');}),
+      db.ref(L+'/videoLinks').once('value').then(function(s2){liste(s2.val(),L+'/videoLinks','logo');}),
+      db.ref(L+'/sponsors').once('value').then(function(s2){liste(s2.val(),L+'/sponsors','src');})
+    ]);}));
   }).then(function(){
-    return db.ref('permanentTeams').once('value').then(function(ps){var P=ps.val()||{};Object.keys(P).forEach(function(pid){ekle(P[pid]&&P[pid].logo,'permanentTeams/'+pid+'/logo');});});
+    return Promise.all([
+      db.ref('permanentTeams').once('value').then(function(ps){var P=ps.val()||{};Object.keys(P).forEach(function(pid){ekle(P[pid]&&P[pid].logo,'permanentTeams/'+pid+'/logo');});}),
+      // (2026-10-25-D) ortak TV listesi, kanal havuzu, sohbet hesapları, giriş ekranı logosu, canlı yayın rozeti logosu
+      db.ref('paylasilan/tvKanallari').once('value').then(function(x){var v=x.val();if(v&&typeof v==='object')Object.keys(v).forEach(function(k){if(v[k]&&typeof v[k]==='object')ekle(v[k].logo,'paylasilan/tvKanallari/'+k+'/logo');});}),
+      db.ref('channelPool').once('value').then(function(x){var v=x.val()||{};Object.keys(v).forEach(function(k){if(v[k]&&typeof v[k]==='object')ekle(v[k].logo,'channelPool/'+k+'/logo');});}),
+      db.ref('paylasilan/sohbetHesaplari').once('value').then(function(x){var v=x.val()||{};Object.keys(v).forEach(function(k){if(!v[k]||typeof v[k]!=='object')return;
+        if(k==='_rozetler'){Object.keys(v[k]).forEach(function(r){var z=v[k][r];if(z&&typeof z==='object')ekle(z.resim,'paylasilan/sohbetHesaplari/_rozetler/'+r+'/resim');});return;}   // sohbet rozeti görselleri
+        ekle(v[k].logo,'paylasilan/sohbetHesaplari/'+k+'/logo');});}),
+      db.ref('appBranding/logoUrl').once('value').then(function(x){ekle(x.val(),'appBranding/logoUrl');}),
+      db.ref('canliRozetGlobal/canliRozetLogo').once('value').then(function(x){ekle(x.val(),'canliRozetGlobal/canliRozetLogo');})
+    ]);
   }).then(function(){
+    // videolar ve görsel olmayan adresler taranmaz
+    Object.keys(harita).forEach(function(u){if(/\.(mp4|webm|mov|m4v|m3u8|mp3|ogg)(\?|#|$)/i.test(u)||/^data:(video|audio)\//i.test(u)||/^(?!data:|https?:\/\/)/i.test(u))delete harita[u];});
     var urls=Object.keys(harita),onarilan=0,temiz=0,okunamayan=0,hatali=0,i=0;
-    if(!urls.length){yaz('Logosu olan takım bulunamadı.',true);if(btn)btn.disabled=false;return;}
+    if(!urls.length){yaz('Taranacak logo bulunamadı.',true);if(btn)btn.disabled=false;return;}
     var sonraki=function(){
       if(i>=urls.length){
         yaz('Bitti: '+urls.length+' logo tarandı · '+onarilan+' onarıldı · '+temiz+' zaten temizdi'+(okunamayan?' · '+okunamayan+' okunamadı (başka sunucu)':'')+(hatali?' · '+hatali+' yüklenemedi':''),hatali?false:true);
@@ -7790,7 +7817,7 @@ function canliRozetPanelHtml(){
         +'</div>';
       }).join('')
     +'<input id="canliRozetMetinInp" placeholder="Rozet metni (ör. sponsor adı) - boş bırakılabilir" value="'+escHtml(metin)+'" oninput="_canliRozetGlobalVeri.canliRozetMetin=this.value" style="font-size:.76rem;margin-bottom:.32rem"/>'
-    +'<div id="canliRozetLogoBox" style="margin-bottom:.32rem">'+(logo?('<div style="display:flex;align-items:center;gap:.4rem"><img src="'+escHtml(logo)+'" style="width:28px;height:28px;object-fit:contain;border-radius:6px;background:var(--s3)"/><span style="font-size:.64rem;color:#22c55e;flex:1"> Logo eklendi</span><button onclick="removeCanliRozetLogo()" style="background:#b91c1c;border:1px solid #ef4444;color:#fff;border-radius:7px;font-size:.66rem;padding:.3rem .7rem;min-height:32px;cursor:pointer">Kaldır</button></div>'):'')+'</div>'
+    +'<div id="canliRozetLogoBox" style="margin-bottom:.32rem">'+(logo?('<div style="display:flex;align-items:center;gap:.4rem"><img src="'+escHtml(logo)+'" style="width:28px;height:28px;object-fit:contain" onload="try{_processLogoImg(this)}catch(_e){}"/><span style="font-size:.64rem;color:#22c55e;flex:1"> Logo eklendi</span><button onclick="removeCanliRozetLogo()" style="background:#b91c1c;border:1px solid #ef4444;color:#fff;border-radius:7px;font-size:.66rem;padding:.3rem .7rem;min-height:32px;cursor:pointer">Kaldır</button></div>'):'')+'</div>'
     +'<div class="g2">'
       +'<button class="btn bgh" onclick="triggerCanliRozetLogoUpload()" style="font-size:.7rem"> '+(logo?'Logo Değiştir':'Logo Yükle')+'</button>'
       +'<button class="btn bp" onclick="saveCanliRozet()" style="font-size:.7rem"> Rozeti Kaydet</button>'
@@ -11757,9 +11784,9 @@ function updateLgLogo(){
      değişmediyse dokunma. */
   var _lgImza=String(S.logoUrl||'');
   var box=qs('lgLogoBox');
-  if(box&&box._lgImza!==_lgImza){box._lgImza=_lgImza;box.innerHTML='';if(S.logoUrl){var img=document.createElement('img');img.src=S.logoUrl;img.style.cssText='width:100%;height:100%;object-fit:cover;border-radius:14px';box.appendChild(img);}else{box.textContent='';}}
+  if(box&&box._lgImza!==_lgImza){box._lgImza=_lgImza;box.innerHTML='';if(S.logoUrl){var img=document.createElement('img');img.src=S.logoUrl;img.style.cssText='width:100%;height:100%;object-fit:contain';img.onload=function(){try{_processLogoImg(img)}catch(_e){}};box.appendChild(img);}else{box.textContent='';}}
   var tl=qs('topLogo');
-  if(tl&&tl._lgImza!==_lgImza){tl._lgImza=_lgImza;tl.innerHTML='';if(S.logoUrl){var img2=document.createElement('img');img2.src=S.logoUrl;img2.style.cssText='width:100%;height:100%;object-fit:cover';tl.appendChild(img2);}else{tl.textContent='';}}
+  if(tl&&tl._lgImza!==_lgImza){tl._lgImza=_lgImza;tl.innerHTML='';if(S.logoUrl){var img2=document.createElement('img');img2.src=S.logoUrl;img2.style.cssText='width:100%;height:100%;object-fit:contain';img2.onload=function(){try{_processLogoImg(img2)}catch(_e){}};tl.appendChild(img2);}else{tl.textContent='';}}
 }
 function updateTheme(){
   var cur=document.documentElement.dataset.theme||'dark';
@@ -12107,7 +12134,7 @@ function addSponsorEntry(type){
       probe.onerror=function(){URL.revokeObjectURL(probeUrl);toast(' Video okunamadı, dosya bozuk veya desteklenmeyen bir format olabilir','er');};
       probe.src=probeUrl;
     }else{
-      compressPhoto(file,function(data){
+      compressLogoImage(file,function(data){   // (2026-10-25-D) sponsor logosu: JPEG yerine şeffaf PNG + kenar temizliği
         var idx=pushEntry({src:data});
         var probe=new Image();
         probe.onload=function(){
@@ -12115,7 +12142,7 @@ function addSponsorEntry(type){
           if(window._editSponsors[idx]){window._editSponsors[idx].width=sz.width;window._editSponsors[idx].height=sz.height;renderSponsorAdmin();}
         };
         probe.src=data;
-      },400,null,'sponsors');
+      },400,null,'sponsors',true);
     }
   };
   inp.click();
@@ -12128,7 +12155,7 @@ function renderSponsorAdmin(){
   grid.innerHTML=sponsors.map(function(sp,i){
     var previewHtml=sp.type==='video'?'<video src="'+sp.src+'" style="width:100%;height:100%;object-fit:contain" muted></video>'
       :sp.type==='text'?'<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;background:'+(sp.bgColor||'transparent')+';font-size:.7rem;font-weight:800;color:var(--tx);text-align:center;padding:.2rem">'+(sp.text||'')+'</div>'
-      :'<img src="'+(sp.src||'')+'" style="width:100%;height:100%;object-fit:contain"/>';
+      :'<img src="'+(sp.src||'')+'" style="width:100%;height:100%;object-fit:contain" onload="try{_processLogoImg(this)}catch(_e){}"/>';
     var placeButtons=SPONSOR_PLACEMENTS.map(function(p){
       var on=!!(sp.placements&&sp.placements[p[0]]);
       return '<button type="button" onclick="toggleSponsorPlacement('+i+',\''+p[0]+'\')" style="padding:.3rem 0;border-radius:7px;font-size:.6rem;font-weight:700;border:1.5px solid '+(on?'var(--ac)':'var(--br)')+';background:'+(on?'var(--ac)':'var(--s2)')+';color:'+(on?'#fff':'var(--mu)')+';cursor:pointer">'+p[1]+'</button>';
@@ -12592,7 +12619,7 @@ window.ptM3uSuz=function(){
     return '<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;background:'
       +(i%2?'var(--s2)':'var(--s3)')+';border:1px solid var(--br);border-radius:9px;margin-bottom:.3rem;cursor:pointer">'
       +'<input type="checkbox" class="m3uSec" data-i="'+i+'"'+(c._sec?' checked':'')+' style="flex-shrink:0;width:18px;height:18px"/>'
-      +(c.logo?'<img src="'+escHtml(c.logo)+'" style="width:24px;height:24px;border-radius:6px;object-fit:contain;background:var(--s1);flex-shrink:0"/>':'')
+      +(c.logo?'<img src="'+escHtml(c.logo)+'" style="width:24px;height:24px;object-fit:contain;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}"/>':'')
       +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:.72rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(c.title)+'</div>'
         +(c.category?'<div style="font-size:.58rem;color:var(--mu)">'+escHtml(c.category)+'</div>':'')
@@ -13061,7 +13088,7 @@ function renderVideoLinkAdmin(){
     var _rozet=v.isLive?' Canlı':' Video';
     return '<div id="vlRow_'+i+'" style="'+(v.gizli?'opacity:.55;':'')+'background:'+(_cift?'var(--s2)':'var(--s3)')+';border:1px solid var(--br);border-radius:13px;padding:.6rem;margin-bottom:.7rem;box-shadow:0 2px 8px rgba(0,0,0,.18);transition:outline-color .3s">'
       +'<div style="display:flex;align-items:center;gap:.5rem;margin:-.15rem -.15rem .5rem;padding:.35rem .45rem;background:var(--s1);border:1px solid var(--br);border-radius:10px">'
-        +(v.logo?'<img src="'+escHtml(v.logo)+'" style="width:26px;height:26px;border-radius:7px;object-fit:contain;background:var(--s3);flex-shrink:0;padding:2px;box-sizing:border-box"/>'
+        +(v.logo?'<img src="'+escHtml(v.logo)+'" style="width:26px;height:26px;object-fit:contain;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}"/>'
                 :'<div style="width:26px;height:26px;border-radius:7px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.78rem;font-weight:900;flex-shrink:0">'+escHtml(_harf)+'</div>')
         +'<div style="flex:1;min-width:0;font-size:.7rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
           +escHtml((v.title||'').trim()||'(başlıksız kayıt)')+'</div>'
@@ -13128,7 +13155,7 @@ function renderVideoLinkAdmin(){
       +'<div id="vlUpload_'+i+'"></div>'
       // KULLANICI TALEBİ: Kanal logosu - küçük bir önizleme + yükle/kaldır düğmeleri.
       +'<div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">'
-      +(v.logo?'<img src="'+escHtml(v.logo)+'" style="width:32px;height:32px;border-radius:8px;object-fit:cover;flex-shrink:0"/>':'<div style="width:32px;height:32px;border-radius:8px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--mu);flex-shrink:0"></div>')
+      +(v.logo?'<img src="'+escHtml(v.logo)+'" style="width:32px;height:32px;object-fit:contain;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}"/>':'<div style="width:32px;height:32px;border-radius:8px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--mu);flex-shrink:0"></div>')
       +'<button type="button" onclick="triggerVideoLinkLogoUpload('+i+')" style="flex-shrink:0;background:var(--s3);border:1px solid var(--br);border-radius:8px;padding:.3rem .55rem;font-size:.62rem;font-weight:700;color:var(--tx);cursor:pointer"> Logo Yükle</button>'
       +(v.logo?'<button type="button" onclick="removeVideoLinkLogo('+i+')" style="flex-shrink:0;background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:.3rem .55rem;font-size:.62rem;font-weight:700;color:#f87171;cursor:pointer">Kaldır</button>':'')
       +'</div>'
@@ -13507,7 +13534,7 @@ function renderChannelPoolSheet(pool){
       var c=pool[id];
       var harf=(c.title||'?').trim().charAt(0).toUpperCase()||'?';
       return '<div style="display:flex;align-items:center;gap:.55rem;padding:.5rem .6rem;background:var(--s2);border-radius:11px;margin-bottom:.35rem">'
-        +(c.logo?'<img src="'+escHtml(c.logo)+'" style="width:34px;height:34px;border-radius:9px;object-fit:contain;background:var(--s3);flex-shrink:0;padding:2px;box-sizing:border-box"/>':'<div style="width:34px;height:34px;border-radius:9px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:900;flex-shrink:0">'+harf+'</div>')
+        +(c.logo?'<img src="'+escHtml(c.logo)+'" style="width:34px;height:34px;object-fit:contain;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}"/>':'<div style="width:34px;height:34px;border-radius:9px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:1rem;font-weight:900;flex-shrink:0">'+harf+'</div>')
         +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:.8rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(c.title||'?')+'</div>'
         +'<div style="font-size:.62rem;color:var(--mu)">'+(c.isLive?' Canlı':' Video')+(c.category?' · '+escHtml(c.category):'')+'</div>'
@@ -13541,7 +13568,7 @@ function _channelPoolFormHtml(c){
       +'<option value="__new__"> Yeni Kategori Oluştur...</option>'
       +'</select></div>'
     +'<div style="display:flex;align-items:center;gap:.5rem;margin-top:.6rem">'
-    +(c.logo?'<img id="cpLogoPreview" src="'+escHtml(c.logo)+'" style="width:32px;height:32px;border-radius:8px;object-fit:contain;background:var(--s3);flex-shrink:0;padding:2px;box-sizing:border-box"/>':'<div id="cpLogoPreview" style="width:32px;height:32px;border-radius:8px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--mu);flex-shrink:0"></div>')
+    +(c.logo?'<img id="cpLogoPreview" src="'+escHtml(c.logo)+'" style="width:32px;height:32px;object-fit:contain;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}"/>':'<div id="cpLogoPreview" style="width:32px;height:32px;border-radius:8px;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--mu);flex-shrink:0"></div>')
     +'<button type="button" onclick="triggerChannelPoolLogoUpload()" style="flex-shrink:0;background:var(--s3);border:1px solid var(--br);border-radius:8px;padding:.35rem .6rem;font-size:.65rem;font-weight:700;color:var(--tx);cursor:pointer"> Logo Yükle</button>'
     +'</div><div id="cpLogoStatus" style="font-size:.6rem;margin-top:.3rem"></div>'
     +'<input type="hidden" id="cpLogoUrl" value="'+(c.logo||'').replace(/"/g,'&quot;')+'"/>'
@@ -13592,7 +13619,7 @@ function triggerChannelPoolLogoUpload(){
     compressLogoImage(file,function(publicUrl){
       var hid=qs('cpLogoUrl');if(hid)hid.value=publicUrl;
       var prev=qs('cpLogoPreview');
-      if(prev)prev.outerHTML='<img id="cpLogoPreview" src="'+publicUrl.replace(/"/g,'&quot;')+'" style="width:32px;height:32px;border-radius:8px;object-fit:contain;background:var(--s3);flex-shrink:0;padding:2px;box-sizing:border-box"/>';
+      if(prev)prev.outerHTML='<img id="cpLogoPreview" src="'+publicUrl.replace(/"/g,'&quot;')+'" style="width:32px;height:32px;object-fit:contain;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}"/>';
       if(status)status.innerHTML='<span style="color:#15803d"> Logo yüklendi</span>';
     },240,function(){if(status)status.innerHTML='<span style="color:#f87171"> Logo yüklenemedi</span>';});
   };
@@ -14764,7 +14791,7 @@ function insertTickerPlaceholder(tag){
 // leagues/<id>/tickerCustomLogo yoluna kaydedilir.
 function updateTickerCustomLogoPreview(url){
   var box=qs('tkCustomLogoPreview'), clearBtn=qs('tkCustomLogoClearBtn');
-  if(box)box.innerHTML=url?'<img src="'+url+'" style="width:100%;height:100%;object-fit:cover"/>':'';
+  if(box)box.innerHTML=url?'<img src="'+url+'" style="width:100%;height:100%;object-fit:contain" onload="try{_processLogoImg(this)}catch(_e){}"/>':'';
   if(clearBtn)clearBtn.style.display=url?'inline-block':'none';
 }
 function clearTickerCustomLogo(){
@@ -14803,6 +14830,7 @@ function _admYukleSeritLogo(file){
       if(w>h){h=Math.round(h*MAX/w);w=MAX;}else{w=Math.round(w*MAX/h);h=MAX;}
       var canvas=document.createElement('canvas'); canvas.width=w; canvas.height=h;
       canvas.getContext('2d').drawImage(img,0,0,w,h);
+      try{admLogoKenarTemizle(canvas);}catch(_t){}   // (2026-10-25-D) şerit logosu: kenara bağlı siyah zemin saydam
       canvas.toBlob(function(blob){
         if(!blob){toast(' Görsel işlenemedi','er');return;}
         var path='ticker-logo/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.png';
@@ -15116,7 +15144,7 @@ function onFormatChange(){
 async function updateLgLogoPreview(){
   const prev=document.getElementById('lgLogoBox');
   if(!prev) return;
-  prev.innerHTML=S.logoUrl?`<img src="${S.logoUrl}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentNode.textContent=''"/>`:'';
+  prev.innerHTML=S.logoUrl?`<img src="${S.logoUrl}" style="width:100%;height:100%;object-fit:contain" onload="try{_processLogoImg(this)}catch(_e){}" onerror="this.parentNode.textContent=''"/>`:'';
 }
 // Lig logo file upload
 // KULLANICI TALEBİ (GÜNCELLEME - Supabase Storage'a geçiş sırasında fark edilen KRİTİK
@@ -15157,14 +15185,14 @@ window.setTheme=async function(theme){
     lgLogoFileEl.addEventListener('change',function(e){
       const file=e.target.files[0]; if(!file) return;
       lgLogoFileEl.value='';
-      compressPhoto(file,async function(data){
+      compressLogoImage(file,async function(data){   // (2026-10-25-D) JPEG yerine şeffaf PNG + kenar temizliği
         S.logoUrl=data;
         document.getElementById('lgLogoUrl').value='';
         await save();
         const prev=document.getElementById('lgLogoBox');
-        if(prev) prev.innerHTML=`<img src="${S.logoUrl}" style="width:100%;height:100%;object-fit:cover"/>`;
+        if(prev) prev.innerHTML=`<img src="${S.logoUrl}" style="width:100%;height:100%;object-fit:contain"/>`;
         toast(' Lig logosu yüklendi');
-      },200,null,'league-logo');
+      },256,null,'league-logo',true);
     });
   }
 })();
@@ -17107,7 +17135,7 @@ function loadAppBranding(){
       if(_hp)_hp.style.backgroundImage=b.homeIcon?('url("'+b.homeIcon+'")'):'';
     }catch(_e){self.__ds&&self.__ds(16726,_e)}
     var box=qs('appBrandLogoBox');
-    if(box)admHtml(box,b.logoUrl?'<img src="'+b.logoUrl+'" style="width:100%;height:100%;object-fit:cover"/>':'');
+    if(box)admHtml(box,b.logoUrl?'<img src="'+b.logoUrl+'" style="width:100%;height:100%;object-fit:contain" onload="try{_processLogoImg(this)}catch(_e){}"/>':'');
     // KULLANICI TALEBİ: Kilit ekranındaki HER BLOK (logo, başlık, form) ayrı ayrı serbest
     // konum/ölçek/blur bilgisiyle kaydedilir (b.loginLayout). Geriye dönük uyumluluk: eski
     // sadece-logo verisi (loginLogoX/Y/Pos) varsa logo bloğuna otomatik aktarılır.
@@ -17147,7 +17175,7 @@ window.secAnaEkranSimgesi=function(){
         logAction(' Ana ekran simgesi değiştirildi');
         toast(' Simge kaydedildi - mevcut kısayollar güncellenmez, yeniden eklenmeli');
       }).catch(function(e){toast(' Kaydedilemedi: '+((e&&e.message)||'hata'),'er');});
-    },512);
+    },512,null,'app-icon',false);   // (2026-10-25-D) uygulama simgesi kare/dolu zeminlidir: kenar temizliği YAPILMAZ
   };
   inp.click();
 };
@@ -17483,15 +17511,15 @@ function updateAppLogoPlaceBtns(){
     brandFileEl.addEventListener('change',function(e){
       const file=e.target.files[0]; if(!file) return;
       this.value='';
-      compressPhoto(file,async function(publicUrl){
+      compressLogoImage(file,async function(publicUrl){   // (2026-10-25-D) JPEG yerine şeffaf PNG + kenar temizliği
         try{
           await db.ref('appBranding').update({logoUrl:publicUrl});
           const prev=document.getElementById('appBrandLogoBox');
-          if(prev)prev.innerHTML=`<img src="${publicUrl}" style="width:100%;height:100%;object-fit:cover"/>`;
+          if(prev)prev.innerHTML=`<img src="${publicUrl}" style="width:100%;height:100%;object-fit:contain"/>`;
           logAction(' Giriş ekranı uygulama logosu güncellendi');
           toast(' Uygulama logosu yüklendi');
         }catch(err){toast(' Yüklenemedi: '+(err&&err.message||'hata'),'er');}
-      },200,null,'app-brand-logo');
+      },256,null,'app-brand-logo',true);
     });
   }
 })();
@@ -20663,7 +20691,7 @@ function sohbetRozetCiz(r, boy){
   if(!r) return '';
   boy = boy || 14;
   var et = _rozetEsc(r.ad || 'Doğrulanmış');
-  if(r.resim) return '<img src="' + _rozetEsc(r.resim) + '" alt="' + et + '" title="' + et + '" style="width:' + boy + 'px;height:' + boy + 'px;object-fit:contain;vertical-align:-2px;flex-shrink:0">';
+  if(r.resim) return '<img src="' + _rozetEsc(r.resim) + '" alt="' + et + '" title="' + et + '" style="width:' + boy + 'px;height:' + boy + 'px;object-fit:contain;vertical-align:-2px;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}">';
   var renk = /^#[0-9a-f]{3,8}$/i.test(String(r.renk || '')) ? r.renk : '#1d8cf0';
   return '<svg viewBox="0 0 24 24" width="' + boy + '" height="' + boy + '" style="vertical-align:-2px;flex-shrink:0" role="img" aria-label="' + et + '"><title>' + et + '</title>'
     + '<g fill="' + renk + '">' + (ROZET_SEKIL[r.sekil] || ROZET_SEKIL.daire) + '</g>' + (ROZET_SIMGE[r.simge] != null ? ROZET_SIMGE[r.simge] : ROZET_SIMGE.tik) + '</svg>';
@@ -20683,7 +20711,7 @@ function sohbetKimlik(c){
   return { ad:String(c.user || '?'), logo:'', rozet:!!kr, rozetTur:(kr && kt[kr.rozetId]) ? kr.rozetId : 'kullanici', dev:false, hesap:false };
 }
 function sohbetKimlikHtml(k, vurgu){
-  return (k.logo ? '<img src="' + escHtml(k.logo) + '" alt="" style="width:18px;height:18px;border-radius:50%;object-fit:cover;flex-shrink:0;background:#fff">' : '')
+  return (k.logo ? '<img src="' + escHtml(k.logo) + '" alt="" style="width:18px;height:18px;object-fit:contain;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}">' : '')
     + (vurgu || escHtml(k.ad)) + (k.rozet ? (function(x){ return x ? ' ' + x : ''; })(sohbetRozetSvg(k.rozetTur || (k.dev ? 'dev' : 'resmi'))) : '');
 }
 var _shDinleRef = null;
@@ -21118,7 +21146,7 @@ function sohbetHesapDuzenle(id){
     + (h.tur === 'lig' ? '<label style="display:flex;align-items:center;gap:.4rem;font-size:.74rem;margin:.4rem 0"><input type="checkbox" id="shDzSabit"' + (h.adSabit ? ' checked' : '') + '> Ad ligden gelmesin (özel ad kullan)</label>'
         + '<p class="hint">Logo ligin logosudur; ligin logosunu değiştirdiğinde burada da değişir.</p>'
       : '<div class="field"><span class="lbl">Logo</span><div style="display:flex;align-items:center;gap:.5rem">'
-        + (h.logo ? '<img src="' + escHtml(h.logo) + '" style="width:40px;height:40px;border-radius:50%;object-fit:cover;background:#fff">' : '<span class="hint">Logo yok</span>')
+        + (h.logo ? '<img src="' + escHtml(h.logo) + '" style="width:40px;height:40px;object-fit:contain" onload="try{_processLogoImg(this)}catch(_e){}">' : '<span class="hint">Logo yok</span>')
         + '<button class="btn bgh" onclick="qs(\'shDzLogo\').click()"> Logo seç</button>'
         + (h.logo ? '<button class="btn" onclick="sohbetHesapLogoSil()">Kaldır</button>' : '') + '</div>'
         + '<input type="file" id="shDzLogo" accept="image/*,.heic,.heif" style="display:none" onchange="sohbetHesapLogoYukle(this)"></div>')

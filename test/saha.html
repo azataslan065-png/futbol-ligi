@@ -1777,6 +1777,18 @@ img.lg-logo{background:transparent !important;border:0 !important;border-radius:
   .ayar-bolumler>.sh-kart,.ayar-bolumler>*{break-inside:avoid;-webkit-column-break-inside:avoid;display:inline-block;width:100%;margin:0 0 14px !important;box-sizing:border-box}
 }
 </style>
+<style id="sahaRakip2026C">
+/* ── RAKİP ANALİZİ: saha görünümü (2026-10-25-C) ── */
+#rakipAnaliz .ra-kutu{width:min(900px,100%) !important;background:var(--pt-bg, #0d1612) !important;border-color:var(--pt-br, rgba(255,255,255,.16)) !important}
+#rakipAnaliz .ra-saha{width:100%;max-width:340px;height:auto !important;min-height:0 !important;aspect-ratio:3/4;margin:0 auto 12px;flex:none}
+#rakipAnaliz .ra-saha .kd-kart{cursor:default;touch-action:auto}
+@media (min-width:700px){
+  #rakipAnaliz .ra-duzen{display:grid;grid-template-columns:auto minmax(0,1fr);gap:16px;align-items:start}
+  #rakipAnaliz .ra-sol{position:sticky;top:0}
+  #rakipAnaliz .ra-saha{width:auto;height:min(520px,calc(100dvh - 120px)) !important;max-width:none;margin:0}
+  #rakipAnaliz .ra-sag>.lg-kulup-ist{margin-top:0}
+}
+</style>
 </head>
 <body>
 
@@ -10375,8 +10387,16 @@ function _yayinDinleKapat(){
   YAYIN.dinle.forEach(function(d){ try{ d[0].off(d[1], d[2]); }catch(e){self.__ds&&self.__ds(9821,e)} });
   YAYIN.dinle = [];
 }
+/* İZLEYİCİ BAŞINA WEBRTC KAPALI (2026-10-25-C, kullanıcı: "üçüncü cihaz maçı izleyince oynayanlarda ve izleyende donma"). KÖK SEBEP
+   (bir parçası): host her izleyici için ayrı bir RTCPeerConnection açıp oyun sesini her birine ayrı kodluyordu; bağlantı kurulamazsa
+   izleyici ~55 sn'de bir YENİ bağlantı istiyor, host her seferinde yeniden kuruyordu. Yayın açıkken host, sesi kapalı olsa bile bütün
+   oyun seslerini üretiyordu. Host takılınca konuğa giden paketler de durduğundan takılma İKİ oyuncuda birden görülüyordu. İzleyici
+   bu sesi zaten gerek duymaz: düdük/tezahürat 'ses' olaylarıyla, spiker/yorumcu cümleleri 'anonsL' listesiyle izleyicinin kendi
+   cihazında üretilir (izleYayinDinle - WebRTC'siz yedek yol; yayinSesOlay/yayinAnonsGonder yayın kapalıyken de yazar). */
+var YAYIN_WEBRTC = false;
 function yayinBaslat(){
   try{
+    if(!YAYIN_WEBRTC) return;
     var fk = window._sahaAktifFikstur;
     if(!fk || window._sahaIzleModu || !window.RTCPeerConnection || !fbHazir || !fbDb) return;
     var cv = renderer.domElement; if(!cv.captureStream) return;
@@ -11309,7 +11329,7 @@ function _spkEkSec(tur, metin){
    olsa bile) durum paketine koyar; konuk aynı cümleleri kendi ses ayarlarıyla (spiker/yorumcu açık-kapalı, sıklık, ses) okur. */
 function _spkYayinla(rol, metin, onemli){
   try{ if(!window._sahaOdaHost) return; var L = SPK.yayin || (SPK.yayin = []); SPK.yayinN = (SPK.yayinN || 0) + 1;
-    L.push({ n:SPK.yayinN, r:rol, m:String(metin).slice(0, 220), o:onemli ? 1 : 0 }); while(L.length > 4) L.shift(); }catch(e){}
+    L.push({ n:SPK.yayinN, r:rol, m:String(metin).slice(0, 220), o:onemli ? 1 : 0 }); while(L.length > 4) L.shift(); SPK.yayinT = Date.now(); }catch(e){}
 }
 function _spkUzaktan(rol, metin, onemli){
   try{
@@ -12695,12 +12715,25 @@ function _sahaFiksturDinle(){
     sahaKadroTabloyaYazZamanla();
     try{ takimSecimKontrol(); takimSecimCiz(); hesapDurumCiz(); }catch(e){_sessiz(e,'_sahaFiksturDinle:1775','saha_ag');}
   }, function(err){ DiagSaha('fiksturTakimOkuma', err, { anlami:'Lig takımları okunamadı; takım seçimi ve maçlar açılmaz.' }); });
-  _dinle('leagues/'+sahaLigId+'/matches', function(sn){
+  /* FİKSTÜR OLAYLARI MAÇTA BEKLETİLİR (2026-10-25-C, bkz. ODA DİNLEYİCİSİ MAÇ MODU): maç sürerken host'un canlı skor yazımları bu düğüme
+     gider; iki oyuncu da sezonun BÜTÜN fikstürünü dinliyordu - her canlı yazımda (saniyede birkaç kez) bütün fikstür yeniden kuruluyor,
+     maç listesi yeniden çiziliyordu. Maç sırasında bunların hiçbiri gerekmez (ilgili denetimler zaten maç sürerken erken döner). Maç
+     sürerken ya da izleme modunda olaylar biriktirilir, en çok 5 sn'de bir YALNIZCA son anlık görüntü işlenir; maç bitince beklemeden. */
+  var _fkIsle = function(sn){
     sahaFikstur = sn.val() || {};
     // Yarıda bırakılmış maç varsa burada geçersiz sayılır (bkz. kural notu).
     try{ sahaYarimMaclariGecersizSay(); }catch(e){self.__ds&&self.__ds(12098,e)}
     maclarCiz();
     try{ macHazirKontrol(); }catch(e){self.__ds&&self.__ds(12100,e)}
+  };
+  var _fkBekleyen = null, _fkT = null, _fkSon = 0;
+  var _fkMesgul = function(){ return !!(window._sahaIzleModu || (typeof running !== 'undefined' && running && !bitti)); };
+  var _fkBosalt = function(){ _fkT = null; if(!_fkBekleyen) return; if(_fkMesgul() && Date.now() - _fkSon < 5000){ _fkT = setTimeout(_fkBosalt, 5000 - (Date.now() - _fkSon)); return; }
+    var x = _fkBekleyen; _fkBekleyen = null; _fkSon = Date.now(); _fkIsle(x); };
+  _dinle('leagues/'+sahaLigId+'/matches', function(sn){
+    if(!_fkMesgul()){ _fkBekleyen = null; _fkSon = Date.now(); _fkIsle(sn); return; }
+    _fkBekleyen = sn;
+    if(!_fkT) _fkT = setTimeout(_fkBosalt, Math.max(0, 5000 - (Date.now() - _fkSon)));
   }, function(err){ DiagSaha('fiksturOkuma', err, { anlami:'Fikstür okunamadı; "Maçlarım" boş kalır.',
     oneri:'leagues/{lig}/matches okuma kuralı ve giriş kimliği.' }); });
 }
@@ -13841,6 +13874,8 @@ function sahaSayfaTazele(ad){
     if(_tazeleT) return;
     var calis = function(){
       if(_shellDokunuyor || (typeof _kdSur !== 'undefined' && _kdSur)){ _tazeleT = setTimeout(calis, 200); return; }
+      // (2026-10-25-C) Maç sürerken menü görünmüyorsa çizim beklenir (bkz. ODA DİNLEYİCİSİ MAÇ MODU) - görünür olunca yapılır.
+      try{ var _psh = document.getElementById('p-shell'); if(typeof running !== 'undefined' && running && !bitti && !(_psh && _psh.classList.contains('on'))){ _tazeleT = setTimeout(calis, 1500); return; } }catch(_e){}
       _tazeleT = null; var l = _tazeleBekleyen; _tazeleBekleyen = {};
       try{ shellDurumCiz(); }catch(e){}
       if(l[_shellSayfa]) sahaSayfaCiz(_shellSayfa);
@@ -13863,10 +13898,12 @@ function sahaAvatarCiz(){
     var bas = (ad || '?').charAt(0).toLocaleUpperCase('tr');
     var av = p.avatar || '';
     var gecerli = av && /^(data:image\/|https?:\/\/)/.test(av);
-    k.innerHTML = (gecerli
+    var _h = (gecerli
         ? '<img class="av" src="' + esc(av) + '" alt="" onerror="this.outerHTML=\'<div class=&quot;av&quot;>' + esc(bas) + '</div>\'">'
         : '<div class="av">' + esc(bas) + '</div>')
       + '<div class="ad">' + esc(ad) + '</div>';
+    if(k._avH === _h) return;            // (2026-10-25-C) değişmediyse yeniden kurma (data: avatar her seferinde yeniden çözülüyordu)
+    k._avH = _h; k.innerHTML = _h;
   }catch(e){ _sessiz(e,'sahaAvatarCiz','saha_oyun'); }
 }
 function shellDurumCiz(){
@@ -13994,6 +14031,37 @@ function _macKartHtml(id, buyuk, tablo){
 /* MAÇ ÖNCESİ RAKİP ANALİZİ (2026-10-10-D, onaylanan öneri A3). Maç kartındaki "Rakibi incele": rakibin dizilişi ve ilk
    11'i (mevki, güç, kondisyon, ceza), en güçlü 3 oyuncusu, son 5 maçı, maç başına atılan/yenilen gol ve cezalı/sakat
    oyuncuları. Veri: puan tablosundaki SAHA kadrosu (havuz kimlikleriyle) ve fikstür sonuçları. */
+/* RAKİP ANALİZİ SAHA GÖRÜNÜMÜ (2026-10-25-C, kullanıcı: "Rakibi inceleye tıklayınca saha görünümlü düzen çıksın"). Rakibin ilk 11'i,
+   kendi dizilişinin (t.formation) slotlarına yerleştirilir - kadro ekranındaki sahayla aynı çizim ve kart dili. Oyuncu-slot eşleşmesi:
+   önce mevki kodu birebir, sonra aynı mevki grubu (KL/DEF/OS/FV), sonra kalanlar sırayla. Diziliş tanınmazsa 4-4-2. */
+function _raSahaHtml(ilk, formasyon){
+  var diz = (SAHA_SLOT[formasyon] && DIZILISLER[formasyon]) ? formasyon : '4-4-2';
+  var slot = SAHA_SLOT[diz], koor = DIZILISLER[diz], kalan = ilk.slice(), yer = new Array(11);
+  var kod = function(v){ return String(v || '').replace(/[0-9]/g, ''); };
+  var al = function(sart){ for(var i = 0; i < 11; i++){ if(yer[i]) continue; var j = kalan.findIndex(function(x){ return sart(x, kod(slot[i])); }); if(j >= 0){ yer[i] = kalan[j]; kalan.splice(j, 1); } } };
+  al(function(x, k){ return kod(x.mevki) === k; });
+  al(function(x, k){ return x.mevki && sahaMevkiGrup(kod(x.mevki)) === sahaMevkiGrup(k); });
+  al(function(){ return true; });
+  var h = '<div class="kd-saha ra-saha" id="raSaha"><div class="kd-cizgi kd-orta"></div><div class="kd-cizgi kd-ceza"></div>'
+    + '<div class="kd-cizgi kd-ceza2"></div><div class="kd-cizgi kd-yay"></div><div class="kd-nokta"></div>';
+  for(var i = 0; i < 11; i++){
+    var top, left;
+    if(i === 0){ top = 90.5; left = 50; } else { var c = koor[i-1] || [-20, 0]; top = 70 - ((c[0] + 35) / 31) * 56; left = 50 + (c[1] / 30) * 46; }
+    var x = yer[i], k = x ? (kod(x.mevki) || kod(slot[i])) : kod(slot[i]), renk = KD_GRUP_RENK[sahaMevkiGrup(k)];
+    var kart;
+    if(!x) kart = '<div class="kd-kart kd-bos"><div class="kd-kod">' + esc(k) + '</div><div class="kd-arti">–</div></div>';
+    else {
+      var ad = String(x.ad || '').trim().split(/\s+/), kisa = ad.length > 1 ? ad[ad.length - 1] : ad[0];
+      var cz = (x.st === 'suspended' || x.st === 'cards') ? '<div class="kd-cz sari"></div>' : (x.st === 'injured' ? '<div class="kd-cz sakat"></div>' : '');
+      kart = '<div class="kd-kart" style="--kd:' + renk + '" title="' + esc(x.ad || '') + '">'
+        + '<div class="kd-ust"><span class="kd-kod">' + esc(k) + '</span><span class="kd-guc">' + (x.guc != null ? x.guc : '–') + '</span></div>'
+        + '<div class="kd-foto">' + (x.o ? _oyuncuAvatarHtml(x.o, 34, 2) : '<span class="dt-bos" style="width:34px;height:34px">' + esc(kisa.charAt(0) || '?') + '</span>') + '</div>'
+        + '<div class="kd-ad">' + esc(kisa) + '</div>' + cz + '</div>';
+    }
+    h += '<div class="kd-yer" data-x="' + left.toFixed(2) + '" data-y="' + top.toFixed(2) + '" style="top:' + top.toFixed(1) + '%;left:' + left.toFixed(1) + '%">' + kart + '</div>';
+  }
+  return h + '</div>';
+}
 function rakipAnalizAc(macId){
   try{
     var m = sahaFikstur[macId]; if(!m || !benimKayit) return;
@@ -14015,7 +14083,8 @@ function rakipAnalizAc(macId){
     var el = document.getElementById('rakipAnaliz');
     if(!el){ el = document.createElement('div'); el.id = 'rakipAnaliz'; document.body.appendChild(el); el.addEventListener('click', function(ev){ if(ev.target === el) el.style.display = 'none'; }); }
     el.innerHTML = '<div class="ra-kutu"><div class="ra-bas">' + _tkLogo(rid, 40) + '<div><b>' + esc(t.name || 'Rakip') + '</b><small>' + esc(t.formation || '') + (ort != null ? ' · ilk 11 güç ort. ' + ort : '') + '</small></div>'
-      + '<button type="button" onclick="document.getElementById(\'rakipAnaliz\').style.display=\'none\'">✕</button></div><div class="ra-ic">'
+      + '<button type="button" onclick="document.getElementById(\'rakipAnaliz\').style.display=\'none\'">✕</button></div><div class="ra-ic"><div class="ra-duzen">'
+      + '<div class="ra-sol">' + (ilk.length ? _raSahaHtml(ilk, t.formation) : '<div class="lg-not">Kadro bilgisi yok.</div>') + '</div><div class="ra-sag">'
       + '<div class="lg-kulup-ist" style="margin-bottom:10px"><span><b>' + maclar.length + '</b>Maç</span><span><b>' + (maclar.length ? (ag / maclar.length).toFixed(1) : '—') + '</b>Attığı / maç</span>'
       + '<span><b>' + (maclar.length ? (yg / maclar.length).toFixed(1) : '—') + '</b>Yediği / maç</span><span><b>' + eksik.length + '</b>Eksik</span></div>'
       + '<div class="lg-baslik" style="margin-top:0">Son maçları</div>' + (maclar.length ? '<div class="ra-son">' + maclar.slice(0, 5).map(function(x){
@@ -14023,9 +14092,10 @@ function rakipAnalizAc(macId){
           return '<span class="' + r + '" title="' + esc(_tkAd(ev ? x.awayId : x.homeId)) + '"><b>' + r + '</b>' + a + '-' + b + '<small>' + esc(kisaKod(_tkAd(ev ? x.awayId : x.homeId))) + '</small></span>'; }).join('') + '</div>' : '<div class="lg-not">Henüz maç oynamadı.</div>')
       + (yildiz.length ? '<div class="lg-baslik">En güçlü oyuncuları</div>' + yildiz.map(satir).join('') : '')
       + (eksik.length ? '<div class="lg-baslik">Cezalı / sakat</div>' + eksik.map(satir).join('') : '')
-      + '<div class="lg-baslik">İlk 11</div>' + (ilk.length ? ilk.map(satir).join('') : '<div class="lg-not">Kadro bilgisi yok.</div>')
-      + '</div></div>';
+      + (yed.length ? '<div class="lg-baslik">Yedekler</div>' + yed.map(satir).join('') : '')
+      + '</div></div></div></div>';
     el.style.display = 'flex';
+    try{ requestAnimationFrame(function(){ var rs = document.getElementById('raSaha'); if(rs){ kdYerlesimDuzelt(rs); kdAdSigdir(rs); } }); }catch(e){}
   }catch(e){ _sessiz(e, 'rakipAnalizAc', 'saha_oyun'); }
 }
 function _ligMaclarHtml(tablo){
@@ -17103,11 +17173,49 @@ function odayaGir(kodParam){
     yaz('Odaya girilemedi: ' + ((err && err.message) || ''), true);
   });
 }
+/* ODA DİNLEYİCİSİ MAÇ MODU (2026-10-25-C, kullanıcı: "iki cihaz lig maçı yaparken üçüncü cihaz izleyince oynayanlarda ve izleyende
+   donma/takılma"). KÖK SEBEP (bir parçası): oda düğümünün TAMAMI ('value') maç boyunca iki cihazda da dinleniyordu. Odanın içinde maç
+   durumu (net/durum, ~12/sn), konuk girdisi (net/girdi, ~20/sn) ve birkaç KB'lık kurtarma kaydı (kurtar, 3 sn'de bir) var: her güncellemede
+   oda nesnesinin tamamı yeniden kuruluyor, ardından menü yenileme tetikleniyordu (saniyede 30+ olay). Konuk ayrıca kurtarma kaydını hiç
+   kullanmadığı halde indiriyordu. ŞİMDİ maç başlayınca üst düğüm dinleyicisi kaldırılır; yalnızca maç sırasında okunan küçük alanlar
+   (durum, son, rövanş, konuk, simHost, lig...) tek tek dinlenir. net/* ve kurtar bu dinleyiciden hiç geçmez (host girdiyi, konuk durumu
+   zaten kendi ayrı dinleyicileriyle alır). Oda silinirse 'durum' boşalır: eski davranış (odadan çıkış) aynen çalışır. */
+var ODA_MAC_ALANLAR = ['durum', 'son', 'rovans', 'rovansBasla', 'konuk', 'konukAd', 'konukTaraf', 'konukTakim', 'simHost', 'sahip', 'sahipAd',
+  'sahipTaraf', 'sahipTakim', 'sahipPuan', 'konukPuan', 'lig', 'turnuva', 'hava', 'sureDk', 'basTs'];
+var _odaMacDinleyiciler = null;
+function _odaMacDinle(){
+  if(_odaMacDinleyiciler || !_odaKod || !fbDb) return;
+  var kod = _odaKod;
+  try{ if(_odaDinleyici) fbDb.ref('sahaOdalar/' + kod).off('value', _odaDinleyici); }catch(e){}
+  var v = Object.assign({}, _odaVeri || {}); delete v.net; delete v.kurtar; _odaVeri = v;
+  _odaMacDinleyiciler = ODA_MAC_ALANLAR.map(function(k){
+    var ref = fbDb.ref('sahaOdalar/' + kod + '/' + k);
+    var fn = function(sn){
+      if(_odaKod !== kod || !_odaVeri) return;
+      var val = sn.val(), eski = _odaVeri[k];
+      if(JSON.stringify(eski === undefined ? null : eski) === JSON.stringify(val)) return;   // ilk bağlanışta aynı değer: işlem yok
+      if(val === null) delete _odaVeri[k]; else _odaVeri[k] = val;
+      if(k === 'durum' && val === null){ _odaVeriIsle(null); return; }                       // oda silindi
+      _odaVeriIsle(_odaVeri);
+    };
+    ref.on('value', fn, function(err){ _sessiz(err, 'odaMacDinle:' + k, 'saha_ag'); });
+    return [ref, fn];
+  });
+}
 function odaDinle(){
   odaDinlemeyiBirak();
   if(!_odaKod) return;
   _odaDinleyici = function(sn){
-    _odaVeri = sn.val();
+    _odaVeriIsle(sn.val());
+    if(window._sahaOdaMacBasladi && _odaKod) _odaMacDinle();      // maç başladı: küçük alanlara geç (bkz. ODA DİNLEYİCİSİ MAÇ MODU)
+  };
+  fbDb.ref('sahaOdalar/'+_odaKod).on('value', _odaDinleyici, function(err){
+    DiagSaha('odaDinle', err, { kod:_odaKod, anlami:'Oda durumu izlenemiyor.' });
+  });
+}
+function _odaVeriIsle(veri){
+  {
+    _odaVeri = veri;
     if(!_odaVeri){ var _llAcik = !!document.getElementById('ligLobi'); odaCik(true);
       if(_llAcik){ ligLobiKapat(); window._sahaLigOda = null; try{ ligMacHavasiGeriAl(); }catch(e){} sahaBildir('Rakip bekleme ekranından ayrıldı. Maça yeniden girebilirsin.', 3200); } return; }     // oda silindi (sahip ayrildi)
     if(_odaVeri.lig && _odaVeri.durum !== 'basladi' && !window._sahaOdaMacBasladi){   // (2026-10-18-A) bkz. LİG LOBİSİ
@@ -17127,15 +17235,14 @@ function odaDinle(){
       try{ hud(); }catch(e){} odaKonukBitir('oda-kaydi'); } }catch(e){ _sessiz(e, 'odaDinle:son', 'saha_ag'); }
     try{ if(window._sahaOdaMacBasladi && rovansIzle(_odaVeri)) return; }catch(e){ _sessiz(e, 'rovansIzle', 'saha_ag'); }
     sahaSayfaTazele('arkadas');
-  };
-  fbDb.ref('sahaOdalar/'+_odaKod).on('value', _odaDinleyici, function(err){
-    DiagSaha('odaDinle', err, { kod:_odaKod, anlami:'Oda durumu izlenemiyor.' });
-  });
+  }
 }
 function odaDinlemeyiBirak(){
   try{
     if(_odaDinleyici && _odaKod) fbDb.ref('sahaOdalar/'+_odaKod).off('value', _odaDinleyici);
   }catch(e){ _sessiz(e,'odaDinlemeyiBirak','saha_ag'); }
+  try{ (_odaMacDinleyiciler || []).forEach(function(x){ try{ x[0].off('value', x[1]); }catch(_o){} }); }catch(e){}
+  _odaMacDinleyiciler = null;
   _odaDinleyici = null;
 }
 function odaCik(sessizce){
@@ -17732,7 +17839,7 @@ function odaNetDurumYaz(){
          [baskı, çalım, kaleci, ara pas, kondisyon, dinlenme] konuğun oyuncusu (2. oyuncu) için gönderilir. */
       lb: (function(){ try{ var q = ctrl2; return [ (OYN[1].baski || _baskiKosulu(1)) ? 1 : 0, (q && topKontrolde(q)) ? 1 : 0, _kaleciCikKosulu(1) ? 1 : 0,
         _takimTopta(1) ? 1 : 0, Math.round(OYN[1].st || 0), OYN[1].dinlen ? 1 : 0 ]; }catch(e){ return 0; } })(),
-      sp: (SPK.yayin && SPK.yayin.length) ? SPK.yayin : 0,
+      sp: (SPK.yayin && SPK.yayin.length && Date.now() - (SPK.yayinT || 0) < 3000) ? SPK.yayin : 0,   // (2026-10-25-C) cümleler yalnızca yeni cümleden sonraki 3 sn pakete girer (eskiden HER pakette ~1 KB)
       // (2026-10-18-B) VAR süresince (bekleme + hakemin monitöre yürümesi dahil) kamera her pakette; inceleme ekranı açıksa e:1 (bkz. KONUKTA VAR - 2)
       ve: (function(){ try{ if(!VAR.aktif) return 0; var d = new THREE.Vector3(); camera.getWorldDirection(d); var c = camera.position, ek = window._varEkranAktif ? 1 : 0;
         var O = VAR.ofs; return { e:ek, o:(O && ek) ? { s:y2(O.savX), a:y2(O.atkX), z:y2(O.atkZ || 0) } : 0, k:[y2(c.x), y2(c.y), y2(c.z), y2(c.x + d.x * 12), y2(c.y + d.y * 12), y2(c.z + d.z * 12)] }; }catch(e){ return 0; } })(),   // (2026-10-17-G) bkz. KONUKTA VAR EKRANI                            // (2026-10-17-G) anlatım konukta da (bkz. KONUKTA ANLATIM)
@@ -18856,7 +18963,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-25-B';
+window.APP_BUILD = '2026-10-25-D';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -21497,6 +21604,10 @@ function sahaOrtakCanliYaz(fk, hG, aG){
     var mac  = (sahaFikstur && sahaFikstur[fk.matchId]) || {};
     var ev   = (sahaLigTakimlar[mac.homeId] || {}).name || 'Ev sahibi';
     var dep  = (sahaLigTakimlar[mac.awayId] || {}).name || 'Deplasman';
+    // (2026-10-25-C) yalnızca skor/dakika değişince ya da 5 sn'de bir: her canlı döngüde yazmak bütün TV dinleyicilerini tetikliyordu
+    var _oDk = Math.max(0, Math.min(120, Math.round(macDakika()||0))), _oI = fk.matchId + '|' + (hG|0) + '|' + (aG|0) + '|' + _oDk;
+    if(window._ortakCanliImza === _oI && Date.now() - (window._ortakCanliT || 0) < 5000) return;
+    window._ortakCanliImza = _oI; window._ortakCanliT = Date.now();
     fbDb.ref('paylasilan/canliMaclar/' + fk.matchId).set({
       lig: fk.ligId, macId: fk.matchId,
       ev: ev, dep: dep, evG: hG|0, depG: aG|0,
@@ -21523,8 +21634,13 @@ function _sahaCanliGonder(g){
   _canliYol.yolda = true; _canliYol.t0 = Date.now();
   var _bitir = function(){ _canliYol.yolda = false; var b = _canliYol.bekleyen; _canliYol.bekleyen = null; if(b) setTimeout(function(){ _sahaCanliGonder(b); }, 0); };
   var ana = {}, ek = {}, ekVar = false;
+  /* TEK YAZIM (2026-10-25-C, bkz. ODA DİNLEYİCİSİ MAÇ MODU): ek alanlar (tabela, momentum, sahaCanliTs, sahaOynayan...) her döngüde AYRI
+     yazılıyordu: döngü başına 6-7 yazım = maçı dinleyen HER cihazda (iki oyuncu, Puan Tablosu, izleyiciler) saniyede 15-18 olay. Bütün ek
+     alanlar artık kurallarda tanımlı: hepsi ana yazımla TEK atomik güncellemede gider (dinleyiciye döngü başına tek olay). Birleşik yazım
+     yine de reddedilirse oturumun kalanında eski yönteme (ana + ek alanlar ayrı) dönülür - canlı veri kesilmez. */
+  var _tekYazim = !window._sahaCanliBolunmus;
   Object.keys(g).forEach(function(k){
-    if(_SAHA_EK_ALANLAR.test(k)){ ek[k] = g[k]; ekVar = true; } else ana[k] = g[k];
+    if(!_tekYazim && _SAHA_EK_ALANLAR.test(k)){ ek[k] = g[k]; ekVar = true; } else ana[k] = g[k];
   });
   var _t0 = performance.now();
   /* 2026-09-28-AE (kullanıcı: "bazı maçlar canlıya alınmıyor"): Firebase, içinde TEK bir
@@ -21542,7 +21658,11 @@ function _sahaCanliGonder(g){
   try{
     fbDb.ref().update(ana)
       .then(function(){ window._canliHataGosterildi = false; _bitir(); try{ if(window.SahaSensor) SahaSensor.yazim(true, performance.now() - _t0); }catch(_e){self.__ds&&self.__ds(20809,_e)} })
-      .catch(function(e){ _bitir(); _yazimHata(e); });
+      .catch(function(e){
+        if(_tekYazim && /permission|PERMISSION/i.test(String(e && (e.code || e.message) || e))){
+          window._sahaCanliBolunmus = true; _bitir(); try{ DiagSaha('canliTekYazimRed', e, { tur:'veri', anlami:'Birleşik canlı yazım reddedildi; ek alanlar ayrı yazılacak.' }); }catch(_d){}
+          setTimeout(function(){ _sahaCanliGonder(g); }, 0); return; }
+        _bitir(); _yazimHata(e); });
   }catch(eSenk){ _bitir(); _yazimHata(eSenk); }
   /* 2026-09-28-AC (kullanıcı: "canlı veri kesilip geri geliyor"): Ek alanlar TEK bir yazımda
      gidiyordu; kurallarda tanımlı olmayan TEK bir alan (ör. sahaCanliTs) bütün yazımı
@@ -30660,7 +30780,7 @@ function _sahaIzleRozetUygula(){
         +'gap:.4rem;background:none;border:none;padding:0;'
         +'font:800 13px/1 Arial,sans-serif;color:#fff;letter-spacing:.02em;pointer-events:none;'
         +'max-width:46vw;text-shadow:0 1px 4px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.6);'
-        +'filter:drop-shadow(0 2px 5px rgba(0,0,0,.7));font-variant-numeric:tabular-nums';
+        +'font-variant-numeric:tabular-nums';   /* (2026-10-25-D) drop-shadow kaldırıldı: logonun çevresine siyah hale çiziyordu */
       document.body.appendChild(el);
     }
       // (yer tutucu kaldirildi - bkz. yukaridaki not)
@@ -30696,7 +30816,7 @@ function _sahaIzleRozetUygula(){
       el.style.fontSize = (13 * yOl).toFixed(1) + 'px';
     
     var html = '';
-      if(logo) html += '<img src="'+logo.replace(/"/g,'&quot;')+'" style="height:'
+      if(logo) html += '<img data-logo="1" src="'+logo.replace(/"/g,'&quot;')+'" style="height:'
         +(18*lOl).toFixed(1)+'px;width:auto;object-fit:contain;flex-shrink:0;display:block" alt=""/>';
     if(metin) html += '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'
       +metin.replace(/</g,'&lt;')+'</span>';

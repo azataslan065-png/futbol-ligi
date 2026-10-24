@@ -1528,7 +1528,7 @@ iframe.ptp-video{pointer-events:none}
   background:none;border:none;border-radius:0;padding:0;
   font:800 13px/1 Arial,sans-serif;color:#fff;letter-spacing:.02em;pointer-events:none;
   text-shadow:0 1px 4px rgba(0,0,0,.9),0 0 10px rgba(0,0,0,.6);
-  filter:drop-shadow(0 2px 5px rgba(0,0,0,.7));
+  /* (2026-10-25-D) filter:drop-shadow kaldırıldı: logonun şeklinin çevresine siyah hale çiziyordu (yazının gölgesi text-shadow ile kalır) */
   max-width:46%;box-shadow:0 2px 8px rgba(0,0,0,.2);font-variant-numeric:tabular-nums}
 .ptp-canliRozet img{height:18px;width:auto;max-width:64px;object-fit:contain;display:block;flex-shrink:0}
 .ptp-canliRozet span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1547,7 +1547,7 @@ iframe.ptp-video{pointer-events:none}
 /* KULLANICI BİLDİRDİ ("küçük ekranda logo büyük görünüyor"): Sabit 20px yükseklik, geniş
    ekranda uygun ama dar bir kutuda üst barın yarısını kaplıyordu. Yükseklik artık kutunun
    genişliğine göre ölçekleniyor; alt ve üst sınırlarla makul aralıkta tutuluyor. */
-.ptp-kanal-logo{height:clamp(12px,3.2vw,20px);max-width:56px;object-fit:contain;flex-shrink:0;border-radius:4px}
+.ptp-kanal-logo{height:clamp(12px,3.2vw,20px);max-width:56px;object-fit:contain;flex-shrink:0}
 /* Tam ekranda kutu ekranın tamamı olduğu için oran zaten doğru; orada üst sınıra izin verilir. */
 .ptp-fs .ptp-kanal-logo{height:clamp(16px,2.2vw,26px);max-width:80px}
 .ptp-live{background:#dc2626;color:#fff;font-size:.62rem;font-weight:900;padding:.14rem .4rem;border-radius:5px;flex-shrink:0}
@@ -2585,6 +2585,12 @@ window.addEventListener('DOMContentLoaded',function(){
 // kaldırıldı - gerçek soruna (Firebase Rules izinleri) zaten ulaşılıp çözüldüğü için artık
 // gerekli değildi.
 </script>
+<style id="ptLogoZemin2026D">
+/* (2026-10-25-D, "kanal, lig ve diğer logoların kenarlarında siyahlık olmasın"): lig ve uygulama logosu kendi şekliyle durur;
+   logo varken arkadaki renkli kutu ve kırpma kalkar. */
+.topbar-logo:has(img){background:transparent !important;border-radius:0 !important;overflow:visible !important}
+#loginLogoEl:has(img){background:transparent !important;box-shadow:none !important;border-radius:0 !important}
+</style>
 </head>
 <body>
 <!-- HATA DÜZELTMESİ (kullanıcı ekran KAYDIYLA kanıtladı: "Ekranı yukarı/aşağı kaydırınca tema
@@ -3120,7 +3126,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-25-B';
+window.APP_BUILD='2026-10-25-D';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -7065,25 +7071,41 @@ function listenToLeague(leagueId){
   _leagueDataListenerId=leagueId;
   _curLeagueId=leagueId; // çağıranlar zaten ayarlıyor; burada da garantiye alınır
   var _gotDataForThisLeague=false; // bu sezon için en az bir kez gerçek veri geldi mi?
-  _leagueDataListener=function(snap){
+  /* OLAY BİRLEŞTİRME (2026-10-25-C, kullanıcı: "iki cihaz lig maçı yaparken üçüncü cihaz izleyince izleyende de donma"). KÖK SEBEP: bu
+     dinleyici ligin TAMAMINI dinler; canlı SAHA maçı sürerken saniyede birkaç kez tetikleniyor, her seferinde snap.val() DÖRT kez
+     çağrılıp (her biri bütün ligi yeniden kurar) bütün lig JSON.stringify ediliyor ve bütün kullanıcıların kadroları yeniden
+     hesaplanıyordu. ŞİMDİ değer bir kez okunur; arka arkaya gelen olaylar birleştirilip en çok 0,6 sn'de bir YALNIZCA son anlık görüntü
+     işlenir (ilk yükleme beklemez). */
+  _leagueDataListener=function _ptLigOlay(snap){
    try{
     // GÜVENLİK KİLİDİ: off() tamamlanana kadar sırada bekleyen bir geri çağrı hâlâ
     // tetiklenebilir - artık aktif olmayan bir ligden gelen senkron D'yi ASLA değiştirmez.
     if(_leagueDataListenerId!==leagueId||_curLeagueId!==leagueId)return;
+    if(!snap._ptHemen){
+      var _simdi=Date.now(),_gecen=_simdi-(window._ptLigT||0);
+      window._ptLigSon=snap;
+      if(_gecen<600){
+        if(!window._ptLigZ)window._ptLigZ=setTimeout(function(){ window._ptLigZ=null; var _s=window._ptLigSon; window._ptLigSon=null; if(_s){ _s._ptHemen=true; _ptLigOlay(_s); } },600-_gecen);
+        return;
+      }
+      window._ptLigSon=null;
+    }
+    window._ptLigT=Date.now();
+    const _sv=snap.val();
     // Sezon Firebase'den SİLİNMİŞSE (daha önce verisi gelmişti, şimdi null döndü) D'yi
     // varsayılanlara SIFIRLAMA - aksi halde ekrandaki her şey (tema, ayarlar) bir anda
     // "eski hâline dönmüş" gibi görünürdü. Doğru sezona geçişi leaguesMeta dinleyicisi
     // zaten yapar. NOT: Henüz hiç veri gelmemişken null gelmesi (gerçekten boş bir sezon)
     // normal akışla işlenmeye devam eder - kullanıcı yükleme ekranında asılı kalmaz.
-    if(snap.val()===null&&_gotDataForThisLeague)return;
-    if(snap.val()!==null)_gotDataForThisLeague=true;
+    if(_sv===null&&_gotDataForThisLeague)return;
+    if(_sv!==null)_gotDataForThisLeague=true;
     // Bu ligin ilk anlık görüntüsünde veri boyutu profili çıkarılır (yalnızca teşhis açıkken).
-    if(typeof veriBoyutuProfili==='function')veriBoyutuProfili(snap.val());
+    if(typeof veriBoyutuProfili==='function')veriBoyutuProfili(_sv);
     // TEŞHİS İŞARETİ (bkz. checkDataHealth): dinleyicinin en son NE ZAMAN tetiklendiğini
     // kaydeder - uygulama davranışını etkilemez. 'visitors' alt yolu ~15sn'de bir güncellendiği
     // için, bağlantı sağlıklıyken bu değer normalde hiç uzun süre bayatlamaz.
     window._ptLastListenerFireAt=Date.now();
-    const d=snap.val();
+    const d=_sv;
     // ÖNEMLİ PERFORMANS OPTİMİZASYONU: Firebase'deki 'visitors' alt yolu her ~15 saniyede
     // bir (presence heartbeat ile) güncellendiğinde, üst yoldaki bu dinleyici de tetiklenir
     // ve TÜM sayfa gereksiz yere yeniden render edilirdi - PT hiçbir zaman 'visitors' verisini
@@ -7301,7 +7323,7 @@ function listenToLeague(leagueId){
     // belirlediği GENEL "Uygulama Adı/Logosu" (appBranding) gösterilir - kullanıcı lig
     // bilgisini zaten uygulama İÇİNDEYKEN (üst bar) görebiliyor, girişte tekrarı gereksizdi.
     // (bkz. applyAppBranding() - appBranding realtime dinleyicisi ile ayrı güncellenir)
-    const lg=document.getElementById('ptLogo');if(lg)lg.innerHTML=D.logoUrl?`<img src="${D.logoUrl}" style="width:100%;height:100%;object-fit:cover" onerror="this.parentNode.innerHTML=''"/>`:'';
+    const lg=document.getElementById('ptLogo');if(lg)lg.innerHTML=D.logoUrl?`<img src="${D.logoUrl}" style="width:100%;height:100%;object-fit:contain" onload="try{_processLogoImg(this)}catch(_e){}" onerror="this.parentNode.innerHTML=''"/>`:'';
     // KULLANICI TALEBİ: Premium palet önizleme (canlı deneme) modu aktifken, henüz erişim
     // hakkı olmayan kullanıcıya GERÇEK canlı maç verisi gösterilmez - önizleme sadece renk
     // paletini gösterir, canlı skor/olay bilgisi trial sırasında gizlenir.
@@ -8336,7 +8358,7 @@ function sponsorBannerHtml(pageKey){
       let inner;
       if(sp.type==='video')inner=`<video src="${sp.src}" style="width:${w}px;height:${h}px;object-fit:contain;flex-shrink:0" autoplay muted loop playsinline></video>`;
       else if(sp.type==='text')inner=`<div style="width:${w}px;height:${h}px;flex-shrink:0;display:flex;align-items:center;justify-content:center;text-align:center;font-size:.75rem;font-weight:800;color:var(--tx);background:${sp.bgColor||'transparent'};border-radius:${sp.bgColor?'8px':'0'}">${sp.text||''}</div>`;
-      else inner=`<img src="${sp.src}" style="width:${w}px;height:${h}px;object-fit:contain;flex-shrink:0"/>`;
+      else inner=`<img src="${sp.src}" style="width:${w}px;height:${h}px;object-fit:contain;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}"/>`;
       // KULLANICI TALEBİ: Sponsora bir link tanımlanmışsa, tıklanınca o siteye gidilir.
       return sp.link?`<a href="${sp.link.replace(/"/g,'&quot;')}" target="_blank" rel="noopener noreferrer" style="flex-shrink:0;text-decoration:none">${inner}</a>`:inner;
     }).join('')}
@@ -17940,7 +17962,7 @@ function sohbetKimlik(c){
   return {ad:String(c.user||'?'),logo:'',rozet:!!kr,rozetTur:(kr&&kt[kr.rozetId])?kr.rozetId:'kullanici',dev:false,hesap:false};
 }
 function sohbetKimlikHtml(k){
-  return (k.logo?'<img src="'+escHtml(k.logo)+'" alt="" style="width:18px;height:18px;border-radius:50%;object-fit:cover;flex-shrink:0;background:#fff">':'')
+  return (k.logo?'<img src="'+escHtml(k.logo)+'" alt="" style="width:18px;height:18px;object-fit:contain;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}">':'')
     +escHtml(k.ad)
     +(k.rozet?(function(x){return x?' '+x:'';})(sohbetRozetSvg(k.rozetTur)):'');
 }
@@ -18001,7 +18023,7 @@ function sohbetRozetCiz(r, boy){
   if(!r) return '';
   boy = boy || 14;
   var et = _rozetEsc(r.ad || 'Doğrulanmış');
-  if(r.resim) return '<img src="' + _rozetEsc(r.resim) + '" alt="' + et + '" title="' + et + '" style="width:' + boy + 'px;height:' + boy + 'px;object-fit:contain;vertical-align:-2px;flex-shrink:0">';
+  if(r.resim) return '<img src="' + _rozetEsc(r.resim) + '" alt="' + et + '" title="' + et + '" style="width:' + boy + 'px;height:' + boy + 'px;object-fit:contain;vertical-align:-2px;flex-shrink:0" onload="try{_processLogoImg(this)}catch(_e){}">';
   var renk = /^#[0-9a-f]{3,8}$/i.test(String(r.renk || '')) ? r.renk : '#1d8cf0';
   return '<svg viewBox="0 0 24 24" width="' + boy + '" height="' + boy + '" style="vertical-align:-2px;flex-shrink:0" role="img" aria-label="' + et + '"><title>' + et + '</title>'
     + '<g fill="' + renk + '">' + (ROZET_SEKIL[r.sekil] || ROZET_SEKIL.daire) + '</g>' + (ROZET_SIMGE[r.simge] != null ? ROZET_SIMGE[r.simge] : ROZET_SIMGE.tik) + '</svg>';
@@ -21325,7 +21347,7 @@ firebase.database().ref('appBranding').on('value',snap=>{
   const nameEl=document.getElementById('loginLigName');
   if(nameEl)nameEl.textContent=b.name||'Puan Tablosu';
   const logoEl=document.getElementById('loginLogoEl');
-  if(logoEl)logoEl.innerHTML=b.logoUrl?`<img src="${b.logoUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:20px" onerror="this.parentNode.innerHTML=''"/>`:'';
+  if(logoEl)logoEl.innerHTML=b.logoUrl?`<img src="${b.logoUrl}" style="width:100%;height:100%;object-fit:contain" onload="try{_processLogoImg(this)}catch(_e){}" onerror="this.parentNode.innerHTML=''"/>`:'';
   // 3 bloğun (logo/titleGroup/formBox) düzen bilgisini uygula. Geriye dönük uyumluluk: eski
   // sadece-logo verisi varsa (loginLogoX/Y/Pos) logo bloğuna otomatik çevrilir.
   let layout=b.loginLayout;
@@ -25438,7 +25460,7 @@ function renderVideoScreenList(){
       +klasorler.map(function(k){
         return '<button onclick="filterVideoScreenCategory(\''+escAttr(k.ad).replace(/'/g,"\\'")+'\')" style="text-align:left;cursor:pointer;font-family:inherit;color:var(--tx);background:var(--s2);border:1.5px solid var(--br);border-radius:14px;padding:0;overflow:hidden;display:flex;flex-direction:column">'
           +'<div style="position:relative;aspect-ratio:16/10;background:var(--s3);display:flex;align-items:center;justify-content:center;overflow:hidden">'
-          +(k.kapak?'<img src="'+escAttr(k.kapak)+'" style="width:100%;height:100%;object-fit:cover;opacity:.9" onerror="this.style.display=\'none\'"/>':'')
+          +(k.kapak?'<img src="'+escAttr(k.kapak)+'" style="width:100%;height:100%;object-fit:contain;padding:6px;box-sizing:border-box;opacity:.95" onload="try{_processLogoImg(this)}catch(_e){}" onerror="this.style.display=\'none\'"/>':'')
           +'<span style="position:absolute;left:.4rem;bottom:.35rem;font-size:1.25rem;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6))"></span></div>'
           +'<div style="padding:.45rem .55rem .5rem"><div style="font-size:.74rem;font-weight:800;line-height:1.25;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">'+escAttr(k.ad)+'</div>'
           +'<div style="font-size:.62rem;color:var(--mu);margin-top:.15rem">'+k.sayi+' video</div></div></button>';
@@ -25908,7 +25930,7 @@ function remoteCtrlChannelRowsHtml(isLive){
   return items.map(function(o){
     var x=o.x,i=o.i;
     var harf=(x.title||'?').trim().charAt(0).toUpperCase()||'?';
-    var logoHtml=x.logo?'<img src="'+x.logo.replace(/"/g,'&quot;')+'" style="width:100%;height:100%;object-fit:contain"/>':harf;
+    var logoHtml=x.logo?'<img src="'+x.logo.replace(/"/g,'&quot;')+'" style="width:100%;height:100%;object-fit:contain" onload="try{_processLogoImg(this)}catch(_e){}"/>':harf;
     // Sıralama modunda satır bir düğme DEĞİL, taşıma tuşlarını barındıran bir satırdır -
     // taşımak isterken yanlışlıkla kanal değişmesin diye.
     if(window._remoteCtrlSira){
@@ -28885,7 +28907,7 @@ function ptCanliRozetUygula(){
     el.style.setProperty('--rozetLogoY', (18 * lOl).toFixed(1) + 'px');
     var _rzHtml = (logo
         ? '<img src="' + escAttr(logo) + '" alt="" style="height:var(--rozetLogoY,18px);'
-          + 'width:auto;object-fit:contain;display:block" onerror="this.style.display=\'none\'"/>'
+          + 'width:auto;object-fit:contain;display:block" onload="try{_processLogoImg(this)}catch(_e){}" onerror="this.style.display=\'none\'"/>'
         : '')
       + (metin ? '<span>' + escHtml(metin) + '</span>' : '');
     // Aynı içerik yeniden yazılmaz (logo her seferinde yeniden yüklenip genişlik oynuyordu); logo yüklenince
@@ -34447,7 +34469,7 @@ function ptpUstBarParcalari(){
     try{
       var _lg=el('ptpKanalLogo');
       if(_lg){
-        if(newLogo){_lg.src=newLogo;_lg.style.display='';}
+        if(newLogo){_lg.onload=function(){try{_processLogoImg(_lg)}catch(_e){}};_lg.src=newLogo;_lg.style.display='';}   // (2026-10-25-D) yeni kanalın logosu da temizlenir
         else _lg.style.display='none';
       }
     }catch(e){self.__ds&&self.__ds(34163,e)}
