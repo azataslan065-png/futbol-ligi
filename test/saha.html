@@ -5821,7 +5821,7 @@ const GOAL_HW = 3.66, GOAL_H = 2.44;
 // TOP BOYUTU (2026-10-02-C, kullanıcı: "topun büyüklüğü çok fazla"): 0.34 m yarıçap gerçeğin
 // ~3 katıydı (gerçek top: 0.11 m). 0.21 m: hâlâ yayın açısından rahat görünür, ama oyuncunun
 // dizine gelmiyor. Fizik ve çizim aynı sabiti kullandığı için zemin teması değişmez.
-const R_BALL = 0.21;
+const R_BALL = 0.15;   // (2026-10-24-G) top çapı 0,42 m → 0,30 m: oyuncuya göre daha gerçekçi
 const STEP = 1/60;                    // sabit fizik adımı
 /* GÖRSEL ADIM (2026-10-17-E, kullanıcı: Redmi 9A'da maç 7-9 kare/sn). KÖK SEBEP: fizik 60 Hz sabit adımla yürür; yavaş cihazda bir
    karede 5 adım birden çalışıyordu ve HER adımda 25 figürün iskelet animasyonu, skor/kondisyon göstergesi (DOM), radar ve duran
@@ -18460,7 +18460,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-23-F';
+window.APP_BUILD = '2026-10-24-G';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -23318,7 +23318,7 @@ function duranHedefHesapla(p){
     var nd = duranNisanYon(p, true), d0 = duran.tip === 'korner' ? Math.hypot(p.dir * (HLX - 11) - ball.position.x, ball.position.z) : 22;
     var bx = ball.position.x + nd.x * d0, bz = ball.position.z + nd.z * d0, ile = _kamIleri();
     bx += sag.x * sx * 11 + ile.x * sy * 9; bz += sag.z * sx * 11 + ile.z * sy * 9;
-    return { kale:false, x:Math.max(-HLX + 1, Math.min(HLX - 1, bx)), z:Math.max(-HWZ + 1, Math.min(HWZ - 1, bz)) };
+    return { kale:false, x:Math.max(-HLX + 1, Math.min(HLX - 1, bx)), z:Math.max(-HWZ + 1, Math.min(HWZ - 1, bz)), sy:sy };
   }catch(e){ return null; }
 }
 var _dhIsaret = null, _dhIsaret2 = null;
@@ -23415,7 +23415,7 @@ function aiHedef(p, kovalayan){
   // PAS ALICISI: havadaki topun düşeceği noktaya, yerdeki topun önüne (topla buluşacağı yere) koşar.
   const _pa = window._pasAlici;
   if (_pa && _pa.p === p && !p.gk && sonDokunanOyuncu === _pa.pasor){
-    if (ball.position.y > 0.7 && _pa.hedef) return _pa.hedef.clone();
+    if (ball.position.y > 0.7 && _pa.hedef){ const _in = _topInisNoktasi(); return _in || _pa.hedef.clone(); }
     const _bh = Math.hypot(bVel.x, bVel.z), _dd = p.obj.position.distanceTo(ball.position);
     const _tt = Math.min(1.2, _dd / Math.max(4, _bh + 6));
     return new THREE.Vector3(ball.position.x + bVel.x*_tt, 0, ball.position.z + bVel.z*_tt);
@@ -23499,6 +23499,22 @@ function _aiVurusAnim(p){
       modelTekSefer(p.obj.userData, _yx >= 0 ? 'sutSag' : 'sutSol', 1.5);
     }
   }catch(e){_sessiz(e,'aiVurus:4082','saha_oynanis');}
+}
+/* PAS ALICISI - HAVADAKİ TOPUN İNİŞ NOKTASI (kullanıcı: "top hangi oyuncuya gönderildiyse o oyuncu gelen pası karşılamalı").
+   KÖK SEBEP: alıcı, havadayken pas anındaki SABİT hedef noktasına koşuyordu. Pas sapıp (beceriye bağlı açısal sapma) başka
+   yere düşünce alıcı boş yerde bekliyor, top ise kimsenin olmadığı yere iniyordu. ŞİMDİ topun mevcut hızıyla, top fiziğiyle
+   aynı adımlarla (yerçekimi + hava direnci) yere ilk değdiği nokta hesaplanır ve alıcı oraya koşar. */
+function _topInisNoktasi(){
+  let x = ball.position.x, y = ball.position.y, z = ball.position.z;
+  let vx = bVel.x, vy = bVel.y, vz = bVel.z;
+  const h = 1 / 60;
+  for (let i = 0; i < 240; i++){
+    vy -= TOP_G * h;
+    if (y > R_BALL + 0.03){ const va = Math.hypot(vx, vy, vz), kd = Math.max(0, 1 - HAVA_SURT * va * h); vx *= kd; vy *= kd; vz *= kd; }
+    x += vx * h; y += vy * h; z += vz * h;
+    if (y <= R_BALL + 0.03) return new THREE.Vector3(Math.max(-HLX + 1, Math.min(HLX - 1, x)), 0, Math.max(-HWZ + 1, Math.min(HWZ - 1, z)));
+  }
+  return null;
 }
 function _pasAliciGecerli(){
   const a = window._pasAlici;
@@ -24135,9 +24151,9 @@ function duranCalistir(){
     if (!havaPasi(p, duran.takim, { min:18, max:62, ideal:40 })) bVel.set(p.dir*26, 7.5, (Math.random()-0.5)*10);
     ofsaytTemizle();
   } else if (tip === 'korner' && (function(){ const _hk = duranHedefHesapla(p); if (!_hk || _hk.kale) return false;   // (2026-10-18-D) kullanıcının seçtiği orta noktası
-      const T = (p.team === 0 ? teamA : teamB).filter(function(q){ return q !== p && !q.gk && !q.dis; });
-      let en = null, ed = 7; T.forEach(function(q){ const dd = Math.hypot(q.obj.position.x - _hk.x, q.obj.position.z - _hk.z); if (dd < ed){ ed = dd; en = q; } });
-      const tx = en ? (en.obj.position.x + _hk.x) / 2 : _hk.x, tz = en ? (en.obj.position.z + _hk.z) / 2 : _hk.z;
+      /* (2026-10-24-G, kullanıcı: "top yön çubuğu ile nereye odaklandıysa oraya gitmeli") eskiden hedef, 7 m içindeki bir takım
+         arkadaşına doğru yarım yarıya çekiliyordu; top nişanın tam üstüne iner. */
+      const tx = _hk.x, tz = _hk.z;
       const dv = new THREE.Vector3(tx - ball.position.x, 0, tz - ball.position.z), u = dv.length(); dv.normalize();
       const L = lobHizi(u, 0.75 + u * 0.025); bVel.set(dv.x * L.vh, L.vy, dv.z * L.vh); ofsaytTemizle(); return true; })()){
     // (kullanıcı ortası yukarıda uygulandı)
@@ -24163,8 +24179,10 @@ function duranCalistir(){
     const _isb = nit(p,'nIsb',0.4);
     let _pz = (Math.random() < 0.5 ? -1 : 1) * GOAL_HW * (0.35 + Math.random()*(0.5 + (1-_isb)*0.45)), _py = 0.3 + Math.random() * 1.2;
     const _hd = duranHedefHesapla(p);   // (2026-10-18-D) bkz. DURAN TOP NİŞANI: kullanıcının seçtiği nokta (+ isabete bağlı sapma)
-    if (_hd && _hd.kale){ _pz = Math.max(-(GOAL_HW + 1.4), Math.min(GOAL_HW + 1.4, _hd.z + (Math.random() - 0.5) * GOAL_HW * 0.32 * (1.25 - _isb)));
-      _py = Math.max(0.15, Math.min(GOAL_H + 0.6, _hd.y + (Math.random() - 0.5) * 0.5 * (1.25 - _isb))); }
+    // (2026-10-24-G) İnsan atıcının nişanında sapma neredeyse yok: top seçilen noktaya gider (küçük beceri payı kalır).
+    const _nzH = (_duranInsanO(p) >= 0) ? 0.12 : 1;
+    if (_hd && _hd.kale){ _pz = Math.max(-(GOAL_HW + 1.4), Math.min(GOAL_HW + 1.4, _hd.z + (Math.random() - 0.5) * GOAL_HW * 0.32 * (1.25 - _isb) * _nzH));
+      _py = Math.max(0.15, Math.min(GOAL_H + 0.6, _hd.y + (Math.random() - 0.5) * 0.5 * (1.25 - _isb) * _nzH)); }
     const h = new THREE.Vector3(p.dir*HLX, 0, _pz);
     if (savGK){
       const _kk = nit(savGK,'nKal',0.4);
@@ -24190,9 +24208,16 @@ function duranCalistir(){
     (p.team === 0 ? istat.a : istat.b).sut++;
     try{ sutHaritaBasla(p, 'pen'); }catch(e){}
     try{ ozetKaydet('penalti', (p.ad||'').split(/\s+/).pop(), 2500, p.team); }catch(e){self.__ds&&self.__ds(23852,e)}
+  } else if (tip === 'serbest' && !duran.dolayli && (function(){ const _hf = duranHedefHesapla(p); if (!_hf || _hf.kale) return false;   // (2026-10-24-G) uzak serbest vuruşta nişan noktasına
+      const dv = new THREE.Vector3(_hf.x - ball.position.x, 0, _hf.z - ball.position.z), u = dv.length(); if (u < 1) return false; dv.normalize();
+      if ((_hf.sy || 0) > 0.35){ const L = lobHizi(u, 0.75 + u * 0.025); bVel.set(dv.x * L.vh, L.vy, dv.z * L.vh); }
+      else { const v0 = yerPasHizi(u, Math.min(11, 4.5 + u * 0.25)); bVel.set(dv.x * v0, 0.5, dv.z * v0); }
+      ofsaytHesapla(p.team); return true; })()){
+    // (uzak serbest vuruş: nişan noktasına gider; pas seçicisine bırakılmaz)
   } else if (tip === 'serbest' && kaleUzak < 30 && !duran.dolayli){
     const _hs = duranHedefHesapla(p);   // (2026-10-18-D) bkz. DURAN TOP NİŞANI
-    const h = new THREE.Vector3(p.dir*HLX, 0, (_hs && _hs.kale) ? Math.max(-(GOAL_HW + 1.4), Math.min(GOAL_HW + 1.4, _hs.z + (Math.random() - 0.5) * GOAL_HW * 0.4 * (1.25 - nit(p,'nIsb',0.4)))) : (Math.random()-0.5)*GOAL_HW*1.6);
+    const _nzS = (_duranInsanO(p) >= 0) ? 0.12 : 1;   // (2026-10-24-G) insan nişanında sapma çok küçük
+    const h = new THREE.Vector3(p.dir*HLX, 0, (_hs && _hs.kale) ? Math.max(-(GOAL_HW + 1.4), Math.min(GOAL_HW + 1.4, _hs.z + (Math.random() - 0.5) * GOAL_HW * 0.4 * (1.25 - nit(p,'nIsb',0.4)) * _nzS)) : (Math.random()-0.5)*GOAL_HW*1.6);
     const D0 = h.clone().sub(ball.position).setY(0).length();
     const d = h.sub(ball.position).setY(0).normalize();
     const _r = (_hs && _hs.kale) ? (_hs.y > 1.2 ? 0.2 : 0.6) : Math.random();   // kullanıcı yukarı nişan aldıysa barajın üstünden, aşağıysa alttan sert
@@ -27178,7 +27203,7 @@ function update(dt){
     const _kosGuc = (kosuyor ? (0.45 + 0.55 * Math.min(1, st.st / 25)) : 0) + (p._beceriGor && p._beceriGor.hiz > 1 ? 0.6 : 0);
     /* HIZLAR (2026-10-16-B, eFootball videosuna göre): koşar adım ~6,2 m/sn, tam depar ~9 m/sn (önceden 6,9 / 9,6 - koşar
        adım fazla hızlıydı, oyuncu her an depar atıyor gibiydi). Baskıdaki rakip (kovalayan 8,6-9,1 m/sn) topu sürene yetişebilir. */
-    const hz = (6.2 + 2.9 * _kosGuc) * (frozen > 0 && !(duran && duran.alici === p) ? 0 : 1) * baskiHizCarpan(p) * (p.toparlan > 0 ? 0.5 : 1)
+    const hz = (5.6 + 3.3 * _kosGuc) * (frozen > 0 && !(duran && duran.alici === p) ? 0 : 1) * baskiHizCarpan(p) * (p.toparlan > 0 ? 0.5 : 1)
                * kondCarpan(p) * nit(p, 'nHiz', 1) * havaFizik().hiz   // güce bağlı hız (2026-09-27-G), hava (2026-10-11-A)
                * topluHizCarpan(p);                                   // topla yavaşlar (2026-10-12-B)
       istekX = gi.x * kamYon() * hz; istekZ = -gi.y * kamYon() * hz;
@@ -27194,7 +27219,7 @@ function update(dt){
     if(!p.gk){ p.hareket = uz > 0.6; kondisyonIsle(p, dt, kovaliyor); }
     const _rakipSurer = !!(_sahipK && _sahipK.team !== p.team && topuSuruyor(_sahipK));
     const _destekBaski = _rakipSurer && p === _destekOyuncu[p.team];
-    let spd = p.gk ? (p.dalisT > 0 ? 9.5 : (p._gkAlarm ? 8.2 : 6.0)) * (0.9 + nit(p,'nKal',0.4)*0.2) : (kovaliyor ? (_rakipSurer ? 9.1 : 8.6) : (_destekBaski ? 8.0 : 6.6)) * kondCarpan(p) * nit(p, 'nHiz', 1) * havaFizik().hiz * topluHizCarpan(p);
+    let spd = p.gk ? (p.dalisT > 0 ? 9.5 : (p._gkAlarm ? 8.2 : 6.0)) * (0.9 + nit(p,'nKal',0.4)*0.2) : (kovaliyor ? (_rakipSurer ? 9.1 : 8.6) : (_destekBaski ? 8.0 : 6.0)) * kondCarpan(p) * nit(p, 'nHiz', 1) * havaFizik().hiz * topluHizCarpan(p);
       if (p.team === 1) spd *= zorKat();
       if (duran && duran.alici === p && !p.gk && p.obj.position.distanceTo(ball.position) > 4) spd = Math.max(spd, 8.6);   // (2026-10-16-C) atıcı topa koşar
       // VARIŞ YAVAŞLAMASI (2026-09-27-H): hedefe yaklaşırken hız kademeli düşer (son
@@ -27424,6 +27449,8 @@ function update(dt){
     players.forEach(gk => {
       if (!gk.gk || gk.dis || gk.cd > 0) return;
       if (!_gkElleAlabilir(gk)) return;
+      // PENALTI (kullanıcı): atış yapılmadan kaleci topu eline alamaz. duran, şut çekilene kadar penaltı olarak kalır.
+      if (duran && duran.tip === 'penalti') return;
       // Kural 12: Kaleci topu ELLE yalnızca KENDİ ceza sahasında tutabilir. Önceden sahanın
       // her yerinde tutuyordu. Kendi kalesi -dir yönünde.
       const _ks = -gk.dir;
