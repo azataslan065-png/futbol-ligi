@@ -478,7 +478,9 @@ button{font-family:Outfit,sans-serif;cursor:pointer;border:none;border-radius:10
 /* Team row */
 .trow{display:flex;align-items:center;gap:.6rem;padding:.55rem .75rem;background:var(--s2);border:1px solid var(--br);border-radius:12px;margin-bottom:.38rem}
 .tlogo{width:36px;height:36px;border-radius:50%;background:var(--s3);border:2px solid var(--br);display:flex;align-items:center;justify-content:center;font-size:.95rem;flex-shrink:0;overflow:hidden}
-.tlogo img{width:100%;height:100%;object-fit:cover}
+.tlogo img{width:100%;height:100%;object-fit:contain}
+/* (2026-10-25-B) Logo varken koyu zemin/kenarlık yok: logonun kenarında siyahlık görünmesin. Logosuz takımın rozeti eskisi gibi. */
+.tlogo:has(img){background:transparent;border-color:transparent;border-radius:0;overflow:visible}
 /* Match row */
 .mrow{display:flex;align-items:center;gap:.4rem;padding:.5rem .7rem;background:var(--s2);border:1px solid var(--br);border-radius:12px;margin-bottom:.35rem}
 .wbadge{background:rgba(124,58,237,.15);border:1px solid rgba(124,58,237,.3);color:#c084fc;border-radius:6px;padding:.08rem .34rem;font-size:.6rem;font-weight:700;flex-shrink:0}
@@ -1115,6 +1117,14 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
     <div class="g2" style="margin-bottom:.6rem">
       <button class="btn" style="background:rgba(245,158,11,.2);color:#fcd34d;border:1px solid rgba(245,158,11,.45);font-weight:800" onclick="openPermanentTeams()"> Kalıcı Takımlar</button>
       <button class="btn" style="background:rgba(124,58,237,.2);color:#c4b5fd;border:1px solid rgba(124,58,237,.45);font-weight:800" onclick="openAddTeamFromPermanent()"> Havuzdan Ekle</button>
+    </div>
+    <div class="card" id="admLogoOnarKart" style="display:flex;align-items:center;gap:.7rem;flex-wrap:wrap">
+      <div style="flex:1 1 220px;min-width:0">
+        <div style="font-size:.78rem;font-weight:800">Logo kenarlarını onar</div>
+        <div style="font-size:.66rem;color:var(--mu);line-height:1.5">Eski yüklemeler JPEG kaydedildiği için bazı takım logolarının kenarı siyah. Bütün liglerdeki ve kalıcı havuzdaki logolar taranır; siyah zeminli olanlar şeffaf PNG olarak yeniden yüklenir. Puan Tablosu ve SAHA otomatik güncellenir.</div>
+        <div id="admLogoOnarMsg" style="font-size:.68rem;margin-top:.3rem"></div>
+      </div>
+      <button class="btn bg" id="admLogoOnarBtn" onclick="admLogolariOnar()" style="flex:0 0 auto">Logoları onar</button>
     </div>
     <div class="card" id="addTeamCard">
       <div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.6rem">
@@ -2846,7 +2856,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-24-X';
+window.APP_BUILD='2026-10-25-B';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -5180,7 +5190,37 @@ function _compressPhotoDevam(file,cb,maxPx,onErr,folder,adi){
 // ama ÇOĞU kanal logosu (TRT1 örneğinde olduğu gibi) şeffaf arka planlı PNG'dir - bu fonksiyon
 // o şeffaflığı YOK EDİYORDU. Bu yeni fonksiyon AYNI boyutlandırma mantığını kullanır ama
 // PNG olarak dışa aktarır - şeffaflık tamamen korunur, siyah arka plan sorunu KÖKTEN çözülür.
-function compressLogoImage(file,cb,maxPx,onErr){
+/* TAKIM LOGOSU KENAR TEMİZLİĞİ (2026-10-25-B, kullanıcı: "admin, puan tablosu ve saha uygulamasında takım logolarının kenarlarında
+   siyahlık olmasın"). KÖK SEBEP: takım logoları compressPhoto() ile JPEG olarak yükleniyordu; JPEG saydamlık taşımadığı için logonun
+   saydam zemini SİYAH kaydediliyordu. Puan Tablosu ve SAHA bu siyahlığı her ekranda ayrı ayrı (çalışma anında) temizlemeye
+   çalışıyordu; kaçan her ekranda siyahlık geri geliyordu. ŞİMDİ kaynakta çözülür: takım logosu PNG yüklenir ve kenardan başlayan
+   koyu zemin (dosyanın kendisinde varsa) saydamlaştırılır. Algoritma SAHA'daki sahaLogoTemiz ile aynıdır: kenarların en az
+   %45'i koyuysa kenara bağlı koyu alan (en parlak kanal <= 58) saydam yapılır; logonun içindeki, kenara bağlı olmayan koyu
+   çizgiler korunur; kenardaki koyu geçiş halkası iki turda yumuşatılır. Dönüş: değişiklik yapıldıysa true. */
+function admLogoKenarTemizle(cv){
+  var W=cv.width,H=cv.height,c=cv.getContext('2d'),d=c.getImageData(0,0,W,H),a=d.data,N=W*H;
+  var mx=function(i){var o=i*4;return Math.max(a[o],a[o+1],a[o+2]);};
+  var saydam=function(i){return a[i*4+3]<20;},koyu=function(i){return a[i*4+3]>=20&&mx(i)<=58;};
+  var kenar=[];for(var x=0;x<W;x++){kenar.push(x,(H-1)*W+x);}for(var y=1;y<H-1;y++){kenar.push(y*W,y*W+W-1);}
+  var nKoyu=kenar.filter(koyu).length;
+  if(nKoyu<kenar.length*0.45)return false;
+  var sil=new Uint8Array(N),yig=[];
+  kenar.forEach(function(i){if(!sil[i]&&(koyu(i)||saydam(i))){sil[i]=1;yig.push(i);}});
+  while(yig.length){var i=yig.pop(),px=i%W,py=(i/W)|0;
+    for(var dy=-1;dy<=1;dy++)for(var dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;var nx=px+dx,ny=py+dy;
+      if(nx<0||ny<0||nx>=W||ny>=H)continue;var j=ny*W+nx;if(sil[j])continue;
+      if(koyu(j)||saydam(j)){sil[j]=1;yig.push(j);}}}
+  for(var p=0;p<N;p++)if(sil[p])a[p*4+3]=0;
+  for(var tur=0;tur<2;tur++){var yeni=[];
+    for(var q=0;q<N;q++){if(sil[q]||a[q*4+3]===0)continue;var m=mx(q);if(m>120)continue;
+      var qx=q%W,qy=(q/W)|0,kom=false;
+      for(var ey=-1;ey<=1&&!kom;ey++)for(var ex=-1;ex<=1;ex++){var zx=qx+ex,zy=qy+ey;if(zx<0||zy<0||zx>=W||zy>=H)continue;if(sil[zy*W+zx]){kom=true;break;}}
+      if(kom)yeni.push([q,m]);}
+    yeni.forEach(function(t){var al=Math.max(0,Math.min(1,(t[1]-58)/62));a[t[0]*4+3]=Math.round(a[t[0]*4+3]*al);if(al<0.5)sil[t[0]]=1;});}
+  c.putImageData(d,0,0);return true;
+}
+window.admLogoKenarTemizle=admLogoKenarTemizle;
+function compressLogoImage(file,cb,maxPx,onErr,folder,temizle){
   if(!file.type||!file.type.startsWith('image/')){
     var uzantiGorsel=/\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(file.name||'');
     if(!uzantiGorsel){toast(' Lütfen bir görsel dosyası seçin','er');if(onErr)onErr();return;}
@@ -5195,9 +5235,10 @@ function compressLogoImage(file,cb,maxPx,onErr){
     // NOT: Kanvas ÖNCEDEN herhangi bir renkle doldurulmuyor - PNG şeffaf kalabilsin diye
     // bilinçli olarak boş bırakılıyor (JPEG'in aksine PNG şeffaflığı sorunsuz taşır).
     c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+    if(temizle){try{admLogoKenarTemizle(c);}catch(_t){}}   // takım logosu: kenara bağlı siyah zemin saydamlaştırılır
     c.toBlob(function(blob){
       if(!blob){toast(' Logo işlenemedi','er');if(onErr)onErr();return;}
-      var path='videolinks-logo/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.png';
+      var path=(folder||'videolinks-logo')+'/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.png';
       supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET).upload(path,blob,{cacheControl:'3600',upsert:false,contentType:'image/png'})
         .then(function(res){
           if(res.error)throw res.error;
@@ -5215,13 +5256,83 @@ function compressLogoImage(file,cb,maxPx,onErr){
   });
 }
 
+/* MEVCUT LOGOLARIN ONARIMI (2026-10-25-B): bütün liglerin (leaguesMeta) takımları ve kalıcı takımlar taranır. Her farklı logo adresi
+   bir kez okunur; kenarında siyah zemin varsa temizlenip PNG olarak yeniden yüklenir ve o adresi kullanan BÜTÜN kayıtlar tek
+   güncellemeyle yeni adrese geçer. Okunamayan (başka sunucu, izin yok) ya da zaten temiz logolara dokunulmaz. */
+function admLogoUrlOku(url){
+  return new Promise(function(res){
+    var im=new Image(); if(String(url).indexOf('data:')!==0)im.crossOrigin='anonymous';
+    im.onload=function(){
+      try{
+        var nw=im.naturalWidth||256,nh=im.naturalHeight||256,k=Math.min(1,256/Math.max(nw,nh));
+        var c=document.createElement('canvas');c.width=Math.max(1,Math.round(nw*k));c.height=Math.max(1,Math.round(nh*k));
+        c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+        var deg=admLogoKenarTemizle(c);
+        res({ok:true,degisti:deg,canvas:c});
+      }catch(e){res({ok:false,hata:'okunamadı'});}
+    };
+    im.onerror=function(){res({ok:false,hata:'yüklenemedi'});};
+    im.src=url;
+  });
+}
+function admPngYukle(canvas){
+  return new Promise(function(res,rej){
+    canvas.toBlob(function(blob){
+      if(!blob){rej(new Error('PNG üretilemedi'));return;}
+      var path='team-logos/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.png';
+      supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET).upload(path,blob,{cacheControl:'3600',upsert:false,contentType:'image/png'})
+        .then(function(r){if(r.error)throw r.error;var pub=supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET).getPublicUrl(path);var u=pub&&pub.data&&pub.data.publicUrl;if(!u)throw new Error('Herkese açık link alınamadı');res(u);})
+        .catch(rej);
+    },'image/png');
+  });
+}
+function admLogolariOnar(){
+  var msg=qs('admLogoOnarMsg'),btn=qs('admLogoOnarBtn');
+  var yaz=function(t,ok){if(!msg)return;msg.style.color=ok===false?'#ff8a80':(ok?'#34d27b':'var(--mu)');msg.textContent=t;};
+  if(!supabaseClient){yaz('Yükleme servisi kullanılamıyor; sayfayı yenileyip tekrar deneyin.',false);return;}
+  if(!confirm('Kayıtlı bütün takım logoları taranacak; kenarı siyah olanlar şeffaf PNG olarak yeniden yüklenecek. Devam edilsin mi?'))return;
+  if(btn)btn.disabled=true;
+  yaz('Takımlar okunuyor…');
+  var harita={};
+  var ekle=function(url,yol){if(!url||typeof url!=='string')return;url=url.trim();if(!url)return;(harita[url]=harita[url]||[]).push(yol);};
+  db.ref('leaguesMeta').once('value').then(function(ms){
+    var ligler=Object.keys(ms.val()||{});
+    if(typeof _curLeagueId!=='undefined'&&_curLeagueId&&ligler.indexOf(_curLeagueId)<0)ligler.push(_curLeagueId);
+    return Promise.all(ligler.map(function(lid){return db.ref('leagues/'+lid+'/teams').once('value').then(function(s2){var T=s2.val()||{};Object.keys(T).forEach(function(tid){ekle(T[tid]&&T[tid].logo,'leagues/'+lid+'/teams/'+tid+'/logo');});});}));
+  }).then(function(){
+    return db.ref('permanentTeams').once('value').then(function(ps){var P=ps.val()||{};Object.keys(P).forEach(function(pid){ekle(P[pid]&&P[pid].logo,'permanentTeams/'+pid+'/logo');});});
+  }).then(function(){
+    var urls=Object.keys(harita),onarilan=0,temiz=0,okunamayan=0,hatali=0,i=0;
+    if(!urls.length){yaz('Logosu olan takım bulunamadı.',true);if(btn)btn.disabled=false;return;}
+    var sonraki=function(){
+      if(i>=urls.length){
+        yaz('Bitti: '+urls.length+' logo tarandı · '+onarilan+' onarıldı · '+temiz+' zaten temizdi'+(okunamayan?' · '+okunamayan+' okunamadı (başka sunucu)':'')+(hatali?' · '+hatali+' yüklenemedi':''),hatali?false:true);
+        try{logAction('Logo kenarları onarıldı: '+onarilan+'/'+urls.length);}catch(_l){}
+        if(btn)btn.disabled=false;return;
+      }
+      var url=urls[i++];yaz('İşleniyor '+i+'/'+urls.length+'…');
+      admLogoUrlOku(url).then(function(r){
+        if(!r.ok){okunamayan++;return;}
+        if(!r.degisti){temiz++;return;}
+        return admPngYukle(r.canvas).then(function(yeni){
+          var g={};harita[url].forEach(function(yol){g[yol]=yeni;});
+          return db.ref().update(g).then(function(){onarilan++;});
+        }).catch(function(e){hatali++;console.error('Logo onarım hatası:',e);});
+      }).then(sonraki,sonraki);
+    };
+    sonraki();
+  }).catch(function(e){yaz('Okunamadı: '+((e&&e.message)||e),false);if(btn)btn.disabled=false;});
+}
+window.admLogolariOnar=admLogolariOnar;
+
 // New team logo file
 qs('newTeamLogoFile').onchange=function(){
   var file=this.files[0]; if(!file)return; this.value='';
-  compressPhoto(file,function(data){
+  // (2026-10-25-B) PNG + kenar temizliği: JPEG'in siyah zemini yok (bkz. TAKIM LOGOSU KENAR TEMİZLİĞİ)
+  compressLogoImage(file,function(data){
     _pendLogo=data;
-    qs('newTeamLogoBox').innerHTML='<img src="'+data+'" style="width:100%;height:100%;object-fit:cover;border-radius:10px"/>';
-  },200,null,'team-logos');
+    qs('newTeamLogoBox').innerHTML='<img src="'+data+'" style="width:100%;height:100%;object-fit:contain"/>';
+  },256,null,'team-logos',true);
 };
 
 // ── FILL SELECTS ──
@@ -5630,7 +5741,7 @@ function _renderTeamEditSheet(t,id){
   window._editChampImages=champMigrated;
   openSheet(window._etIsPermanent?' Kalıcı Takımı Düzenle':' Takım Düzenle',
     '<div style="display:flex;align-items:center;gap:.8rem;margin-bottom:.65rem">'
-    +'<div class="pbox" id="etBox" onclick="document.getElementById(\'etFile\').click()" style="width:62px;height:62px;flex-shrink:0">'+(t.logo?'<img src="'+t.logo+'" style="width:100%;height:100%;object-fit:cover;border-radius:10px" onload="_processLogoImg(this)" onerror="this.parentNode.innerHTML=\'\'"/>':'')+'</div>'
+    +'<div class="pbox" id="etBox" onclick="document.getElementById(\'etFile\').click()" style="width:62px;height:62px;flex-shrink:0">'+(t.logo?'<img src="'+t.logo+'" style="width:100%;height:100%;object-fit:contain" onload="_processLogoImg(this)" onerror="this.parentNode.innerHTML=\'\'"/>':'')+'</div>'
     +'<input type="file" id="etFile" accept="image/*,.heic,.heif" style="position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none"/>'
     +'<div style="flex:1">'
     +'<div class="field"><span class="lbl">Takım Adı</span><input id="etName" value="'+t.name.replace(/"/g,'&quot;')+'"/></div>'
@@ -5693,10 +5804,10 @@ function _renderTeamEditSheet(t,id){
     var fi=qs('etFile');
     if(fi&&!fi._b){fi._b=1;fi.onchange=function(){
       var file=this.files[0]; if(!file)return; this.value='';
-      compressPhoto(file,function(data){
+      compressLogoImage(file,function(data){   // (2026-10-25-B) PNG + kenar temizliği
         window._editLogo=data;
-        var b=qs('etBox'); if(b)b.innerHTML='<img src="'+data+'" style="width:100%;height:100%;object-fit:cover;border-radius:10px"/>';
-      },200,null,'team-logos');
+        var b=qs('etBox'); if(b)b.innerHTML='<img src="'+data+'" style="width:100%;height:100%;object-fit:contain"/>';
+      },256,null,'team-logos',true);
     };}
     var mf=qs('etMascotFile');
     if(mf&&!mf._b){mf._b=1;mf.onchange=function(){
@@ -7146,10 +7257,11 @@ function _renderLivePickerAsil(picker){
         var logoEl;
         if(team.logo){
           logoEl=document.createElement('div');
-          logoEl.style.cssText='width:36px;height:36px;border-radius:50%;overflow:hidden;border:2px solid var(--br);flex-shrink:0';
+          logoEl.style.cssText='width:36px;height:36px;flex-shrink:0';   // (2026-10-25-B) kırpma/koyu kenarlık yok
           var img=document.createElement('img');
+          img.onload=function(){try{_processLogoImg(img);}catch(_e){}};
           img.src=team.logo;
-          img.style.cssText='width:100%;height:100%;object-fit:cover';
+          img.style.cssText='width:100%;height:100%;object-fit:contain';
           logoEl.appendChild(img);
         }else{
           logoEl=document.createElement('div');
@@ -14339,8 +14451,9 @@ function drawCelebrationFrame(ctx,W,H,team,title,message,logoImg,progress,confet
     try{
       ctx.save();
       ctx.globalAlpha=ease;
-      ctx.beginPath();ctx.arc(W/2,H-160,90,0,Math.PI*2);ctx.closePath();ctx.clip();
-      ctx.drawImage(logoImg,W/2-90,H-250,180,180);
+      // (2026-10-25-B) logo daireye kırpılmaz/gerilmez: oranı korunarak 180px kutuya sığdırılır (temizliği loadTeamLogo yapar)
+      var _lw=logoImg.naturalWidth||logoImg.width||180,_lh=logoImg.naturalHeight||logoImg.height||180,_lk=Math.min(180/_lw,180/_lh);
+      ctx.drawImage(logoImg,W/2-_lw*_lk/2,H-160-_lh*_lk/2,_lw*_lk,_lh*_lk);
       ctx.restore();
       ctx.globalAlpha=1;
     }catch(err){
@@ -14369,7 +14482,10 @@ function loadTeamLogo(team,cb){
   // crossOrigin='anonymous' bunu mümkün olduğunca önler; yine de başarısız olursa yukarıdaki
   // try/catch devreye girer.
   img.crossOrigin='anonymous';
-  img.onload=function(){cb(img);};
+  img.onload=function(){
+    // (2026-10-25-B) eski JPEG logolardaki kenar siyahlığı temizlenmiş bir tuvalle çizilir; tuval okunamazsa (CORS) görsel olduğu gibi
+    try{var nw=img.naturalWidth||256,nh=img.naturalHeight||256,k=Math.min(1,256/Math.max(nw,nh));var c=document.createElement('canvas');c.width=Math.max(1,Math.round(nw*k));c.height=Math.max(1,Math.round(nh*k));c.getContext('2d').drawImage(img,0,0,c.width,c.height);admLogoKenarTemizle(c);cb(c);}catch(_e){cb(img);}
+  };
   img.onerror=function(){cb(null);};
   img.src=team.logo;
 }
@@ -17428,7 +17544,7 @@ function openBulkDeleteTeams(){
   teams.forEach(function(t){
     html+='<label style="display:flex;align-items:center;gap:.5rem;padding:.4rem .5rem;background:var(--s2);border-radius:9px;margin-bottom:.3rem;cursor:pointer">'
       +'<input type="checkbox" class="team-del-cb" value="'+t.id+'" style="width:16px;height:16px;flex-shrink:0"/>'
-      +(t.logo?'<img src="'+t.logo+'" style="width:24px;height:24px;border-radius:50%;object-fit:cover" onload="_processLogoImg(this)" onerror="this.style.display=\'none\'"/>':'')
+      +(t.logo?'<img src="'+t.logo+'" style="width:24px;height:24px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.style.display=\'none\'"/>':'')
       +'<span style="font-size:.78rem;font-weight:700;flex:1">'+(t.name||'?')+'</span>'
       +'</label>';
   });
@@ -22784,9 +22900,9 @@ function renderAdminMatchInfoSheet(){
     :'<div style="font-size:.72rem;color:var(--mu);text-align:center;margin:.4rem 0">'+(m.date?m.date.slice(5):'Tarih yok')+(m.time?' · '+m.time:'')+'</div>';
   var seasonBadgeHtml=ctx.seasonLabel?'<div style="text-align:center;margin-bottom:.3rem"><span style="font-size:.62rem;font-weight:800;color:var(--ac3);background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.3);border-radius:7px;padding:.1rem .4rem"> '+escHtml(ctx.seasonLabel)+'</span></div>':'';
   var headerHtml=seasonBadgeHtml+'<div style="display:flex;align-items:center;justify-content:center;gap:.7rem;background:var(--s2);border-radius:14px;padding:.7rem;margin-bottom:.3rem">'
-    +'<div style="text-align:center;flex:1;min-width:0">'+(h.logo?'<img src="'+h.logo+'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;margin:0 auto .3rem"/>':'')+'<div style="font-size:.72rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(h.name||'?')+'</div></div>'
+    +'<div style="text-align:center;flex:1;min-width:0">'+(h.logo?'<img src="'+h.logo+'" style="width:36px;height:36px;object-fit:contain;display:block;margin:0 auto .3rem" onload="_processLogoImg(this)"/>':'')+'<div style="font-size:.72rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(h.name||'?')+'</div></div>'
     +'<div style="flex-shrink:0">'+scoreHtml+'</div>'
-    +'<div style="text-align:center;flex:1;min-width:0">'+(a.logo?'<img src="'+a.logo+'" style="width:36px;height:36px;border-radius:50%;object-fit:cover;margin:0 auto .3rem"/>':'')+'<div style="font-size:.72rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(a.name||'?')+'</div></div>'
+    +'<div style="text-align:center;flex:1;min-width:0">'+(a.logo?'<img src="'+a.logo+'" style="width:36px;height:36px;object-fit:contain;display:block;margin:0 auto .3rem" onload="_processLogoImg(this)"/>':'')+'<div style="font-size:.72rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escHtml(a.name||'?')+'</div></div>'
     +'</div>';
   var TABS=[['detay','Detay'],['kadro','Kadro'],['akis','Maç Akışı'],['yorumlar','Yorumlar'],['puan','Puan Durumu']];
   var curTab=window._admMatchViewTab||'yorumlar';
@@ -24915,7 +25031,7 @@ function renderVisitorDetailContent(v){
   html+='<div data-live-since="'+detailLiveSinceTs+'" data-live-mode="'+detailLiveMode+'" style="font-size:.66rem;color:var(--mu);margin-top:.1rem">'+(isOnline?formatDuration(Date.now()-detailLiveSinceTs)+' süredir aktif':(v.lastSeen?formatDuration(Date.now()-v.lastSeen)+' önce görüldü':'—'))+'</div></div></div>';
   html+='<div class="g2" style="margin-bottom:.7rem">';
   html+='<div style="background:var(--s2);border-radius:10px;padding:.5rem;text-align:center;display:flex;flex-direction:column;align-items:center;gap:.25rem">'
-    +(favTeam&&favTeam.logo?'<img src="'+favTeam.logo+'" style="width:22px;height:22px;border-radius:50%;object-fit:cover"/>':'<span style="font-size:1rem"></span>')
+    +(favTeam&&favTeam.logo?'<img src="'+favTeam.logo+'" style="width:22px;height:22px;object-fit:contain" onload="_processLogoImg(this)"/>':'<span style="font-size:1rem"></span>')
     +'<div style="font-size:.6rem;color:var(--mu)">Favori Takım</div><div style="font-size:.74rem;font-weight:800">'+(favTeam?favTeam.name:'—')+'</div></div>';
   html+='<div style="background:var(--s2);border-radius:10px;padding:.5rem;text-align:center"><div style="font-size:.6rem;color:var(--mu)">Ziyaret Sayısı</div><div style="font-size:.78rem;font-weight:800;margin-top:.2rem">'+(v.visitCount||1)+'</div></div>';
   html+='</div>';
@@ -26150,7 +26266,7 @@ function renderPermanentTeamsSheet(pt){
       var t=pt[id];
       var sqCount=t.squad?((t.squad.starting||[]).filter(function(p){return p&&p.name;}).length+(t.squad.bench||[]).filter(function(p){return p&&p.name;}).length):0;
       return '<div style="display:flex;align-items:center;gap:.55rem;padding:.5rem .6rem;background:var(--s2);border-radius:11px;margin-bottom:.35rem">'
-        +(t.logo?'<img src="'+t.logo+'" style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0" onload="_processLogoImg(this)" onerror="this.outerHTML=\'<div style=&quot;width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0&quot;></div>\'"/>':'<div style="width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0"></div>')
+        +(t.logo?'<img src="'+t.logo+'" style="width:34px;height:34px;object-fit:contain;flex-shrink:0" onload="_processLogoImg(this)" onerror="this.outerHTML=\'<div style=&quot;width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0&quot;></div>\'"/>':'<div style="width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:1rem;flex-shrink:0"></div>')
         +'<div style="flex:1;min-width:0">'
         +'<div style="font-size:.8rem;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(t.name||'?')+'</div>'
         +'<div style="font-size:.62rem;color:var(--mu)">'+(t.stadium?' '+t.stadium+' · ':'')+sqCount+' oyuncu</div>'
@@ -26169,7 +26285,7 @@ function openCopyToPermanent(){
   var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.6rem">Bu ligdeki bir takımı seçin, kalıcı havuza (kadro, stadyum, logo dahil) kopyalanacak.</div>';
   html+=teams.map(function(t){
     return '<div data-tid="'+t.id+'" onclick="doCopyToPermanent(this.dataset.tid)" style="display:flex;align-items:center;gap:.5rem;padding:.5rem .6rem;background:var(--s2);border-radius:10px;margin-bottom:.32rem;cursor:pointer">'
-      +(t.logo?'<img src="'+t.logo+'" style="width:28px;height:28px;border-radius:50%;object-fit:cover" onload="_processLogoImg(this)" onerror="this.outerHTML=\'<div style=&quot;width:28px;height:28px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.85rem&quot;></div>\'"/>':'<div style="width:28px;height:28px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.85rem"></div>')
+      +(t.logo?'<img src="'+t.logo+'" style="width:28px;height:28px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.outerHTML=\'<div style=&quot;width:28px;height:28px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.85rem&quot;></div>\'"/>':'<div style="width:28px;height:28px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.85rem"></div>')
       +'<span style="flex:1;font-size:.78rem;font-weight:700">'+t.name+'</span>'
       +'<span style="color:var(--mu);font-size:.75rem">›</span>'
       +'</div>';
@@ -26273,7 +26389,7 @@ function openAddTeamFromPermanent(){
     html+=ids.map(function(id){
       var t=pt[id];
       return '<div data-ptid="'+id+'" onclick="addPermanentTeamToCurrentLeague(this.dataset.ptid);closeSheet();" style="display:flex;align-items:center;gap:.5rem;padding:.5rem .6rem;background:var(--s2);border-radius:10px;margin-bottom:.32rem;cursor:pointer">'
-        +(t.logo?'<img src="'+t.logo+'" style="width:28px;height:28px;border-radius:50%;object-fit:cover" onload="_processLogoImg(this)" onerror="this.outerHTML=\'<div style=&quot;width:28px;height:28px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.85rem&quot;></div>\'"/>':'<div style="width:28px;height:28px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.85rem"></div>')
+        +(t.logo?'<img src="'+t.logo+'" style="width:28px;height:28px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.outerHTML=\'<div style=&quot;width:28px;height:28px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.85rem&quot;></div>\'"/>':'<div style="width:28px;height:28px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.85rem"></div>')
         +'<span style="flex:1;font-size:.78rem;font-weight:700">'+(t.name||'?')+'</span>'
         +'<button data-ptid="'+id+'" onclick="event.stopPropagation();openEditPermanentTeamFull(this.dataset.ptid)" style="background:rgba(124,58,237,.15);border:1px solid rgba(124,58,237,.3);color:#c084fc;border-radius:7px;padding:.25rem .5rem;font-size:.62rem;cursor:pointer;font-family:Outfit,sans-serif;flex-shrink:0"> Düzenle</button>'
         +'<span style="color:var(--mu);font-size:.75rem;flex-shrink:0">›</span>'

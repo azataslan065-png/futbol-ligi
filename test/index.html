@@ -3120,7 +3120,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-24-X';
+window.APP_BUILD='2026-10-25-B';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -7853,6 +7853,29 @@ function getSimMergedMatches(){
 // göz ile "titreme/kaybolup gelme" olarak algılanıyordu. Artık önbellek kontrolü SENKRON
 // olarak EN BAŞTA yapılıyor - eğer bu görsel DAHA ÖNCE işlendiyse, hiçbir asenkron gecikme
 // olmadan ANINDA işlenmiş sürüm uygulanır, orijinal görsel HİÇ görünmez.
+/* (2026-10-25-B) Kanvasa çizilen takım logoları için ortak kenar temizleyici (admin admLogoKenarTemizle / SAHA sahaLogoTemiz ile aynı algoritma). */
+function _ptLogoKenarTemizle(cv){
+  var W=cv.width,H=cv.height,c=cv.getContext('2d'),d=c.getImageData(0,0,W,H),a=d.data,N=W*H;
+  var mx=function(i){var o=i*4;return Math.max(a[o],a[o+1],a[o+2]);};
+  var saydam=function(i){return a[i*4+3]<20;},koyu=function(i){return a[i*4+3]>=20&&mx(i)<=58;};
+  var kenar=[];for(var x=0;x<W;x++){kenar.push(x,(H-1)*W+x);}for(var y=1;y<H-1;y++){kenar.push(y*W,y*W+W-1);}
+  var nKoyu=kenar.filter(koyu).length;
+  if(nKoyu<kenar.length*0.45)return false;
+  var sil=new Uint8Array(N),yig=[];
+  kenar.forEach(function(i){if(!sil[i]&&(koyu(i)||saydam(i))){sil[i]=1;yig.push(i);}});
+  while(yig.length){var i=yig.pop(),px=i%W,py=(i/W)|0;
+    for(var dy=-1;dy<=1;dy++)for(var dx=-1;dx<=1;dx++){if(!dx&&!dy)continue;var nx=px+dx,ny=py+dy;
+      if(nx<0||ny<0||nx>=W||ny>=H)continue;var j=ny*W+nx;if(sil[j])continue;
+      if(koyu(j)||saydam(j)){sil[j]=1;yig.push(j);}}}
+  for(var p=0;p<N;p++)if(sil[p])a[p*4+3]=0;
+  for(var tur=0;tur<2;tur++){var yeni=[];
+    for(var q=0;q<N;q++){if(sil[q]||a[q*4+3]===0)continue;var m=mx(q);if(m>120)continue;
+      var qx=q%W,qy=(q/W)|0,kom=false;
+      for(var ey=-1;ey<=1&&!kom;ey++)for(var ex=-1;ex<=1;ex++){var zx=qx+ex,zy=qy+ey;if(zx<0||zy<0||zx>=W||zy>=H)continue;if(sil[zy*W+zx]){kom=true;break;}}
+      if(kom)yeni.push([q,m]);}
+    yeni.forEach(function(t){var al=Math.max(0,Math.min(1,(t[1]-58)/62));a[t[0]*4+3]=Math.round(a[t[0]*4+3]*al);if(al<0.5)sil[t[0]]=1;});}
+  c.putImageData(d,0,0);return true;
+}
 const _logoTransparentCache={};
 function _processLogoImg(imgEl){
   try{
@@ -13585,7 +13608,7 @@ function renderSahaPitch(m,h,a){
     const dkGoster=dk>90?('90+'+(dk-90)):dk;
 
     const logoHtml=(t)=>t&&t.logo
-      ?`<img src="${t.logo}" style="width:18px;height:18px;object-fit:contain;border-radius:50%;background:#fff" onload="_processLogoImg&&_processLogoImg(this)" onerror="this.style.display='none'"/>`
+      ?`<img src="${t.logo}" style="width:18px;height:18px;object-fit:contain" onload="_processLogoImg&&_processLogoImg(this)" onerror="this.style.display='none'"/>`
       :`<div style="width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;font-size:.6rem"></div>`;
 
     return `<div class="md-section-head"> Canlı Görsel Anlatım</div>
@@ -13660,7 +13683,7 @@ function ptSahaOlayHtml(m,h,a){
   try{
     var o=m&&m.tabela&&m.tabela.ol; if(!o||!o.k) return '';
     var yas=Date.now()-(Number(o.ts)||0), e=escHtml, tk=o.s==='away'?a:h, tAd=(tk&&tk.name)||(o.s==='away'?'Deplasman':'Ev sahibi');
-    var lg=function(t){ return t&&t.logo?'<img src="'+e(t.logo)+'" alt="" data-logo="1">':'<b>'+e(String((t&&t.name)||'?').slice(0,3).toUpperCase())+'</b>'; };
+    var lg=function(t){ return t&&t.logo?'<img src="'+e(t.logo)+'" alt="" data-logo="1" onload="try{_processLogoImg(this)}catch(_e){}">':'<b>'+e(String((t&&t.name)||'?').slice(0,3).toUpperCase())+'</b>'; };
     if(o.k==='goal'||o.k==='pen_goal'||o.k==='og'){
       if(yas>45000) return '';
       return '<div class="sp-gol"><div class="sp-gol-ust"> GOL!</div><div class="sp-gol-sk"><span class="sp-lg">'+lg(h)+'</span><b>'+(Number(m.homeGoals)||0)+' - '+(Number(m.awayGoals)||0)+'</b><span class="sp-lg">'+lg(a)+'</span></div>'
@@ -14559,13 +14582,14 @@ function generateMatchSummaryCard(matchId){
   }
   function drawTeamLogo(team,cx,cy,r){
     if(team.logo){
+      // (2026-10-25-B, "logoların kenarlarında siyahlık olmasın"): logo daireye kırpılmaz, kareye gerilmez; oranı korunur ve
+      // kenara bağlı siyah zemini (eski JPEG yüklemeleri) _ptLogoKenarTemizle ile saydamlaştırılır.
       return loadImg(team.logo).then(img=>{
-        ctx.save();
-        ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.closePath();ctx.clip();
-        ctx.drawImage(img,cx-r,cy-r,r*2,r*2);
-        ctx.restore();
-        ctx.strokeStyle='rgba(255,255,255,.15)';ctx.lineWidth=2;
-        ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
+        const nw=img.naturalWidth||img.width||1,nh=img.naturalHeight||img.height||1,k=Math.min((r*2)/nw,(r*2)/nh);
+        const w=Math.max(1,Math.round(nw*k)),h=Math.max(1,Math.round(nh*k));
+        const tc=document.createElement('canvas');tc.width=w;tc.height=h;tc.getContext('2d').drawImage(img,0,0,w,h);
+        try{_ptLogoKenarTemizle(tc);}catch(_t){}
+        ctx.drawImage(tc,cx-w/2,cy-h/2,w,h);
       }).catch(()=>{drawLogoFallback(cx,cy,r);});
     }else{
       drawLogoFallback(cx,cy,r);
@@ -20014,7 +20038,7 @@ function renderTdKarsilastir(tid){
     ['Maç başı gol',+ort(A.r.AG||0,A.O),+ort(B.r.AG||0,B.O),true],['Maç başı yenilen',+ort(A.r.YG||0,A.O),+ort(B.r.YG||0,B.O),false],
     ['Gol yemediği maç',A.temiz,B.temiz,true],['İç saha puanı',A.ic,B.ic,true],['Deplasman puanı',A.dis,B.dis,true],
     ['Sarı kart',A.sari,B.sari,false],['Kırmızı kart',A.kirmizi,B.kirmizi,false]];
-  const logo=function(t){return t.logo?'<img src="'+t.logo+'" onerror="this.style.display=\'none\'">':'<span></span>';};
+  const logo=function(t){return t.logo?'<img src="'+t.logo+'" onload="try{_processLogoImg(this)}catch(_e){}" onerror="this.style.display=\'none\'">':'<span></span>';};
   const formH=function(f){return f.length?f.map(function(x){return '<span class="form-badge fb-'+(x==='G'?'w':(x==='B'?'d':'l'))+'">'+x+'</span>';}).join(''):'<span style="color:var(--mu)">—</span>';};
   const h2h=Object.values(D.matches||{}).filter(m=>(m.homeId===tid&&m.awayId===rk)||(m.homeId===rk&&m.awayId===tid)).sort((a,b)=>(a.week||0)-(b.week||0));
   return '<div class="tk-sec"><span>Rakip</span><select onchange="tdKarsiSec(this.value)">'+ids.map(function(k){return '<option value="'+k+'"'+(k===rk?' selected':'')+'>'+e((D.teams[k]||{}).name||k)+'</option>';}).join('')+'</select></div>'
@@ -20303,7 +20327,7 @@ function renderTeamDetailContent(){
     <div class="sheet-handle"></div>
     ${bannerHtml}
     <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:.7rem">
-      ${t.logo?`<img src="${t.logo}" style="width:44px;height:44px;object-fit:contain;border:2px solid var(--br)" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:`<div style="width:44px;height:44px;border-radius:50%;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:1.3rem"></div>`}
+      ${t.logo?`<img src="${t.logo}" style="width:44px;height:44px;object-fit:contain" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:`<div style="width:44px;height:44px;border-radius:50%;background:var(--s2);display:flex;align-items:center;justify-content:center;font-size:1.3rem"></div>`}
       <div style="flex:1"><div style="font-size:.95rem;font-weight:900">${t.name}</div><div style="font-size:.6rem;color:var(--mu)">${tr.O||0} maç oynandı</div></div>
       ${(t.kitHome1||t.kitAway1)?`<div title="Forma Renkleri (Ev Sahibi + Deplasman)" style="background:var(--s2);border-radius:8px;padding:.35rem">${jerseyIconHtml(t,22)}</div>`:''}
       ${t.kitThird1?`<div title="Üçüncü Forma" style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,${t.kitThird1} 50%,${t.kitThird2||'#000'} 50%);border:1.5px solid var(--br);flex-shrink:0"></div>`:''}
@@ -22226,7 +22250,7 @@ window.openCmpPickerPopup=function(kind,field){
     const sub=isTeamRow?'':it.teamName;
     const val=isTeamRow?it.id:(it.name+'|'+it.teamId);
     return `<div class="cmp-pick-row" data-name="${escAttr(name.toLowerCase())}" data-cmp-kind="${escAttr(kind)}" data-cmp-field="${escAttr(field)}" data-cmp-val="${escAttr(val)}" onclick="event.stopPropagation();selectCmpFromPopup(this.dataset.cmpKind,this.dataset.cmpField,this.dataset.cmpVal)" style="display:flex;align-items:center;gap:.6rem;padding:.5rem .6rem;background:var(--s2);border:1px solid var(--br);border-radius:11px;margin-bottom:.35rem;cursor:pointer">
-      ${imgSrc?`<img src="${imgSrc}" style="width:34px;height:34px;border-radius:50%;object-fit:cover" onerror="this.outerHTML='<div style=&quot;width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.9rem&quot;>${isTeamRow?'':''}</div>'"/>`:`<div style="width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.9rem">${isTeamRow?'':''}</div>`}
+      ${imgSrc?`<img src="${imgSrc}" style="width:34px;height:34px;${isTeamRow?'object-fit:contain':'border-radius:50%;object-fit:cover'}" ${isTeamRow?'onload="try{_processLogoImg(this)}catch(_e){}"':''} onerror="this.outerHTML='<div style=&quot;width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.9rem&quot;>${isTeamRow?'':''}</div>'"/>`:`<div style="width:34px;height:34px;border-radius:50%;background:var(--s3);display:flex;align-items:center;justify-content:center;font-size:.9rem">${isTeamRow?'':''}</div>`}
       <div style="flex:1">
         <div style="font-size:.8rem;font-weight:700">${name}</div>
         ${sub?`<div style="font-size:.62rem;color:var(--mu)">${sub}</div>`:''}
@@ -22306,7 +22330,7 @@ function renderCompare(){
   }
 
   function teamHead(t,s,side){return `<div style="text-align:${side==='a'?'left':'right'}">
-    ${t.logo?`<img src="${t.logo}" style="width:44px;height:44px;object-fit:contain;border:2px solid var(--br);${side==='a'?'':'margin-left:auto;display:block'}" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:''}
+    ${t.logo?`<img src="${t.logo}" style="width:44px;height:44px;object-fit:contain;${side==='a'?'':'margin-left:auto;display:block'}" onload="_processLogoImg(this)" onerror="this.style.display='none'"/>`:''}
     <div style="font-size:.82rem;font-weight:900;margin-top:.25rem">${t.name||'?'}</div>
     <div style="font-size:1.6rem;font-weight:900;color:var(--ac3);line-height:1.1">${s.P||0}<span style="font-size:.6rem;color:var(--mu);font-weight:400"> P</span></div>
   </div>`;}
@@ -25145,7 +25169,7 @@ function _ptMacLogo(url, ad, boy){
   var ic=url?'<img src="'+escAttr(url)+'" style="width:100%;height:100%;object-fit:contain;display:block" onload="try{_processLogoImg(this)}catch(e){self.__ds&&self.__ds(24968,e)}" onerror="this.replaceWith(Object.assign(document.createElement(\'span\'),{textContent:\''+harf.replace(/'/g,'')+'\'}))"/>':harf;
   return '<div style="width:'+boy+';aspect-ratio:1;display:flex;align-items:center;justify-content:center;border-radius:50%;'
     +(url?'':'background:rgba(255,255,255,.14);border:2px solid rgba(255,255,255,.55);')
-    +'color:#fff;font-weight:900;font-size:1.1rem;filter:drop-shadow(0 3px 6px rgba(0,0,0,.65))">'+ic+'</div>';
+    +'color:#fff;font-weight:900;font-size:1.1rem;'+(url?'':'filter:drop-shadow(0 3px 6px rgba(0,0,0,.65))')+'">'+ic+'</div>';   // (2026-10-25-B) logonun çevresinde koyu hale olmasın
 }
 // Kartın görsel kısmı: arka plan + iki logo (ev solda, deplasman sağda) + CANLI rozeti.
 function ptMacKartGorsel(v, oran, logoBoy, rozetsiz){
@@ -25510,7 +25534,7 @@ function renderVideoScreenList(){
       // gerekirse üstte/altta veya yanlarda (kutunun arka plan rengiyle uyumlu) küçük bir
       // boşluk kalır ama HİÇBİR ŞEY kesilmez - bu, kaynak en-boy oranı ne olursa olsun
       // (kare, yatay, dikey) tutarlı ve güvenilir çalışır.
-      const logoInner=v.logo?`<img src="${escAttr(v.logo)}" style="width:100%;height:100%;object-fit:contain;padding:3px;box-sizing:border-box;border-radius:13px;display:block;flex-shrink:0;min-width:0"/>`:harf;
+      const logoInner=v.logo?`<img src="${escAttr(v.logo)}" style="width:100%;height:100%;object-fit:contain;padding:3px;box-sizing:border-box;border-radius:13px;display:block;flex-shrink:0;min-width:0" onload="try{_processLogoImg(this)}catch(_e){}"/>`:harf;
       // KULLANICI TALEBİ ("yönetici istediği kanalları şifreli yapabilir"): Premium işaretli
       // VE kullanıcının erişimi olmayan kanallar listede rozetiyle işaretlenir - kullanıcı
       // tıklamadan önce bunun kilitli olduğunu görür.
@@ -29234,7 +29258,7 @@ function ptpUstBarParcalari(){
       canli:(d.oynaticiCanliRozeti===false)?''
         :'<span class="ptp-live" id="ptpLive" style="'+(canliMi?'':'display:none;')+'"> CANLI</span>',
       logo:((d.oynaticiKanalLogosu===false)||!logo)?''
-        :'<img class="ptp-kanal-logo" id="ptpKanalLogo" src="'+String(logo).replace(/"/g,'&quot;')+'" alt=""/>',
+        :'<img class="ptp-kanal-logo" id="ptpKanalLogo" src="'+String(logo).replace(/"/g,'&quot;')+'" alt="" onload="try{_processLogoImg(this)}catch(_e){}"/>',
       ad:(d.oynaticiKanalAdi===false)?''
         :'<div class="ptp-title">'+String(baslik).replace(/</g,'&lt;')+'</div>'
     };
@@ -32822,7 +32846,7 @@ function ptpUstBarParcalari(){
     return items.map(function(o){
       var x=o.x,i=o.i;
       var harf=(x.title||'?').trim().charAt(0).toUpperCase()||'?';
-      var logoHtml=x.logo?'<img src="'+x.logo.replace(/"/g,'&quot;')+'"/>':harf;
+      var logoHtml=x.logo?'<img src="'+x.logo.replace(/"/g,'&quot;')+'" onload="try{_processLogoImg(this)}catch(_e){}"/>':harf;
       // KULLANICI TALEBİ ("yönetici istediği kanalları şifreli yapabilir"): Oynatıcı içi
       // kompakt listede de AYNI kilit rozeti - hasPremiumAccess ana kapsamda tanımlı bir
       // fonksiyon olduğundan (window'a atanmamış olsa da) PTPlayer'ın kendi kapsamından
