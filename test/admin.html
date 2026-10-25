@@ -1520,6 +1520,12 @@ html.hafif-cihaz .pu-ort,html.hafif-cihaz .pu-etik{-webkit-backdrop-filter:none 
         border:1px dashed var(--s3);background:var(--s2) center/cover no-repeat;
         display:flex;align-items:center;justify-content:center;font-size:.7rem;color:var(--mu)">Yok</div>
       <div id="sahaBgGirisDurum" class="hint" style="margin:.3rem 0"></div>
+      <!-- (2026-10-25-K) SAHA LOGOSU: giriş kapak fotoğrafından otomatik üretilir; SAHA'nın üst çubuğu, giriş kartı, bakım ekranı,
+           sekme simgesi ve Puan Tablosu'ndaki SAHA işaretleri bunu kullanır. Fotoğraf yoksa uygulamanın kendi simgesi görünür. -->
+      <div style="display:flex;align-items:center;gap:.6rem;margin:.35rem 0;padding:.5rem .6rem;border:1px solid var(--s3);border-radius:12px;background:var(--s2)">
+        <div id="sahaLogoOnizle" style="width:46px;height:46px;border-radius:14px;flex-shrink:0;background:url('saha-icon-192.png') center/cover no-repeat;box-shadow:inset 0 0 0 1px rgba(255,255,255,.15)"></div>
+        <div style="font-size:.66rem;line-height:1.45;color:var(--mu)"><b style="color:var(--tx)">SAHA logosu</b><br><span id="sahaLogoDurum">Kapak fotoğrafından otomatik üretilir; SAHA ve Puan Tablosu'ndaki tüm SAHA logoları anında değişir.</span></div>
+      </div>
       <div class="g2" style="margin:.35rem 0">
         <button class="btn bgh" onclick="qs('sahaBgGirisFile').click()"> Galeriden seç</button>
         <button class="btn" onclick="sahaArkaplanSil('giris')"> Kaldır</button>
@@ -2994,7 +3000,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-25-J';
+window.APP_BUILD='2026-10-25-K';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -8575,7 +8581,10 @@ function sahaArkaplanDosya(inp, hangi){
       // arka plan, her acilista mobil veriden inecegi icin kullanicinin aleyhine.
       if(veri.length > 1200000){ veri = c.toDataURL('image/jpeg', 0.55); }
       var yol = (hangi === 'oyun') ? 'oyunArkaplan' : 'girisArkaplan';
-      firebase.database().ref('sahaGorunum/'+yol).set(veri)
+      /* (2026-10-25-K) Kapak (giriş) fotoğrafı değişince SAHA logosu da ondan yeniden üretilir - tek yazımda ikisi birlikte. */
+      var guncel = {}; guncel[yol] = veri;
+      if(hangi !== 'oyun'){ try{ guncel.logo = _sahaLogoKes(c); }catch(_l){ DiagSil('sahaLogoKes', _l); } }
+      firebase.database().ref('sahaGorunum').update(guncel)
         .then(function(){ toast(' Arka plan yüklendi'); })
         .catch(function(e){ toast(' Yüklenemedi: '+((e&&e.message)||''),'er'); });
     }catch(e){ DiagSil('sahaArkaplanDosya', e); toast(' Fotoğraf işlenemedi','er'); }
@@ -8584,9 +8593,25 @@ function sahaArkaplanDosya(inp, hangi){
   img.onerror = function(){ toast(' Fotoğraf okunamadı','er'); };
   img.src = URL.createObjectURL(f);
 }
+/* SAHA LOGOSU (2026-10-25-K): kapak fotoğrafının ortasından kare kesit, 256 px JPEG (~15 KB). */
+function _sahaLogoKes(kaynak){
+  var W = kaynak.naturalWidth || kaynak.width, H = kaynak.naturalHeight || kaynak.height, k = Math.min(W, H);
+  var c = document.createElement('canvas'); c.width = c.height = 256;
+  c.getContext('2d').drawImage(kaynak, (W - k) / 2, (H - k) / 2, k, k, 0, 0, 256, 256);
+  return c.toDataURL('image/jpeg', 0.82);
+}
+function sahaLogoOnizleCiz(u){
+  try{
+    var o = qs('sahaLogoOnizle'), d = qs('sahaLogoDurum');
+    if(o) o.style.backgroundImage = 'url("' + (u || 'saha-icon-192.png') + '")';
+    if(d) d.textContent = u ? 'Kapak fotoğrafından üretildi - SAHA ve Puan Tablosu\'ndaki tüm SAHA logoları bunu kullanıyor.'
+                            : 'Kapak fotoğrafı yok - uygulamanın kendi simgesi kullanılıyor.';
+  }catch(e){ DiagSil('sahaLogoOnizleCiz', e); }
+}
 function sahaArkaplanSil(hangi){
   var yol = (hangi === 'oyun') ? 'oyunArkaplan' : 'girisArkaplan';
-  firebase.database().ref('sahaGorunum/'+yol).remove()
+  var sil = {}; sil[yol] = null; if(hangi !== 'oyun') sil.logo = null;   // (2026-10-25-K) kapak gidince logo varsayılana döner
+  firebase.database().ref('sahaGorunum').update(sil)
     .then(function(){ toast(' Arka plan kaldırıldı'); })
     .catch(function(e){ toast(' Kaldırılamadı: '+((e&&e.message)||''),'er'); });
 }
@@ -8646,6 +8671,12 @@ function golAnimVarsayilan(){
       _sahaBgVeri.giris = v.girisArkaplan || '';
       _sahaBgVeri.oyun  = v.oyunArkaplan  || '';
       sahaArkaplanOnizleCiz();
+      sahaLogoOnizleCiz(v.logo || '');
+      /* (2026-10-25-K) GEÇİŞ: logo özelliğinden önce yüklenmiş kapak fotoğrafı varsa logo bir kez ondan üretilir. */
+      if(v.girisArkaplan && !v.logo && !window._sahaLogoGecis){
+        window._sahaLogoGecis = true;
+        try{ var im = new Image(); im.onload = function(){ try{ firebase.database().ref('sahaGorunum/logo').set(_sahaLogoKes(im)); }catch(_k){ DiagSil('sahaLogoGecis', _k); } }; im.src = v.girisArkaplan; }catch(_m){ DiagSil('sahaLogoGecis', _m); }
+      }
       try{ _golAnimVeri = (v.golAnim && typeof v.golAnim === 'object') ? v.golAnim : {}; golAnimCiz(); }catch(_g){ DiagSil('golAnimOku', _g); }
     }, function(err){ DiagSil('sahaArkaplanDinleAdmin', err); });
   }catch(e){ DiagSil('sahaArkaplanDinleAdmin', e); setTimeout(sahaArkaplanDinleAdmin, 1200); }
