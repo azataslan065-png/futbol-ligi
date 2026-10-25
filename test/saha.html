@@ -1835,6 +1835,7 @@ img.lg-logo{background:transparent !important;border:0 !important;border-radius:
     <div style="font-size:10px;letter-spacing:.06em;opacity:.6;margin-top:4px">
       DEĞİŞİKLİK <span id="degHak">3</span>
     </div>
+    <div style="font-size:10px;letter-spacing:.06em;opacity:.75;margin-top:3px">MORAL <span id="moralEt" style="font-weight:800">Normal</span></div>
   </div>
   <button id="ayarBtn" title="Duraklat"></button>
   <button id="kamBtn" type="button" title="Kamera açısı (V)" onclick="kameraDegistir()"></button>
@@ -13456,6 +13457,7 @@ function oyuncuSatinAl(id){
   if(sahaAskiEngel()) return;
   const o = magazaHavuz[id];
   if(!o || !kayitliMi()){ return; }
+  if(artirmaAktif(o)){ artirmaTeklif(id); return; }   // (2026-10-25-F) açık artırmadaki oyuncu doğrudan alınamaz
   if(o.sahip){ sahaBildir('Bu oyuncu başka bir takımla anlaştı'); return; }
   if(!o.satista){ sahaBildir('Bu oyuncu şu an satışta değil'); return; }
   var _fiyat = o.fiyat || 0, _para = benimKayit.para || 0;
@@ -14008,7 +14010,7 @@ function _tkGuc(tid){
   try{
     var gs = [];
     if(benimKayit && benimKayit.takimId === tid && benimKayit.kadro){
-      kdIlkDizi(kdUygunKadro(benimKayit.kadro)).forEach(function(id){ var o = id && magazaHavuz[id]; if(o) gs.push(Number(o.guc) || 0); });
+      kdIlkDizi(kdUygunKadro(benimKayit.kadro)).forEach(function(id){ var o = id && magazaHavuz[id]; if(o) gs.push(sahaEtkinGuc(o)); });
     } else {
       var t = sahaLigTakimlar[tid] || {};
       sahaDizi(t.squad && t.squad.starting).forEach(function(x){ var o = x && x.name && oyuncuHavuzKaydi(x.name); if(o) gs.push(Number(o.guc) || 0); });
@@ -14734,7 +14736,7 @@ function oyuncuDetayAc(id){
       + '<div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">'
       + '<span style="background:' + renk + '33;border:1px solid ' + renk + ';border-radius:20px;padding:3px 10px;font-size:11.5px;font-weight:800">'
       + esc(o.mevki || '—') + '</span>'
-      + '<span style="background:rgba(255,255,255,.07);border-radius:20px;padding:3px 10px;font-size:11.5px;font-weight:800">Güç ' + (o.guc||0) + '</span>'
+      + '<span style="background:rgba(255,255,255,.07);border-radius:20px;padding:3px 10px;font-size:11.5px;font-weight:800">Güç ' + sahaEtkinGuc(o) + (sahaGelisimBonus(o) ? ' <span style="color:#7ee08a">(+' + sahaGelisimBonus(o) + ')</span>' : '') + '</span>'
       + (o.baslangic ? '<span style="background:rgba(255,255,255,.07);border-radius:20px;padding:3px 10px;font-size:11.5px">Başlangıç kadrosu</span>' : '')
       + '</div></div>'
       + satir('Değer', '<b style="color:#7ee0a0">' + deger + ' SL</b>')
@@ -14744,6 +14746,8 @@ function oyuncuDetayAc(id){
             return '<span style="color:' + (f>0?'#7ee0a0':(f<0?'#f0a8a2':'#cbd5e1')) + '">' + (f>0?'+':'') + f + ' SL</span>';
           })()) : '')
       + satir('Oynadığı maç', mac ? (mac + ' maç') : 'hiç oynamadı')
+      + ((benimMi && GELISIM.max > 0) ? satir('Gelişim', (function(){ var xp = _gelisimXp(o), b = sahaGelisimBonus(o);
+            return b >= GELISIM.max ? ('+' + b + ' güç · en üst seviye') : ('+' + b + ' güç · ' + (xp % GELISIM.xpGuc) + '/' + GELISIM.xpGuc + ' XP'); })()) : '')
       + satir('Ortalama puan', ort != null ? (ort + ' / 10') : '—')
       + satir('Hız · Şut · Pas', (o.hiz||0) + ' · ' + (o.sut||0) + ' · ' + (o.pas||0))
       // (2026-10-11-A, kullanıcı: "bunu saha uygulamasında kaldır, puan tablosuna daha detaylı ekle") son 10 maç grafiği Puan Tablosu'nda.
@@ -15188,7 +15192,7 @@ function _kdKart(id, anahtar, slotKod, kucuk){
   var ilan = satisIlaniniOku(o);
   var kendi = String(o.mevki || '').replace(/[0-9]/g,'');
   var uyum = slotKod ? sahaUyum(kendi, slotKod) : 1;
-  var gucG = Math.round((o.guc||0) * uyum);
+  var gucG = Math.round(sahaEtkinGuc(o) * uyum);
   // Kartın üstünde oyuncunun KAYITLI mevkisi (2026-09-27-O); oynadığı yer farklıysa altta yazar.
   if(kendi && kendi !== 'STP'){ kod = kendi; renk = KD_GRUP_RENK[sahaMevkiGrup(kendi)]; }
   var _cz = sahaCezaBilgi(o);
@@ -15235,7 +15239,7 @@ function _kadroSahaHtml(){
       + k.dis.map(function(id){ return _kdKart(id, 'dis:' + id, null, true); }).join('') + '</div>';
   }
   yan += _duranTopKutularHtml() + '</div>';
-  var guclar = k.ilk.filter(Boolean).map(function(id, i){ var o = magazaHavuz[id]; return o ? (o.guc || 0) : 0; });
+  var guclar = k.ilk.filter(Boolean).map(function(id, i){ var o = magazaHavuz[id]; return o ? sahaEtkinGuc(o) : 0; });
   var ort = guclar.length ? Math.round(guclar.reduce(function(t, g){ return t + g; }, 0) / guclar.length) : 0;
   var renkler = [['KL','Kaleci'],['DEF','Defans'],['OS','Orta saha'],['FV','Forvet']].map(function(r, i){
     return '<span><i style="background:' + KD_GRUP_RENK[i] + '"></i>' + r[1] + '</span>'; }).join('');
@@ -15621,7 +15625,7 @@ function _kadroHtml(){
     var _ilan = satisIlaniniOku(o);
     return '<div class="sh-satir"><div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">'
       + esc(o.ad || '') + ' <span style="opacity:.45;font-size:11px"></span>'
-      + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0)
+      + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + sahaEtkinGuc(o)
       + (o.baslangic ? ' · başlangıç' : '')
       + (_ilan ? ' · <span style="color:#f0c674">satışta ' + _sureBicim(_ilan.kalan) + '</span>' : '')
       + '</div></div>'
@@ -15743,6 +15747,7 @@ function _trListeHtml(ids, param){
   return '<div class="sh-kart"><div class="sh-kart-bas">Satıştaki oyuncular · ' + l.length + '/' + ids.length + ' · Kasan: ' + param + ' SL</div>'
     + (l.length ? l.map(function(id){
         var o = magazaHavuz[id], alinabilir = kayitliMi() && param >= (o.fiyat||0);
+        if(artirmaAktif(o)) return _artirmaSatirHtml(id, o, param);
         return '<div class="sh-satir"><span style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">' + _oyuncuAvatarHtml(o, 34) + '</span>'
           + '<div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">' + esc(o.ad || '') + ' <span style="opacity:.45;font-size:11px"></span>'
           + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0) + '</div></div>'
@@ -15751,6 +15756,99 @@ function _trListeHtml(ids, param){
           + '<button class="sh-dug" type="button" ' + (alinabilir ? 'onclick="oyuncuSatinAl(\'' + id + '\')"' : 'disabled') + '>' + (alinabilir ? 'Al' : 'Yetersiz') + '</button></div>';
       }).join('') : '<div class="sh-bos" style="padding:14px">Süzgece uyan oyuncu yok.</div>') + '</div>';
 }
+/* AÇIK ARTIRMALI TRANSFER (2026-10-25-F, onaylanan öneri 8). Yönetici satıştaki bir oyuncuyu süreli açık artırmaya çıkarır:
+   oyuncuHavuzu/{id}/artirma = {bas, adim, bitis, basTs}. Kullanıcılar teklif verir (artirma/teklif = {u, ad, tutar, ts}; teklif
+   en az başlangıç ya da önceki teklif + artış, ve bakiyeden fazla olamaz - kurallar da denetler; artirma/gecmis teklif listesi).
+   Süre bitince sayfası açık olan herhangi bir cihaz sonucu işler: en yüksek teklifi verenin bakiyesi yetiyorsa oyuncu ona geçer,
+   bedel bakiyesinden düşer (sahip ataması kuralı ikinci kez işlemeyi engeller); teklif yoksa ya da bakiye yetmiyorsa oyuncu
+   normal satışa döner (artirma/durum). Teklifin geçilirse uygulama bildirir. */
+function artirmaAktif(o){ return !!(o && o.artirma && o.artirma.bitis && !o.artirma.durum && !o.sahip && o.satista); }
+function _artirmaMin(o){ var a = o.artirma || {}, t = a.teklif; return t && t.tutar ? (Number(t.tutar) + Math.max(1, Number(a.adim) || 1)) : Math.max(0, Number(a.bas) || 0); }
+function _artirmaKalan(o){
+  var ms = Math.max(0, (Number(o.artirma.bitis) || 0) - Date.now()), dk = Math.floor(ms / 60000), sa = Math.floor(dk / 60), gn = Math.floor(sa / 24);
+  if(ms <= 0) return 'sonuçlanıyor';
+  return gn ? gn + 'g ' + (sa % 24) + 'sa' : (sa ? sa + 'sa ' + (dk % 60) + 'dk' : (dk ? dk + 'dk ' + Math.floor(ms / 1000) % 60 + 'sn' : Math.floor(ms / 1000) + 'sn'));
+}
+function _artirmaSatirHtml(id, o, param){
+  var a = o.artirma, t = a.teklif, benim = t && t.u === benimUid, min = _artirmaMin(o), yeter = kayitliMi() && param >= min && Date.now() < a.bitis;
+  return '<div class="sh-satir"><span style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">' + _oyuncuAvatarHtml(o, 34) + '</span>'
+    + '<div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">' + esc(o.ad || '') + ' <span class="sh-rozet" style="background:rgba(242,194,48,.18);color:#f2c230">⚖ Açık artırma</span>'
+    + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0) + ' · kalan ' + _artirmaKalan(o) + '</div>'
+    + '<div class="alt">' + (t ? ('En yüksek: <b>' + (t.tutar || 0) + ' SL</b> · ' + (benim ? '<b style="color:#7ee08a">sende</b>' : esc(String(t.ad || '').slice(0, 20)))) : ('Başlangıç: <b>' + (a.bas || 0) + ' SL</b> · henüz teklif yok')) + '</div></div>'
+    + '<button class="sh-dug" type="button" ' + (yeter && !benim ? 'onclick="artirmaTeklif(\'' + id + '\')"' : 'disabled') + '>' + (benim ? 'Önde' : (yeter ? 'Teklif ' + min : 'Yetersiz')) + '</button></div>';
+}
+function artirmaTeklif(id){
+  if(sahaAskiEngel()) return;
+  var o = magazaHavuz[id]; if(!artirmaAktif(o) || !kayitliMi()) return;
+  if(Date.now() >= o.artirma.bitis){ sahaBildir('Açık artırma sona erdi'); return; }
+  var min = _artirmaMin(o), para = benimKayit.para || 0;
+  if(para < min){ sahaBildir('Paran yetmiyor: en az ' + min + ' SL gerekli'); return; }
+  sahaSoru({ baslik:'⚖ Açık artırma', govde:_sahaOyuncuKartHtml(o, [
+      ['En yüksek teklif', o.artirma.teklif ? (o.artirma.teklif.tutar + ' SL') : 'yok'], ['En az teklif', min + ' SL'], ['Kalan süre', _artirmaKalan(o)], ['Bakiyen', para + ' SL']])
+      + '<input id="artTeklifInp" type="number" inputmode="numeric" min="' + min + '" max="' + para + '" step="' + Math.max(1, Number(o.artirma.adim) || 1) + '" value="' + min + '" style="width:100%;margin-top:10px;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.2);background:#0b1118;color:#fff;font-size:16px;font-weight:800;text-align:center">'
+      + '<div style="font-size:11.5px;opacity:.6;line-height:1.5;margin-top:6px;text-align:center">Süre bitince en yüksek teklifi veren oyuncuyu alır; bedel o an bakiyesinden düşer.</div>',
+    evet:'Teklif ver', hayir:'Vazgeç' }).then(function(ok){
+      if(!ok) return;
+      var v = Math.floor(Number((document.getElementById('artTeklifInp') || {}).value) || 0);
+      var o2 = magazaHavuz[id]; if(!artirmaAktif(o2)) { sahaBildir('Açık artırma sona erdi'); return; }
+      var m2 = _artirmaMin(o2);
+      if(v < m2){ sahaBildir('Teklif en az ' + m2 + ' SL olmalı'); return; }
+      if(v > (benimKayit.para || 0)){ sahaBildir('Teklif bakiyeni aşamaz'); return; }
+      var ad = (benimKayit && (benimKayit.takimAd || benimKayit.ad)) || 'Takım';
+      try{ var tk = benimKayit.takimId && sahaLigTakimlar[benimKayit.takimId]; if(tk && tk.name) ad = tk.name; }catch(e){}
+      fbDb.ref('oyuncuHavuzu/' + id + '/artirma/teklif').transaction(function(cur){
+        if(cur && Number(cur.tutar) + Math.max(1, Number(o2.artirma.adim) || 1) > v) return;   // bu arada daha yüksek teklif geldi
+        return { u:benimUid, ad:String(ad).slice(0, 40), tutar:v, ts:Date.now() };
+      }).then(function(r){
+        if(!r.committed){ sahaBildir('Daha yüksek bir teklif geldi, yeniden dene'); return; }
+        try{ fbDb.ref('oyuncuHavuzu/' + id + '/artirma/gecmis').push({ u:benimUid, ad:String(ad).slice(0, 40), tutar:v, ts:Date.now() }); }catch(e){}
+        window._artOnde = window._artOnde || {}; window._artOnde[id] = true;
+        sahaBildir('⚖ ' + (o2.ad || '') + ' için ' + v + ' SL teklif verildi');
+        try{ _artirmaListeTazele(); }catch(e){}
+      }).catch(function(err){ DiagSaha('artirmaTeklif', err, { anlami:'Açık artırma teklifi reddedildi.', oneri:'oyuncuHavuzu/{id}/artirma/teklif kuralını (bakiye, süre, en az tutar) denetleyin.' }); sahaBildir('Teklif verilemedi'); });
+    });
+}
+function _artirmaListeTazele(){
+  var k = document.getElementById('trListe'); if(!k) return;
+  var ids = Object.keys(magazaHavuz).filter(function(id){ var o = magazaHavuz[id]; return o && !o.sahip && o.satista; });
+  k.innerHTML = _trListeHtml(ids, benimKayit ? (benimKayit.para || 0) : 0);
+}
+function _artirmaSonuclandir(id){
+  var o = magazaHavuz[id]; if(!o || !o.artirma || o.artirma.durum || o.sahip) return;
+  window._artIsleniyor = window._artIsleniyor || {}; if(window._artIsleniyor[id]) return; window._artIsleniyor[id] = true;
+  var t = o.artirma.teklif;
+  if(!t || !t.u || !(t.tutar > 0)){ fbDb.ref('oyuncuHavuzu/' + id + '/artirma/durum').set('teklifsiz').catch(function(){ window._artIsleniyor[id] = false; }); return; }
+  fbDb.ref('kullanicilar/' + t.u + '/para').once('value').then(function(sn){
+    var para = Number(sn.val()) || 0;
+    if(para < t.tutar){ return fbDb.ref('oyuncuHavuzu/' + id + '/artirma/durum').set('yetersiz'); }
+    var g = {}, P = 'oyuncuHavuzu/' + id + '/';
+    g[P + 'sahip'] = t.u; g[P + 'alisTs'] = Date.now(); g[P + 'alisFiyat'] = t.tutar; g[P + 'katilimKaybi'] = sahaKatilimKaybi(t.tutar, o.guc);
+    g[P + 'satista'] = false; g[P + 'maclar'] = null; g[P + 'macSayisi'] = 0; g[P + 'puanToplam'] = 0; g[P + 'artirma/durum'] = 'satildi';
+    g['kullanicilar/' + t.u + '/para'] = firebase.database.ServerValue.increment(-t.tutar);
+    g['kullanicilar/' + t.u + '/harcamaKayit/' + fbDb.ref().push().key] = { tur:'artirma', tutar:t.tutar, oyuncu:String(o.ad || '').slice(0, 40), ts:Date.now() };
+    return fbDb.ref().update(g).then(function(){
+      try{ transferAkisYaz('alis', o, t.tutar); }catch(e){}
+      if(t.u === benimUid) sahaBildir('⚖ Açık artırmayı kazandın: ' + (o.ad || '') + ' (' + t.tutar + ' SL)');
+    });
+  }).catch(function(err){ window._artIsleniyor[id] = false; _sessiz(err, 'artirmaSonuclandir', 'saha_ag'); });
+}
+function artirmaDenetle(){
+  try{
+    if(!fbHazir || !fbDb || !benimUid || typeof magazaHavuz === 'undefined') return;
+    var aktifVar = false; window._artOnde = window._artOnde || {};
+    Object.keys(magazaHavuz).forEach(function(id){
+      var o = magazaHavuz[id]; if(!o || !o.artirma || o.artirma.durum) return;
+      var t = o.artirma.teklif;
+      if(o.sahip){ return; }
+      aktifVar = true;
+      if(Date.now() >= Number(o.artirma.bitis || 0) + 1500) _artirmaSonuclandir(id);
+      if(t && t.u === benimUid) window._artOnde[id] = true;
+      else if(window._artOnde[id] && t && t.u !== benimUid){ window._artOnde[id] = false; sahaBildir('⚖ ' + (o.ad || '') + ' için teklifin geçildi: ' + t.tutar + ' SL'); }
+    });
+    if(aktifVar && !running) _artirmaListeTazele();
+  }catch(e){ _sessiz(e, 'artirmaDenetle', 'saha_ag'); }
+}
+setInterval(artirmaDenetle, 5000);
 function oyuncuKarsilastir(id){
   try{
     var o = magazaHavuz[id]; if(!o) return;
@@ -15887,7 +15985,7 @@ function _transferHtml(){
           return '<div class="sh-satir"><span style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">' + _oyuncuAvatarHtml(o, 34) + '</span>'
             + '<div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">'
             + esc(o.ad || '') + ' <span style="opacity:.45;font-size:11px"></span>' + sahaKadroRozet(id)
-            + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0)
+            + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + sahaEtkinGuc(o)
             + ' · alış ' + (o.alisFiyat||0) + ' SL · '
             + (mac ? (mac + ' maç, ortalama ' + ort) : 'hiç maç oynamadı')
             + '</div></div>'
@@ -15906,7 +16004,7 @@ function _transferHtml(){
           return '<div class="sh-satir"><span style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">' + _oyuncuAvatarHtml(o, 34) + '</span>'
             + '<div class="ad" style="cursor:pointer" onclick="oyuncuDetayAc(\'' + id + '\')">'
             + esc(o.ad || '') + ' <span style="opacity:.45;font-size:11px"></span>' + sahaKadroRozet(id)
-            + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + (o.guc||0) + '</div></div>'
+            + '<div class="alt">' + esc(o.mevki || '') + ' · güç ' + sahaEtkinGuc(o) + '</div></div>'
             + '<span class="sh-rozet">0 SL</span>'
             + '<button class="sh-dug ikincil" type="button" onclick="oyuncuSat(\'' + id + '\')">Çıkar</button></div>';
         }).join('')
@@ -15930,6 +16028,9 @@ var ANTRENMANLAR = [
   ['korner',     '', 'Korner',           'Köşe vuruşu ve ceza sahasında toplanma'],
   ['penalti',    '', 'Penaltı vuruşu',   'Noktadan, kaleciye karşı'],
   ['kurtaris',   '', 'Penaltı kurtarma', 'Kaleyi sen korursun'],
+  ['hedefSut',   '', 'Şut isabeti',      'Kalede beliren hedefi vur; 10 şutluk seride puan topla'],
+  ['kafa',       '', 'Kafa vuruşu',      'Kanattan gelen ortaya zamanında kafa vur; 10 ortada gol say'],
+  ['savunma',    '', 'Savunma',          'Topla gelen rakibi ceza sahasına girmeden durdur'],
   ['pasAlis',    '', 'Pas isabeti',      'Parlayan takım arkadaşına doğru pas; isabet ve süre puanı'],
   ['slalom',     '', 'Top sürme slalomu','Kapılardan topla geç; en iyi süren kaydedilir'],
   ['kapiAvi',    '', 'Kapı avı',         'Sırayla beliren 8 kapıdan topla geç; süre yarışı'],
@@ -15946,7 +16047,7 @@ function sayAntrenmanCiz(){
 }
 /* (2026-10-25-B, menü yeniden tasarımı) Modlar amacına göre gruplanır: öne çıkan Kontrol eğitimi (geniş kart), Beceri, Duran toplar,
    Maç. Dikeyde iki sütun kart; yatayda yatay kartlar (ikon solda) - ekrana daha çok mod sığar. */
-var ANT_GRUPLAR = [['Beceri', ['sut','pasAlis']], ['Top sürme', ['slalom','kapiAvi','hizSurus','topKoruma']], ['Duran toplar', ['serbest','korner','penalti','kurtaris']], ['Maç', ['serbestMac','rastgeleMac']]];
+var ANT_GRUPLAR = [['Beceri', ['sut','hedefSut','kafa','pasAlis','savunma']], ['Top sürme', ['slalom','kapiAvi','hizSurus','topKoruma']], ['Duran toplar', ['serbest','korner','penalti','kurtaris']], ['Maç', ['serbestMac','rastgeleMac']]];
 function _antKart(a, ek){
   return '<button type="button" class="sh-bul' + (ek || '') + '" onclick="antrenmanBasla(\'' + a[0] + '\')">'
     + '<span class="i">' + a[1] + '</span><span class="b">' + a[2] + '</span><span class="a">' + a[3] + '</span></button>';
@@ -16167,13 +16268,130 @@ function penTabloCiz(a, b, ilk, baslik){
    topu tutmak gerekir. Süreli olanlarda en iyi süre cihazda saklanır.
    PAS İSABETİ (aynı tarih, kullanıcı: "pası veren oyuncu ile alan oyuncu, yön verme hariç ileri geri hareket etmemeli"): pasör ve
    alıcılar yerlerinde KİLİTLİ; çubuk yalnızca pasörü döndürür (top ayağının önünde onunla döner), alıcılar topa döner. */
-var HRK_TURLER = ['pasAlis','slalom','kapiAvi','hizSurus','topKoruma'];
+var HRK_TURLER = ['pasAlis','slalom','kapiAvi','hizSurus','topKoruma','hedefSut','kafa','savunma'];
+/* ŞUT İSABETİ / KAFA / SAVUNMA (2026-10-25-F, onaylanan öneriler 5-7).
+   ŞUT İSABETİ: kalecisiz kalede bir hedef halka belirir; atıcı rastgele bir noktada topun başında bekler (kamera arkasında). Hedefe
+   isabet 3, kaleye isabet 1 puan; 10 şutluk seri sonunda toplam ve en iyi skor. KAFA: kanattaki arkadaşın ortası ceza sahasına gelir,
+   top yaklaşırken Şut'a basılır (top başın hizasındaysa kafa vuruşu olur); rakip kaleci kalede. 10 ortada gol sayısı. SAVUNMA: topla
+   gelen rakip ceza sahasına doğru sürer; Müdahale / Kay ile topu kapınca ya da uzaklaştırınca başarı, rakip ceza sahasına girerse
+   ya da faul yapılırsa başarısız. */
+var HRK_SERI = { hedefSut:1, kafa:1 };
+function _hrkEnIyiPuan(){ try{ return Number(localStorage.getItem('saha-' + HRK.tur + '-eniyi')) || 0; }catch(e){ return 0; } }
+function _hrkSeriSonuc(basari, puan, metin){
+  if(HRK.faz === 'sonuc') return;
+  HRK.deneme++; if(basari) HRK.basari++; HRK.puan = (HRK.puan || 0) + (puan || 0);
+  HRK.faz = 'sonuc'; HRK.t = 0; HRK.seriBitti = HRK.deneme >= 10;
+  if(basari){ try{ gelisimAntrenman(HRK.atan || ctrl); }catch(e){} }
+  try{ if(basari) sesTribun(0.2, 1.4); else sesOhh(0.5); }catch(e){}
+  var en = _hrkEnIyiPuan(), deger = HRK.tur === 'kafa' ? HRK.basari : HRK.puan, rekor = false;
+  if(HRK.seriBitti && deger > en){ rekor = true; try{ localStorage.setItem('saha-' + HRK.tur + '-eniyi', String(deger)); }catch(e){} }
+  var ozet = HRK.tur === 'kafa' ? ('Gol ' + HRK.basari + '/' + HRK.deneme) : ('Puan ' + HRK.puan + ' · şut ' + HRK.deneme + '/10');
+  hrkPanel((basari ? ' ' : ' ') + metin, ozet + (HRK.seriBitti ? (rekor ? ' · YENİ REKOR!' : ' · seri bitti' + (en ? ' (en iyi ' + en + ')' : '')) : ''));
+}
+function _hrkTopBasina(c, bx, bz, gx, gz){   // oyuncuyu topun arkasına, hedef yönüne dönük koyar
+  var gu = Math.hypot(gx, gz) || 1; gx /= gu; gz /= gu;
+  c.dis = false; c.obj.visible = true; if(c.golge) c.golge.visible = true;
+  c.obj.position.set(bx - gx * 0.65, 0, bz - gz * 0.65); c.obj.rotation.y = Math.atan2(gx, gz); if(c.vel) c.vel.set(0, 0, 0);
+  ball.position.set(bx, R_BALL, bz); bVel.set(0, 0, 0); bSpin = 0;
+  sonDokunanOyuncu = c; sonVurusTuru = 'surus'; sonDokunan = c.team;
+}
+var HRK_HEDEFLER = [[-1, 1, 'üst sol'], [1, 1, 'üst sağ'], [-1, -1, 'alt sol'], [1, -1, 'alt sağ'], [0, 1, 'üst orta']];
+function _hrkKaleCikis(kaleIci){
+  if(HRK.tur === 'hedefSut'){
+    if(kaleIci && HRK.faz === 'ucusta'){ var H = HRK.hedefN, d1 = H ? Math.hypot(ball.position.z - H.z, ball.position.y - H.y) : 99;
+      if(d1 < 0.62) _hrkSeriSonuc(true, 3, 'HEDEF! +3'); else _hrkSeriSonuc(true, 1, 'KALEDE +1'); }
+    else _hrkSeriSonuc(false, 0, 'DIŞARI');
+    return true;
+  }
+  if(HRK.tur === 'kafa'){ if(kaleIci && HRK.faz === 'ucusta' && HRK.vurdu) _hrkSeriSonuc(true, 1, 'GOL!'); else _hrkSeriSonuc(false, 0, kaleIci ? 'ORTA DOĞRUDAN GİRDİ (sayılmaz)' : 'DIŞARI'); return true; }
+  if(HRK.tur === 'savunma'){ if(kaleIci) hrkSonuc(false, 'GOL YEDİN'); else hrkSonuc(true, sonDokunanOyuncu && sonDokunanOyuncu.team === 0 ? 'UZAKLAŞTIRDIN' : 'TOP DIŞARI ÇIKTI'); return true; }
+  return false;
+}
+function _hrkKafaVur(o){
+  try{
+    OYN[0].ch = false; OYN[0].c = 0; OYN[0].baski = false; _komutTampon[0] = null; HRK.kafaIstek = false; HRK.vurdu = true;
+    try{ document.getElementById('power').style.opacity = '0'; }catch(e){}
+    var gx = o.dir * HLX, d = vurusYonu(o, 0), ux = gx - ball.position.x, tz;
+    if(Math.abs(d.x) > 0.15 && d.x * o.dir > 0) tz = ball.position.z + d.z / d.x * ux; else tz = ball.position.z > 0 ? -(GOAL_HW - 0.8) : (GOAL_HW - 0.8);
+    var sap = Math.max(0.05, 1 - nit(o, 'nIsb', 0.4)) * 1.4;
+    tz = Math.max(-(GOAL_HW + 1.2), Math.min(GOAL_HW + 1.2, tz + (Math.random() * 2 - 1) * sap));
+    var ty = Math.max(0.3, Math.min(GOAL_H + 0.4, 0.5 + Math.random() * 1.3));
+    var v = topHedefHiz({ x:ball.position.x, y:ball.position.y, z:ball.position.z }, { x:gx, y:ty, z:tz }, 15 + nit(o, 'nSut', 1) * 3);
+    bVel.set(v.x, v.y, v.z); bSpin = 0;
+    sonDokunanOyuncu = o; sonVurusTuru = 'sut'; sonDokunan = o.team; topKilit = 0.3; o.cd = 0.4;
+    try{ topaDokundu(o); }catch(e){}
+    try{ if(o.obj.userData.hazirModel) modelTekSefer(o.obj.userData, 'kafa', 1.3); }catch(e){}
+    try{ sesVurus(0.45); spk('kafa', { p:o }); }catch(e){}
+    try{ sutKaydet(o, true); }catch(e){}
+  }catch(e){ _sessiz(e, '_hrkKafaVur', 'saha_oynanis'); }
+}
+function _ortaYukseklik(vh, vy, u){   // yatay u metrede topun yüksekliği (oyunun fiziği); ulaşamazsa null
+  var x = 0, y = R_BALL, a = vh, b = vy, dt = 1 / 60;
+  for(var i = 0; i < 400; i++){ b -= TOP_G * dt; var va = Math.hypot(a, b), kd = Math.max(0, 1 - HAVA_SURT * va * dt); a *= kd; b *= kd;
+    var nx = x + a * dt, ny = y + b * dt; if(nx >= u) return y + (ny - y) * (u - x) / Math.max(1e-6, nx - x); x = nx; y = ny; if(y < R_BALL) return null; }
+  return null;
+}
+function _hrkYeniAdim(sahip, dt, d){
+  var o = HRK.atan; if(!o) return;
+  if(HRK.tur === 'hedefSut'){
+    if(HRK.halka){ var s2 = 1 + Math.sin(HRK.t * 5) * 0.06; HRK.halka.scale.set(s2, s2, s2); }
+    if(HRK.faz === 'hazir'){
+      if(HRK.bekle){ try{ var gi = girdiYonu(0); if(gi && gi.m > 0.35) HRK.bekle = false; }catch(e){} }
+      if(sonVurusTuru === 'sut' && Math.hypot(bVel.x, bVel.z) > 6){ HRK.faz = 'ucusta'; HRK.ucT = HRK.t; HRK.bekle = false; return; }
+      if(HRK.t > 25) _hrkSeriSonuc(false, 0, 'ŞUT ÇEKMEDİN');
+      return;
+    }
+    if(HRK.faz === 'ucusta' && (HRK.t - HRK.ucT > 4 || (HRK.t - HRK.ucT > 0.8 && Math.hypot(bVel.x, bVel.z) < 1.2))) _hrkSeriSonuc(false, 0, 'KAÇTI');
+    return;
+  }
+  if(HRK.tur === 'kafa'){
+    if(ctrl !== o){ ctrl = o; }   // orta yapan topa sahipken kontrol ona geçmesin: kafa vuracak oyuncu kullanıcıda kalır
+    if(HRK.faz === 'hazir'){
+      if(HRK.fvYer && girdiYonu(0).m < 0.2){ o.obj.position.x = HRK.fvYer.x; o.obj.position.z = HRK.fvYer.z; }
+      if(HRK.t > 1.4){   // orta
+        var c = HRK.ortaci, hx = o.obj.position.x, hz = o.obj.position.z, bx = ball.position.x, bz = ball.position.z;
+        var dx = hx - bx, dz = hz - bz, us = Math.hypot(dx, dz) || 1, vh = Math.max(18, Math.min(28, us * 0.95)), vy = 8;
+        // Top, oyunun fiziğiyle (yerçekimi + hava direnci) oyuncunun hizasına geldiğinde baş yüksekliğinde (1,45 m) olacak şekilde atılır.
+        var lo = 1, hi = 30; for(var it = 0; it < 32; it++){ vy = (lo + hi) / 2; var y = _ortaYukseklik(vh, vy, us); if(y == null || y < 1.45) lo = vy; else hi = vy; }   // ikiye bölme: kısa düşen = alçak
+        bVel.set(dx / us * vh, vy, dz / us * vh); bSpin = 0;
+        sonDokunanOyuncu = c; sonVurusTuru = 'pas'; sonDokunan = 0; topKilit = 0.25;
+        HRK.faz = 'ucusta'; HRK.ucT = HRK.t; HRK.vurdu = false; HRK.kafaIstek = false;
+        try{ if(c && c.obj.userData.hazirModel) modelTekSefer(c.obj.userData, 'pas', 1.2); }catch(e){}
+      }
+      return;
+    }
+    if(HRK.faz === 'ucusta'){
+      // KAFA: Şut tuşuna basılmışsa (basılı tutuluyor ya da bırakılıp tamponda bekliyor) top baş hizasına gelince kafa vuruşu yapılır.
+      var _bas = !!(OYN[0].ch || OYN[0].baski || (_komutTampon[0] && _komutTampon[0].tur === 'sut') || HRK.kafaIstek);   // top havadayken Şut 'baskı' sayılır; kafa isteği olarak da alınır
+      if(_bas && !HRK.kafaIstek) HRK.kafaIstek = true;
+      var _yd = Math.hypot(ball.position.x - o.obj.position.x, ball.position.z - o.obj.position.z);
+      if(!HRK.vurdu && HRK.kafaIstek && _yd < 1.5 && ball.position.y > 0.5 && ball.position.y < 2.6){ _hrkKafaVur(o); return; }
+      if(!HRK.vurdu && sonDokunanOyuncu === o && sonVurusTuru === 'surus' && HRK.t - HRK.ucT > 0.3){ _hrkSeriSonuc(false, 0, 'TOPU KONTROL ETTİN · Şut\'a top gelmeden bas'); return; }
+      if(_gkTutan){ _hrkSeriSonuc(false, 0, 'KURTARIŞ'); return; }
+      if(HRK.t - HRK.ucT > 5 || (HRK.t - HRK.ucT > 1.6 && Math.hypot(bVel.x, bVel.z) < 1.5 && ball.position.y < 0.4)) _hrkSeriSonuc(false, 0, 'KAÇTI');
+    }
+    return;
+  }
+  if(HRK.tur === 'savunma'){
+    var A = HRK.rakip; if(!A) return;
+    if(HRK.faz === 'hazir'){ A._hrkHedef = A.obj.position.clone(); if(HRK.t > 1.5){ HRK.faz = 'kosu'; HRK.t = 0; HRK.zigT = 0; } hrkPanel(' Savunma · deneme ' + (HRK.deneme + 1), 'Rakip birazdan topla geliyor · başarı ' + HRK.basari + '/' + HRK.deneme); return; }
+    HRK.zigT += dt;
+    if(HRK.zigT > 1.4){ HRK.zigT = 0; HRK.zigZ = Math.max(-14, Math.min(14, A.obj.position.z + (Math.random() < 0.5 ? -1 : 1) * (3 + Math.random() * 5))); }
+    if(sonDokunanOyuncu === A || !sonDokunanOyuncu) A._hrkHedef = new THREE.Vector3(-d * (HLX - 12), 0, HRK.zigZ || 0);
+    if(duran){ duran = null; hrkSonuc(false, 'FAUL'); return; }
+    if((sahip && sahip.team === 0) || (sonDokunanOyuncu && sonDokunanOyuncu.team === 0)){ hrkSonuc(true, 'TOPU KAPTIN · ' + HRK.t.toFixed(1) + ' sn'); return; }
+    if(Math.abs(A.obj.position.x) > HLX - 16.5 && Math.abs(A.obj.position.z) < 20.2 && sonDokunanOyuncu === A){ hrkSonuc(false, 'CEZA SAHASINA GİRDİ'); return; }
+    hrkPanel(' Savunma · ' + HRK.t.toFixed(1) + ' sn', 'Ceza sahasına girmeden topu kap · başarı ' + HRK.basari + '/' + HRK.deneme);
+    if(HRK.t > 25) hrkSonuc(true, 'RAKİP İLERLEYEMEDİ');
+  }
+}
 var HRK = { aktif:false, tur:'', faz:'yok', t:0, deneme:0, basari:0, sureTop:0, nesne:[], hedef:null, atan:null, kapi:0, ceza:0, kayipT:0 };
 function hrkMi(){ return HRK.aktif && mod === 'antrenman'; }
 function hrkTemizle(){
   try{ HRK.nesne.forEach(function(m){ scene.remove(m); if(m.geometry) m.geometry.dispose(); }); }catch(e){}
   HRK.nesne = []; HRK.aktif = false; HRK.faz = 'yok'; HRK.hedef = null;
   try{ players.forEach(function(p){ p._hrkHedef = null; p._pasKilit = null; p._hrkTakip = false; }); }catch(e){}
+  HRK.bekle = false; HRK.seriBitti = false; HRK.puan = 0; HRK.rakip = null; HRK.ortaci = null;
   var el = document.getElementById('hrkPanel'); if(el) el.style.display = 'none';
 }
 function hrkPanel(baslik, satir){
@@ -16219,6 +16437,37 @@ function hrkKur(){
       HRK.hedef = yer[Math.floor(Math.random() * yer.length)];
       var h = _hrkHalka(0xf2c230, 1.6); h.position.x = HRK.hedef._hrkHedef.x; h.position.z = HRK.hedef._hrkHedef.z; HRK.halka = h;
       hrkPanel(' Pas isabeti · ' + (HRK.deneme + 1) + '/10', 'Sarı halkadaki arkadaşına pas at · isabet ' + HRK.basari + '/' + HRK.deneme);
+    } else if(HRK.tur === 'hedefSut'){
+      if(HRK.seriBitti || HRK.deneme === 0){ HRK.deneme = 0; HRK.basari = 0; HRK.puan = 0; HRK.seriBitti = false; }
+      var u = 16 + Math.random() * 10, bz0 = (Math.random() * 2 - 1) * 12, bx0 = d * (HLX - u);
+      _hrkTopBasina(oyn, bx0, bz0, d * HLX - bx0, -bz0); ctrl = oyn; HRK.bekle = true; window._kamPan = 0;
+      var hd = HRK_HEDEFLER[Math.floor(Math.random() * HRK_HEDEFLER.length)];
+      HRK.hedefN = { z:hd[0] * (GOAL_HW - 0.75), y:hd[1] > 0 ? GOAL_H - 0.62 : 0.62, ad:hd[2] };
+      var hm = new THREE.Mesh(new THREE.RingGeometry(0.42, 0.6, 32), new THREE.MeshBasicMaterial({ color:0xf2c230, transparent:true, opacity:.9, side:THREE.DoubleSide, depthWrite:false }));
+      hm.position.set(d * (HLX - 0.05), HRK.hedefN.y, HRK.hedefN.z); hm.rotation.y = Math.PI / 2; scene.add(hm); HRK.nesne.push(hm); HRK.halka = hm;
+      var enS = _hrkEnIyiPuan();
+      hrkPanel(' Şut isabeti · şut ' + (HRK.deneme + 1) + '/10', 'Hedef: ' + hd[2] + ' köşe (3 puan, kale 1) · puan ' + (HRK.puan || 0) + (enS ? ' · en iyi ' + enS : ''));
+    } else if(HRK.tur === 'kafa'){
+      if(HRK.seriBitti || HRK.deneme === 0){ HRK.deneme = 0; HRK.basari = 0; HRK.puan = 0; HRK.seriBitti = false; }
+      var fv = saha[9] || saha[saha.length - 1] || oyn, kenar = Math.random() < 0.5 ? 1 : -1, orc = (saha[7] && saha[7] !== fv) ? saha[7] : saha[1];
+      if(fv !== oyn){ oyn.dis = true; oyn.obj.visible = false; if(oyn.golge) oyn.golge.visible = false; }
+      fv.dis = false; fv.obj.visible = true; if(fv.golge) fv.golge.visible = true;
+      fv.obj.position.set(d * (HLX - 10 - Math.random() * 3), 0, (Math.random() * 2 - 1) * 3); fv.obj.rotation.y = Math.atan2(d, 0); fv._hrkHedef = null; HRK.fvYer = fv.obj.position.clone();
+      ctrl = fv; HRK.atan = fv;
+      var ox = d * (HLX - 11), oz = kenar * (HWZ - 9);
+      _hrkTopBasina(orc, ox, oz, fv.obj.position.x - ox, fv.obj.position.z - oz); orc._hrkHedef = orc.obj.position.clone(); HRK.ortaci = orc;
+      sonDokunanOyuncu = orc; sonVurusTuru = 'surus';
+      var gkB = teamB.find(function(q){ return q.gk; }); if(gkB){ gkB.dis = false; gkB.obj.visible = true; if(gkB.golge) gkB.golge.visible = true; gkB.obj.position.set(d * (HLX - 1), 0, 0); }
+      var enK2 = _hrkEnIyiPuan();
+      hrkPanel(' Kafa vuruşu · orta ' + (HRK.deneme + 1) + '/10', 'Top yaklaşırken Şut\'a bas · gol ' + HRK.basari + '/' + HRK.deneme + (enK2 ? ' · en iyi ' + enK2 : ''));
+    } else if(HRK.tur === 'savunma'){
+      var df = saha[2] || oyn; if(df !== oyn){ oyn.dis = true; oyn.obj.visible = false; if(oyn.golge) oyn.golge.visible = false; }
+      df.dis = false; df.obj.visible = true; if(df.golge) df.golge.visible = true; df._hrkHedef = null;
+      df.obj.position.set(-d * (HLX - 22), 0, 0); df.obj.rotation.y = Math.atan2(d, 0); ctrl = df; HRK.atan = df;
+      var at = teamB.filter(function(q){ return !q.gk; })[8] || teamB.filter(function(q){ return !q.gk; })[0];
+      var az = (Math.random() * 2 - 1) * 10;
+      _hrkTopBasina(at, -d * (HLX - 42), az, -d, 0); at._hrkHedef = at.obj.position.clone(); HRK.rakip = at; HRK.zigZ = az;
+      hrkPanel(' Savunma · deneme ' + (HRK.deneme + 1), 'Rakip birazdan topla geliyor');
     } else if(HRK.tur === 'kapiAvi'){
       HRK.kapi = 0; HRK.kayipT = 0; HRK.kapiNesne = []; HRK.g = null;
       _hrkKapiYeni(oyn);
@@ -16309,7 +16558,7 @@ function hrkAdim(dt){
   if(!hrkMi() || !running || bitti || duraklat) return;
   HRK.t += dt;
   var d = dirA || 1, sahip = topSahibi();
-  if(HRK.faz === 'sonuc'){ if(HRK.t > 1.8){ if(HRK.tur === 'pasAlis' && HRK.deneme >= 10){ HRK.deneme = 0; HRK.basari = 0; HRK.sureTop = 0; } hrkKur(); } return; }
+  if(HRK.faz === 'sonuc'){ if(HRK.t > (HRK.seriBitti ? 3.5 : 1.8)){ if(HRK.tur === 'pasAlis' && HRK.deneme >= 10){ HRK.deneme = 0; HRK.basari = 0; HRK.sureTop = 0; } hrkKur(); } return; }
   if(HRK.tur === 'pasAlis'){
     if(HRK.halka) HRK.halka.material.opacity = 0.55 + 0.35 * Math.sin(HRK.t * 6);
     if(HRK.faz === 'hazir' && sahip !== HRK.atan && Math.hypot(bVel.x, bVel.z) > 3){ HRK.faz = 'ucusta'; HRK.ucT = HRK.t; }
@@ -16318,6 +16567,7 @@ function hrkAdim(dt){
     if(HRK.t > 12) hrkSonuc(false, 'SÜRE DOLDU');
     return;
   }
+  if(HRK_SERI[HRK.tur] || HRK.tur === 'savunma'){ _hrkYeniAdim(sahip, dt, d); return; }
   var o = HRK.atan; if(!o) return;
   if(HRK.tur === 'kapiAvi' || HRK.tur === 'hizSurus' || HRK.tur === 'topKoruma'){ _hrkSurusAdim(o, sahip, dt, d); return; }
   // SLALOM
@@ -16380,6 +16630,7 @@ function _hrkSurusAdim(o, sahip, dt, d){
 }
 function hrkSonuc(basari, metin){
   if(HRK.faz === 'sonuc') return;
+  if(basari){ try{ gelisimAntrenman(HRK.atan || ctrl); }catch(e){} }
   HRK.deneme++; if(basari) HRK.basari++;
   if(HRK.tur === 'pasAlis' && basari) HRK.sureTop += HRK.t;
   HRK.faz = 'sonuc'; HRK.t = 0;
@@ -16452,7 +16703,7 @@ function antDrillSonuc(sonuc){
     if(ANT.faz !== 'ucusta' && ANT.faz !== 'hazir') return;
     var tur = window._sahaAntrenmanTur, kurtarma = (tur === 'kurtaris');
     var basari = kurtarma ? (sonuc !== 'gol') : (sonuc === 'gol');
-    if(basari) ANT.gol++;
+    if(basari){ ANT.gol++; try{ gelisimAntrenman(ctrl); }catch(e){} }
     ANT.faz = 'sonuc'; ANT.t = 0;
     bVel.set(0, 0, 0);
     var baslik = { gol:'GOL!', kurtaris:'KURTARIŞ', direk:'DİREK!', disari:'DIŞARI', zaman:'SÜRE DOLDU', kesildi:'TOP KESİLDİ', uzaklasti:'UZAKLAŞTIRILDI' }[sonuc] || '';
@@ -19132,7 +19383,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-25-E';
+window.APP_BUILD = '2026-10-25-F';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -19564,7 +19815,7 @@ function oyuncuHavuzKaydi(ad){
 }
 function oyuncuGucuBul(ad){
   const o = oyuncuHavuzKaydi(ad);
-  return o ? Math.max(1, Math.min(150, Number(o.guc) || SAHA_VARSAYILAN_GUC)) : null;
+  return o ? Math.max(1, Math.min(150, (Number(o.guc) || SAHA_VARSAYILAN_GUC) + sahaGelisimBonus(o))) : null;
 }
 // Gücün oyundaki oranı: 1-99 doğrusal (0-1); 99 üstü (yıldız, en fazla 150) azalan etkiyle en çok 1.26 - fizik bozulmasın.
 function sahaGucOran(guc){ const g = Math.max(1, Math.min(150, Number(guc) || 50)); return g <= 99 ? g / 99 : 1 + (g - 99) / 99 * 0.6; }
@@ -19581,7 +19832,7 @@ function nitelikAta(p, idx){
        KİMLİĞİYLE eşlenir (kendi kadron: kullanicilar/kadro; rakip: puan tablosu kadrosundaki havuzId; yedekten giren:
        yedek listesindeki kimlik). Kimlik yoksa ada göre aranır; aynı adlılar arasında sahipli ve en güçlü olan seçilir. */
     const _hkId = (p.havuzId && magazaHavuz[p.havuzId]) ? magazaHavuz[p.havuzId] : null;
-    const guc = _hkId ? Math.max(1, Math.min(150, Number(_hkId.guc) || SAHA_VARSAYILAN_GUC)) : oyuncuGucuBul(p.ad);
+    const guc = _hkId ? Math.max(1, Math.min(150, (Number(_hkId.guc) || SAHA_VARSAYILAN_GUC) + sahaGelisimBonus(_hkId))) : oyuncuGucuBul(p.ad);   // (2026-10-25-F) + gelişim
     p.guc = (guc != null) ? guc : SAHA_VARSAYILAN_GUC;
     // Mevki uyumu (2026-09-27-M): kendi takımında oyuncu KENDİ mevkisi dışında bir yerde
     // oynuyorsa Kadro ekranında gördüğü "o yerdeki güç" ile oynar (bkz. sahaUyum).
@@ -19614,7 +19865,106 @@ function nitelikAta(p, idx){
     p.nKal = Math.min(1.25, L(0.0, 1.0)); // kalecilik (yalnızca kalecide anlamlı)
   }catch(e){ p.nHiz = 1; p.nSut = 1; p.nPas = 1; p.nSur = 1; p.nKap = 1; p.nIsb = 0.4; p.nKal = 0.4; p.g01 = 0.38; }
 }
-function nit(p, ad, vars){ return (p && p[ad] != null) ? p[ad] : vars; }
+/* MORAL (2026-10-25-F, onaylanan öneri 3): takımın morali -1..1. Maç başında son 5 resmi sonuçtan (galibiyet/beraberlik/mağlubiyet)
+   taban moral hesaplanır; maç içinde gol atan takımın morali yükselir, yiyeninki düşer, sonra yavaşça tabana döner. Etkisi küçük
+   ama hissedilir: hız, pas, şut, isabet, sürme ve kapma en çok ±%5. Antrenmanda moral yok. Kondisyon kutusunda gösterilir. */
+var MORAL = [0, 0], MORAL_TABAN = [0, 0], MORAL_NIT = { nHiz:1, nSut:1, nPas:1, nSur:1, nKap:1, nIsb:1, nKal:1 };
+function moralKat(t){ var m = MORAL[t === 1 ? 1 : 0] || 0; return 1 + Math.max(-1, Math.min(1, m)) * 0.05; }
+function nit(p, ad, vars){ var v = (p && p[ad] != null) ? p[ad] : vars; if (p && MORAL_NIT[ad] && (MORAL[0] || MORAL[1])) v *= moralKat(p.team); return v; }
+function _moralTakimId(t){
+  try{
+    var fk = window._sahaAktifFikstur;
+    if(fk && typeof sahaFikstur !== 'undefined' && sahaFikstur[fk.matchId]){ var mc = sahaFikstur[fk.matchId]; return t === 0 ? (fk.benTarafHome ? mc.homeId : mc.awayId) : (fk.benTarafHome ? mc.awayId : mc.homeId); }
+    if(window._odaTakimlar) return t === 0 ? window._odaTakimlar.a : window._odaTakimlar.b;
+    return t === 0 ? (benimKayit && benimKayit.takimId) : window._sahaAntrenmanRakip;
+  }catch(e){ return null; }
+}
+function _takimFormu(tid){
+  try{
+    if(!tid || typeof sahaFikstur === 'undefined') return 0;
+    var l = Object.keys(sahaFikstur).map(function(k){ return sahaFikstur[k]; })
+      .filter(function(m){ return m && m.played && (m.homeId === tid || m.awayId === tid); })
+      .sort(function(a, b){ return ((Number(b.week) || 0) - (Number(a.week) || 0)) || (String(b.date || '').localeCompare(String(a.date || ''))); }).slice(0, 5);
+    if(!l.length) return 0;
+    var t = 0; l.forEach(function(m){ var h = Number(m.homeGoals) || 0, a = Number(m.awayGoals) || 0, ben = m.homeId === tid ? h : a, o = m.homeId === tid ? a : h; t += ben > o ? 1 : (ben < o ? -1 : 0); });
+    return Math.max(-0.6, Math.min(0.6, t / 5 * 0.6));
+  }catch(e){ return 0; }
+}
+function moralSifirla(){
+  try{
+    if(mod === 'antrenman'){ MORAL = [0, 0]; MORAL_TABAN = [0, 0]; return; }
+    MORAL_TABAN = [_takimFormu(_moralTakimId(0)), _takimFormu(_moralTakimId(1))];
+    MORAL = MORAL_TABAN.slice();
+  }catch(e){ MORAL = [0, 0]; MORAL_TABAN = [0, 0]; }
+}
+function moralGol(t){
+  if(mod === 'antrenman') return;
+  var o = t === 0 ? 1 : 0, fark = (t === 0 ? skorA - skorB : skorB - skorA);
+  MORAL[t] = Math.min(1, (MORAL[t] || 0) + 0.18 + (fark === 0 ? 0.08 : 0));   // eşitleyen gol daha çok moral verir
+  MORAL[o] = Math.max(-1, (MORAL[o] || 0) - 0.22);
+}
+function moralAdim(dt){
+  if(!running || bitti || mod === 'antrenman') return;
+  for(var i = 0; i < 2; i++) MORAL[i] += (MORAL_TABAN[i] - MORAL[i]) * Math.min(1, dt * 0.012);
+}
+/* OYUNCU GELİŞİMİ (2026-10-25-F, onaylanan öneri 4): oyuncular maçlarda ve antrenmanda deneyim (XP) kazanır; her XP_GUC kadar XP
+   oyuncunun gücüne +1 ekler, en çok yöneticinin belirlediği sınıra kadar (globalAdminSettings/sahaGelisim = {max, xpGuc};
+   varsayılan +10 güç, 100 XP; max 0 = gelişim kapalı). Kayıt: oyuncuHavuzu/{id}/gelisim = {u, xp}; yalnızca kaydı yazan sahip
+   (u) bugünkü sahiple aynıysa geçerlidir - oyuncu satılınca gelişim sıfırlanmış sayılır. Maç sonu: sahada kalma süresi, isabetli
+   şut, isabetli pas, top kapma, kurtarış ve sonuca göre en çok 60 XP. Antrenman: başarılı her deneme kontrol edilen oyuncuya 3 XP
+   (günde en çok 60). Gelişen güç maçta, kadroda ve oyuncu kartında geçerlidir. */
+var GELISIM = { max:10, xpGuc:100 };
+(function gelisimAyarDinle(){
+  try{
+    if(typeof fbHazir === 'undefined' || !fbHazir || !fbDb){ setTimeout(gelisimAyarDinle, 900); return; }
+    fbDb.ref('globalAdminSettings/sahaGelisim').on('value', function(sn){ var v = sn.val() || {};
+      var m = Number(v.max), x = Number(v.xpGuc);
+      GELISIM = { max:(isFinite(m) && v.max != null) ? Math.max(0, Math.min(40, Math.round(m))) : 10, xpGuc:(x >= 20 && x <= 2000) ? Math.round(x) : 100 }; }, function(){});
+  }catch(e){ setTimeout(gelisimAyarDinle, 1500); }
+})();
+function _gelisimXp(o){ return (o && o.gelisim && o.gelisim.u && o.gelisim.u === o.sahip) ? Math.max(0, Number(o.gelisim.xp) || 0) : 0; }
+function sahaGelisimBonus(o){ if(!o || !(GELISIM.max > 0)) return 0; return Math.min(GELISIM.max, Math.floor(_gelisimXp(o) / GELISIM.xpGuc)); }
+function sahaEtkinGuc(o){ return Math.max(1, Math.min(150, (Number(o && o.guc) || 0) + sahaGelisimBonus(o))); }
+function sahaGelisimEkle(harita, neden){
+  try{
+    if(!fbHazir || !fbDb || !benimUid || !(GELISIM.max > 0)) return;
+    var g = {}, n = 0;
+    Object.keys(harita || {}).forEach(function(id){
+      var o = magazaHavuz[id], ek = Math.max(0, Math.min(200, Math.round(harita[id] || 0)));
+      if(!o || o.sahip !== benimUid || !ek) return;
+      var yeni = _gelisimXp(o) + ek; g['oyuncuHavuzu/' + id + '/gelisim'] = { u:benimUid, xp:yeni };
+      o.gelisim = { u:benimUid, xp:yeni }; n++;   // iyimser
+    });
+    if(!n) return;
+    fbDb.ref().update(g).catch(function(err){ DiagSaha('gelisimYaz', err, { neden:neden || '', anlami:'Oyuncu gelişimi (XP) kaydedilemedi.', oneri:'oyuncuHavuzu/{id}/gelisim yazma kuralını denetleyin (database.rules.json).' }); });
+  }catch(e){ _sessiz(e, 'sahaGelisimEkle', 'saha_ag'); }
+}
+function gelisimMacSonu(){
+  try{
+    if(mod === 'antrenman' || window._sahaIzleModu || window._sahaAntrenmanTur === 'serbestMac' || !benimUid) return;
+    var benT = window._sahaOdaKonuk ? 1 : 0, ben = benT === 0 ? skorA : skorB, rak = benT === 0 ? skorB : skorA;
+    var sonucEk = ben > rak ? 8 : (ben === rak ? 4 : 0), toplam = Math.max(60, 2 * (HALF || 150)), harita = {};
+    var idBul = {}; players.forEach(function(q){ if(q.team === benT && q.havuzId) idBul[q.ad] = q.havuzId; });
+    (cikanlar[benT] || []).forEach(function(c){ if(c && c.havuzId && c.ad) idBul[c.ad] = c.havuzId; });
+    Object.keys(OYIST).forEach(function(k){
+      if(k.indexOf(benT + ':') !== 0) return; var ad = k.slice(2), st = OYIST[k], id = idBul[ad]; if(!id || !st || st.sn < 30) return;
+      var xp = 8 + 22 * Math.min(1, st.sn / toplam) + 3 * (st.sutIs || 0) + 0.4 * (st.pasOk || 0) + 1.5 * (st.kap || 0) + 2 * (st.kurt || 0) + sonucEk;
+      harita[id] = Math.min(60, Math.round(xp));
+    });
+    sahaGelisimEkle(harita, 'mac');
+  }catch(e){ _sessiz(e, 'gelisimMacSonu', 'saha_oyun'); }
+}
+function gelisimAntrenman(p){
+  try{
+    if(!p || !p.havuzId || !(GELISIM.max > 0)) return;
+    var gun = new Date().toISOString().slice(0, 10), k = {};
+    try{ k = JSON.parse(localStorage.getItem('saha-gelisim-gun') || '{}') || {}; }catch(e){}
+    if(k.gun !== gun) k = { gun:gun, top:0 };
+    if(k.top >= 60) return;
+    k.top += 3; try{ localStorage.setItem('saha-gelisim-gun', JSON.stringify(k)); }catch(e){}
+    var h = {}; h[p.havuzId] = 3; sahaGelisimEkle(h, 'antrenman');
+  }catch(e){}
+}
 // Güce bağlı ivmelenme: güçlü oyuncu tam hıza daha çabuk çıkar (zayıfta ~%78, ortada %100, yıldızda ~%118).
 function gucIvme(p){ const g = (p && p.g01 != null) ? p.g01 : 0.5; return 0.78 + Math.min(1.25, g) * 0.44; }
 /* TOPLA HER YERİ DOLAŞMA (2026-10-12-B, kullanıcı: "herhangi bir oyuncuyla topla bütün stadyumu dolaşılabiliyor; oyun
@@ -25824,6 +26174,9 @@ function hud(){
     _hudYaz('kondBar', 'background', k>70 ? '#2fae7a' : (k>45 ? '#e4b23c' : '#d8443a'));
     _hudYaz('kondYuzde', 't', String(k));
     _hudYaz('degHak', 't', String((degisiklikHakki && degisiklikHakki[0]!=null) ? degisiklikHakki[0] : 5));
+    { const _mt = window._sahaOdaKonuk ? 1 : 0, _mv = MORAL[_mt] || 0;
+      _hudYaz('moralEt', 't', _mv > 0.33 ? 'Yüksek ▲' : (_mv < -0.33 ? 'Düşük ▼' : 'Normal'));
+      _hudYaz('moralEt', 'color', _mv > 0.33 ? '#7ee08a' : (_mv < -0.33 ? '#f0a8a2' : '#e6edf5')); }
   }catch(e){_sessiz(e,'hud:4491','saha_oynanis');}
   tabelaYonUygula();
   _hudYaz('sa', 't', String(skorA));
@@ -27582,6 +27935,7 @@ function gol(takim){
   window._sonGolTakim = takim;                                   // (2026-10-17-A) online maçta tekrarı golü atan taraf geçer
   try{ taraftarCoskula(1); }catch(e){_sessiz(e,'gol:4651','saha_oynanis');}   // gol: tribunler ayaga kalkar
   if (takim === 0) skorA++; else skorB++;
+  try{ moralGol(takim); }catch(e){}
   (takim === 0 ? istat.a : istat.b).isabet++;
   try{ sutHaritaGol(takim); }catch(e){}
   try{ if(window._sahaOdaHost) setTimeout(odaKurtarYaz, 400); }catch(e){}
@@ -27689,6 +28043,7 @@ function kamPanAdim(dt, aktif){
 })();
 function _sutKamOyuncu(){   // kamera arkasına geçecek, şut için topun başında bekleyen oyuncu (eğitim)
   try{ if(EGT.aktif && EGT.sutBekle && ctrl && !duran) return ctrl; }catch(e){}
+  try{ if(HRK.aktif && HRK.tur === 'hedefSut' && HRK.faz === 'hazir' && HRK.bekle && ctrl && !duran) return ctrl; }catch(e){}
   return null;
 }
 function duranKameraHedefi(){
@@ -27844,6 +28199,7 @@ function update(dt){
   if (VAR.aktif){ try{ agTopAdim(dt); }catch(e){} varAdim(dt); return; }   // (2026-10-16-E) VAR beklerken de top ağın içinde yoluna devam eder                 // VAR incelemesi: oyun durur (bkz. VAR)
   if (window._havaDeg && !window._havaDeg.oldu) havaDegisimKontrol();
   if (EGT.aktif) egtAdim(dt);
+  try{ moralAdim(dt); }catch(e){}
   try{ if (window._kaleciCik[0] > 0) window._kaleciCik[0] -= dt; if (window._kaleciCik[1] > 0) window._kaleciCik[1] -= dt;
        if (OYN[0].bcd > 0) OYN[0].bcd -= dt; if (OYN[1] && OYN[1].bcd > 0) OYN[1].bcd -= dt; }catch(e){}
   istemsizVurusSensoru();
@@ -28446,7 +28802,7 @@ function update(dt){
       if (PEN.faz === 'ucusta' || PEN.faz === 'hazir') penAtisSonuc(kaleIci ? 'gol' : 'disari');
       bVel.set(0,0,0);
     } else if (mod === 'antrenman' && disarida && hrkMi()){
-      if (HRK.faz !== 'sonuc') hrkSonuc(false, 'TOP DIŞARI');
+      if (HRK.faz !== 'sonuc' && !_hrkKaleCikis(kaleIci)) hrkSonuc(false, 'TOP DIŞARI');
       bVel.set(0,0,0);
     } else if (mod === 'antrenman' && disarida && antDrillMi()){
       // Odaklı drill: top çıktı ya da ağlarda - normal oyun (santra/taç/top sende) YOK, deneme sonuçlanır.
@@ -28750,6 +29106,7 @@ function bitir(){
     }
   }catch(e){_sessiz(e,'bitir:kazanc','saha_ag');}
   try{ sahaYorgunlukYaz(); }catch(e){self.__ds&&self.__ds(27468,e)}
+  try{ gelisimMacSonu(); }catch(e){}   // (2026-10-25-F) bkz. OYUNCU GELİŞİMİ
   try{ spk('son'); }catch(e){self.__ds&&self.__ds(27469,e)}
   // (2026-10-18-A) Lig maçında yöneten cihaz koptu ve maç hükmen bittiyse sonucu bağlı kalan cihaz yazar.
   try{ var _L2 = window._sahaLigOda; if(!window._sahaAktifFikstur && _L2 && window._sahaHukmen && window._sahaOdaKonuk && window._odaTakimlar)
@@ -30338,7 +30695,7 @@ function basla(yeniMod){
   HALF = (window._sahaOdaSuresiDk > 0) ? window._sahaOdaSuresiDk * 30
        : (window._sahaAktifFikstur && window._sahaYoneticiSureDk > 0) ? window._sahaYoneticiSureDk * 30
        : sahaModSuresiDk(sahaAktifModTuru()) * 30;   // (2026-10-25-E) süreyi yönetici belirler; oyuncu ayarı yok
-  durma = { 1:0, 2:0 }; uzatmaVerildi = false; golBekleme = false;
+  durma = { 1:0, 2:0 }; uzatmaVerildi = false; golBekleme = false; try{ moralSifirla(); }catch(e){}
   skorA = 0; skorB = 0; saat = 0; devre = 1; dirA = _odaKameraModu() ? 1 : _devreYonu(1);
   window._sahaSutlar = []; window._sutBekleyen = null; window._sutSon = null; window._macHavaIlk = AYAR.hava; window._sahaMvp = null; OYIST = {}; _oyIzle = { son:null, pas:null, surus:null };
   try{ duranAticiSifirla(); }catch(e){self.__ds&&self.__ds(29060,e)}

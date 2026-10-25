@@ -1264,6 +1264,15 @@ body:has(#sheetOv.on) .diagHudBadge,body:has(#sheetOv.on) #admDoctorBtn{display:
         <button class="btn bgh" onclick="sahaSureKaldir()"> Hepsini varsayılana döndür</button>
       </div>
     </div>
+    <!-- OYUNCU GELİŞİMİ (2026-10-25-F): globalAdminSettings/sahaGelisim = {max, xpGuc}. Bkz. saha.html/OYUNCU GELİŞİMİ. -->
+    <div class="card saha-ozel" style="margin-top:.6rem">
+      <h2>Oyuncu Gelişimi</h2>
+      <p class="hint">Oyuncular maçlarda (en çok 60 XP) ve antrenmanda (başarılı deneme 3 XP, günde en çok 60) deneyim kazanır; belirlenen XP her dolduğunda gücüne +1 eklenir. Üst sınır 0 ise gelişim kapalıdır. Oyuncu satılınca gelişimi sıfırlanır.</p>
+      <div class="row"><span>En çok güç artışı</span><input id="sahaGelMax" type="number" min="0" max="40" step="1" placeholder="10" style="max-width:6rem"></div>
+      <div class="row"><span>+1 güç için XP</span><input id="sahaGelXp" type="number" min="20" max="2000" step="10" placeholder="100" style="max-width:6rem"></div>
+      <div id="sahaGelDurum" class="hint" style="margin:.3rem 0"></div>
+      <button class="btn bp" onclick="sahaGelisimKaydet()">Kaydet</button>
+    </div>
     <!-- OYUNCU DEĞİŞİKLİĞİ HAKKI (2026-10-10-A): maç başına değişiklik sayısı, maç türüne göre. -->
     <div class="card saha-ozel" style="margin-top:.6rem">
       <h2>⇄ Değişiklik Hakkı ve Kart Cezası</h2>
@@ -2865,7 +2874,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-25-E';
+window.APP_BUILD='2026-10-25-F';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -8709,6 +8718,26 @@ function sahaSureKaldir(){
     .then(function(){ toast(' Süreler varsayılana döndü'); })
     .catch(function(){ toast(' İşlem başarısız','er'); });
 }
+function sahaGelisimKaydet(){
+  var m = String((qs('sahaGelMax')||{}).value || '').trim(), x = String((qs('sahaGelXp')||{}).value || '').trim();
+  var mv = m === '' ? 10 : parseInt(m, 10), xv = x === '' ? 100 : parseInt(x, 10);
+  if(!(mv >= 0 && mv <= 40)){ toast(' Güç artışı 0-40 arası olmalı','er'); return; }
+  if(!(xv >= 20 && xv <= 2000)){ toast(' XP 20-2000 arası olmalı','er'); return; }
+  firebase.database().ref('globalAdminSettings/sahaGelisim').set({ max:mv, xpGuc:xv })
+    .then(function(){ toast(' Gelişim ayarı kaydedildi'); try{ logAction(' SAHA oyuncu gelişimi: +' + mv + ' / ' + xv + ' XP'); }catch(e){} })
+    .catch(function(e){ toast(' Kaydedilemedi: ' + ((e && e.message) || ''),'er'); });
+}
+(function sahaGelisimDinleAdmin(){
+  try{
+    if(!window.firebase || !firebase.database){ setTimeout(sahaGelisimDinleAdmin, 700); return; }
+    firebase.database().ref('globalAdminSettings/sahaGelisim').on('value', function(sn){ var v = sn.val() || {};
+      var a = qs('sahaGelMax'), b = qs('sahaGelXp');
+      if(a && document.activeElement !== a) a.value = v.max != null ? v.max : '';
+      if(b && document.activeElement !== b) b.value = v.xpGuc != null ? v.xpGuc : '';
+      var d = qs('sahaGelDurum'); if(d){ var mx = v.max != null ? v.max : 10, xp = v.xpGuc || 100; d.textContent = mx > 0 ? ('Şu an: en çok +' + mx + ' güç, her ' + xp + ' XP\'de +1' + (v.max == null ? ' (varsayılan)' : '')) : 'Şu an: gelişim kapalı'; }
+    });
+  }catch(e){ setTimeout(sahaGelisimDinleAdmin, 1500); }
+})();
 (function sahaSureDinleAdmin(){
   try{
     if(!window.firebase || !firebase.database){ setTimeout(sahaSureDinleAdmin, 600); return; }
@@ -10484,7 +10513,9 @@ function havuzCiz(){
       + (tur === 'satis'
           ? '<input type="number" value="'+(o.fiyat||0)+'" min="0" style="width:68px;padding:.2rem .3rem" onchange="havuzFiyatGuncelle(\''+id+'\', this.value)">'
           + '<button class="btn bgh" onclick="havuzSatisAcKapa(\''+id+'\')" title="Satışta mı">'+(o.satista?'':'')+'</button>'
+          + '<button class="btn bgh" onclick="havuzArtirma(\''+id+'\')" title="Açık artırma" style="'+(o.artirma && !o.artirma.durum ? 'background:rgba(242,194,48,.25)' : '')+'">⚖</button>'
           : '')
+      + ((o.artirma && tur === 'satis') ? '<div style="font-size:.62rem;opacity:.75;margin-top:.2rem">⚖ ' + _admArtirmaOzet(o) + '</div>' : '')
       + '<button class="btn" style="background:rgba(239,68,68,.15);color:#dc2626;border:1px solid rgba(239,68,68,.45)" onclick="havuzSil(\''+id+'\')"></button>'
       + '</div></div>';
   }).join('') + (fazla > 0 ? '<p class="hint" style="margin:.4rem">… ve '+fazla+' oyuncu daha - aramayı daraltın.</p>' : '');
@@ -10513,6 +10544,30 @@ function havuzFiyatGuncelle(id, v){
   firebase.database().ref('oyuncuHavuzu/'+id+'/fiyat').set(f)
     .then(function(){ toast(' Fiyat guncellendi'); })
     .catch(function(){ toast(' Guncellenemedi','er'); });
+}
+/* AÇIK ARTIRMA (2026-10-25-F): oyuncuHavuzu/{id}/artirma = {bas, adim, bitis, basTs}. Kullanıcılar SAHA'da teklif verir; süre bitince
+   en yüksek teklifi veren (bakiyesi yetiyorsa) oyuncuyu alır, değilse oyuncu normal satışa döner (bkz. saha.html/AÇIK ARTIRMALI TRANSFER). */
+function _admArtirmaOzet(o){
+  var a = o.artirma || {}, t = a.teklif, kal = Math.max(0, (a.bitis || 0) - Date.now());
+  var d = { satildi:'satıldı', teklifsiz:'teklif gelmedi, normal satışta', yetersiz:'kazananın bakiyesi yetmedi, normal satışta' }[a.durum];
+  return (d ? d : ('kalan ' + Math.floor(kal / 3600000) + 'sa ' + Math.floor(kal / 60000) % 60 + 'dk')) + ' · başlangıç ' + (a.bas || 0) + ' SL · artış ' + (a.adim || 0) + (t ? ' · en yüksek ' + t.tutar + ' SL (' + escHtml(String(t.ad || '')) + ')' : ' · teklif yok');
+}
+function havuzArtirma(id){
+  var o = _havuz[id]; if(!o) return;
+  if(o.artirma && !o.artirma.durum){
+    ptOnay('<b>' + escHtml(o.ad || '') + '</b> için süren açık artırma iptal edilsin mi? Verilen teklifler silinir, oyuncu normal satışa döner.', { baslik:'Açık Artırmayı İptal Et', ikon:'⚖', tehlikeli:true, tamamYazi:'İptal et' })
+      .then(function(ok){ if(!ok) return; firebase.database().ref('oyuncuHavuzu/' + id + '/artirma').remove().then(function(){ toast(' Açık artırma iptal edildi'); }).catch(function(){ toast(' İptal edilemedi','er'); }); });
+    return;
+  }
+  ptSor('Başlangıç fiyatı (SL), süre (saat) ve en az artış (SL) - virgülle ayırın:', (o.fiyat || 100) + ', 24, ' + Math.max(10, Math.round((o.fiyat || 100) / 20)), { baslik:'⚖ ' + (o.ad || '') + ' · Açık Artırma', ikon:'⚖', tamamYazi:'Başlat' }).then(function(v){
+    if(v == null) return;
+    var p = String(v).split(/[,;\s]+/).filter(Boolean).map(function(x){ return parseFloat(x); });
+    var bas = Math.round(p[0]), saat = p[1], adim = Math.round(p[2]);
+    if(!(bas >= 0) || !(saat >= 0.05 && saat <= 336) || !(adim >= 1)){ toast(' Örnek: 500, 24, 25 (başlangıç, saat, artış)','er'); return; }
+    var u = {}; u['oyuncuHavuzu/' + id + '/artirma'] = { bas:bas, adim:adim, bitis:Date.now() + Math.round(saat * 3600000), basTs:Date.now() }; u['oyuncuHavuzu/' + id + '/satista'] = true;
+    firebase.database().ref().update(u).then(function(){ toast(' Açık artırma başladı: ' + saat + ' saat'); try{ logAction('⚖ Açık artırma: ' + (o.ad || '') + ' · ' + bas + ' SL · ' + saat + ' sa'); }catch(e){} })
+      .catch(function(e){ toast(' Başlatılamadı: ' + ((e && e.message) || ''),'er'); });
+  });
 }
 function havuzSatisAcKapa(id){
   var o = _havuz[id]; if(!o) return;
