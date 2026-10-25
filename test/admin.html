@@ -2994,7 +2994,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-25-H';
+window.APP_BUILD='2026-10-25-J';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -9890,6 +9890,7 @@ function transferDinle(){
     var db = firebase.database();
     db.ref('oyuncuHavuzu').on('value', function(snap){
       _havuz = snap.val() || {};
+      try{ admArtirmaSahipOnar(); }catch(e){}   // (2026-10-25-J) önceki sürümde sahibinden alınmış kartları geri ver
       _tDurum.havuz = Object.keys(_havuz).length + ' kayit';
       // DOM FIRTINASI (2026-10-06-B, teşhis: admin ana ekranda saniyede 6000-9000 DOM değişikliği): SAHA maç
       // sırasında oyuncu havuzunu ve kullanıcı kayıtlarını sık sık yazıyor; her yazımda bu listelerin TAMAMI
@@ -10433,6 +10434,11 @@ function ligOyuncuMagazayaSun(){
   if(!secim.length){ toast(' Önce listeden oyuncu seçin','er'); return; }
   var guc = Math.max(1, Math.min(GUC_UST, parseInt((qs('lgoGuc')||{}).value, 10) || 70));
   var fiyat = Math.max(0, parseInt((qs('lgoFiyat')||{}).value, 10) || 0);
+  /* (2026-10-25-J) KÖK SEBEP (kullanıcı: "yönetici açık artırmaya çıkarıyor fakat mağazada normal satılıyor"): açık artırma ayarı
+     window._lgoArtAyar'da tutuluyor ve onay penceresi (dlg) AÇILIR AÇILMAZ temizleniyordu; kayıt onaydan SONRA yazıldığı için ayar
+     boş kalıyor, oyuncu doğrudan satışa çıkıyordu. Ayar artık burada yerel değişkene alınır. */
+  var artAyar = window._lgoArtAyar || null;
+  if(artAyar) fiyat = artAyar.bas;
   dlg('','Mağazaya Sun',
       secim.length + ' oyuncu SAHA mağazasına satışa sunulacak. Güç ' + guc + ', fiyat ' + fiyat + ' SL. '
       + 'Oyuncular havuza eklenir; istediğiniz zaman havuz listesinden düzenleyebilir ya da kaldırabilirsiniz.',
@@ -10462,7 +10468,7 @@ function ligOyuncuMagazayaSun(){
         ligTakimId: p.takim || null,
         eklenmeTs: Date.now()
       };
-      if(window._lgoArtAyar){ g['oyuncuHavuzu/'+ref.key].artirma = _admArtirmaKayit(window._lgoArtAyar); g['oyuncuHavuzu/'+ref.key].fiyat = window._lgoArtAyar.bas; }
+      if(artAyar){ g['oyuncuHavuzu/'+ref.key].artirma = _admArtirmaKayit(artAyar); g['oyuncuHavuzu/'+ref.key].fiyat = artAyar.bas; }
       eklenen++;
     });
     if(!eklenen){ toast('Hepsi zaten mağazada'); ligOyuncuSecimTemizle(); return; }
@@ -10639,7 +10645,8 @@ function _havuzSatirHtml(id, o){
     alt += '<label class="hv-fiyat" title="Doğrudan satış fiyatı"><input type="number" value="'+(o.fiyat||0)+'" min="0" onchange="havuzFiyatGuncelle(\''+id+'\', this.value)"><b>SL</b></label>'
       + '<button class="hv-dug '+(o.satista?'satista':'pasif')+'" onclick="havuzSatisAcKapa(\''+id+'\')">'+(o.satista?'● Satışta':'○ Satışta değil')+'</button>';
   }
-  alt += '<button class="hv-dug art" onclick="havuzArtirma(\''+id+'\')">⚖ '+(artAktif?'Artırmayı yönet':'Açık artırma')+'</button>'
+  if(o.sahip) alt += '<button class="hv-dug satista" onclick="havuzKopyaSatisa(\''+id+'\')" title="Sahibinin kartına dokunulmaz">+ Yeni kart satışa</button>';
+  alt += '<button class="hv-dug art" onclick="havuzArtirma(\''+id+'\')">⚖ '+(artAktif?'Artırmayı yönet':(o.sahip?'Yeni kart artırmaya':'Açık artırma'))+'</button>'
     + '<button class="hv-dug sil" onclick="havuzSil(\''+id+'\')" title="Havuzdan sil">Sil</button>';
   return '<div class="hv-s'+(artAktif?' art':'')+'"><div class="hv-ust">'+foto+'<div class="hv-ad"><b>'+escHtml(o.ad||'')+'</b><small>'+bilgi+'</small></div></div>'
     + '<div class="hv-alt">'+alt+'</div>'
@@ -10749,14 +10756,53 @@ function havuzArtirma(id){
   }
   var sahipAd = o.sahip ? ((_kullanicilar[o.sahip]||{}).ad || 'bir kullanıcı') : null;
   admArtirmaAyar({ baslik:'Açık Artırma', alt:'<b>' + escHtml(o.ad || '') + '</b> · ' + escHtml(o.mevki || '') + ' · güç ' + (o.guc || 0)
-      + (sahipAd ? '<br><span style="color:#f6d36a">Bu oyuncu <b>' + escHtml(sahipAd) + '</b> kadrosunda. Açık artırma sürerken kadrodan ayrılır; satılırsa bedel ona ödenir, teklif gelmezse geri döner.</span>' : ''),
+      + (sahipAd ? '<br><span style="color:#f6d36a">Bu oyuncu <b>' + escHtml(sahipAd) + '</b> kadrosunda ve orada KALIR. Aynı oyuncunun YENİ bir kartı açık artırmaya çıkar.</span>' : ''),
       bas:o.fiyat || 100 }).then(function(ayar){
     if(!ayar) return;
-    var u = {}, P = 'oyuncuHavuzu/' + id + '/';
-    u[P + 'artirma'] = _admArtirmaKayit(ayar, o.sahip || null); u[P + 'satista'] = true; u[P + 'satisIlan'] = null;
-    if(o.sahip){ u[P + 'sahip'] = null; u[P + 'baslangic'] = false; }
-    firebase.database().ref().update(u).then(function(){ toast(' Açık artırma başladı: ' + ayar.metin); try{ logAction('⚖ Açık artırma: ' + (o.ad || '') + ' · ' + ayar.bas + ' SL · ' + ayar.metin); }catch(e){} })
+    var u = {}, P;
+    if(o.sahip){   // (2026-10-25-J) satın alan takımın kartına dokunulmaz: yeni kart
+      var yeni = _havuzKartKopya(o, ayar.bas); yeni.artirma = _admArtirmaKayit(ayar);
+      u['oyuncuHavuzu/' + firebase.database().ref('oyuncuHavuzu').push().key] = yeni;
+    } else {
+      P = 'oyuncuHavuzu/' + id + '/';
+      u[P + 'artirma'] = _admArtirmaKayit(ayar); u[P + 'satista'] = true; u[P + 'satisIlan'] = null;
+    }
+    firebase.database().ref().update(u).then(function(){ toast(' Açık artırma başladı: ' + ayar.metin + (o.sahip ? ' (yeni kart)' : '')); try{ logAction('⚖ Açık artırma: ' + (o.ad || '') + ' · ' + ayar.bas + ' SL · ' + ayar.metin); }catch(e){} })
       .catch(function(e){ toast(' Başlatılamadı: ' + ((e && e.message) || ''),'er'); });
+  });
+}
+/* SAHİBİ OLAN OYUNCUYU TEKRAR SATIŞA ÇIKARMA (2026-10-25-J, kullanıcı: "Messi daha önce bir takım tarafından satın alınmış; yönetici aynı
+   oyuncunun kartını tekrar satışa veya açık artırmaya çıkarınca oyuncu o takımın kadrosundan düşüyor; bu bir hata"). KÖK SEBEP: kart
+   satışa çıkarılırken sahibi siliniyordu. Artık sahibinin kartına DOKUNULMAZ; aynı oyuncunun (ad, mevki, güç, fotoğraf) YENİ bir kartı
+   oluşturulup satışa / açık artırmaya çıkar (bkz. BİRDEN FAZLA KEZ SATIŞA ÇIKARMA). */
+function _havuzKartKopya(o, fiyat){
+  return { ad:o.ad, mevki:o.mevki || 'SF', guc:o.guc || 50, hiz:o.hiz || null, sut:o.sut || null, pas:o.pas || null, foto:o.foto || null, ligTakimId:o.ligTakimId || null,
+    sahip:null, baslangic:false, alisFiyat:0, satista:true, fiyat:Math.max(0, Math.round(fiyat || o.fiyat || 0)), macSayisi:0, puanToplam:0, eklenmeTs:Date.now() };
+}
+/* ONARIM (2026-10-25-J): 2026-10-25-G/H/I sürümlerinde sahibi olan oyuncu açık artırmaya çıkarılınca kart sahibinden alınıyordu
+   (artirma.eskiSahip). Süren böyle her artırma için kart SAHİBİNE GERİ VERİLİR; artırma (verilen teklifler dahil) aynı oyuncunun yeni
+   kartına taşınır. Yönetici paneli havuzu her okuduğunda bir kez denetlenir; kurallar gereği yalnızca yönetici yazabilir. */
+var _artOnarYapildi = {};
+function admArtirmaSahipOnar(){
+  var u = {}, n = 0;
+  Object.keys(_havuz || {}).forEach(function(id){
+    var o = _havuz[id]; if(!o || !o.artirma || o.artirma.durum || o.sahip || !o.artirma.eskiSahip || _artOnarYapildi[id]) return;
+    _artOnarYapildi[id] = 1;
+    var yeni = _havuzKartKopya(o, o.artirma.bas || o.fiyat || 0), a = JSON.parse(JSON.stringify(o.artirma)); delete a.eskiSahip; yeni.artirma = a;
+    u['oyuncuHavuzu/' + firebase.database().ref('oyuncuHavuzu').push().key] = yeni;
+    u['oyuncuHavuzu/' + id + '/sahip'] = o.artirma.eskiSahip; u['oyuncuHavuzu/' + id + '/satista'] = false; u['oyuncuHavuzu/' + id + '/artirma'] = null;
+    if(o.baslangic === false && o._eskiBaslangic) u['oyuncuHavuzu/' + id + '/baslangic'] = true;
+    n++;
+  });
+  if(!n) return;
+  firebase.database().ref().update(u).then(function(){ toast(' ' + n + ' oyuncu sahibinin kadrosuna geri verildi; açık artırma yeni kartla sürüyor'); try{ logAction('⚖ Açık artırma onarımı: ' + n + ' kart sahibine döndü'); }catch(e){} })
+    .catch(function(e){ toast(' Onarım yapılamadı: ' + ((e && e.message) || ''),'er'); });
+}
+function havuzKopyaSatisa(id){
+  var o = _havuz[id]; if(!o) return;
+  ptSor('<b>' + escHtml(o.ad || '') + '</b> sahibinin kadrosunda kalır; aynı oyuncunun yeni bir kartı doğrudan satışa çıkar. Fiyat (SL):', String(o.fiyat || 200), { baslik:'Yeni Kartı Satışa Çıkar', tamamYazi:'Satışa çıkar' }).then(function(v){
+    if(v == null) return; var f = parseInt(v, 10); if(!(f >= 0)){ toast(' Geçerli bir fiyat girin','er'); return; }
+    firebase.database().ref('oyuncuHavuzu').push(_havuzKartKopya(o, f)).then(function(){ toast(' ' + (o.ad || '') + ' yeni kartla satışa çıktı'); }).catch(function(e){ toast(' Eklenemedi: ' + ((e && e.message) || ''),'er'); });
   });
 }
 /* AÇIK ARTIRMALAR LİSTESİ: süren ve son 7 günde biten artırmalar, teklif veren takımlarla. */
@@ -10768,7 +10814,7 @@ function admArtirmaListeCiz(){
   k.innerHTML = '<div style="font-size:.7rem;font-weight:900;letter-spacing:.06em;margin:.2rem 0 .35rem;color:#f2c230">⚖ AÇIK ARTIRMALAR · ' + l.length + '</div>' + l.map(function(id){
     var o = _havuz[id], tek = _admTeklifciler(o);
     return '<div class="art-k"><div style="display:flex;align-items:center;gap:.4rem"><b style="flex:1;font-size:.78rem">' + escHtml(o.ad || '') + '</b>'
-      + (!o.artirma.durum ? '<button class="hv-dug art" onclick="havuzArtirma(\'' + id + '\')">Yönet</button>' : '') + '</div>'
+      + (!o.artirma.durum ? '<button class="hv-dug art" onclick="havuzArtirma(\'' + id + '\')">' + (o.artirma.eskiSahip ? 'Sahibine geri ver' : 'Yönet') + '</button>' : '') + '</div>'
       + '<div class="art-s"><span>' + _admArtirmaOzet(o) + '</span></div>'
       + (tek.length ? '<ol>' + tek.slice(0, 5).map(function(t, i){ return '<li>' + (i === 0 ? '<b>' : '') + escHtml(t.ad) + ' · ' + t.tutar + ' SL' + (i === 0 ? '</b>' : '') + '</li>'; }).join('') + '</ol>' : '') + '</div>';
   }).join('');
