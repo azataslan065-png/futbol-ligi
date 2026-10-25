@@ -279,7 +279,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol vK</title>
+<title>SAHA — 3D Futbol vM</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -12491,6 +12491,39 @@ try{
     var _testMi = !!window._sahaTestKopya || (location.pathname.indexOf('/test/') !== -1);
     var _orjRef = fbDb.ref.bind(fbDb);
     window._sahaTestOrtami = _testMi;
+
+    /* ═══ DAL KAYDI (2026-10-25-L, kullanıcı: "yeni özellikler eklense dahi kopyalayabilmesi için bir sistem geliştir") ═══
+       Test kopyalaması elle yazılmış bir dal listesine bağlıydı; yeni bir özellik yeni bir üst düzey dal açınca liste
+       güncellenmediği sürece o dal kopyalanmıyordu (SAHA'nın tüm dalları bu yüzden eksik kalmıştı). Artık üç uygulama da
+       (index, admin, saha) veritabanında DOKUNDUĞU her üst düzey dalı bu sarmalayıcı üzerinden "_dalKaydi/<dal>" altına
+       kendiliğinden bildirir. Kopyalama bu kayıttan beslenir: yeni bir özellik ilk kez kullanıldığı anda dalı listeye girer,
+       kimsenin kodu güncellemesi gerekmez. Her dal cihaz başına yalnızca BİR KEZ yazılır (cihazda hatırlanır), oturum açılmadan
+       yazılmaz; kayıt başarısızsa (ör. kural henüz yayınlanmadı) sonraki açılışta yeniden denenir. Test ortamı kendi
+       kaydını test/_dalKaydi'ye yazar - gerçek veriye dokunmaz. */
+    var _dalKaydet = (function(orjRef, testMi){
+      var ANAHTAR = 'pt_dal_kaydi_v1' + (testMi ? '_test' : ''), bilinen = {}, bekleyen = {}, zaman = null;
+      try{ bilinen = JSON.parse(localStorage.getItem(ANAHTAR) || '{}') || {}; }catch(e){ bilinen = {}; }
+      function bosalt(){
+        zaman = null;
+        try{
+          var au = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+          if(!au){ zaman = setTimeout(bosalt, 5000); return; }
+          Object.keys(bekleyen).forEach(function(k){
+            delete bekleyen[k];
+            orjRef((testMi ? 'test/' : '') + '_dalKaydi/' + k).set(Date.now()).then(function(){
+              bilinen[k] = 1; try{ localStorage.setItem(ANAHTAR, JSON.stringify(bilinen)); }catch(e){}
+            }).catch(function(){});
+          });
+        }catch(e){}
+      }
+      return function(yol){
+        try{
+          var k = String(yol || '').replace(/^\/+/, '').split('/')[0];
+          if(!k || k === 'test' || k === '_dalKaydi' || bilinen[k] || bekleyen[k] || !/^[A-Za-z0-9_]{1,60}$/.test(k)) return;
+          bekleyen[k] = 1; if(!zaman) zaman = setTimeout(bosalt, 4000);
+        }catch(e){}
+      };
+    })(_orjRef, _testMi);
     /* VERİ KÖKÜ (kullanıcı: "adminin SAHA için yaptığı ayarlar ayrı saklanacak")
        SAHA uygulaması HER ZAMAN SAHA kökünde çalışır - burada seçim yok, uygulamanın
        kendisi zaten "SAHA tarafı". Lig, takımlar ve fikstür 'sahaVeri/' altından gelir.
@@ -12521,7 +12554,7 @@ try{
         ref.update = function(nesne){
           if(nesne && typeof nesne === 'object' && !Array.isArray(nesne)){
             var yeni = {};
-            Object.keys(nesne).forEach(function(k){ yeni[_yolCevir(k)] = nesne[k]; });
+            Object.keys(nesne).forEach(function(k){ var _y = _yolCevir(k); _dalKaydet(_y); yeni[_y] = nesne[k]; });
             nesne = yeni;
           }
           return orjUpdate(nesne);
@@ -12533,6 +12566,7 @@ try{
       var ham = (yol == null ? '' : String(yol)).replace(/^\/+/, '');
       if(ham.indexOf('.info/') === 0 || ham === '.info') return _orjRef(ham);
       var y = _yolCevir(ham);
+      _dalKaydet(y);
       var r = _orjRef(_testMi ? ('test/' + y) : y);
       // Yalnızca KÖK ref'in anahtarları çevrilir. Alt yollarda taban zaten çevrilmiş
       // olduğundan anahtarları bir kez daha çevirmek yanlış olurdu.
@@ -19500,7 +19534,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-25-K';
+window.APP_BUILD = '2026-10-25-M';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;

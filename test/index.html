@@ -3164,6 +3164,39 @@ function _kokUygula(y, onek){
     var d=firebase.database();
     var orj=d.ref.bind(d);
     window._ptGercekRef=orj;          // önek UYGULANMAMIŞ hâli
+
+    /* ═══ DAL KAYDI (2026-10-25-L, kullanıcı: "yeni özellikler eklense dahi kopyalayabilmesi için bir sistem geliştir") ═══
+       Test kopyalaması elle yazılmış bir dal listesine bağlıydı; yeni bir özellik yeni bir üst düzey dal açınca liste
+       güncellenmediği sürece o dal kopyalanmıyordu (SAHA'nın tüm dalları bu yüzden eksik kalmıştı). Artık üç uygulama da
+       (index, admin, saha) veritabanında DOKUNDUĞU her üst düzey dalı bu sarmalayıcı üzerinden "_dalKaydi/<dal>" altına
+       kendiliğinden bildirir. Kopyalama bu kayıttan beslenir: yeni bir özellik ilk kez kullanıldığı anda dalı listeye girer,
+       kimsenin kodu güncellemesi gerekmez. Her dal cihaz başına yalnızca BİR KEZ yazılır (cihazda hatırlanır), oturum açılmadan
+       yazılmaz; kayıt başarısızsa (ör. kural henüz yayınlanmadı) sonraki açılışta yeniden denenir. Test ortamı kendi
+       kaydını test/_dalKaydi'ye yazar - gerçek veriye dokunmaz. */
+    var _dalKaydet = (function(orjRef, testMi){
+      var ANAHTAR = 'pt_dal_kaydi_v1' + (testMi ? '_test' : ''), bilinen = {}, bekleyen = {}, zaman = null;
+      try{ bilinen = JSON.parse(localStorage.getItem(ANAHTAR) || '{}') || {}; }catch(e){ bilinen = {}; }
+      function bosalt(){
+        zaman = null;
+        try{
+          var au = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+          if(!au){ zaman = setTimeout(bosalt, 5000); return; }
+          Object.keys(bekleyen).forEach(function(k){
+            delete bekleyen[k];
+            orjRef((testMi ? 'test/' : '') + '_dalKaydi/' + k).set(Date.now()).then(function(){
+              bilinen[k] = 1; try{ localStorage.setItem(ANAHTAR, JSON.stringify(bilinen)); }catch(e){}
+            }).catch(function(){});
+          });
+        }catch(e){}
+      }
+      return function(yol){
+        try{
+          var k = String(yol || '').replace(/^\/+/, '').split('/')[0];
+          if(!k || k === 'test' || k === '_dalKaydi' || bilinen[k] || bekleyen[k] || !/^[A-Za-z0-9_]{1,60}$/.test(k)) return;
+          bekleyen[k] = 1; if(!zaman) zaman = setTimeout(bosalt, 4000);
+        }catch(e){}
+      };
+    })(orj, testMi);
     window._ptTestOrtami=testMi;
     // Kök öneki ÇAĞRI ANINDA okunur: kullanıcı kaynağı açılıştan sonra seçiyor.
     // (Seçim değişince sayfa yeniden yükleniyor - bkz. ptKaynakSec.)
@@ -3179,7 +3212,7 @@ function _kokUygula(y, onek){
           if(nesne && typeof nesne === 'object' && !Array.isArray(nesne)){
             var yeni = {};
             Object.keys(nesne).forEach(function(k){
-              yeni[_kokUygula(String(k).replace(/^\/+/,''), onek)] = nesne[k];
+              var _y=_kokUygula(String(k).replace(/^\/+/,''), onek); _dalKaydet(_y); yeni[_y] = nesne[k];
             });
             nesne = yeni;
           }
@@ -3196,6 +3229,7 @@ function _kokUygula(y, onek){
       if(ham.indexOf('.info/')===0||ham==='.info')return orj(ham);
       var onek=(ptVeriKaynagi()==='saha') ? window.SAHA_KOK_ONEK : '';
       var y=_kokUygula(ham, onek);
+      _dalKaydet(y);
       var r=orj(testMi ? ('test/'+y) : y);
       return (ham==='') ? _kokRefSar(r, onek) : r;
     };
@@ -3252,7 +3286,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-25-K';
+window.APP_BUILD='2026-10-25-M';
 
 
 var DIAG_AUTH_MOD='pt_auth';

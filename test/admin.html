@@ -2708,11 +2708,80 @@ window.ptTestVeriKopyala=function(){
       +'Kilidi kaldırma ekranı açılsın mı?',{baslik:'Kopya Mevcut',ikon:'',tamamYazi:'Kilidi Kaldır'}).then(function(ok){ if(ok)window.ptTestKopyaSifirla(); });
     return;
   }
-  ptOnay('Gerçek veritabanındaki lig, kanal havuzu ve genel ayarlar TEST ortamına kopyalanacak.\n\n'
-    +'• Gerçek veriye DOKUNULMAZ - yalnızca okunur.\n'
-    +'• Test ortamındaki mevcut veriler bu dallarda ÜZERİNE YAZILIR.\n\nDevam edilsin mi?',{baslik:'Test Ortamına Kopyala',ikon:'',tamamYazi:'Kopyala'}).then(function(ok){ if(ok)_ptTestVeriKopyalaYap(); });
+  _ptTestKopyaSecim().then(function(liste){ if(liste && liste.length) _ptTestVeriKopyalaYap(liste); });
 };
-function _ptTestVeriKopyalaYap(){
+/* ═══ KOPYALANACAK DALLARIN SEÇİMİ (2026-10-25-L) ═══════════════════════════════════════════════════════
+   Liste üç kaynaktan birleşir: (1) aşağıdaki bilinen dallar, (2) gerçek ortamın dal kaydı (_dalKaydi), (3) test ortamının dal
+   kaydı (test/_dalKaydi) - bkz. sarmalayıcıdaki DAL KAYDI notu. Böylece sonradan eklenen bir özelliğin dalı, uygulamalardan
+   biri onu ilk kez kullandığı anda burada "YENİ" etiketiyle çıkar ve varsayılan olarak SEÇİLİ gelir.
+   Anlık oturum dalları (odalar, çevrimiçi, davet...) varsayılan olarak seçili GELMEZ; yönetici isterse işaretler.
+   Yöneticinin kaldırdığı işaretler cihazda hatırlanır, bir sonraki kopyalamada aynı seçim gelir. */
+var TEST_KOPYA_DALLARI={
+  leagues:'SAHA dışı ligler',leaguesMeta:'SAHA dışı lig listesi',activeDisplayLeague:'SAHA dışı aktif lig',
+  sahaVeri:'SAHA ligleri, takımlar ve fikstür',userProfiles:'Kullanıcı profilleri ve kişisel ayarlar',kullanicilar:'SAHA hesapları',
+  channelPool:'TV kanal havuzu',paylasilan:'Ortak sohbet ve TV kanalları',globalAdminSettings:'Genel yönetici ayarları',
+  globalConfig:'Genel yapılandırma ve bakım',appBranding:'Uygulama adı, logo, giriş düzeni',appVersionHistory:'Sürüm geçmişi',
+  admins:'Yöneticiler',adminPerms:'Yönetici yetkileri',permanentTeams:'Kalıcı takımlar',referees:'Hakemler',
+  seasonTemplates:'Sezon şablonları',oyuncuHavuzu:'Oyuncu havuzu ve açık artırmalar',takimSahipleri:'Takım sahipleri',
+  sahaGorunum:'SAHA arka plan, logo, ses, gol animasyonu',reklamPanolari:'Reklam panoları',canliRozetGlobal:'Canlı yayın rozeti',
+  bakimSahaIzinli:'Bakımda giriş izni olanlar',sahaDuyuru:'SAHA duyuruları',sahaTurnuva:'Turnuvalar',sahaTransferAkis:'Transfer akışı'
+};
+var TEST_KOPYA_ANLIK={sahaAktif:'Aktif maçlar (anlık)',sahaOdalar:'Maç odaları (anlık)',sahaCevrimici:'Çevrimiçi oyuncular (anlık)',
+  sahaIzleyici:'İzleyiciler (anlık)',sahaDavet:'Davetler (anlık)',sahaArkIstek:'Arkadaşlık istekleri (anlık)',sahaArkYanit:'Arkadaşlık yanıtları (anlık)',
+  diagnostics:'Teşhis kayıtları'};
+var TEST_KOPYA_ASLA={test:1,_dalKaydi:1,_kopyaBilgi:1};
+function _ptTestKopyaSecim(){
+  return Promise.all([
+    window._ptGercekRef('_dalKaydi').once('value').then(function(sn){return sn.val()||{};},function(){return {};}),
+    window._ptGercekRef('test/_dalKaydi').once('value').then(function(sn){return sn.val()||{};},function(){return {};})
+  ]).then(function(r){
+    var hepsi={}; Object.keys(TEST_KOPYA_DALLARI).concat(Object.keys(r[0]),Object.keys(r[1]),Object.keys(TEST_KOPYA_ANLIK)).forEach(function(k){ if(!TEST_KOPYA_ASLA[k]) hepsi[k]=1; });
+    var haric={}; try{ haric=JSON.parse(localStorage.getItem('adm_test_kopya_haric_v1')||'null')||null; }catch(e){ haric=null; }
+    if(!haric){ haric={}; Object.keys(TEST_KOPYA_ANLIK).forEach(function(k){haric[k]=1;}); }
+    var sira=Object.keys(hepsi).sort(function(a,b){
+      var ga=TEST_KOPYA_DALLARI[a]?1:TEST_KOPYA_ANLIK[a]?2:0, gb=TEST_KOPYA_DALLARI[b]?1:TEST_KOPYA_ANLIK[b]?2:0;
+      return ga-gb || a.localeCompare(b);
+    });
+    var esc=function(x){return String(x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+    return new Promise(function(coz){
+      var ov=document.createElement('div'); ov.className='pu-ort'; ov.id='tkSecimOv';
+      ov.innerHTML='<div class="pu-kart" role="dialog" aria-modal="true" style="max-width:460px;text-align:left">'
+        +'<div class="pu-ik">\ue906</div><div class="pu-baslik">Test Ortamına Kopyala</div>'
+        +'<div class="pu-mesaj" style="margin-bottom:10px">Gerçek veriye dokunulmaz, yalnızca okunur. Seçili dallar test ortamında <b>üzerine yazılır</b>. '
+        +'<b>YENİ</b> etiketli dallar sonradan eklenen özelliklerden otomatik bulundu.</div>'
+        +'<div style="display:flex;gap:6px;margin-bottom:8px"><button type="button" class="pu-b" data-t="1" style="min-height:34px;font-size:12px">Tümünü seç</button>'
+        +'<button type="button" class="pu-b" data-t="0" style="min-height:34px;font-size:12px">Anlıkları çıkar</button></div>'
+        +'<div id="tkListe" style="max-height:46vh;overflow:auto;border:1px solid rgba(255,255,255,.1);border-radius:14px">'
+        +sira.map(function(k){
+          var yeni=!TEST_KOPYA_DALLARI[k]&&!TEST_KOPYA_ANLIK[k], anlik=!!TEST_KOPYA_ANLIK[k];
+          var ad=TEST_KOPYA_DALLARI[k]||TEST_KOPYA_ANLIK[k]||'Sonradan eklenen özellik';
+          return '<label style="display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer">'
+            +'<input type="checkbox" data-dal="'+esc(k)+'"'+(haric[k]?'':' checked')+' style="width:18px;height:18px;flex-shrink:0;accent-color:#7c3aed">'
+            +'<span style="flex:1;min-width:0"><b style="font-size:13px;display:block">'+esc(ad)+'</b><small style="opacity:.6;font-size:11px;font-family:monospace">'+esc(k)+'</small></span>'
+            +(yeni?'<span style="font-size:10px;font-weight:900;padding:2px 7px;border-radius:999px;background:rgba(34,197,94,.18);color:#4ade80">YENİ</span>':'')
+            +(anlik?'<span style="font-size:10px;font-weight:800;padding:2px 7px;border-radius:999px;background:rgba(245,158,11,.15);color:#fbbf24">ANLIK</span>':'')
+            +'</label>';
+        }).join('')+'</div>'
+        +'<div class="pu-dug"><button type="button" class="pu-b" data-c="0">Vazgeç</button><button type="button" class="pu-b ana" data-c="1" id="tkKopyalaBtn">Kopyala</button></div></div>';
+      document.body.appendChild(ov);
+      var kutular=function(){return Array.prototype.slice.call(ov.querySelectorAll('input[data-dal]'));};
+      var say=function(){ var n=kutular().filter(function(c){return c.checked;}).length; var b=ov.querySelector('#tkKopyalaBtn'); b.textContent='Kopyala ('+n+' dal)'; b.disabled=!n; b.style.opacity=n?'':'.5'; };
+      ov.addEventListener('change',say); say();
+      ov.querySelector('[data-t="1"]').onclick=function(){ kutular().forEach(function(c){c.checked=true;}); say(); };
+      ov.querySelector('[data-t="0"]').onclick=function(){ kutular().forEach(function(c){ if(TEST_KOPYA_ANLIK[c.getAttribute('data-dal')]) c.checked=false; }); say(); };
+      var bitir=function(v){ try{ov.remove();}catch(e){} coz(v); };
+      ov.querySelector('[data-c="0"]').onclick=function(){bitir(null);};
+      ov.onclick=function(ev){ if(ev.target===ov) bitir(null); };
+      ov.querySelector('[data-c="1"]').onclick=function(){
+        var sec=[], yeniHaric={};
+        kutular().forEach(function(c){ var k=c.getAttribute('data-dal'); if(c.checked) sec.push(k); else yeniHaric[k]=1; });
+        try{ localStorage.setItem('adm_test_kopya_haric_v1', JSON.stringify(yeniHaric)); }catch(e){}
+        bitir(sec);
+      };
+    });
+  });
+}
+function _ptTestVeriKopyalaYap(secilen){
   var btn=document.getElementById('testKopyaBtn');
   if(btn){btn.disabled=true;btn.textContent=' Kopyalanıyor…';}
   // KULLANICI BİLDİRDİ ("arka plan rengini palete göre senkronize et gibi ayarlar taşınmıyor"):
@@ -2723,24 +2792,42 @@ function _ptTestVeriKopyalaYap(){
   // olan ve taşınması anlamlı olan her dal eklendi.
   // 'diagnostics' ve '_kopyaBilgi' BİLEREK dışarıda: teşhis kayıtları test ortamının kendi
   // kayıtları olmalı, kopya damgası ise zaten teste ait bir işaret.
-  var dallar=['leagues','leaguesMeta','activeDisplayLeague','userProfiles',
-              'channelPool','globalAdminSettings','globalConfig','appBranding',
-              'appVersionHistory','admins','adminPerms','permanentTeams','referees',
-              'seasonTemplates'];
-  var okundu={};
+  /* (2026-10-25-K, kullanıcı: "gerçek veriyi kopyala deyince nelerin kopyalanmadığına bak") TARAMA SONUCU İKİ KÖK SEBEP:
+     1) LİSTE ESKİYDİ: SAHA eklendikten sonra açılan dalların HİÇBİRİ listede yoktu - SAHA ligleri (sahaVeri), SAHA hesapları
+        (kullanicilar), oyuncu havuzu ve açık artırmalar (oyuncuHavuzu), takım sahipleri, SAHA görünümü (arka plan/logo/ses/gol
+        animasyonu), reklam panoları, ortak sohbet ve TV kanalları (paylasilan), canlı rozet, bakım izinlileri, SAHA duyuruları,
+        turnuvalar ve transfer akışı. Test ortamında SAHA bu yüzden boş açılıyordu.
+     2) YANLIŞ KÖK: Yazım 'firebase.database().ref(d)' ile yapılıyordu; o sarmalayıcı yönetici SAHA kaynağını seçmişse
+        leagues/leaguesMeta/activeDisplayLeague'i 'sahaVeri/' altına çeviriyor. Yani SAHA kaynağındayken SAHA DIŞI ligler
+        test/sahaVeri/leagues'e yazılıyor, gerçek SAHA ligleri ise hiç okunmuyordu. Artık okuma da yazma da öneksiz ham
+        yolla yapılır: gerçek 'X' -> 'test/X', kaynak seçimi ne olursa olsun birebir.
+     BİLEREK DIŞARIDA: diagnostics (test kendi kayıtlarını tutar), _kopyaBilgi (teste ait damga) ve anlık oturum verileri
+     (sahaAktif, sahaOdalar, sahaCevrimici, sahaIzleyici, sahaDavet, sahaArkIstek, sahaArkYanit) - bunlar saniyelik durum,
+     kopyalanırsa testte var olmayan odalar/çevrimiçi oyuncular görünür.
+     Bir dal yazılamazsa diğerleri yine kopyalanır ve hangilerinin başarısız olduğu söylenir. */
+  // (2026-10-25-L) Liste artık seçim penceresinden gelir (bkz. _ptTestKopyaSecim). Doğrudan çağrılırsa bilinen dallar kullanılır.
+  var dallar=(secilen&&secilen.length?secilen:Object.keys(TEST_KOPYA_DALLARI)).filter(function(d){return !TEST_KOPYA_ASLA[d];});
+  var okundu={}, hatali=[], kopyalanan=[];
   Promise.all(dallar.map(function(d){
-    return window._ptGercekRef(d).once('value').then(function(sn){okundu[d]=sn.val();});
+    return window._ptGercekRef(d).once('value').then(function(sn){okundu[d]=sn.val();})
+      .catch(function(e){hatali.push(d+' (okunamadı)');});
   })).then(function(){
     return Promise.all(dallar.map(function(d){
       if(okundu[d]==null)return Promise.resolve();
-      return firebase.database().ref(d).set(okundu[d]);
+      return window._ptGercekRef('test/'+d).set(okundu[d]).then(function(){kopyalanan.push(d);})
+        .catch(function(e){hatali.push(d+' (yazılamadı)');});
     }));
   }).then(function(){
-    // Kopyalama anı kaydedilir - yönetici "bu test verisi ne kadar eski" sorusunu
-    // düğmenin üstünden görebilsin. Kopya TEK SEFERLİKTİR; gerçek taraf sonradan
-    // değişirse test tarafı KENDİLİĞİNDEN güncellenmez, bu damga da bunu görünür kılar.
-    return firebase.database().ref('_kopyaBilgi').set({ts:Date.now()});
+    if(!kopyalanan.length) throw new Error('Hiçbir dal kopyalanamadı'+(hatali.length?': '+hatali.join(', '):''));
+    if(hatali.length){ try{ DiagSil('testKopyaEksik', new Error(hatali.join(', '))); }catch(_e){} }
+    window._ptKopyaEksik=hatali.slice();
+    return firebase.database().ref('_kopyaBilgi').set({ts:Date.now(),dallar:kopyalanan,hatali:hatali});
   }).then(function(){
+    if(window._ptKopyaEksik&&window._ptKopyaEksik.length){
+      if(btn){btn.textContent=' Kısmen kopyalandı';}
+      ptBilgi('Kopyalanamayan dallar:\n• '+window._ptKopyaEksik.join('\n• ')+'\n\nDiğer her şey kopyalandı. Tamam\'a basınca sayfa yenilenir.',{baslik:'Kısmen Kopyalandı',ikon:''}).then(function(){location.reload();},function(){location.reload();});
+      return;
+    }
     if(btn){btn.textContent=' Kopyalandı - sayfa yenileniyor';}
     setTimeout(function(){location.reload();},900);
   }).catch(function(e){
@@ -2964,6 +3051,40 @@ function _kokUygula(y, onek){
     var orj=d.ref.bind(d);
     window._ptGercekRef=orj;
     window._ptTestOrtami=testMi;
+
+    /* ═══ DAL KAYDI (2026-10-25-L, kullanıcı: "yeni özellikler eklense dahi kopyalayabilmesi için bir sistem geliştir") ═══
+       Test kopyalaması elle yazılmış bir dal listesine bağlıydı; yeni bir özellik yeni bir üst düzey dal açınca liste
+       güncellenmediği sürece o dal kopyalanmıyordu (SAHA'nın tüm dalları bu yüzden eksik kalmıştı). Artık üç uygulama da
+       (index, admin, saha) veritabanında DOKUNDUĞU her üst düzey dalı bu sarmalayıcı üzerinden "_dalKaydi/<dal>" altına
+       kendiliğinden bildirir. Kopyalama bu kayıttan beslenir: yeni bir özellik ilk kez kullanıldığı anda dalı listeye girer,
+       kimsenin kodu güncellemesi gerekmez. Her dal cihaz başına yalnızca BİR KEZ yazılır (cihazda hatırlanır), oturum açılmadan
+       yazılmaz; kayıt başarısızsa (ör. kural henüz yayınlanmadı) sonraki açılışta yeniden denenir. Test ortamı kendi
+       kaydını test/_dalKaydi'ye yazar - gerçek veriye dokunmaz. */
+    var _dalKaydet = (function(orjRef, testMi){
+      var ANAHTAR = 'pt_dal_kaydi_v1' + (testMi ? '_test' : ''), bilinen = {}, bekleyen = {}, zaman = null;
+      try{ bilinen = JSON.parse(localStorage.getItem(ANAHTAR) || '{}') || {}; }catch(e){ bilinen = {}; }
+      function bosalt(){
+        zaman = null;
+        try{
+          var au = (window.firebase && firebase.auth) ? firebase.auth().currentUser : null;
+          if(!au){ zaman = setTimeout(bosalt, 5000); return; }
+          Object.keys(bekleyen).forEach(function(k){
+            delete bekleyen[k];
+            orjRef((testMi ? 'test/' : '') + '_dalKaydi/' + k).set(Date.now()).then(function(){
+              bilinen[k] = 1; try{ localStorage.setItem(ANAHTAR, JSON.stringify(bilinen)); }catch(e){}
+            }).catch(function(){});
+          });
+        }catch(e){}
+      }
+      return function(yol){
+        try{
+          var k = String(yol || '').replace(/^\/+/, '').split('/')[0];
+          if(!k || k === 'test' || k === '_dalKaydi' || bilinen[k] || bekleyen[k] || !/^[A-Za-z0-9_]{1,60}$/.test(k)) return;
+          bekleyen[k] = 1; if(!zaman) zaman = setTimeout(bosalt, 4000);
+        }catch(e){}
+      };
+    })(orj, testMi);
+
     // Kök öneki ÇAĞRI ANINDA okunur (yönetici kaynağı açılıştan sonra seçiyor).
     /* ═══ KÖK SEVİYESİ TOPLU YAZIM ═══════════════════════════════════════════
        ref('yol') sarmalamak YETMİYOR: kod birçok yerde ref().update({...}) kullanıp
@@ -2977,7 +3098,7 @@ function _kokUygula(y, onek){
           if(nesne && typeof nesne === 'object' && !Array.isArray(nesne)){
             var yeni = {};
             Object.keys(nesne).forEach(function(k){
-              yeni[_kokUygula(String(k).replace(/^\/+/,''), onek)] = nesne[k];
+              var _y=_kokUygula(String(k).replace(/^\/+/,''), onek); _dalKaydet(_y); yeni[_y] = nesne[k];
             });
             nesne = yeni;
           }
@@ -2991,6 +3112,7 @@ function _kokUygula(y, onek){
       if(ham.indexOf('.info/')===0||ham==='.info')return orj(ham);
       var onek=(admVeriKaynagi()==='saha') ? window.SAHA_KOK_ONEK : '';
       var y=_kokUygula(ham, onek);
+      _dalKaydet(y);
       var r=orj(testMi ? ('test/'+y) : y);
       return (ham==='') ? _kokRefSar(r, onek) : r;
     };
@@ -3000,7 +3122,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-25-K';
+window.APP_BUILD='2026-10-25-M';
 
 
 var DIAG_AUTH_MOD='adm_settings';
