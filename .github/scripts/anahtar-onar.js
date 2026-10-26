@@ -1,5 +1,5 @@
 // Hizmet hesabi anahtarini dogrular/onarir (bkz. firebase-kurallar.yml). Anahtarin kendisi ASLA yazdirilmaz.
-const fs=require("fs"); let t=fs.readFileSync(process.argv[1],"utf8"), j, onarildi=false;
+const fs=require("fs"); let t=fs.readFileSync(process.argv[2],"utf8"), j, onarildi=false;
 // ONARIM: Telefonda metin uygulamasindan kopyalarken uzun satirlar (ozellikle private_key) gercek satir sonlariyla
 // bolunebiliyor; JSON metin icinde satir sonu kabul etmez. Once oldugu gibi denenir, olmazsa satir sonlari temizlenir
 // ve ozel anahtar PEM bicimine (64 karakterlik satirlar) yeniden kurulur.
@@ -25,5 +25,5 @@ const sorun=[]; if(j.type!=="service_account") sorun.push("type service_account 
 if(!/BEGIN PRIVATE KEY/.test(pk)||!/END PRIVATE KEY/.test(pk)) sorun.push("private_key eksik/bozuk (uzunluk "+pk.length+")"); if(!j.client_email) sorun.push("client_email yok");
 console.log((sorun.length?"::error::Anahtar bicimi hatali: "+sorun.join("; "):"::notice::Anahtar bicimi gecerli"+(onarildi?" (kopyalamada eklenen satir sonlari onarildi)":""))+" | anahtar "+String(j.private_key_id||"").slice(0,8));
 if(sorun.length) process.exit(1);
-fs.writeFileSync(process.argv[1], JSON.stringify(j));
+fs.writeFileSync(process.argv[2], JSON.stringify(j));
 fs.writeFileSync(process.env.RUNNER_TEMP+"/sa_temiz", JSON.stringify(j));
