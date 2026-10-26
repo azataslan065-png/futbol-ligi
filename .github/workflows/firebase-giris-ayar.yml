@@ -1,0 +1,46 @@
+# Firebase Authentication'da E-posta/Sifre girisini acar (yalnizca elle: Actions > Run workflow).
+# Once mevcut durumu okur, kapaliysa acar, sonra yeniden okuyup sonucu ozet satirina yazar.
+name: Firebase giris ayari (E-posta/Sifre)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/firebase-giris-ayar.yml]
+jobs:
+  ac:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Anahtari hazirla
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then echo "::error::FIREBASE_SERVICE_ACCOUNT yok"; exit 1; fi
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json"
+      - name: E-posta/Sifre girisini ac
+        run: |
+          cd "$RUNNER_TEMP" && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          node -e '
+            const {GoogleAuth}=require("google-auth-library"); const fs=require("fs");
+            (async()=>{
+              const SAJ=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/sa_temiz","utf8")), P=SAJ.project_id;
+              const auth=new GoogleAuth({credentials:SAJ,scopes:["https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/firebase"]});
+              const tok=(await (await auth.getClient()).getAccessToken()).token;
+              const U="https://identitytoolkit.googleapis.com/admin/v2/projects/"+P+"/config", H={Authorization:"Bearer "+tok,"Content-Type":"application/json","X-Goog-User-Project":P};
+              const oku=async()=>{ const r=await fetch(U,{headers:H}); const t=await r.text(); if(!r.ok) throw new Error("Okuma HTTP "+r.status+": "+t.replace(/\s+/g," ").slice(0,300)); const j=JSON.parse(t); return {email:(j.signIn||{}).email||{}, anonim:((j.signIn||{}).anonymous||{}).enabled}; };
+              const once=await oku();
+              console.log("Onceki durum: e-posta "+JSON.stringify(once.email)+" | anonim "+once.anonim);
+              if(!(once.email.enabled && once.email.passwordRequired)){
+                const r=await fetch(U+"?updateMask=signIn.email.enabled,signIn.email.passwordRequired",{method:"PATCH",headers:H,body:JSON.stringify({signIn:{email:{enabled:true,passwordRequired:true}}})});
+                const t=await r.text(); if(!r.ok) throw new Error("Acma HTTP "+r.status+": "+t.replace(/\s+/g," ").slice(0,300));
+              }
+              const sonra=await oku();
+              const ok=sonra.email.enabled===true && sonra.email.passwordRequired!==false;
+              console.log((ok?"::notice::":"::error::")+"E-posta/Sifre girisi "+(ok?"ACIK":"KAPALI")+" (once: "+(once.email.enabled?"acik":"kapali")+") | anonim giris "+(sonra.anonim?"acik":"kapali")+" | anahtar "+String(SAJ.private_key_id||"").slice(0,8));
+              if(!ok) process.exit(1);
+            })().catch(e=>{ console.log("::error::"+e.message); process.exit(1); });
+          '
