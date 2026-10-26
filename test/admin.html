@@ -153,7 +153,7 @@
 </script>
 <meta charset="UTF-8"/>
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=c8fff236"></script>
+<script src="ortak/ortak.js?v=efd57732"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -3300,7 +3300,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-26-H';
+window.APP_BUILD='2026-10-26-I';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -16124,7 +16124,16 @@ function renderPasswordResetList(){
 function sendTempPassword(visitorId){
   var inp=qs('tempPw_'+visitorId);
   var tempPw=(inp&&inp.value.trim())||Math.random().toString(36).slice(2,8).toUpperCase();
-  db.ref('userProfiles/'+visitorId+'/tempPassword').set(tempPw).then(function(){
+  /* (2026-10-26-I, V1.4.0 2. hafta) Taşınmış hesapta şifre Firebase'de: geçici şifreyi yazmak tek başına yetmez. Yönetici
+     geçici şifreyle yeni bir kimlik hesabı açar (ikincil uygulamada; yönetici oturumu değişmez), profil ve bağ ona çevrilir.
+     Kullanıcı geçici şifreyle girince hemen yeni şifresini belirler. Taşınmamış hesapta eski akış aynen sürer. */
+  if(tempPw.length<4){toast('Geçici şifre en az 4 karakter olmalı','er');return;}
+  var _hazirla=db.ref('userProfiles/'+visitorId).once('value').then(function(ps){
+    var pv=ps.val()||{};
+    if(pv.authEposta&&window.SahaKimlik&&window.firebase&&firebase.auth)return SahaKimlik.yoneticiSifirla(function(y){return db.ref(y);},visitorId,tempPw,pv);
+    return db.ref('userProfiles/'+visitorId+'/tempPassword').set(tempPw);
+  });
+  _hazirla.then(function(){
     if(S.passwordResetRequests&&S.passwordResetRequests[visitorId])S.passwordResetRequests[visitorId].status='resolved';
     return db.ref('leagues/'+_curLeagueId+'/passwordResetRequests/'+visitorId+'/status').set('resolved');
   }).then(function(){

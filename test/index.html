@@ -169,7 +169,7 @@
 </script>
 <meta charset="UTF-8"/>
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=c8fff236"></script>
+<script src="ortak/ortak.js?v=efd57732"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -3339,7 +3339,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-26-H';
+window.APP_BUILD='2026-10-26-I';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5665,7 +5665,11 @@ window.doEnter=function(){
     if(!enteredPw||enteredPw.length<4){document.getElementById('nameErr').textContent='Şifre en az 4 karakter olmalı';return;}
     var _pv=window._pendingLoginProfile||{};
     document.getElementById('nameErr').textContent='Yeni şifre kaydediliyor...';
-    SahaKimlik.olustur(_kimlikRef,window._pendingLoginVisitorId,enteredPw,_pv,_pv.authEposta?((Number(_pv.authSurum)||0)+1):0).then(()=>{
+    // Taşınmış hesap (yönetici sıfırladı): oturum geçici şifreyle açık, şifre güncellenir. Taşınmamış hesap: yeni hesap açılır.
+    var _is=(_pv.authEposta&&window._pendingLoginGecici)
+      ? SahaKimlik.yeniSifreBelirle(_kimlikRef,window._pendingLoginVisitorId,window._pendingLoginGecici,enteredPw,_pv)
+      : SahaKimlik.olustur(_kimlikRef,window._pendingLoginVisitorId,enteredPw,_pv,0);
+    _is.then(()=>{ window._pendingLoginGecici=null;
       firebase.database().ref('userProfiles/'+window._pendingLoginVisitorId+'/tempPassword').remove().catch(function(){});
       document.getElementById('nameErr').textContent='';
       doEnterAfterPasswordCheck(name);
@@ -5674,9 +5678,14 @@ window.doEnter=function(){
     if(!enteredPw){document.getElementById('nameErr').textContent='Lütfen şifrenizi girin';return;}
     const _tm=window._pendingLoginTempPassword&&enteredPw.toLocaleUpperCase('tr')===window._pendingLoginTempPassword.toLocaleUpperCase('tr');
     document.getElementById('nameErr').textContent='Giriş yapılıyor...';
-    SahaKimlik.giris(_kimlikRef,window._pendingLoginVisitorId,enteredPw,window._pendingLoginProfile).then(r=>{
+    // Geçici şifre harf duyarsız kabul edilir (yönetici büyük harfle üretir); kimlik sistemine kayıttaki asıl hâliyle gönderilir.
+    const _girPw=_tm?window._pendingLoginTempPassword:enteredPw;
+    SahaKimlik.giris(_kimlikRef,window._pendingLoginVisitorId,_girPw,window._pendingLoginProfile).then(r=>{
+      if(r.durum==='ok'&&(r.sifreYenile||_tm)){
+        // Yöneticinin sıfırladığı hesap: geçici şifreyle girildi, hemen yeni şifre belirlenir (2. hafta).
+        window._pendingLoginGecici=_girPw; document.getElementById('nameErr').textContent=''; _kimlikYeniSifreIste(); return; }
       if(r.durum==='ok'){ document.getElementById('nameErr').textContent=''; doEnterAfterPasswordCheck(name); return; }
-      if(_tm){ document.getElementById('nameErr').textContent=''; _kimlikYeniSifreIste(); return; }
+      if(_tm){ document.getElementById('nameErr').textContent='Geçici şifre henüz etkin değil - yöneticiden yeniden göndermesini iste'; return; }
       document.getElementById('nameErr').textContent=r.durum==='ag'?' Bağlantı sorunu - tekrar dene':' Şifre hatalı';
     });
   }else{
@@ -7096,7 +7105,18 @@ function ptKaynakGecisTamamla(){
     // Lig verisi gelene kadar bekle; doEnterAfterPasswordCheck _curLeagueId istiyor.
     var deneme = 0;
     (function bekle(){
-      if(_curLeagueId){ try{ doEnterAfterPasswordCheck(ad); }catch(e){ DiagSil('ptKaynakGecisTamamla',e); } return; }
+      if(_curLeagueId){
+        // (2026-10-26-I, 2. hafta) Oturum devamı yalnızca bu tarayıcıda o hesabın kimlik oturumu açıksa şifresiz olur;
+        // aksi halde sahiplik kuralları kullanıcının kendi kaydına yazmasını reddeder - şifre bir kez sorulur.
+        if(_kimlikHazir()){
+          firebase.database().ref('userProfiles/'+visitorIdFromName(ad)).once('value').then(function(ps){
+            var pv=ps.val()||{};
+            if(pv.authEposta&&!SahaKimlik.oturumBuProfil(pv)&&!SahaKimlik.adminOturumuMu()){ window._oturumDevam=false; if(document.getElementById('nameInp')) doEnter(); return; }
+            try{ doEnterAfterPasswordCheck(ad); }catch(e){ DiagSil('ptKaynakGecisTamamla',e); }
+          }).catch(function(){ try{ doEnterAfterPasswordCheck(ad); }catch(e){} });
+          return;
+        }
+        try{ doEnterAfterPasswordCheck(ad); }catch(e){ DiagSil('ptKaynakGecisTamamla',e); } return; }
       // ~12 sn sonra vazgeç: normal giriş akışına dön (şifre sorulur) - boş ekranda kalınmasın.
       if(++deneme > 60){ window._oturumDevam = false; try{ if(document.getElementById('nameInp')) doEnter(); }catch(e){self.__ds&&self.__ds(6585,e)} return; }
       setTimeout(bekle, 200);
@@ -35951,8 +35971,12 @@ window.saveSettName=function(){
         }).then(function(profSnap){
           const profData=profSnap.val()||{};
           profData.name=newName;
+          // (2026-10-26-I, 2. hafta) Kimlik bağı yeni profile taşınır. Sıra kurallar için önemli: yeni profil → eski profil
+          // silinir (bağ hâlâ eskiyi gösterirken) → bağ yeniye çevrilir (yeni profilde bu hesabın e-postası yazılı).
           return db.ref('userProfiles/'+newVisitorId).set(profData).then(function(){
             return db.ref('userProfiles/'+oldVisitorId).remove();
+          }).then(function(){
+            if(profData.authUid)return db.ref('kimlik/'+profData.authUid).set({p:newVisitorId,ts:Date.now()});
           });
         });
       });

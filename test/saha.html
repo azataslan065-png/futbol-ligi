@@ -169,7 +169,7 @@
 </script>
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=c8fff236"></script>
+<script src="ortak/ortak.js?v=efd57732"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol vH</title>
+<title>SAHA — 3D Futbol vI</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -13722,7 +13722,9 @@ function girisYap(){
     if(v.authEposta && _kimlikVar){
       if(!sifre && SahaKimlik.oturumBuProfil(v)){ _girisDevam(); return; }
       if(!sifre){ girisMesaj('Şifreni gir.', true); return; }
-      SahaKimlik.giris(_kRef, visitorId, sifre, v).then(function(r){
+      var _gt = gecici && sifre.toLocaleUpperCase('tr') === String(gecici).toLocaleUpperCase('tr');   // geçici şifre harf duyarsız
+      SahaKimlik.giris(_kRef, visitorId, _gt ? String(gecici) : sifre, v).then(function(r){
+        if(r.durum === 'ok' && r.sifreYenile){ try{ SahaKimlik.cikis(); }catch(e){} girisMesaj('Geçici şifreyle girdin. Önce Puan Tablosu\'nda yeni şifreni belirle, sonra buradan o şifreyle gir.', true); return; }
         if(r.durum === 'ok'){ _girisDevam(); return; }
         if(gecici && sifre.toLocaleUpperCase('tr') === String(gecici).toLocaleUpperCase('tr')){ girisMesaj('Geçici şifreyle önce Puan Tablosu\'na gir ve yeni şifreni belirle; sonra buradan o şifreyle gir.', true); return; }
         girisMesaj(r.durum === 'ag' ? 'Bağlantı sorunu - tekrar dene.' : 'İsim veya şifre hatalı.', true);
@@ -16058,35 +16060,66 @@ function _artirmaListeTazele(){
   var ids = Object.keys(magazaHavuz).filter(function(id){ var o = magazaHavuz[id]; return o && !o.sahip && o.satista; });
   k.innerHTML = _trListeHtml(ids, benimKayit ? (benimKayit.para || 0) : 0);
 }
+/* AÇIK ARTIRMA SONUÇLANDIRMA (2026-10-26-I, V1.4.0 2. hafta - sahiplik kuralları).
+   Önceden süresi biten artırmayı uygulamayı o an açık olan HERHANGİ bir kullanıcı sonuçlandırıyor, kazananın parasını düşüp
+   satıcının parasını artırıyordu: başkasının kaydına yazmak. Sahiplik kuralları bunu reddettiği için iş bölündü:
+   - Teklif yoksa: oyuncu yöneticinin ise herkes "teklifsiz" işaretleyebilir (para yok); kullanıcının oyuncusuysa sahibi geri alır.
+   - Teklif varsa KAZANAN sonuçlandırır: kendi parasından düşer, oyuncuyu alır, satıcı için ödeme kaydı (artirma/odeme) bırakır.
+   - Kazananın parası yetmiyorsa: oyuncu kullanıcınınsa sahibi geri alır, yöneticininse "yetersiz" işaretlenir.
+   - Satıcı kendi uygulamasında ödeme kaydını görünce parasını KENDİSİ alır (bir kez: bekliyor → odendi işlemiyle).
+   Kimse başkasının parasına yazmaz. */
 function _artirmaSonuclandir(id){
   var o = magazaHavuz[id]; if(!o || !o.artirma || o.artirma.durum || o.sahip) return;
-  window._artIsleniyor = window._artIsleniyor || {}; if(window._artIsleniyor[id]) return; window._artIsleniyor[id] = true;
+  window._artIsleniyor = window._artIsleniyor || {}; if(window._artIsleniyor[id]) return;
   var t = o.artirma.teklif, eski = o.artirma.eskiSahip || null;
-  // (2026-10-25-G) Sahibi olan oyuncu açık artırmaya çıkarıldıysa: teklif yoksa / bakiye yetmezse sahibine döner, satılırsa bedel sahibine ödenir.
-  var iade = function(){ var u = {}; u['oyuncuHavuzu/' + id + '/sahip'] = eski; u['oyuncuHavuzu/' + id + '/satista'] = false; u['oyuncuHavuzu/' + id + '/artirma/durum'] = 'iade'; return fbDb.ref().update(u); };
-  if(!t || !t.u || !(t.tutar > 0)){ (eski ? iade() : fbDb.ref('oyuncuHavuzu/' + id + '/artirma/durum').set('teklifsiz')).catch(function(){ window._artIsleniyor[id] = false; }); return; }
-  fbDb.ref('kullanicilar/' + t.u + '/para').once('value').then(function(sn){
+  var benKazanan = !!(t && t.u && t.u === benimUid), benSatici = !!(eski && eski === benimUid);
+  var iade = function(neden){ var u = {}; u['oyuncuHavuzu/' + id + '/sahip'] = eski; u['oyuncuHavuzu/' + id + '/satista'] = false; u['oyuncuHavuzu/' + id + '/artirma/durum'] = 'iade'; return fbDb.ref().update(u); };
+  var bitir = function(p){ window._artIsleniyor[id] = true; p.catch(function(err){ _sessiz(err, 'artirmaSonuclandir', 'saha_ag'); }).then(function(){ window._artIsleniyor[id] = false; }); };
+  if(!t || !t.u || !(t.tutar > 0)){
+    if(eski){ if(benSatici) bitir(iade('teklifsiz')); return; }
+    bitir(fbDb.ref('oyuncuHavuzu/' + id + '/artirma/durum').set('teklifsiz')); return;
+  }
+  if(!benKazanan && !benSatici) return;                      // üçüncü kişiler artık dokunmaz
+  bitir(fbDb.ref('kullanicilar/' + t.u + '/para').once('value').then(function(sn){
     var para = Number(sn.val()) || 0;
-    if(para < t.tutar){ return eski ? iade() : fbDb.ref('oyuncuHavuzu/' + id + '/artirma/durum').set('yetersiz'); }
+    if(para < t.tutar){
+      if(benSatici) return iade('yetersiz');
+      if(benKazanan && !eski) return fbDb.ref('oyuncuHavuzu/' + id + '/artirma/durum').set('yetersiz');
+      return;                                                 // kullanıcının oyuncusu: sahibi geri alacak
+    }
+    if(!benKazanan) return;                                   // satıcı kazananın gelmesini bekler
     var g = {}, P = 'oyuncuHavuzu/' + id + '/';
     g[P + 'sahip'] = t.u; g[P + 'alisTs'] = Date.now(); g[P + 'alisFiyat'] = t.tutar; g[P + 'katilimKaybi'] = sahaKatilimKaybi(t.tutar, o.guc);
     g[P + 'satista'] = false; g[P + 'maclar'] = null; g[P + 'macSayisi'] = 0; g[P + 'puanToplam'] = 0; g[P + 'artirma/durum'] = 'satildi';
+    if(eski && eski !== t.u) g[P + 'artirma/odeme'] = { u:eski, tutar:t.tutar, durum:'bekliyor', ts:Date.now() };
     g['kullanicilar/' + t.u + '/para'] = firebase.database.ServerValue.increment(-t.tutar);
     g['kullanicilar/' + t.u + '/harcamaKayit/' + fbDb.ref().push().key] = { tur:'artirma', tutar:t.tutar, oyuncu:String(o.ad || '').slice(0, 40), ts:Date.now() };
-    if(eski && eski !== t.u){ g['kullanicilar/' + eski + '/para'] = firebase.database.ServerValue.increment(t.tutar);
-      g['kullanicilar/' + eski + '/satisKayit/' + fbDb.ref().push().key] = { tur:'artirma', tutar:t.tutar, oyuncu:String(o.ad || '').slice(0, 40), ts:Date.now() }; }
     return fbDb.ref().update(g).then(function(){
       try{ transferAkisYaz('alis', o, t.tutar); }catch(e){}
-      if(t.u === benimUid) sahaBildir('⚖ Açık artırmayı kazandın: ' + (o.ad || '') + ' (' + t.tutar + ' SL)');
+      sahaBildir('⚖ Açık artırmayı kazandın: ' + (o.ad || '') + ' (' + t.tutar + ' SL)');
     });
-  }).catch(function(err){ window._artIsleniyor[id] = false; _sessiz(err, 'artirmaSonuclandir', 'saha_ag'); });
+  }));
+}
+// Satıcının ödemesi: kazanan sonuçlandırınca bırakılan kaydı satıcı kendisi tahsil eder (bir kez).
+function _artirmaOdemeTahsil(id){
+  var o = magazaHavuz[id], od = o && o.artirma && o.artirma.odeme;
+  if(!od || od.u !== benimUid || od.durum !== 'bekliyor') return;
+  window._artTahsil = window._artTahsil || {}; if(window._artTahsil[id]) return; window._artTahsil[id] = true;
+  fbDb.ref('oyuncuHavuzu/' + id + '/artirma/odeme/durum').transaction(function(d){ return d === 'bekliyor' ? 'odendi' : undefined; }).then(function(r){
+    if(!r.committed) return;
+    var g = {}, tutar = Number(od.tutar) || 0;
+    g['kullanicilar/' + benimUid + '/para'] = firebase.database.ServerValue.increment(tutar);
+    g['kullanicilar/' + benimUid + '/satisKayit/' + fbDb.ref().push().key] = { tur:'artirma', tutar:tutar, oyuncu:String(o.ad || '').slice(0, 40), ts:Date.now() };
+    return fbDb.ref().update(g).then(function(){ sahaBildir('⚖ ' + (o.ad || '') + ' açık artırmada satıldı: +' + tutar + ' SL'); });
+  }).catch(function(err){ window._artTahsil[id] = false; _sessiz(err, 'artirmaOdemeTahsil', 'saha_ag'); });
 }
 function artirmaDenetle(){
   try{
     if(!fbHazir || !fbDb || !benimUid || typeof magazaHavuz === 'undefined') return;
     var aktifVar = false; window._artOnde = window._artOnde || {};
     Object.keys(magazaHavuz).forEach(function(id){
-      var o = magazaHavuz[id]; if(!o || !o.artirma || o.artirma.durum) return;
+      var o = magazaHavuz[id]; if(!o || !o.artirma) return;
+      if(o.artirma.durum){ if(o.artirma.odeme) _artirmaOdemeTahsil(id); return; }
       var t = o.artirma.teklif;
       if(o.sahip){ return; }
       aktifVar = true;
@@ -19676,7 +19709,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-10-26-H';
+window.APP_BUILD='2026-10-26-I';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;

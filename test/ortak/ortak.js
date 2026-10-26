@@ -419,10 +419,10 @@ var SahaKimlik = (function(){
   function sure(p, ms){ return Promise.race([p, new Promise(function(_, r){ setTimeout(function(){ r({ code:'auth/timeout' }); }, ms || 15000); })]); }
   function bagla(ref, profil, uid, eposta0, surum){
     var simdi = Date.now();
-    return Promise.all([
-      ref('userProfiles/' + profil).update({ authEposta:eposta0, authSurum:Number(surum) || 0, authUid:uid, authTs:simdi, password:null }),
-      ref('kimlik/' + uid).set({ p:profil, ts:simdi })
-    ]);
+    // SIRA ÖNEMLİ (2. hafta kuralları): kimlik bağı yalnızca profilde bu hesabın e-postası yazılıysa kabul edilir;
+    // önce profil, sonra bağ yazılır.
+    return ref('userProfiles/' + profil).update({ authEposta:eposta0, authSurum:Number(surum) || 0, authUid:uid, authTs:simdi, password:null })
+      .then(function(){ return ref('kimlik/' + uid).set({ p:profil, ts:simdi }); });
   }
   // Mevcut (taşınmış) hesapla giriş. Sonuç: {durum:'ok'|'hatali'|'ag', uid}
   function giris(ref, profil, pw, kayit){
@@ -431,7 +431,10 @@ var SahaKimlik = (function(){
     return sure(a.signInWithEmailAndPassword(e0, sifre(pw))).then(function(c){
       var uid = c && c.user && c.user.uid;
       // kimlik bağı her girişte tazelenir (başka cihazda silinmiş/kopyalanmış olabilir)
-      return ref('kimlik/' + uid).set({ p:profil, ts:Date.now() }).then(function(){ return { durum:'ok', uid:uid }; }, function(){ return { durum:'ok', uid:uid }; });
+      // Sıra: önce bağ (profildeki e-postayla doğrulanır), sonra profildeki authUid (sahiplik bağdan okunur).
+      return ref('kimlik/' + uid).set({ p:profil, ts:Date.now() })
+        .then(function(){ if(!(kayit && kayit.authUid === uid)) return ref('userProfiles/' + profil + '/authUid').set(uid); })
+        .then(function(){ return { durum:'ok', uid:uid, sifreYenile:!!(kayit && kayit.sifreYenile) }; }, function(){ return { durum:'ok', uid:uid, sifreYenile:!!(kayit && kayit.sifreYenile) }; });
     }, function(e){ return { durum: agHatasi(e) ? 'ag' : 'hatali', kod:hataKodu(e) }; });
   }
   // Yeni hesap aç (eski şifreden taşıma, ilk şifre ya da geçici şifre sonrası yeni şifre).
@@ -454,6 +457,31 @@ var SahaKimlik = (function(){
       return bagla(ref, profil, uid, r.e0, r.s).then(function(){ return { durum:'ok', uid:uid, eposta:r.e0, surum:r.s }; });
     });
   }
+  // YÖNETİCİ SIFIRLAMASI (2. hafta): şifresini unutan taşınmış kullanıcı için yönetici geçici şifreyle YENİ bir hesap açar
+  // (ikincil uygulamada - yönetici oturumu değişmez), profili ve bağı ona çevirir, eski bağı siler. Kullanıcı geçici şifreyle
+  // normal girer; profilde sifreYenile işareti olduğu için hemen yeni şifresini belirler. Kurallar yalnızca yöneticiye izin verir.
+  function yoneticiSifirla(ref, profil, geciciPw, kayit){
+    var a = ikincil(), eskiUid = kayit && kayit.authUid, surum = (Number(kayit && kayit.authSurum) || 0) + 1;
+    function dene(s, kalan){
+      var e0 = eposta(profil, s);
+      return sure(a.createUserWithEmailAndPassword(e0, sifre(geciciPw))).then(function(c){ return { c:c, e0:e0, s:s }; }, function(e){
+        if(hataKodu(e).indexOf('email-already-in-use') === -1 || kalan <= 0) throw e;
+        return dene(s + 1, kalan - 1);
+      });
+    }
+    return dene(surum, 6).then(function(r){
+      var uid = r.c.user.uid, simdi = Date.now();
+      try{ a.signOut(); }catch(e){}
+      return ref('userProfiles/' + profil).update({ authEposta:r.e0, authSurum:r.s, authUid:uid, authTs:simdi, sifreYenile:true, tempPassword:geciciPw, password:null })
+        .then(function(){ return ref('kimlik/' + uid).set({ p:profil, ts:simdi }); })
+        .then(function(){ if(eskiUid && eskiUid !== uid) return ref('kimlik/' + eskiUid).remove(); })
+        .then(function(){ return { uid:uid, eposta:r.e0, surum:r.s }; });
+    });
+  }
+  // Geçici şifreyle girdikten sonra yeni şifre (oturum bu hesapta açık).
+  function yeniSifreBelirle(ref, profil, geciciPw, yeniPw, kayit){
+    return sifreDegistir(ref, profil, geciciPw, yeniPw, kayit).then(function(){ return ref('userProfiles/' + profil).update({ sifreYenile:null }); });
+  }
   // Oturum açıkken şifre değiştir (mevcut şifre ile yeniden doğrulanır).
   function sifreDegistir(ref, profil, eskiPw, yeniPw, kayit){
     var a = hedef(), e0 = kayit && kayit.authEposta;
@@ -472,5 +500,5 @@ var SahaKimlik = (function(){
     return a.signOut().then(function(){ return a.signInAnonymously(); }).catch(function(){});
   }
   return { eposta:eposta, sifre:sifre, sha256:sha256, ortam:ortam, sentetikMi:sentetikMi, adminOturumuMu:adminOturumuMu,
-           giris:giris, olustur:olustur, sifreDegistir:sifreDegistir, oturumBuProfil:oturumBuProfil, cikis:cikis };
+           giris:giris, olustur:olustur, sifreDegistir:sifreDegistir, yoneticiSifirla:yoneticiSifirla, yeniSifreBelirle:yeniSifreBelirle, oturumBuProfil:oturumBuProfil, cikis:cikis };
 })();
