@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol vE</title>
+<title>SAHA — 3D Futbol vG</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -19219,7 +19219,7 @@ var SahaTeshis = (function(){
       if(LOGS.length > 150) LOGS.splice(0, LOGS.length - 150);
       if(tur === 'hata') SAY.hata++; else if((SEV[tur]||0) >= 2) SAY.uyari++;
       rozetCiz(); panelCiz();
-      if((SEV[tur]||0) >= 2) uzaga(rec);      // bilgi/veri yalnızca cihazdaki panelde
+      if((SEV[tur]||0) >= 1) uzaga(rec);      // (2026-10-26-F) panel kullanıcıya kapalı: bilgi düzeyi hariç her kayıt yöneticiye gider
     }catch(e){self.__ds&&self.__ds(17755,e)}
   }
   function uzaga(rec){
@@ -19306,6 +19306,51 @@ var SahaTeshis = (function(){
     if(window._sahaIzleModu) return acik('saha_izle');
     return herhangi();
   }
+
+  /* SÜRÜKLENEBİLİR ROZET (2026-10-26-G, kullanıcı: "teşhis panelini kullanıcı ekranın istediği yere taşıyabilir").
+     Basılı tutup 8 px'ten fazla kaydırınca sürükleme başlar; bırakınca konum cihazda saklanır (ekran oranı olarak, yön
+     değişse de aynı bölgede kalır). Sürüklemeden sonraki dokunuş "tıklama" sayılmaz. */
+  function rozetKonumYaz(el,x,y){
+    var r=el.getBoundingClientRect(),w=r.width||60,h=r.height||40;
+    x=Math.max(4,Math.min(innerWidth-w-4,x));y=Math.max(4,Math.min(innerHeight-h-4,y));
+    el.style.left=x+'px';el.style.top=y+'px';el.style.right='auto';el.style.bottom='auto';el.style.transform='none';
+  }
+  function rozetKayitliKonum(el,anahtar){
+    if(el._suruklen)return true;   // sürüklenirken ekran yenilemesi rozeti eski yerine çekmesin
+    try{var k=JSON.parse(localStorage.getItem(anahtar)||'null');
+      if(k&&isFinite(k.x)&&isFinite(k.y)){rozetKonumYaz(el,k.x*innerWidth,k.y*innerHeight);return true;}}catch(_e){}
+    return false;
+  }
+  function rozetSurukleKur(el,anahtar,tikla){
+    var bas=null,surukledi=false;
+    el.style.touchAction='none';el.style.userSelect='none';
+    el.style.transition='none';   // sayfanın genel düğme geçişi (transition:all) rozeti parmağın gerisinde sürüklüyordu
+    el.addEventListener('pointerdown',function(e){
+      if(e.button>0)return;var r=el.getBoundingClientRect();
+      bas={px:e.clientX,py:e.clientY,x:r.left,y:r.top,id:e.pointerId};surukledi=false;
+      try{el.setPointerCapture(e.pointerId);}catch(_e){}
+    });
+    el.addEventListener('pointermove',function(e){
+      if(!bas||e.pointerId!==bas.id)return;
+      var dx=e.clientX-bas.px,dy=e.clientY-bas.py;
+      if(!surukledi&&Math.sqrt(dx*dx+dy*dy)<8)return;
+      surukledi=true;el._suruklen=true;e.preventDefault();el.style.cursor='grabbing';
+      rozetKonumYaz(el,bas.x+dx,bas.y+dy);
+    });
+    var bit=function(){
+      if(!bas)return;var s=surukledi;bas=null;el._suruklen=false;el.style.cursor='pointer';
+      if(s){var r=el.getBoundingClientRect();
+        try{localStorage.setItem(anahtar,JSON.stringify({x:r.left/innerWidth,y:r.top/innerHeight}));}catch(_e){}
+        el._surukleTs=Date.now();}
+    };
+    el.addEventListener('pointerup',bit);el.addEventListener('pointercancel',bit);
+    el.addEventListener('click',function(e){
+      e.stopPropagation();
+      if(el._surukleTs&&Date.now()-el._surukleTs<500)return;
+      tikla();
+    });
+    window.addEventListener('resize',function(){rozetKayitliKonum(el,anahtar);});
+  }
   function rozetCiz(){
     try{
       var r = document.getElementById('sahaTeshisRozet');
@@ -19318,10 +19363,13 @@ var SahaTeshis = (function(){
         r.style.cssText = 'position:fixed;left:8px;top:42%;z-index:2147481000;min-width:44px;height:44px;'
           + 'border-radius:22px;border:2px solid rgba(255,255,255,.35);color:#fff;font:700 13px system-ui,sans-serif;'
           + 'display:flex;align-items:center;justify-content:center;gap:4px;padding:0 10px;box-shadow:0 2px 8px rgba(0,0,0,.4);opacity:.9';
-        r.onclick = function(){ var p = document.getElementById('sahaTeshisPanel'); if(p && p.style.display !== 'none') panelKapat(); else panelAc(); };
+        // (2026-10-26-F, kullanıcı: "kullanıcı teşhis paneline tıklayınca teşhis ekranı açılmayacak, raporları kopyalayamayacak;
+        // sadece admin açabilir"). Rozet yalnızca kaydın açık olduğunu söyler; kayıtlar yöneticiye otomatik gider (bkz. uzaga).
+        rozetSurukleKur(r, 'saha_teshis_rozet_konum', function(){ try{ sahaBildir('Teşhis kaydı açık. Kayıtlar yöneticiye otomatik gönderiliyor. Düğmeyi basılı tutup sürükleyerek istediğin yere taşıyabilirsin.', 3400); }catch(e){} });
         document.body.appendChild(r);
       }
       r.style.display = 'flex';
+      rozetKayitliKonum(r, 'saha_teshis_rozet_konum');   // görünür olduktan sonra ölçülür
       r.style.background = SAY.hata ? '#dc2626' : (SAY.uyari ? '#b45309' : '#15803d');
       var n = SAY.hata || SAY.uyari;
       r.textContent = '' + (n ? ' ' + (n > 99 ? '99+' : n) : '');
@@ -19601,7 +19649,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD = '2026-10-26-E';
+window.APP_BUILD='2026-10-26-G';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;
@@ -22817,7 +22865,11 @@ function dinamikKatHesapla(){
 }
 function dinamikKatOnizle(){ var m0 = mod, f0 = window._sahaAktifFikstur; try{ mod = 'mac'; window._sahaAktifFikstur = null; return dinamikKatHesapla(); }finally{ mod = m0; window._sahaAktifFikstur = f0; } }
 window._dinamikKat = 1;
-function zorKat(){ return (AYAR.zor || 1) * (window._dinamikKat || 1); }
+/* (2026-10-26-F, kullanıcı: "lig maçının zorluğu tamamen sahadaki oyuncuların gücüne, antrenmanına ve becerisine bağlıdır").
+   Online maçta (lig ve arkadaş odası) maçı yöneten cihazın zorluk ayarı yalnızca takım 1'e uygulanıyor, iki gerçek oyuncu eşit
+   şartlarda oynamıyordu. Orada zorluk etkisizdir; fark yalnızca oyuncu gücü, gelişim ve kondisyondan gelir. */
+function _zorKapali(){ return !!_odaKod || mod === 'iki' || !!window._sahaLigOda; }
+function zorKat(){ return _zorKapali() ? 1 : (AYAR.zor || 1) * (window._dinamikKat || 1); }
 const GRAFIK  = [ {k:1,ad:'Düşük'}, {k:1.5,ad:'Orta'}, {k:2,ad:'Yüksek'} ];
 const isTouch = matchMedia('(pointer:coarse)').matches;
 const BASKI    = [ {k:0,  ad:'Düşük'}, {k:7,  ad:'Orta'}, {k:13, ad:'Yüksek'} ];
@@ -24958,7 +25010,7 @@ function aiVurus(p){
   if (arkadasSuruyor(p)) return;          // topu süren arkadaşının ayağından almaz
   if (ofsaytMi(p)){ ofsaytCal(p); return; }
   topaDokundu(p);
-  const sapma = (2 - (p.team === 1 ? zorKat() : AYAR.zor)) * 1.2;
+  const sapma = (2 - (p.team === 1 ? zorKat() : (_zorKapali() ? 1 : AYAR.zor))) * 1.2;
   if (p.gk){
     if (Math.random() < 0.5 && pasVer(p, p.team)){        // elle atış
       p.cd = 0.9; p.tcd = 0.5;
