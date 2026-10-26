@@ -1,0 +1,28 @@
+# Firebase Realtime Database kurallarını otomatik yayınlar.
+# database.rules.json ana dalda her değiştiğinde (ya da Actions sekmesinden elle "Run workflow" ile) çalışır.
+# Gerekli gizli anahtar: FIREBASE_SERVICE_ACCOUNT (Firebase → Proje ayarları → Hizmet hesapları → Yeni özel anahtar, JSON içeriği).
+name: Firebase kurallarini yayinla
+on:
+  push:
+    branches: [main]
+    paths: [database.rules.json, firebase.json]
+  workflow_dispatch:
+jobs:
+  yayinla:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Kurallari dogrula
+        run: node -e "JSON.parse(require('fs').readFileSync('database.rules.json','utf8')); console.log('JSON gecerli')"
+      - name: Yayinla
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then echo "::error::FIREBASE_SERVICE_ACCOUNT gizli anahtari eklenmemis (Settings > Secrets and variables > Actions)."; exit 1; fi
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          npx --yes firebase-tools@13 deploy --only database --project superlig-208e3 --non-interactive
+          rm -f "$RUNNER_TEMP/sa.json"
