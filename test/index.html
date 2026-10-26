@@ -169,7 +169,7 @@
 </script>
 <meta charset="UTF-8"/>
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=892d98c3"></script>
+<script src="ortak/ortak.js?v=c8fff236"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -3339,7 +3339,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-26-G';
+window.APP_BUILD='2026-10-26-H';
 
 
 var DIAG_AUTH_MOD='pt_auth';
@@ -5472,6 +5472,24 @@ window.openPasswordManager=function(){
   window._diagScreen='pt_auth';
   if(!_userName)return;
   const visitorId=visitorIdFromName(_userName);
+  firebase.database().ref('userProfiles/'+visitorId).once('value').then(function(ps){
+    var pv=ps.val()||{};
+    if(!(pv.authEposta&&_kimlikHazir()))return eskiSifreEkrani();
+    // TAŞINMIŞ HESAP: şifre artık hiçbir yerde düz metin olarak durmuyor, gösterilemez; değiştirmek için mevcut şifre istenir.
+    window._kimlikPv=pv;
+    document.getElementById('sheetContent').innerHTML=`
+      <div class="sheet-handle"></div>
+      <div style="font-size:1rem;font-weight:900;margin-bottom:.5rem"> Şifrem</div>
+      <div style="font-size:.7rem;color:var(--mu);line-height:1.5;margin-bottom:.8rem">Şifren güvenli kimlik sisteminde korunuyor; kimse (yönetici dahil) göremez. Değiştirmek için mevcut şifreni gir.</div>
+      <div class="field" style="margin-bottom:.5rem"><span class="lbl">Mevcut Şifre</span><input type="password" id="curPwInp" autocomplete="current-password" style="width:100%;box-sizing:border-box;background:var(--s2);border:1.5px solid var(--br);border-radius:10px;padding:.6rem .7rem;min-height:44px;color:var(--tx);font-size:.85rem;font-family:inherit"/></div>
+      <div class="field" style="margin-bottom:.6rem"><span class="lbl">Yeni Şifre</span><input type="password" id="newPwInp" autocomplete="new-password" placeholder="En az 4 karakter" style="width:100%;box-sizing:border-box;background:var(--s2);border:1.5px solid var(--br);border-radius:10px;padding:.6rem .7rem;min-height:44px;color:var(--tx);font-size:.85rem;font-family:inherit"/></div>
+      <div id="pwMgrErr" style="font-size:.7rem;color:#f87171;min-height:1rem;margin-bottom:.4rem"></div>
+      <button onclick="saveNewPassword()" style="width:100%;background:linear-gradient(135deg,var(--ac),var(--ac2));border:none;border-radius:12px;padding:.6rem;min-height:44px;color:#fff;font-size:.8rem;font-weight:800;cursor:pointer">Şifreyi Değiştir</button>
+    `;
+    if(window.PTSheetNav)PTSheetNav.mark('sheet@2163');
+    document.getElementById('sheetWrap').classList.add('open');
+  });
+  function eskiSifreEkrani(){
   firebase.database().ref('userProfiles/'+visitorId+'/password').once('value').then(snap=>{
     const curPw=snap.val()||'';
     document.getElementById('sheetContent').innerHTML=`
@@ -5489,11 +5507,22 @@ window.openPasswordManager=function(){
     if(window.PTSheetNav)PTSheetNav.mark('sheet@2163');
     document.getElementById('sheetWrap').classList.add('open');
   });
+  }
 };
 window.saveNewPassword=function(){
   const newPw=(document.getElementById('newPwInp').value||'').trim();
   if(!newPw||newPw.length<4){showToast(' Şifre en az 4 karakter olmalı','er');return;}
   const visitorId=visitorIdFromName(_userName);
+  var _cur=document.getElementById('curPwInp');
+  if(_cur&&window._kimlikPv&&window._kimlikPv.authEposta){
+    var err=document.getElementById('pwMgrErr');
+    if(!_cur.value){ if(err)err.textContent='Mevcut şifreni gir'; return; }
+    if(err)err.textContent='Kaydediliyor...';
+    SahaKimlik.sifreDegistir(_kimlikRef,visitorId,_cur.value,newPw,window._kimlikPv).then(()=>{
+      showToast(' Şifren güncellendi'); closeSheet();
+    }).catch(e=>{ var k=String((e&&e.code)||''); if(err)err.textContent=/wrong-password|invalid-credential|invalid-login/i.test(k)?'Mevcut şifre hatalı':_kimlikHata(e); });
+    return;
+  }
   firebase.database().ref('userProfiles/'+visitorId+'/password').set(newPw).then(()=>{
     showToast(' Şifren güncellendi');
     closeSheet();
@@ -5510,6 +5539,25 @@ window.openForgotPasswordForm=function(){
     showToast(' Talebin admin\u2019e iletildi, geçici şifreniz size özel olarak burada görünecek');
   }).catch(()=>showToast(' Talep gönderilemedi','er'));
 };
+/* ═══ GERÇEK KİMLİK (2026-10-26-H, V1.4.0 1. hafta) ═══ bkz. ortak/ortak.js SahaKimlik.
+   Şifre artık veritabanında tutulmaz; giriş Firebase E-posta/Şifre hesabıyla yapılır. Eski (düz şifreli) hesaplar
+   ilk girişte eski şifreyle doğrulanıp taşınır; geçici şifreyle girenlerden yeni şifre istenir. Kimlik SDK'sı
+   yüklenemeyen ortamda (ör. dosyadan açılış) eski akış aynen çalışır. */
+function _kimlikHazir(){ try{ return !!(window.SahaKimlik && window._authOrtamUygun && window.firebase && firebase.auth && !window._fbAuthLoadFailed); }catch(e){ return false; } }
+function _kimlikRef(y){ return firebase.database().ref(y); }
+function _kimlikHata(e){
+  var k=String((e&&e.code)||(e&&e.message)||'');
+  if(/network|timeout/i.test(k))return ' Bağlantı sorunu - tekrar dene';
+  if(/weak-password/i.test(k))return 'Şifre çok zayıf - daha uzun bir şifre seç';
+  if(/operation-not-allowed/i.test(k))return 'Kimlik sistemi kapalı (yönetici: E-posta/Şifre girişi)';
+  if(/too-many/i.test(k))return 'Çok fazla deneme - birkaç dakika sonra tekrar dene';
+  return 'Kimlik işlemi tamamlanamadı ('+k.replace(/^auth\//,'')+')';
+}
+function _kimlikYeniSifreIste(){
+  window._pendingLoginPasswordCheck='yeniSifre';
+  showLoginPasswordField('Yeni Şifre Belirle','Geçici şifreyle girdin. Hesabını korumak için yeni bir şifre belirle (en az 4 karakter).');
+  var th=document.getElementById('loginTempHint'); if(th) th.innerHTML='';
+}
 window.doEnter=function(){
   // KULLANICI TALEBİ: İnternet bağlantısı olmadan giriş yapılamaz - bağlantı zorunlu.
   if(!navigator.onLine){
@@ -5548,7 +5596,20 @@ window.doEnter=function(){
       _loginCheckTimeout
     ]).then(snap=>{
       const v=snap.val();
-      if(v&&v.password){
+      window._pendingLoginProfile=v||null;
+      if(v&&v.authEposta&&_kimlikHazir()){
+        // TAŞINMIŞ HESAP: şifre Firebase'de; veritabanında karşılaştırılacak şifre yok.
+        window._pendingLoginPasswordCheck='auth';
+        window._pendingLoginRealPassword=null;
+        window._pendingLoginTempPassword=v.tempPassword||null;
+        showLoginPasswordField('Şifre',window._pendingLoginTempPassword?'':'Bu hesap için şifrenizi girin.');
+        renderTempPasswordHint();
+        if(_pwLoginLiveListener)firebase.database().ref('userProfiles/'+visitorId+'/tempPassword').off('value',_pwLoginLiveListener);
+        _pwLoginLiveListener=firebase.database().ref('userProfiles/'+visitorId+'/tempPassword').on('value',tSnap=>{
+          window._pendingLoginTempPassword=tSnap.val()||null;
+          renderTempPasswordHint();
+        });
+      }else if(v&&v.password){
         window._pendingLoginPasswordCheck='verify';
         window._pendingLoginRealPassword=v.password;
         window._pendingLoginTempPassword=v.tempPassword||null;
@@ -5586,10 +5647,37 @@ window.doEnter=function(){
       document.getElementById('nameErr').textContent='Şifre en az 4 karakter olmalı';
       return;
     }
+    if(_kimlikHazir()){
+      // YENİ HESAP: şifre veritabanına yazılmaz, Firebase hesabı açılır.
+      document.getElementById('nameErr').textContent='Hesap oluşturuluyor...';
+      SahaKimlik.olustur(_kimlikRef,window._pendingLoginVisitorId,enteredPw,window._pendingLoginProfile,0).then(()=>{
+        document.getElementById('nameErr').textContent='';
+        doEnterAfterPasswordCheck(name);
+      }).catch(e=>{ document.getElementById('nameErr').textContent=_kimlikHata(e); });
+      return;
+    }
     firebase.database().ref('userProfiles/'+window._pendingLoginVisitorId+'/password').set(enteredPw).then(()=>{
       doEnterAfterPasswordCheck(name);
     }).catch(()=>{
       document.getElementById('nameErr').textContent=' Şifre kaydedilemedi, tekrar deneyin';
+    });
+  }else if(window._pendingLoginPasswordCheck==='yeniSifre'){
+    if(!enteredPw||enteredPw.length<4){document.getElementById('nameErr').textContent='Şifre en az 4 karakter olmalı';return;}
+    var _pv=window._pendingLoginProfile||{};
+    document.getElementById('nameErr').textContent='Yeni şifre kaydediliyor...';
+    SahaKimlik.olustur(_kimlikRef,window._pendingLoginVisitorId,enteredPw,_pv,_pv.authEposta?((Number(_pv.authSurum)||0)+1):0).then(()=>{
+      firebase.database().ref('userProfiles/'+window._pendingLoginVisitorId+'/tempPassword').remove().catch(function(){});
+      document.getElementById('nameErr').textContent='';
+      doEnterAfterPasswordCheck(name);
+    }).catch(e=>{ document.getElementById('nameErr').textContent=_kimlikHata(e); });
+  }else if(window._pendingLoginPasswordCheck==='auth'){
+    if(!enteredPw){document.getElementById('nameErr').textContent='Lütfen şifrenizi girin';return;}
+    const _tm=window._pendingLoginTempPassword&&enteredPw.toLocaleUpperCase('tr')===window._pendingLoginTempPassword.toLocaleUpperCase('tr');
+    document.getElementById('nameErr').textContent='Giriş yapılıyor...';
+    SahaKimlik.giris(_kimlikRef,window._pendingLoginVisitorId,enteredPw,window._pendingLoginProfile).then(r=>{
+      if(r.durum==='ok'){ document.getElementById('nameErr').textContent=''; doEnterAfterPasswordCheck(name); return; }
+      if(_tm){ document.getElementById('nameErr').textContent=''; _kimlikYeniSifreIste(); return; }
+      document.getElementById('nameErr').textContent=r.durum==='ag'?' Bağlantı sorunu - tekrar dene':' Şifre hatalı';
     });
   }else{
     if(!enteredPw){document.getElementById('nameErr').textContent='Lütfen şifrenizi girin';return;}
@@ -5601,7 +5689,19 @@ window.doEnter=function(){
     // şifre karşılaştırması hâlâ harf duyarlı - kullanıcının kendi seçimine sadık kalınır).
     const tempMatch=window._pendingLoginTempPassword&&enteredPw.toLocaleUpperCase('tr')===window._pendingLoginTempPassword.toLocaleUpperCase('tr');
     if(enteredPw===window._pendingLoginRealPassword){
+      if(_kimlikHazir()){
+        // TAŞIMA: eski şifre doğrulandı - Firebase hesabı açılır ve düz şifre veritabanından silinir.
+        // Taşıma başarısız olsa bile giriş engellenmez (bir sonraki girişte yeniden denenir).
+        document.getElementById('nameErr').textContent='Hesabın güvenli sisteme taşınıyor...';
+        SahaKimlik.olustur(_kimlikRef,window._pendingLoginVisitorId,enteredPw,window._pendingLoginProfile,0)
+          .catch(e=>{ try{DiagCore&&DiagCore.kaydet&&DiagCore.kaydet('pt_auth','hata','Kimlik taşıması yapılamadı',{kod:String((e&&e.code)||e)});}catch(_){} })
+          .then(()=>{ document.getElementById('nameErr').textContent=''; doEnterAfterPasswordCheck(name); });
+        return;
+      }
       doEnterAfterPasswordCheck(name);
+    }else if(tempMatch&&_kimlikHazir()){
+      firebase.database().ref('userProfiles/'+window._pendingLoginVisitorId+'/tempPassword').remove().catch(function(){});
+      _kimlikYeniSifreIste();
     }else if(tempMatch){
       // KULLANICI TALEBİ: Geçici şifre kullanıldıktan sonra geçersiz olur (tek kullanımlık),
       // asıl (unutulan) şifre HÂLÂ AKTİF kalır - değiştirilmez.
@@ -36204,6 +36304,7 @@ window.confirmDownloadMyProfileCard=function(){
 // kaynak kodunda düz metin bir şifrenin bulunmasını (gerçek bir güvenlik açığıydı) önler.
 window.doLogoutPt=function(){
   try{ sessionStorage.removeItem('pt_oturumAd'); }catch(e){self.__ds&&self.__ds(35527,e)}
+  try{ if(window.SahaKimlik)SahaKimlik.cikis(); }catch(e){}   // kullanıcı hesabı kapanır, anonim bağlantıya dönülür (yönetici oturumuna dokunulmaz)
   setVisitorOffline();
   closeSheet();
   // HATA DÜZELTMESİ (kök sebep - kullanıcı bildirdi: "Aynı tarayıcıda başka hesap girişi
@@ -37997,7 +38098,11 @@ window.voteMvp=function(matchId,player){
      tanınır ve ölçüm dışında kalır. */
   var DIAG_SELF_SEL='.diagHudBadge,#diagHudPanel,#diagRefPhotoOv,#ptDoctorBtn,#admDoctorBtn,'
     +'#ptDoctorBadge,#admDoctorBadge,#ptDoctorPanel,#admDoctorPanel,#ptDoctorCopyWarn,#diagCopyWarn,'
-    +'.diagMiniBg,[data-diag-ui],[data-x="sensorOut"],#diagErrorAlertBanner';
+    +'.diagMiniBg,[data-diag-ui],[data-x="sensorOut"],#diagErrorAlertBanner,'
+    // (2026-10-26-H, teşhis raporu: "DOM fırtınası · #diagLogList 213 · #diagModuleList 212") Teşhis yönetim ekranının
+    // kendi listeleri de teşhis arayüzüdür: yeni kayıt gelince listenin yeniden çizilmesi fırtına sayılıyor, bu da yeni
+    // bir kayıt üretip listeyi yeniden çizdiriyordu (kendini besleyen döngü).
+    +'#diagModuleList,#diagLogList,#diagLogFilters,#diagDeviceLogList';
 /* ── RENK OKUNABİLİRLİĞİ YARDIMCILARI ─────────────────────────────────────────────
      KULLANICI TALEBİ: "renk soğuması" da yakalansın - yani yazının arka planıyla arasındaki
      fark azalıp okunmaz hale gelmesi. Bu, tema değişikliklerinde en sık kaçan kusurdur:
@@ -38603,6 +38708,11 @@ window.voteMvp=function(matchId,player){
           if((cs3.display==='flex'||cs3.display==='grid')&&(cs3.justifyContent==='center'||cs3.alignItems==='center'&&cs3.flexDirection==='column'||cs3.alignContent==='center'))continue;
           if((cs3.position==='absolute'||cs3.position==='fixed')&&/ortu|orti|spin|loading|yukleniyor/i.test(kap.className||''))continue;
           var cocuk=[];
+          // (2026-10-26-H, teşhis raporu: "sheetBody > div · üst kenarında 91px boşluk · ilk içerik: saha-ik") Kapsayıcının
+          // doğrudan metni varsa o bir paragraftır; içindeki satır içi simgeler (saha-ik, inline-block) yığın değildir.
+          // Önceden üçüncü satırdaki ilk simge 'ilk öğe' sayılıp üstündeki iki satır metin 91px boşluk sanılıyordu.
+          var _kapMetinli=false;
+          for(var _tn=kap.firstChild;_tn;_tn=_tn.nextSibling){ if(_tn.nodeType===3&&/\S/.test(_tn.nodeValue)){_kapMetinli=true;break;} }
           for(var c=0;c<kap.children.length;c++){
             var ch=kap.children[c];
             if(kendiMi(ch))continue;
@@ -38616,7 +38726,8 @@ window.voteMvp=function(matchId,player){
             // boşluk yoktu.) Artık yalnızca blok seviyesindeki çocuklar ölçüme girer.
             var _cd='',_cp='';
             try{var _cs2=getComputedStyle(ch);_cd=_cs2.display;_cp=_cs2.position;}catch(e){self.__ds&&self.__ds(37935,e)}
-            if(/^(inline|contents|none)$/.test(_cd)||ch.tagName==='BR')continue;   // (2026-10-06-B) inline-block düğmeler/girdiler yığına DAHİL: atlanınca aralarındaki düğme 'boşluk' sanılıyordu
+            if(/^(inline|contents|none)$/.test(_cd)||ch.tagName==='BR')continue;
+            if(_kapMetinli&&(/^inline/.test(_cd)||ch.tagName==='SAHA-IK'))continue;   // (2026-10-06-B) inline-block düğmeler/girdiler yığına DAHİL: atlanınca aralarındaki düğme 'boşluk' sanılıyordu
             // AKIŞTAN ÇIKMIŞ öğeler de yığının parçası değildir: mutlak/sabit konumlu bir
             // eleman kardeşlerini itmez, o yüzden onunla bir sonraki kardeş arasındaki mesafe
             // "boşluk" sayılamaz.
@@ -38828,6 +38939,13 @@ window.voteMvp=function(matchId,player){
              ([data-live-since]) ve animasyon sınıfı taşıyan öğeler zaten kasıtlı olarak değişir, sayılmaz. */
           var t=m.target,now=Date.now();
           if(t.hasAttribute('data-live-since')||/(^|\s)\S*anim/.test(t.className||''))continue;
+          // (2026-10-26-H, teşhis raporu: "aynı alan ard arda yeniden çiziliyor · sheetBody > div") Simge yükseltmesi (metindeki
+          // simge karakterinin <saha-ik> öğesine çevrilmesi) bir yeniden çizim değildir: paragraftaki her simge ayrı bir
+          // değişiklik kaydı üretiyor, 9 simgeli bir açıklama "3 kez / 400ms" sanılıyordu.
+          var _ikonYuk=true,_ai;
+          for(_ai=0;_ai<m.addedNodes.length&&_ikonYuk;_ai++){var _an=m.addedNodes[_ai];if(!(_an.nodeType===3||_an.nodeName==='SAHA-IK'))_ikonYuk=false;}
+          for(_ai=0;_ai<m.removedNodes.length&&_ikonYuk;_ai++){if(m.removedNodes[_ai].nodeType!==3)_ikonYuk=false;}
+          if(_ikonYuk)continue;
           var k=t.__rdKey||(t.__rdKey='n'+(++_rdSira));
           if(_sonYazim[k]&&now-_sonYazim[k]<REDRAW_MS){
             _ardArda[k]=(_ardArda[k]||1)+1;
@@ -38857,6 +38975,10 @@ window.voteMvp=function(matchId,player){
         list.getEntries().forEach(function(en){
           // Kullanıcı etkileşiminden kaynaklanan kaymalar normaldir, sayılmaz.
           if(en.hadRecentInput)return;
+          // (2026-10-26-H, teşhis raporu: "İçerik zıplaması 0.343 · kayan öğe bulunamadı") Kayan öğelerin HEPSİ teşhis
+          // arayüzüyse (sürüklenen rozet, teşhis listeleri) bu kayma kullanıcının gördüğü içerik değildir; sayılmaz.
+          // Önceden kaynaklar atlanıyor ama değer yine de birikime ekleniyordu - rapor "kayan öğe yok" diyordu.
+          try{var _kz=en.sources||[];if(_kz.length&&_kz.every(function(sc){return sc&&sc.node&&sc.node.nodeType===1&&kendiMi(sc.node);}))return;}catch(_k){}
           _cls+=en.value||0;
           // GELİŞTİRME (kullanıcı talebi: "sensörleri en iyi şekilde geliştir"): Eskiden
           // yalnızca BİRİKİM sayısı bildiriliyordu ("birikim: 0.204") - hangi öğenin kaydığı

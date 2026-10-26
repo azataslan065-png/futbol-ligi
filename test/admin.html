@@ -153,7 +153,7 @@
 </script>
 <meta charset="UTF-8"/>
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=892d98c3"></script>
+<script src="ortak/ortak.js?v=c8fff236"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -3300,7 +3300,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-26-G';
+window.APP_BUILD='2026-10-26-H';
 
 
 var DIAG_AUTH_MOD='adm_settings';
@@ -25686,7 +25686,12 @@ function renderVisitorListNow(){
     // On kullanıcıda on yeniden çizim demek. Ortak denetim (admListeDegisti) araya girince
     // zincir kırılır: ad güncellemesi veriyi gerçekten değiştirdiyse bir kez çizilir, aksi
     // halde hiç çizilmez.
-    if(!admListeDegisti(el,arr))return;
+    /* (2026-10-26-H, teşhis raporu: "#visitorList 3 kez / 400ms") Her kullanıcı 15 sn'de bir lastSeen yazıyor; imza bu
+       zaman damgasını da içerdiği için birkaç kullanıcının kalp atışı art arda gelince liste her biri için baştan
+       çiziliyordu. Ekranda görünen süreler canlı sayaçla (startVisitorLiveTimers) güncellenir; imzaya yalnızca listeyi
+       GERÇEKTEN değiştiren alanlar girer: ad, çevrimiçi durumu, sayacın başlangıcı, susturma, takım ve son eylem. */
+    var _vImza=arr.map(function(v){var la=v.actions?Object.keys(v.actions).length:0;return [v._key,v.name||'',v.online?1:0,v.online?(v.sessionStart||0):(v.lastSeen?Math.floor(v.lastSeen/60000):0),v.muted?1:0,(v.profile&&v.profile.favTeam)||'',la];});
+    if(!admListeDegisti(el,[_vImza,window._visitorSearchTerm||'']))return;
     if(!arr.length){el.innerHTML='<div style="font-size:.72rem;color:var(--mu);padding:.4rem 0">Henüz kayıtlı kullanıcı yok. Puan Tablosu\'na giriş yapan kullanıcılar burada görünecek.</div>';return;}
     window._visitorArr=arr;
     var onlineCount=arr.filter(function(v){return v.online;}).length;
@@ -25853,6 +25858,18 @@ function renderVisitorDetailContent(v){
   // doğru yoldan çekilip bir placeholder'a yerleştiriliyor.
   html+='<div id="visitorPwBox_'+(v._key||'')+'"></div>';
   (function(vkey){
+    /* (2026-10-26-H, V1.4.0 1. hafta) Taşınmış hesabın şifresi veritabanında yok; Firebase kimlik sisteminde
+       korunuyor ve kimse göremez. Unutan kullanıcıya yine geçici şifre gönderilir; kullanıcı onunla girince yeni
+       şifresini belirler. */
+    db.ref('userProfiles/'+vkey+'/authEposta').once('value').then(function(aSnap){
+      if(!aSnap.val())return;
+      var box=qs('visitorPwBox_'+vkey);if(!box)return;
+      box.innerHTML='<div style="background:var(--s2);border-radius:10px;padding:.5rem .65rem;margin-top:.6rem">'
+        +'<div style="font-size:.6rem;color:var(--mu);text-transform:uppercase;margin-bottom:.2rem">Şifresi</div>'
+        +'<div style="font-size:.72rem;font-weight:700;color:#15803d">Güvenli kimlik sisteminde korunuyor</div>'
+        +'<div style="font-size:.62rem;color:var(--mu);margin-top:.2rem;line-height:1.5">Şifre görüntülenemez. Unutursa geçici şifre gönderin; kullanıcı onunla girince yeni şifresini belirler.</div>'
+        +'</div>';
+    }).catch(function(){});
     db.ref('userProfiles/'+vkey+'/password').once('value').then(function(snap){
       var pw=snap.val();
       var box=qs('visitorPwBox_'+vkey);if(!box||!pw)return;
@@ -25887,10 +25904,13 @@ function deleteVisitorAccount(key,name){
   if(!key||!_curLeagueId)return;
   dlg('','Hesabı Kalıcı Sil','"'+(name||'Bu kullanıcı')+'" adlı kullanıcının hesabı (profil, tema/palet/avatar ayarları, favori takımı) KALICI OLARAK silinecek. Bu işlem GERİ ALINAMAZ. Kullanıcının geçmiş yorumları/mesajları etkilenmez, sadece hesabı silinir. Devam etmek istiyor musunuz?','Kalıcı Sil','dor').then(function(ok){
     if(!ok)return;
-    Promise.all([
+    // (2026-10-26-H) Profil silinince kimlik bağı da silinir; aynı adla yeniden açılan hesap yeni bir Firebase hesabı alır.
+    db.ref('userProfiles/'+key+'/authUid').once('value').then(function(au){
+      var uid=au.val(); return uid?db.ref('kimlik/'+uid).remove():null;
+    }).catch(function(){}).then(function(){ return Promise.all([
       db.ref('leagues/'+_curLeagueId+'/visitors/'+key).remove(),
       db.ref('userProfiles/'+key).remove()
-    ]).then(function(){
+    ]); }).then(function(){
       logAction(' Kullanıcı hesabı kalıcı olarak silindi: '+(name||key));
       toast(' Hesap kalıcı olarak silindi');
       closeSheet();
@@ -31382,7 +31402,11 @@ function diagClearRemoteLogs(){
      tanınır ve ölçüm dışında kalır. */
   var DIAG_SELF_SEL='.diagHudBadge,#diagHudPanel,#diagRefPhotoOv,#ptDoctorBtn,#admDoctorBtn,'
     +'#ptDoctorBadge,#admDoctorBadge,#ptDoctorPanel,#admDoctorPanel,#ptDoctorCopyWarn,#diagCopyWarn,'
-    +'.diagMiniBg,[data-diag-ui],[data-x="sensorOut"],#diagErrorAlertBanner';
+    +'.diagMiniBg,[data-diag-ui],[data-x="sensorOut"],#diagErrorAlertBanner,'
+    // (2026-10-26-H, teşhis raporu: "DOM fırtınası · #diagLogList 213 · #diagModuleList 212") Teşhis yönetim ekranının
+    // kendi listeleri de teşhis arayüzüdür: yeni kayıt gelince listenin yeniden çizilmesi fırtına sayılıyor, bu da yeni
+    // bir kayıt üretip listeyi yeniden çizdiriyordu (kendini besleyen döngü).
+    +'#diagModuleList,#diagLogList,#diagLogFilters,#diagDeviceLogList';
 /* ── RENK OKUNABİLİRLİĞİ YARDIMCILARI ─────────────────────────────────────────────
      KULLANICI TALEBİ: "renk soğuması" da yakalansın - yani yazının arka planıyla arasındaki
      fark azalıp okunmaz hale gelmesi. Bu, tema değişikliklerinde en sık kaçan kusurdur:
@@ -31963,6 +31987,11 @@ function diagClearRemoteLogs(){
           if((cs3.display==='flex'||cs3.display==='grid')&&(cs3.justifyContent==='center'||cs3.alignItems==='center'&&cs3.flexDirection==='column'||cs3.alignContent==='center'))continue;
           if((cs3.position==='absolute'||cs3.position==='fixed')&&/ortu|orti|spin|loading|yukleniyor/i.test(kap.className||''))continue;
           var cocuk=[];
+          // (2026-10-26-H, teşhis raporu: "sheetBody > div · üst kenarında 91px boşluk · ilk içerik: saha-ik") Kapsayıcının
+          // doğrudan metni varsa o bir paragraftır; içindeki satır içi simgeler (saha-ik, inline-block) yığın değildir.
+          // Önceden üçüncü satırdaki ilk simge 'ilk öğe' sayılıp üstündeki iki satır metin 91px boşluk sanılıyordu.
+          var _kapMetinli=false;
+          for(var _tn=kap.firstChild;_tn;_tn=_tn.nextSibling){ if(_tn.nodeType===3&&/\S/.test(_tn.nodeValue)){_kapMetinli=true;break;} }
           for(var c=0;c<kap.children.length;c++){
             var ch=kap.children[c];
             if(kendiMi(ch))continue;
@@ -31976,7 +32005,8 @@ function diagClearRemoteLogs(){
             // boşluk yoktu.) Artık yalnızca blok seviyesindeki çocuklar ölçüme girer.
             var _cd='',_cp='';
             try{var _cs2=getComputedStyle(ch);_cd=_cs2.display;_cp=_cs2.position;}catch(e){self.__ds&&self.__ds(30754,e)}
-            if(/^(inline|contents|none)$/.test(_cd)||ch.tagName==='BR')continue;   // (2026-10-06-B) inline-block düğmeler/girdiler yığına DAHİL: atlanınca aralarındaki düğme 'boşluk' sanılıyordu
+            if(/^(inline|contents|none)$/.test(_cd)||ch.tagName==='BR')continue;
+            if(_kapMetinli&&(/^inline/.test(_cd)||ch.tagName==='SAHA-IK'))continue;   // (2026-10-06-B) inline-block düğmeler/girdiler yığına DAHİL: atlanınca aralarındaki düğme 'boşluk' sanılıyordu
             // AKIŞTAN ÇIKMIŞ öğeler de yığının parçası değildir: mutlak/sabit konumlu bir
             // eleman kardeşlerini itmez, o yüzden onunla bir sonraki kardeş arasındaki mesafe
             // "boşluk" sayılamaz.
@@ -32188,6 +32218,13 @@ function diagClearRemoteLogs(){
              ([data-live-since]) ve animasyon sınıfı taşıyan öğeler zaten kasıtlı olarak değişir, sayılmaz. */
           var t=m.target,now=Date.now();
           if(t.hasAttribute('data-live-since')||/(^|\s)\S*anim/.test(t.className||''))continue;
+          // (2026-10-26-H, teşhis raporu: "aynı alan ard arda yeniden çiziliyor · sheetBody > div") Simge yükseltmesi (metindeki
+          // simge karakterinin <saha-ik> öğesine çevrilmesi) bir yeniden çizim değildir: paragraftaki her simge ayrı bir
+          // değişiklik kaydı üretiyor, 9 simgeli bir açıklama "3 kez / 400ms" sanılıyordu.
+          var _ikonYuk=true,_ai;
+          for(_ai=0;_ai<m.addedNodes.length&&_ikonYuk;_ai++){var _an=m.addedNodes[_ai];if(!(_an.nodeType===3||_an.nodeName==='SAHA-IK'))_ikonYuk=false;}
+          for(_ai=0;_ai<m.removedNodes.length&&_ikonYuk;_ai++){if(m.removedNodes[_ai].nodeType!==3)_ikonYuk=false;}
+          if(_ikonYuk)continue;
           var k=t.__rdKey||(t.__rdKey='n'+(++_rdSira));
           if(_sonYazim[k]&&now-_sonYazim[k]<REDRAW_MS){
             _ardArda[k]=(_ardArda[k]||1)+1;
@@ -32217,6 +32254,10 @@ function diagClearRemoteLogs(){
         list.getEntries().forEach(function(en){
           // Kullanıcı etkileşiminden kaynaklanan kaymalar normaldir, sayılmaz.
           if(en.hadRecentInput)return;
+          // (2026-10-26-H, teşhis raporu: "İçerik zıplaması 0.343 · kayan öğe bulunamadı") Kayan öğelerin HEPSİ teşhis
+          // arayüzüyse (sürüklenen rozet, teşhis listeleri) bu kayma kullanıcının gördüğü içerik değildir; sayılmaz.
+          // Önceden kaynaklar atlanıyor ama değer yine de birikime ekleniyordu - rapor "kayan öğe yok" diyordu.
+          try{var _kz=en.sources||[];if(_kz.length&&_kz.every(function(sc){return sc&&sc.node&&sc.node.nodeType===1&&kendiMi(sc.node);}))return;}catch(_k){}
           _cls+=en.value||0;
           // GELİŞTİRME (kullanıcı talebi: "sensörleri en iyi şekilde geliştir"): Eskiden
           // yalnızca BİRİKİM sayısı bildiriliyordu ("birikim: 0.204") - hangi öğenin kaydığı

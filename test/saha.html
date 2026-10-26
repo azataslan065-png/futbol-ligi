@@ -169,7 +169,7 @@
 </script>
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=892d98c3"></script>
+<script src="ortak/ortak.js?v=c8fff236"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol vG</title>
+<title>SAHA — 3D Futbol vH</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -13713,10 +13713,35 @@ function girisYap(){
     }
     const gercekSifre = v.password || '';
     const gecici = v.tempPassword || '';
+    /* GERÇEK KİMLİK (2026-10-26-H, V1.4.0 1. hafta; bkz. ortak/ortak.js SahaKimlik). Taşınmış hesapta şifre
+       veritabanında yok: Firebase hesabıyla doğrulanır. Bu tarayıcıda aynı hesabın oturumu açıksa ("beni hatırla")
+       şifre sorulmaz. Eski hesap doğru şifreyle girerse burada da taşınır. Geçici şifre ve yeni şifre belirleme
+       Puan Tablosu'nda yapılır. */
+    var _kimlikVar = !!(window.SahaKimlik && window.firebase && firebase.auth);
+    var _kRef = function(y){ return fbDb.ref(y); };
+    if(v.authEposta && _kimlikVar){
+      if(!sifre && SahaKimlik.oturumBuProfil(v)){ _girisDevam(); return; }
+      if(!sifre){ girisMesaj('Şifreni gir.', true); return; }
+      SahaKimlik.giris(_kRef, visitorId, sifre, v).then(function(r){
+        if(r.durum === 'ok'){ _girisDevam(); return; }
+        if(gecici && sifre.toLocaleUpperCase('tr') === String(gecici).toLocaleUpperCase('tr')){ girisMesaj('Geçici şifreyle önce Puan Tablosu\'na gir ve yeni şifreni belirle; sonra buradan o şifreyle gir.', true); return; }
+        girisMesaj(r.durum === 'ag' ? 'Bağlantı sorunu - tekrar dene.' : 'İsim veya şifre hatalı.', true);
+      });
+      return;
+    }
     if(gercekSifre && sifre !== gercekSifre && !(gecici && sifre === gecici)){
       girisMesaj('İsim veya şifre hatalı.', true);
       return;
     }
+    if(gercekSifre && sifre === gercekSifre && _kimlikVar){
+      girisMesaj('Hesabın güvenli sisteme taşınıyor...');
+      SahaKimlik.olustur(_kRef, visitorId, sifre, v, 0)
+        .catch(function(e){ _sessiz(e, 'kimlikTasima', 'saha_ag'); })
+        .then(_girisDevam);
+      return;
+    }
+    _girisDevam();
+    function _girisDevam(){
     girisMesaj('');
     /* PROFİL FOTOĞRAFI (kullanıcı: "Puan Tablosu tarafındaki profil fotoğrafı burada
        da görünmeli"): Aynı düğümden (userProfiles/{visitorId}) okunur - SAHA'ya ayrı
@@ -13745,6 +13770,7 @@ function girisYap(){
     hesabiDinle();
     hesapDurumCiz();
     menuGoster();
+    }
   }).catch(function(err){
     girisMesaj('Bağlantı hatası: '+((err&&err.message)||''), true);
   });
@@ -13808,6 +13834,7 @@ try{
 
 function cikisYap(){
   try{ sahaAktifDurdur(); }catch(e){self.__ds&&self.__ds(12959,e)}
+  try{ if(window.SahaKimlik) SahaKimlik.cikis(); }catch(e){}   // kullanıcı hesabı kapanır, anonim bağlantıya dönülür
   try{ window._sahaProfil = null; sahaAvatarCiz(); }catch(e){self.__ds&&self.__ds(12960,e)}
   try{ if(window._bakimIzinRef){ window._bakimIzinRef.off(); window._bakimIzinRef = null; } }catch(e){self.__ds&&self.__ds(12961,e)}
   window._bakimIzinDinleniyor = false; window._bakimSahaIzinliBen = false; window._sahaGirisAd = null;
@@ -19649,7 +19676,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-10-26-G';
+window.APP_BUILD='2026-10-26-H';
 try{
   const _sr = document.getElementById('surumRozet');
   if(_sr) _sr.textContent = 'Yüklü sürüm: ' + window.APP_BUILD;

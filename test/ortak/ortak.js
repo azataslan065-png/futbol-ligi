@@ -357,3 +357,120 @@ function ortakKitAlanlari(tk, f){
   if(o.kitShortsHome) o.kitShorts = o.kitShortsHome;
   return o;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════════════════════
+   SAHA KİMLİK (2026-10-26-H · V1.4.0 yol haritası 1. hafta)
+   Sorun: giriş anonimdi, kimlik addan türetiliyordu (v_azat_aslan) ve şifreler veritabanında
+   düz metin duruyordu (userProfiles/{id}/password) - siteyi açan herkes okuyabiliyordu.
+   Çözüm: her profile Firebase E-posta/Şifre hesabı bağlanır. Kullanıcı yine yalnızca ad ve
+   şifre yazar; e-posta gizlidir ve profilden türetilir. Şifre Firebase'de saklanır, veritabanında
+   tutulmaz. Eski hesaplar ilk girişte eski şifreyle bir kez doğrulanıp taşınır.
+   Veri:  userProfiles/{profil}/authEposta · authSurum · authUid · authTs   (düz şifre silinir)
+          kimlik/{authUid} = { p: profil, ts }                                (kurallar için bağ)
+   Test ve kök ayrı hesaplar kullanır (e-posta ortamı da içerir) - test şifresi kökü etkilemez.
+   Yönetici oturumu korunur: aynı tarayıcıda admin girişi varsa kullanıcı işlemleri ikincil bir
+   Firebase uygulamasında yapılır; admin paneli oturumunu kaybetmez.
+   ═══════════════════════════════════════════════════════════════════════════════════════════ */
+var SahaKimlik = (function(){
+  var ALAN = 'saha-lig.app';
+  // Küçük, bağımlılıksız SHA-256 (tüm cihazlarda aynı sonucu vermesi için tarayıcı API'sine bağlı değil).
+  function sha256(ascii){
+    function rr(v, n){ return (v >>> n) | (v << (32 - n)); }
+    var K = [], H = [], i, j, isPrime = {}, c = 0, n;
+    for(n = 2; c < 64; n++){ if(!isPrime[n]){ for(i = 0; i < 313; i += n) isPrime[i] = n; H[c] = (Math.pow(n, .5) * 4294967296) | 0; K[c++] = (Math.pow(n, 1/3) * 4294967296) | 0; } }
+    H = H.slice(0, 8);
+    var bytes = unescape(encodeURIComponent(ascii)), L = bytes.length * 8, words = [];
+    bytes += '\x80'; while(bytes.length % 64 - 56) bytes += '\x00';
+    for(i = 0; i < bytes.length; i++){ j = bytes.charCodeAt(i); words[i >> 2] |= j << ((3 - i) % 4) * 8; }
+    words[words.length] = (L / 4294967296) | 0; words[words.length] = L;
+    for(j = 0; j < words.length;){
+      var w = words.slice(j, j += 16), old = H.slice(0);
+      for(i = 0; i < 64; i++){
+        var w15 = w[i - 15], w2 = w[i - 2], a = H[0], e = H[4];
+        var t1 = H[7] + (rr(e, 6) ^ rr(e, 11) ^ rr(e, 25)) + ((e & H[5]) ^ (~e & H[6])) + K[i]
+          + (w[i] = (i < 16) ? w[i] : (w[i - 16] + (rr(w15, 7) ^ rr(w15, 18) ^ (w15 >>> 3)) + w[i - 7] + (rr(w2, 17) ^ rr(w2, 19) ^ (w2 >>> 10))) | 0);
+        var t2 = (rr(a, 2) ^ rr(a, 13) ^ rr(a, 22)) + ((a & H[1]) ^ (a & H[2]) ^ (H[1] & H[2]));
+        H = [(t1 + t2) | 0].concat(H); H[4] = (H[4] + t1) | 0; H.length = 8;
+      }
+      for(i = 0; i < 8; i++) H[i] = (H[i] + old[i]) | 0;
+    }
+    var out = ''; for(i = 0; i < 8; i++) for(j = 3; j + 1; j--){ var b = (H[i] >> (j * 8)) & 255; out += (b < 16 ? '0' : '') + b.toString(16); }
+    return out;
+  }
+  function ortam(){ try{ return (location.pathname.indexOf('/test/') !== -1 || window._sahaTestKopya) ? 'test' : 'kok'; }catch(e){ return 'kok'; } }
+  function eposta(profil, surum){ return 'u' + sha256(ortam() + '|' + profil + '|' + (Number(surum) || 0)).slice(0, 32) + '@' + ALAN; }
+  function sifre(pw){ return 'SAHA·' + String(pw == null ? '' : pw); }   // Firebase en az 6 karakter ister; eski 4 haneli şifreler de geçerli kalır
+  function sentetikMi(u){ return !!(u && u.email && /@saha-lig\.app$/i.test(u.email)); }
+  function varsayilan(){ try{ return firebase.auth(); }catch(e){ return null; } }
+  function adminOturumuMu(){ var a = varsayilan(), u = a && a.currentUser; return !!(u && !u.isAnonymous && !sentetikMi(u)); }
+  var _ik = null;
+  function ikincil(){
+    if(_ik) return _ik;
+    var app; try{ app = firebase.app('sahaKimlik'); }catch(e){ app = firebase.initializeApp(firebase.app().options, 'sahaKimlik'); }
+    _ik = app.auth();
+    try{ _ik.setPersistence(firebase.auth.Auth.Persistence.NONE); }catch(e){}
+    return _ik;
+  }
+  // Kullanıcı işlemlerinin yapılacağı kimlik nesnesi: normalde varsayılan uygulama (veritabanı da bu
+  // kimlikle çalışır); aynı tarayıcıda yönetici oturumu varsa ikincil uygulama.
+  function hedef(){ return adminOturumuMu() ? ikincil() : varsayilan(); }
+  function hataKodu(e){ return String((e && e.code) || (e && e.message) || 'bilinmeyen'); }
+  function agHatasi(e){ return /network|timeout|unavailable|too-many/i.test(hataKodu(e)); }
+  function sure(p, ms){ return Promise.race([p, new Promise(function(_, r){ setTimeout(function(){ r({ code:'auth/timeout' }); }, ms || 15000); })]); }
+  function bagla(ref, profil, uid, eposta0, surum){
+    var simdi = Date.now();
+    return Promise.all([
+      ref('userProfiles/' + profil).update({ authEposta:eposta0, authSurum:Number(surum) || 0, authUid:uid, authTs:simdi, password:null }),
+      ref('kimlik/' + uid).set({ p:profil, ts:simdi })
+    ]);
+  }
+  // Mevcut (taşınmış) hesapla giriş. Sonuç: {durum:'ok'|'hatali'|'ag', uid}
+  function giris(ref, profil, pw, kayit){
+    var a = hedef(), e0 = kayit && kayit.authEposta;
+    if(!a || !e0) return Promise.resolve({ durum:'hatali' });
+    return sure(a.signInWithEmailAndPassword(e0, sifre(pw))).then(function(c){
+      var uid = c && c.user && c.user.uid;
+      // kimlik bağı her girişte tazelenir (başka cihazda silinmiş/kopyalanmış olabilir)
+      return ref('kimlik/' + uid).set({ p:profil, ts:Date.now() }).then(function(){ return { durum:'ok', uid:uid }; }, function(){ return { durum:'ok', uid:uid }; });
+    }, function(e){ return { durum: agHatasi(e) ? 'ag' : 'hatali', kod:hataKodu(e) }; });
+  }
+  // Yeni hesap aç (eski şifreden taşıma, ilk şifre ya da geçici şifre sonrası yeni şifre).
+  // E-posta kullanılıyorsa önce aynı şifreyle giriş denenir (başka cihazda açılmış olabilir), olmazsa sürüm artırılır.
+  function olustur(ref, profil, pw, kayit, ilkSurum){
+    var a = hedef(); if(!a) return Promise.reject({ code:'auth/sdk-yok' });
+    var surum = Math.max(Number(ilkSurum) || 0, Number(kayit && kayit.authSurum) || 0);
+    function dene(s, kalan){
+      var e0 = eposta(profil, s);
+      return sure(a.createUserWithEmailAndPassword(e0, sifre(pw))).then(function(c){ return { c:c, e0:e0, s:s }; }, function(e){
+        if(hataKodu(e).indexOf('email-already-in-use') === -1 || kalan <= 0) throw e;
+        return sure(a.signInWithEmailAndPassword(e0, sifre(pw))).then(function(c){ return { c:c, e0:e0, s:s }; }, function(e2){
+          if(agHatasi(e2)) throw e2;
+          return dene(s + 1, kalan - 1);
+        });
+      });
+    }
+    return dene(surum, 6).then(function(r){
+      var uid = r.c && r.c.user && r.c.user.uid;
+      return bagla(ref, profil, uid, r.e0, r.s).then(function(){ return { durum:'ok', uid:uid, eposta:r.e0, surum:r.s }; });
+    });
+  }
+  // Oturum açıkken şifre değiştir (mevcut şifre ile yeniden doğrulanır).
+  function sifreDegistir(ref, profil, eskiPw, yeniPw, kayit){
+    var a = hedef(), e0 = kayit && kayit.authEposta;
+    if(!a || !e0) return Promise.reject({ code:'auth/tasinmamis' });
+    return sure(a.signInWithEmailAndPassword(e0, sifre(eskiPw))).then(function(c){
+      return c.user.updatePassword(sifre(yeniPw));
+    }).then(function(){ return ref('userProfiles/' + profil).update({ authTs:Date.now(), password:null, tempPassword:null }); });
+  }
+  // Bu tarayıcıdaki oturum bu profile mi ait? (SAHA'da "beni hatırla" şifresiz giriş)
+  function oturumBuProfil(kayit){ var a = varsayilan(), u = a && a.currentUser; return !!(u && kayit && kayit.authEposta && sentetikMi(u) && u.email === kayit.authEposta); }
+  // Çıkış: kullanıcı hesabı kapatılır, veritabanı bağlantısı için anonim oturuma dönülür. Yönetici oturumuna dokunulmaz.
+  function cikis(){
+    var a = varsayilan(), u = a && a.currentUser;
+    try{ if(_ik && _ik.currentUser) _ik.signOut(); }catch(e){}
+    if(!u || !sentetikMi(u)) return Promise.resolve();
+    return a.signOut().then(function(){ return a.signInAnonymously(); }).catch(function(){});
+  }
+  return { eposta:eposta, sifre:sifre, sha256:sha256, ortam:ortam, sentetikMi:sentetikMi, adminOturumuMu:adminOturumuMu,
+           giris:giris, olustur:olustur, sifreDegistir:sifreDegistir, oturumBuProfil:oturumBuProfil, cikis:cikis };
+})();
