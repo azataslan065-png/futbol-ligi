@@ -5,7 +5,7 @@ name: Firebase kurallarini yayinla
 on:
   push:
     branches: [main]
-    paths: [database.rules.json, firebase.json]
+    paths: [database.rules.json, firebase.json, .github/workflows/firebase-kurallar.yml]
   workflow_dispatch:
 jobs:
   yayinla:
@@ -25,4 +25,23 @@ jobs:
           printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
           export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
           npx --yes firebase-tools@13 deploy --only database --project superlig-208e3 --non-interactive
-          rm -f "$RUNNER_TEMP/sa.json"
+      - name: Yayinlanan kurallari Firebase'den geri oku ve karsilastir
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          cd "$RUNNER_TEMP" && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          node -e '
+            const {GoogleAuth}=require("google-auth-library"); const fs=require("fs");
+            (async()=>{
+              const auth=new GoogleAuth({credentials:JSON.parse(process.env.SA),scopes:["https://www.googleapis.com/auth/firebase.database","https://www.googleapis.com/auth/userinfo.email"]});
+              const tok=(await (await auth.getClient()).getAccessToken()).token;
+              const r=await fetch("https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/.settings/rules.json",{headers:{Authorization:"Bearer "+tok}});
+              const metin=await r.text();
+              if(!r.ok){ console.log("::error::Kurallar okunamadi: HTTP "+r.status+" "+metin.slice(0,200)); process.exit(1); }
+              const temiz=t=>JSON.stringify(JSON.parse(t.replace(/\/\/.*$/mg,"")));
+              const ayni=temiz(metin)===temiz(fs.readFileSync(process.env.GITHUB_WORKSPACE+"/database.rules.json","utf8"));
+              const dal=metin.includes("_dalKaydi");
+              console.log((ayni?"::notice::":"::error::")+"Firebase kurallari depodakiyle "+(ayni?"BIREBIR AYNI":"FARKLI")+" | _dalKaydi "+(dal?"VAR":"YOK")+" | "+new Date().toISOString());
+              if(!ayni) process.exit(1);
+            })().catch(e=>{ console.log("::error::"+e.message); process.exit(1); });
+          '
