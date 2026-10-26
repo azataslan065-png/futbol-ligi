@@ -1,4 +1,4 @@
-/* SAHA / Puan Tablosu servis çalışanı — 2026-10-19-A
+/* SAHA / Puan Tablosu servis çalışanı — 2026-10-26-E
    1) Chrome'un "uygulama olarak yükle" koşulu için kayıtlı bir fetch işleyicisi (eskiden tek görevi buydu).
    2) MEDYA ÖNBELLEĞİ: Supabase'deki herkese açık dosyalar (müzik, reklam / gol animasyonu videoları,
       logolar, fotoğraflar) cihaza BİR KEZ indirilir, sonra cihazdan verilir. Supabase trafiği (egress)
@@ -17,7 +17,7 @@ var DOGRULA_MS = 12 * 3600e3, TARAMA_MS = 24 * 3600e3, KULLANILMAYAN_MS = 30 * 2
 self.addEventListener('install', function(){ self.skipWaiting(); });
 self.addEventListener('activate', function(e){
   e.waitUntil(caches.keys().then(function(ad){
-    return Promise.all(ad.filter(function(k){ return k.indexOf('saha-medya-') === 0 && k !== MEDYA; })
+    return Promise.all(ad.filter(function(k){ return (k.indexOf('saha-medya-') === 0 && k !== MEDYA) || (k.indexOf('saha-varlik-') === 0 && k !== VARLIK); })
       .map(function(k){ return caches.delete(k); }));
   }).then(function(){ return self.clients.claim(); }));
 });
@@ -152,8 +152,29 @@ function medyaVer(istek){
   }).catch(function(){ return fetch(istek); });
 }
 
+/* 3) VARLIK ÖNBELLEĞİ (2026-10-26-E): uygulamanın kendi büyük dosyaları (ortak/ klasörü: oyuncu modelleri, simge yazı tipi,
+      ortak.js). Adreslerinde içerik sürümü (?v=...) vardır; aynı adres hiç değişmez, bu yüzden cihazdaki kopya doğrudan verilir
+      (ağa hiç gidilmez). Sürüm değişince yeni adres indirilir, aynı dosyanın eski sürümleri silinir. */
+var VARLIK = 'saha-varlik-v1';
+function _varlikMi(u){ try{ var x = new URL(u); return x.origin === self.location.origin && /\/ortak\//.test(x.pathname) && /[?&]v=/.test(x.search); }catch(e){ return false; } }
+function varlikVer(r){
+  return caches.open(VARLIK).then(function(c){
+    return c.match(r.url).then(function(h){
+      if(h) return h;
+      return fetch(r).then(function(y){
+        if(y && y.ok){
+          var yol = new URL(r.url).pathname, kopya = y.clone();
+          c.keys().then(function(ks){ ks.forEach(function(k){ try{ if(new URL(k.url).pathname === yol && k.url !== r.url) c.delete(k); }catch(e){} }); });
+          c.put(r.url, kopya).catch(function(){});
+        }
+        return y;
+      });
+    });
+  }).catch(function(){ return fetch(r); });
+}
 self.addEventListener('fetch', function(e){
   var r = e.request;
+  if(r.method === 'GET' && r.mode !== 'navigate' && _varlikMi(r.url)){ e.respondWith(varlikVer(r)); return; }
   if(r.method !== 'GET' || r.mode === 'navigate' || !_medyaMi(r.url)) return;   // diğer her şey tarayıcıya
   e.respondWith(medyaVer(r));
   e.waitUntil(taramaGerekirse().catch(function(){}));
