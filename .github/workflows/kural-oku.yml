@@ -1,0 +1,48 @@
+# Yayındaki Firebase kurallarını okur ve "canli-kurallar" dalına canli.rules.json olarak yazar (yayın YAPMAZ).
+# Konsoldan elle yapılan kural değişikliklerini depoya almak için: Actions > "Canli kurallari oku" > Run workflow.
+name: Canli kurallari oku
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/kural-oku.yml]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  oku:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Kurallari oku
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json" >/dev/null 2>&1 || true
+          cd "$RUNNER_TEMP" && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          node -e '
+            const {GoogleAuth}=require("google-auth-library"); const fs=require("fs");
+            (async()=>{
+              let t=fs.readFileSync(process.env.RUNNER_TEMP+"/sa.json","utf8"), SAJ;
+              try{ SAJ=JSON.parse(t); }catch(e){ SAJ=JSON.parse(t.replace(/\r?\n/g,"\\n")); }
+              const auth=new GoogleAuth({credentials:SAJ,scopes:["https://www.googleapis.com/auth/firebase.database","https://www.googleapis.com/auth/userinfo.email"]});
+              const tok=(await (await auth.getClient()).getAccessToken()).token;
+              const r=await fetch("https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/.settings/rules.json",{headers:{Authorization:"Bearer "+tok}});
+              const metin=await r.text();
+              if(!r.ok){ console.log("::error::Kurallar okunamadi: HTTP "+r.status); process.exit(1); }
+              fs.writeFileSync(process.env.RUNNER_TEMP+"/canli.rules.json", metin);
+              const temiz=x=>JSON.stringify(JSON.parse(x.replace(/\/\/.*$/mg,"")));
+              const ayni=temiz(metin)===temiz(fs.readFileSync(process.env.GITHUB_WORKSPACE+"/database.rules.json","utf8"));
+              console.log("::notice::Canli kurallar depodakiyle "+(ayni?"AYNI":"FARKLI")+" | "+metin.length+" karakter | "+new Date().toISOString());
+            })().catch(e=>{ console.log("::error::"+e.message); process.exit(1); });
+          '
+          rm -f "$RUNNER_TEMP/sa.json"
+      - name: canli-kurallar dalina yaz
+        run: |
+          cp "$RUNNER_TEMP/canli.rules.json" /tmp/canli.rules.json
+          git config user.name "github-actions"; git config user.email "actions@github.com"
+          git checkout --orphan canli-kurallar && git rm -rfq . && cp /tmp/canli.rules.json canli.rules.json
+          git add canli.rules.json && git commit -qm "Canli kurallar $(date -u +%FT%TZ)" && git push -f origin canli-kurallar
