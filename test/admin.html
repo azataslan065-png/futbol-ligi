@@ -153,7 +153,7 @@
 </script>
 <meta charset="UTF-8"/>
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=8890ab49"></script>
+<script src="ortak/ortak.js?v=3f013263"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -2418,8 +2418,20 @@ html.hafif-cihaz .pu-ort,html.hafif-cihaz .pu-etik{-webkit-backdrop-filter:none 
         <button class="btn bgh" onclick="previewVersionHistory()"> Önizle</button>
         <button class="btn bgh" onclick="exportVersionHistory()"> JSON Yedek İndir</button>
       </div>
-      <button class="btn bp" style="width:100%;margin-bottom:.6rem" onclick="openAddVersionForm()"> Yeni Sürüm Ekle</button>
+      <button class="btn bp" style="width:100%;margin-bottom:.6rem" onclick="openAddVersionForm()"> Yeni Sürüm Ekle</button>
       <div id="versionMgmtList"></div>
+    </div>
+    <!-- SAHA SÜRÜM NOTLARI (2026-10-30-B, kullanıcı: "Puan tablosundaki yenilikler sisteminin aynısını saha uygulaması içinde
+         uygula; admin, mevcut yenilikleri kendisi girecek"). Ayrı yol: sahaSurumNotlari = {versions:[{v,date,notes[]}], seeded}. -->
+    <div class="card" id="sahaSurumKart">
+      <div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.65rem;text-transform:uppercase;letter-spacing:.05em"> Sürüm Notları (SAHA "Yenilikler")</div>
+      <div style="font-size:.66rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">SAHA'daki "Yenilikler" ekranında görünen sürüm geçmişi. Listenin EN ÜSTÜNDEKİ sürüm güncel sürümdür; kullanıcı yeni bir sürüm eklendiğinde SAHA'ya girince notları bir kez kendiliğinden görür, sonra Ayarlar &gt; Destek &gt; Yenilikler'den açar. Puan Tablosu'nun notlarından ayrıdır.</div>
+      <div class="g2" style="margin-bottom:.4rem">
+        <button class="btn bgh" onclick="previewVersionHistory('saha')"> Önizle</button>
+        <button class="btn bgh" onclick="exportVersionHistory('saha')"> JSON Yedek İndir</button>
+      </div>
+      <button class="btn bp" style="width:100%;margin-bottom:.6rem" onclick="openAddVersionForm('saha')"> Yeni Sürüm Ekle</button>
+      <div id="sahaVersionMgmtList"></div>
     </div>
     <div class="card">
       <div style="font-size:.68rem;font-weight:800;color:var(--mu);margin-bottom:.65rem;text-transform:uppercase;letter-spacing:.05em"> Manuel Sıralama</div>
@@ -3340,7 +3352,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-30-A';
+window.APP_BUILD='2026-10-30-B';
 window.APP_SURUM='1.4.0';   // (2026-10-30-A) üç uygulamada ortak sürüm numarası
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true }); }catch(e){}   // yönetici geçebilir
 
@@ -20208,27 +20220,40 @@ db.ref('appVersionHistory').on('value',function(snap){
   }
   renderVersionMgmtList();
 });
-function getVersionHistory(){return _globalVersionHistory!==null?_globalVersionHistory:DEFAULT_VERSIONS;}
-function saveVersionHistory(vers){
+// (2026-10-30-B) SAHA notları ayrı yolda; h==='saha' ise o liste işlenir. Hiç kaydedilmemişse boş başlar (tohumlanmaz).
+var _sahaVersionHistory=null;
+db.ref('sahaSurumNotlari').on('value',function(snap){
+  var val=snap.val();
+  _sahaVersionHistory=val===null?[]:(Array.isArray(val)?val:(val.versions||[]));
+  renderVersionMgmtList('saha');
+},function(e){DiagSil('sahaSurumNotlari/oku',e);});
+function getVersionHistory(h){
+  if(h==='saha')return _sahaVersionHistory||[];
+  return _globalVersionHistory!==null?_globalVersionHistory:DEFAULT_VERSIONS;
+}
+function saveVersionHistory(vers,h){
+  if(h==='saha')return db.ref('sahaSurumNotlari').set({versions:vers,seeded:true}).then(function(){_sahaVersionHistory=vers;});
   return db.ref('appVersionHistory').set({versions:vers,seeded:true}).then(function(){_globalVersionHistory=vers;}).catch(function(e){console.error('Sürüm geçmişi kaydedilemedi:',e);});
 }
+function _vhArg(h){return h==='saha'?",'saha'":'';}
 // KULLANICI TALEBİ: Sürüm geçmişini JSON olarak indirebilme (yanlışlıkla silinirse geri
 // yüklenebilsin diye basit bir yedek).
-function exportVersionHistory(){
-  var data=JSON.stringify(getVersionHistory(),null,2);
+function exportVersionHistory(h){
+  var data=JSON.stringify(getVersionHistory(h),null,2);
   var blob=new Blob([data],{type:'application/json'});
   var url=URL.createObjectURL(blob);
   var a=document.createElement('a');
-  a.href=url;a.download='surum-notlari-yedek-'+new Date().toISOString().slice(0,10)+'.json';
+  a.href=url;a.download=(h==='saha'?'saha-':'')+'surum-notlari-yedek-'+new Date().toISOString().slice(0,10)+'.json';
   document.body.appendChild(a);a.click();a.remove();
   setTimeout(function(){URL.revokeObjectURL(url);},2000);
   toast(' JSON yedek indirildi');
 }
 // KULLANICI TALEBİ: Admin, kaydetmeden önce Puan Tablosu'nda "Yenilikler" ekranının nasıl
 // görüneceğini önizleyebilir.
-function previewVersionHistory(){
-  var vers=getVersionHistory();
-  var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.7rem;text-align:center"> Puan Tablosu\'nda böyle görünecek</div>'
+function previewVersionHistory(h){
+  var vers=getVersionHistory(h);
+  var html='<div style="font-size:.7rem;color:var(--mu);margin-bottom:.7rem;text-align:center"> '+(h==='saha'?'SAHA\'da':'Puan Tablosu\'nda')+' böyle görünecek</div>'
+    +(vers.length?'':'<div style="text-align:center;color:var(--mu);padding:1rem;font-size:.74rem">Henüz sürüm notu yok</div>')
     +vers.map(function(ver,i){
       return '<div style="width:100%;display:flex;align-items:center;gap:.6rem;padding:.65rem .8rem;background:var(--s2);border:1px solid var(--br);border-radius:12px;margin-bottom:.4rem">'
         +'<span style="background:linear-gradient(135deg,#7c3aed,#a78bfa);color:#fff;border-radius:8px;padding:.25rem .6rem;font-size:.74rem;font-weight:800;flex-shrink:0">'+ver.v+'</span>'
@@ -20237,13 +20262,13 @@ function previewVersionHistory(){
     }).join('');
   openSheet(' Yenilikler Önizleme',html, 'previewVersionHistory');
 }
-function renderVersionMgmtList(){
-  var el=qs('versionMgmtList');if(!el)return;
-  var vers=getVersionHistory();
+function renderVersionMgmtList(h){
+  var el=qs(h==='saha'?'sahaVersionMgmtList':'versionMgmtList');if(!el)return;
+  var vers=getVersionHistory(h), _a=_vhArg(h);
   // Ortak denetim (bkz. admListeDegisti): sürüm listesi veri değişmediği hâlde her senkronda
   // yeniden yazılıyordu - DOM fırtınasına katkı veren kaynaklardan biri.
   if(!admListeDegisti(el,vers))return;
-  if(!vers.length){el.innerHTML='<div style="text-align:center;color:var(--mu);padding:1rem;font-size:.74rem">Sürüm listesi boş (tamamen silindi). Puan Tablosu\'nda "Yenilikler" ekranı da boş görünecektir.</div>';return;}
+  if(!vers.length){el.innerHTML='<div style="text-align:center;color:var(--mu);padding:1rem;font-size:.74rem">'+(h==='saha'?'Henüz SAHA sürüm notu yok. "Yeni Sürüm Ekle" ile ilk notları girin.':'Sürüm listesi boş (tamamen silindi). Puan Tablosu\'nda "Yenilikler" ekranı da boş görünecektir.')+'</div>';return;}
   el.innerHTML=vers.map(function(ver,i){
     return '<div style="padding:.55rem .65rem;background:var(--s2);border-radius:11px;margin-bottom:.4rem">'
       +'<div style="display:flex;justify-content:space-between;align-items:center">'
@@ -20252,45 +20277,45 @@ function renderVersionMgmtList(){
       +'</div>'
       +'<div style="font-size:.64rem;color:var(--mu);margin-top:.25rem">'+(ver.notes?ver.notes.length:0)+' madde</div>'
       +'<div style="display:flex;gap:.4rem;margin-top:.4rem">'
-      +'<button onclick="openEditVersionForm('+i+')" style="flex:1;min-height:32px;background:rgba(124,58,237,.2);color:#6d28d9;font-weight:800;border:1px solid rgba(124,58,237,.3);border-radius:8px;padding:.3rem;font-size:.64rem;font-weight:700;cursor:pointer"> Düzenle</button>'
-      +'<button onclick="deleteVersionEntry('+i+')" style="flex:1;min-height:32px;background:rgba(239,68,68,.2);color:#b91c1c;font-weight:800;border:1px solid rgba(239,68,68,.45);border-radius:8px;padding:.4rem;font-size:.64rem;font-weight:700;cursor:pointer"> Sil</button>'
+      +'<button onclick="openEditVersionForm('+i+_a+')" style="flex:1;min-height:32px;background:rgba(124,58,237,.2);color:#6d28d9;font-weight:800;border:1px solid rgba(124,58,237,.3);border-radius:8px;padding:.3rem;font-size:.64rem;font-weight:700;cursor:pointer"> Düzenle</button>'
+      +'<button onclick="deleteVersionEntry('+i+_a+')" style="flex:1;min-height:32px;background:rgba(239,68,68,.2);color:#b91c1c;font-weight:800;border:1px solid rgba(239,68,68,.45);border-radius:8px;padding:.4rem;font-size:.64rem;font-weight:700;cursor:pointer"> Sil</button>'
       +'</div></div>';
   }).join('')||'<div style="text-align:center;color:var(--mu);padding:1rem;font-size:.78rem">Henüz sürüm kaydı yok</div>';
 }
 // (Not: Sürüm numarasına göre erişim kapatma sistemi kaldırıldı - admin'in manuel girdiği
 // sürüm numarası kesin bir yapı oluşturmadığı için güvenilir çalışmıyordu, kullanıcı talebi
 // üzerine tamamen kaldırıldı.)
-function openAddVersionForm(){
+function openAddVersionForm(h){
   var html='<div style="font-size:.72rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Yeni sürüm listenin EN ÜSTÜNE eklenir ve "güncel sürüm" olur.</div>'
     +'<div class="field"><span class="lbl">Sürüm Numarası</span><input id="verNumInp" placeholder="Örn: v3.5.0"/></div>'
     +'<div class="field" style="margin-top:.4rem"><span class="lbl">Tarih / Yıl</span><input id="verDateInp" placeholder="Örn: 2026" value="'+new Date().getFullYear()+'"/></div>'
     +'<div class="field" style="margin-top:.4rem"><span class="lbl">Güncelleme Notları (her satır ayrı madde)</span><textarea id="verNotesInp" rows="6" placeholder="Her satıra bir yenilik yazın..." style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.5rem .6rem;font-size:.78rem;color:var(--tx);font-family:Outfit,sans-serif;resize:vertical"></textarea></div>'
-    +'<button class="btn bp" style="width:100%;margin-top:.55rem" onclick="saveNewVersion()"> Sürümü Ekle</button>';
-  openSheet(' Yeni Sürüm Ekle',html, 'openAddVersionForm');
+    +'<button class="btn bp" style="width:100%;margin-top:.55rem" onclick="saveNewVersion('+(h==='saha'?"'saha'":'')+')"> Sürümü Ekle</button>';
+  openSheet(h==='saha'?' Yeni SAHA Sürümü Ekle':' Yeni Sürüm Ekle',html, 'openAddVersionForm');
 }
-function saveNewVersion(){
+function saveNewVersion(h){
   var v=qs('verNumInp')?qs('verNumInp').value.trim():'';
   var date=qs('verDateInp')?qs('verDateInp').value.trim():'';
   var notesRaw=qs('verNotesInp')?qs('verNotesInp').value:'';
   if(!v){toast(' Sürüm numarası giriniz','er');return;}
   var notes=notesRaw.split('\n').map(function(s){return s.trim();}).filter(Boolean);
   if(!notes.length){toast(' En az bir güncelleme notu giriniz','er');return;}
-  var vers=getVersionHistory().slice();
+  var vers=getVersionHistory(h).slice();
   vers.unshift({v:v,date:date,notes:notes});
-  saveVersionHistory(vers).then(function(){closeSheet();renderVersionMgmtList();logAction(' Yeni sürüm eklendi: '+v);toast(' '+v+' eklendi ve güncel sürüm oldu');})
+  saveVersionHistory(vers,h).then(function(){closeSheet();renderVersionMgmtList(h);logAction(' Yeni sürüm eklendi: '+v);toast(' '+v+' eklendi ve güncel sürüm oldu');})
     .catch(function(e){toast(' Kaydedilemedi: '+(e&&e.message||'hata'),'er');});
 }
-function openEditVersionForm(idx){
-  var vers=getVersionHistory();
+function openEditVersionForm(idx,h){
+  var vers=getVersionHistory(h);
   var ver=vers[idx];if(!ver)return;
   var html='<div class="field"><span class="lbl">Sürüm Numarası</span><input id="verNumInp" value="'+(ver.v||'').replace(/"/g,'&quot;')+'"/></div>'
     +'<div class="field" style="margin-top:.4rem"><span class="lbl">Tarih / Yıl</span><input id="verDateInp" value="'+(ver.date||'').replace(/"/g,'&quot;')+'"/></div>'
     +'<div class="field" style="margin-top:.4rem"><span class="lbl">Güncelleme Notları (her satır ayrı madde)</span><textarea id="verNotesInp" rows="8" style="width:100%;background:var(--s2);border:1.5px solid var(--br);border-radius:9px;padding:.5rem .6rem;font-size:.78rem;color:var(--tx);font-family:Outfit,sans-serif;resize:vertical">'+(ver.notes||[]).join('\n')+'</textarea></div>'
-    +'<button class="btn bp" style="width:100%;margin-top:.55rem" onclick="saveEditVersion('+idx+')"> Kaydet</button>';
+    +'<button class="btn bp" style="width:100%;margin-top:.55rem" onclick="saveEditVersion('+idx+_vhArg(h)+')"> Kaydet</button>';
   openSheet(' Sürümü Düzenle',html, 'openEditVersionForm');
 }
-function saveEditVersion(idx){
-  var vers=getVersionHistory().slice();
+function saveEditVersion(idx,h){
+  var vers=getVersionHistory(h).slice();
   if(!vers[idx])return;
   var v=qs('verNumInp')?qs('verNumInp').value.trim():'';
   var date=qs('verDateInp')?qs('verDateInp').value.trim():'';
@@ -20299,16 +20324,16 @@ function saveEditVersion(idx){
   var notes=notesRaw.split('\n').map(function(s){return s.trim();}).filter(Boolean);
   if(!notes.length){toast(' En az bir güncelleme notu giriniz','er');return;}
   vers[idx]=Object.assign({},vers[idx],{v:v,date:date,notes:notes});
-  saveVersionHistory(vers).then(function(){closeSheet();renderVersionMgmtList();logAction(' Sürüm güncellendi: '+v);toast(' Güncellendi');})
+  saveVersionHistory(vers,h).then(function(){closeSheet();renderVersionMgmtList(h);logAction(' Sürüm güncellendi: '+v);toast(' Güncellendi');})
     .catch(function(e){toast(' Kaydedilemedi: '+(e&&e.message||'hata'),'er');});
 }
-function deleteVersionEntry(idx){
-  var vers=getVersionHistory();
+function deleteVersionEntry(idx,h){
+  var vers=getVersionHistory(h);
   var ver=vers[idx];if(!ver)return;
   dlg('','Sürümü Sil',ver.v+' sürüm kaydı kalıcı olarak silinecek.','Sil','dor').then(function(ok){
     if(!ok)return;
     var newVers=vers.slice();newVers.splice(idx,1);
-    saveVersionHistory(newVers).then(function(){renderVersionMgmtList();logAction(' Sürüm silindi: '+ver.v);toast(' Silindi');})
+    saveVersionHistory(newVers,h).then(function(){renderVersionMgmtList(h);logAction(' Sürüm silindi: '+ver.v);toast(' Silindi');})
       .catch(function(e){toast(' Silinemedi: '+(e&&e.message||'hata'),'er');});
   });
 }

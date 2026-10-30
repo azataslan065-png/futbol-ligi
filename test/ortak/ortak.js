@@ -562,3 +562,72 @@ var SahaGuncelleme = (function(){
   }
   return { karsilastir:karsilastir, baslat:baslat, guncelle:guncelle, durum:function(){ return _min; } };
 })();
+/* ═══ DOSYA YÜKLEME (2026-10-30-B) ═════════════════════════════════════════════════════════════════════════════
+   SAHA geri bildirimine fotoğraf/video eklemek için (Puan Tablosu'ndaki uploadImageToSupabase/uploadVideoToSupabase ile
+   aynı Supabase deposu ve aynı yol: videos/feedback/...). Ham XMLHttpRequest: gerçek yükleme yüzdesi okunur. Fotoğraf
+   tuvalle küçültülüp JPEG'e çevrilir (sonuç sınırı aşarsa kalite düşürülerek yeniden denenir). Hepsi Promise döndürür. */
+var SahaYukleme = (function(){
+  var URLK = 'https://oasyhelzshbehnpyrssw.supabase.co', ANAHTAR = 'sb_publishable_DxSYVhhxvfVw_yAA7xkS6A_s1Usv41C', KOVA = 'videos';
+  function yolAdi(klasor, uzanti){ return (klasor || 'genel') + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + uzanti; }
+  function gonder(blob, yol, tur, ilerleme){
+    return new Promise(function(coz, red){
+      var x = new XMLHttpRequest(), acik = URLK + '/storage/v1/object/public/' + KOVA + '/' + yol, bitti = false;
+      var son = function(e, u){ if(bitti) return; bitti = true; clearTimeout(z); e ? red(e) : coz(u); };
+      var z = setTimeout(function(){ try{ x.abort(); }catch(e){} son(new Error('sunucu yanıt vermedi, tekrar dene')); }, 240000);
+      x.open('POST', URLK + '/storage/v1/object/' + KOVA + '/' + yol, true);
+      x.setRequestHeader('Authorization', 'Bearer ' + ANAHTAR); x.setRequestHeader('apikey', ANAHTAR);
+      x.setRequestHeader('Content-Type', tur); x.setRequestHeader('x-upsert', 'false');
+      if(x.upload && ilerleme){
+        x.upload.onprogress = function(e){ if(e.lengthComputable) try{ ilerleme(e.loaded / e.total); }catch(_e){} };
+        x.upload.onloadend = function(){ try{ ilerleme(1); }catch(_e){}
+          // Yanıt kaybolursa (mobil ağ) dosya sunucuda mı diye bakılır; oradaysa başarılı sayılır.
+          setTimeout(function dene(){ if(bitti) return; fetch(acik, { method:'HEAD', cache:'no-store' }).then(function(r){ if(r.ok){ try{ x.abort(); }catch(e){} son(null, acik); } else setTimeout(dene, 15000); }, function(){ setTimeout(dene, 15000); }); }, 45000); };
+      }
+      x.onload = function(){ if(x.status >= 200 && x.status < 300) son(null, acik);
+        else { var m = 'Yükleme başarısız (HTTP ' + x.status + ')'; try{ var j = JSON.parse(x.responseText); if(j && j.message) m = j.message; }catch(e){} son(new Error(m)); } };
+      x.onerror = function(){ son(new Error('bağlantı hatası, internetini kontrol et')); };
+      x.onabort = function(){ son(new Error('yükleme iptal edildi')); };
+      x.send(blob);
+    });
+  }
+  function resim(dosya, klasor, o){
+    o = o || {};
+    return new Promise(function(coz, red){
+      if(!dosya) return red(new Error('Dosya seçilmedi'));
+      if(!(dosya.type || '').match(/^image\//) && !/\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(dosya.name || '')) return red(new Error((dosya.name || 'Dosya') + ' bir resim değil'));
+      if(dosya.size > 60 * 1048576) return red(new Error('Fotoğraf çok büyük (en fazla 60 MB)'));
+      var u = URL.createObjectURL(dosya), img = new Image();
+      img.onload = function(){
+        URL.revokeObjectURL(u);
+        var en = o.maxDim || 900, k = Math.min(1, en / Math.max(img.width, img.height)), c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * k)); c.height = Math.max(1, Math.round(img.height * k));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        var sinir = (o.maxMB || 15) * 1048576;
+        var kodla = function(q, n){ c.toBlob(function(b){
+          if(!b) return red(new Error('Fotoğraf işlenemedi'));
+          if(b.size > sinir && n < 3) return kodla(Math.max(.4, q - .18), n + 1);
+          if(b.size > sinir) return red(new Error('Fotoğraf küçültüldükten sonra bile çok büyük'));
+          gonder(b, yolAdi(klasor, 'jpg'), 'image/jpeg', o.ilerleme).then(coz, red);
+        }, 'image/jpeg', q); };
+        kodla(o.quality || .78, 0);
+      };
+      img.onerror = function(){ URL.revokeObjectURL(u); red(new Error((dosya.name || 'Fotoğraf') + ' açılamadı; JPEG ya da PNG dene')); };
+      img.src = u;
+    });
+  }
+  function video(dosya, klasor, o){
+    o = o || {};
+    return new Promise(function(coz, red){
+      if(!dosya || !(dosya.type || '').match(/^video\//)) return red(new Error('Geçerli bir video seçilmedi'));
+      var mb = o.maxMB || 50; if(dosya.size > mb * 1048576) return red(new Error('Video en fazla ' + mb + ' MB olabilir'));
+      var uz = ((dosya.name || '').split('.').pop() || 'mp4').replace(/[^a-zA-Z0-9]/g, '').slice(0, 6) || 'mp4';
+      var yukle = function(){ gonder(dosya, yolAdi(klasor, uz), dosya.type, o.ilerleme).then(coz, red); };
+      if(!o.maxSn) return yukle();
+      var v = document.createElement('video'); v.preload = 'metadata';
+      v.onloadedmetadata = function(){ URL.revokeObjectURL(v.src); if(v.duration > o.maxSn) return red(new Error('Video en fazla ' + o.maxSn + ' saniye olabilir')); yukle(); };
+      v.onerror = function(){ red(new Error('Video okunamadı, başka bir video dene')); };
+      v.src = URL.createObjectURL(dosya);
+    });
+  }
+  return { resim:resim, video:video };
+})();

@@ -119,7 +119,14 @@ const { ref, set, update, get, remove, runTransaction } = require('firebase/data
   await bek('Genel sohbete yazılır', true, () => set(ref(anon, T + 'paylasilan/genelSohbet/g1'), { text: 'x' }));
   await bek('Kullanıcı TV kanallarını değiştiremez', false, () => set(ref(anon, T + 'paylasilan/tvKanallari/k1'), { ad: 'x' }));
   await bek('Dal kaydı yazılır', true, () => set(ref(anon, T + '_dalKaydi/leagues'), 1));
-  // 8) Kök (yayındaki eski sürüm) değişmedi
+  // 8) SAHA sürüm notları ve geri bildirim eki (2026-10-30-B)
+  await bek('Kullanıcı SAHA sürüm notlarını değiştiremez', false, () => set(ref(ali, T + 'sahaSurumNotlari'), { versions: [] }));
+  await bek('Yönetici SAHA sürüm notlarını yazar', true, () => set(ref(admin, T + 'sahaSurumNotlari'), { versions: [{ v: '1.4.0', date: '2026', notes: ['x'] }], seeded: true }));
+  await bek('Herkes SAHA sürüm notlarını okur', true, () => get(ref(anon, T + 'sahaSurumNotlari')));
+  await bek('Kök: yönetici SAHA sürüm notlarını yazar', true, () => set(ref(admin, 'sahaSurumNotlari'), { versions: [], seeded: true }));
+  await bek('Kök: kullanıcı SAHA sürüm notlarını yazamaz', false, () => set(ref(anon, 'sahaSurumNotlari'), { versions: [] }));
+  await bek('Fotoğraflı geri bildirim yazılır', true, () => set(ref(ali, T + 'sahaVeri/leagues/L1/feedback/fb2'), { user: 'Ali', uid: 'v_ali', text: 'x', photo: 'https://x/y.jpg', ts: 1, status: 'pending' }));
+  // 9) Kök (yayındaki eski sürüm) değişmedi
   await bek('Kök: eski kural aynen (anonim kendi alanına yazar)', true, () => set(ref(anon, 'kullanicilar/v_kok/para'), 6));
   const satir = sonuc.join('\n');
   console.log(satir);
