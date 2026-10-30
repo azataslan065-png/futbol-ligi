@@ -502,3 +502,63 @@ var SahaKimlik = (function(){
   return { eposta:eposta, sifre:sifre, sha256:sha256, ortam:ortam, sentetikMi:sentetikMi, adminOturumuMu:adminOturumuMu,
            giris:giris, olustur:olustur, sifreDegistir:sifreDegistir, yoneticiSifirla:yoneticiSifirla, yeniSifreBelirle:yeniSifreBelirle, oturumBuProfil:oturumBuProfil, cikis:cikis };
 })();
+/* ═══ ZORUNLU GÜNCELLEME (2026-10-30-A, V1.4.0) ══════════════════════════════════════════════════════════════════
+   Yönetici admin panelinden globalConfig/minSurum = { build:'YYYY-AA-GG-H', mesaj, ts } yazar. Yüklü sürümü (APP_BUILD) bundan
+   eski olan Puan Tablosu, SAHA ve admin ekranı "Güncelle" ekranı gösterir. Güncelle: medya dışındaki önbellekleri siler, servis
+   çalışanını yeniler, sayfayı ağdan zorla çekip yeniden yükler. secenek.ertele() true döndükçe (ör. SAHA'da maç sürerken) ekran
+   açılmaz, 5 sn'de bir yeniden bakılır. secenek.gecilebilir: "Şimdilik geç" düğmesi (yalnızca yönetici paneli). */
+var SahaGuncelleme = (function(){
+  function parca(b){ var m = /^(\d{4}-\d{2}-\d{2})-([A-Z]+)$/.exec(String(b || '').trim()); return m ? { t:m[1], h:m[2] } : null; }
+  // -1: a eski, 0: aynı ya da okunamadı, 1: a yeni. Harfler A..Z, sonra AA, AB ... (uzun olan yenidir).
+  function karsilastir(a, b){
+    var x = parca(a), y = parca(b); if(!x || !y) return 0;
+    if(x.t !== y.t) return x.t < y.t ? -1 : 1;
+    if(x.h.length !== y.h.length) return x.h.length < y.h.length ? -1 : 1;
+    return x.h < y.h ? -1 : (x.h > y.h ? 1 : 0);
+  }
+  var _min = null, _ov = null, _gecildi = null, _bekZ = 0, _o = {};
+  function esc(t){ return String(t == null ? '' : t).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
+  function guncelle(){
+    try{ var b = document.getElementById('sgGuncelleDug'); if(b){ b.disabled = true; b.textContent = 'Güncelleniyor…'; } }catch(e){}
+    var isler = [];
+    try{ if(window.caches) isler.push(caches.keys().then(function(ad){ return Promise.all(ad.filter(function(k){ return k.indexOf('saha-medya-') !== 0; }).map(function(k){ return caches.delete(k); })); })); }catch(e){}
+    try{ if(navigator.serviceWorker) isler.push(navigator.serviceWorker.getRegistrations().then(function(r){ return Promise.all(r.map(function(x){ return x.update().catch(function(){}); })); })); }catch(e){}
+    try{ isler.push(fetch(location.href, { cache:'reload', credentials:'same-origin' }).catch(function(){})); }catch(e){}
+    var bitti = false, git = function(){ if(bitti) return; bitti = true; try{ location.reload(); }catch(e){} };
+    Promise.all(isler.map(function(p){ return Promise.resolve(p).catch(function(){}); })).then(git, git);
+    setTimeout(git, 6000);
+  }
+  function kaldir(){ if(_ov){ try{ _ov.remove(); }catch(e){} _ov = null; } }
+  function goster(){
+    if(!_min || karsilastir(window.APP_BUILD, _min.build) >= 0 || _gecildi === _min.build){ kaldir(); return; }
+    try{ if(_o.ertele && _o.ertele()){ if(!_bekZ) _bekZ = setTimeout(function(){ _bekZ = 0; goster(); }, 5000); return; } }catch(e){}
+    if(!_ov){ _ov = document.createElement('div'); _ov.id = 'sahaGuncelleEkran'; document.body.appendChild(_ov); }
+    _ov.style.cssText = 'position:fixed;inset:0;z-index:2147483600;display:flex;align-items:center;justify-content:center;padding:20px;'
+      + 'background:rgba(6,12,9,.94);color:#eef2ee;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center';
+    _ov.innerHTML = '<div style="max-width:380px;width:100%">'
+      + '<div style="width:64px;height:64px;margin:0 auto 16px;border-radius:20px;background:#3f8a45;display:flex;align-items:center;justify-content:center">'
+      + '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></div>'
+      + '<div style="font-size:21px;font-weight:900;margin-bottom:8px">Yeni sürüm yayında</div>'
+      + '<div style="font-size:14px;line-height:1.55;opacity:.85;margin-bottom:6px">' + (_min.mesaj ? esc(_min.mesaj) : 'Bu sürüm artık desteklenmiyor. Devam etmek için uygulamayı güncelle.') + '</div>'
+      + '<div style="font-size:12px;opacity:.6;margin-bottom:18px">Yüklü: ' + esc(window.APP_BUILD || '?') + ' · Gerekli: ' + esc(_min.build) + '</div>'
+      + '<button id="sgGuncelleDug" type="button" style="width:100%;min-height:48px;border:0;border-radius:14px;background:#3f8a45;color:#fff;font-size:16px;font-weight:800;cursor:pointer">Şimdi güncelle</button>'
+      + (_o.gecilebilir ? '<button id="sgGecDug" type="button" style="width:100%;min-height:44px;margin-top:10px;border:1px solid rgba(255,255,255,.25);border-radius:14px;background:transparent;color:#eef2ee;font-size:14px;font-weight:700;cursor:pointer">Şimdilik geç (yönetici)</button>' : '')
+      + '<div style="font-size:11.5px;opacity:.55;margin-top:14px;line-height:1.5">Güncelleme birkaç saniye sürer; hesabın ve takımın etkilenmez.</div></div>';
+    _ov.querySelector('#sgGuncelleDug').onclick = guncelle;
+    var g = _ov.querySelector('#sgGecDug'); if(g) g.onclick = function(){ _gecildi = _min.build; kaldir(); };
+  }
+  // refFn: uygulamanın kendi (test/ önekini ekleyen) ref işlevi. Oturum açılmadan okuma reddedilirse yeniden denenir.
+  function baslat(refFn, secenek){
+    _o = secenek || {}; var deneme = 0;
+    var kur = function(){
+      try{
+        refFn('globalConfig/minSurum').on('value', function(sn){
+          var v = sn.val(); var b = v ? (typeof v === 'string' ? v : v.build) : null;
+          _min = b ? { build:String(b), mesaj:(v && v.mesaj) || '' } : null; goster();
+        }, function(){ deneme++; if(deneme <= 40) setTimeout(kur, Math.min(15000, 1500 * deneme)); });
+      }catch(e){ deneme++; if(deneme <= 40) setTimeout(kur, Math.min(15000, 1500 * deneme)); }
+    };
+    kur();
+  }
+  return { karsilastir:karsilastir, baslat:baslat, guncelle:guncelle, durum:function(){ return _min; } };
+})();

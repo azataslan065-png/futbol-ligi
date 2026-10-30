@@ -93,7 +93,13 @@ const { ref, set, update, get, remove, runTransaction } = require('firebase/data
   await bek('Sahipsiz takımlı maçı onaylı kullanıcı oynar', true, () => set(ref(veli, T + 'sahaVeri/leagues/L1/matches/m2/awayGoals'), 1));
   await bek('Onaysız maça kimse skor yazamaz', false, () => set(ref(ali, T + 'sahaVeri/leagues/L1/matches/m3/homeGoals'), 3));
   await bek('Herkes maça yorum yazabilir', true, () => set(ref(anon, T + 'sahaVeri/leagues/L1/matches/m1/comments/c1'), { text: 'x' }));
-  // 6) Kök (yayındaki eski sürüm) değişmedi
+  // 6) Zorunlu güncelleme ve SAHA sorun bildirimi (2026-10-30-A)
+  await bek('Kullanıcı zorunlu sürümü değiştiremez', false, () => set(ref(ali, T + 'globalConfig/minSurum'), { build: '2020-01-01-A' }));
+  await bek('Anonim bakım ayarını değiştiremez', false, () => set(ref(anon, T + 'globalConfig/maintenanceSaha'), { active: false }));
+  await bek('Yönetici zorunlu sürümü ayarlar', true, () => set(ref(admin, T + 'globalConfig/minSurum'), { build: '2026-10-30-A', ts: 1 }));
+  await bek('Herkes zorunlu sürümü okur', true, () => get(ref(anon, T + 'globalConfig/minSurum')));
+  await bek('SAHA kullanıcısı sorun bildirir', true, () => set(ref(ali, T + 'sahaVeri/leagues/L1/feedback/fb1'), { user: 'Ali', text: 'x', ts: 1, status: 'pending' }));
+  // 7) Kök (yayındaki eski sürüm) değişmedi
   await bek('Kök: eski kural aynen (anonim kendi alanına yazar)', true, () => set(ref(anon, 'kullanicilar/v_kok/para'), 6));
   const satir = sonuc.join('\n');
   console.log(satir);
