@@ -99,7 +99,27 @@ const { ref, set, update, get, remove, runTransaction } = require('firebase/data
   await bek('Yönetici zorunlu sürümü ayarlar', true, () => set(ref(admin, T + 'globalConfig/minSurum'), { build: '2026-10-30-A', ts: 1 }));
   await bek('Herkes zorunlu sürümü okur', true, () => get(ref(anon, T + 'globalConfig/minSurum')));
   await bek('SAHA kullanıcısı sorun bildirir', true, () => set(ref(ali, T + 'sahaVeri/leagues/L1/feedback/fb1'), { user: 'Ali', text: 'x', ts: 1, status: 'pending' }));
-  // 7) Kök (yayındaki eski sürüm) değişmedi
+  // 7) Yönetici dalları ve lig ayrıntıları kökle aynı sıkılıkta (2026-10-30-B)
+  await bek('Kullanıcı kendini yönetici yapamaz', false, () => set(ref(kotu, T + 'admins/UX'), true));
+  await bek('Kullanıcı sezon listesini değiştiremez', false, () => set(ref(kotu, T + 'sahaVeri/leaguesMeta/L9'), { name: 'x' }));
+  await bek('Kullanıcı aktif ligi değiştiremez', false, () => set(ref(ali, T + 'sahaVeri/activeDisplayLeague'), 'L9'));
+  await bek('Kullanıcı teşhis bayrağını açamaz', false, () => set(ref(anon, T + 'diagnostics/flags/saha_oyun'), true));
+  await bek('Teşhis kaydı yazılır', true, () => set(ref(anon, T + 'diagnostics/logs/d1'), { m: 'x' }));
+  await bek('Kullanıcı marka ayarını değiştiremez', false, () => set(ref(anon, T + 'appBranding/name'), 'x'));
+  await bek('Yönetici marka ayarını değiştirir', true, () => set(ref(admin, T + 'appBranding/name'), 'SAHA'));
+  await bek('Kullanıcı takım adını değiştiremez', false, () => set(ref(kotu, T + 'sahaVeri/leagues/L1/teams/T1/name'), 'x'));
+  await bek('Kullanıcı yönetici hesap listesine yazamaz', false, () => set(ref(kotu, T + 'sahaVeri/leagues/L1/adminAccounts'), ['x']));
+  await bek('Kadro (squad) yazılır', true, () => set(ref(ali, T + 'sahaVeri/leagues/L1/teams/T1/squad'), { starting: ['a'] }));
+  await bek('Ziyaretçi kaydı yazılır', true, () => set(ref(anon, T + 'leagues/L1/visitors/v_ali'), { ts: 1 }));
+  await bek('Arşiv maçına yorum yazılır', true, () => set(ref(anon, T + 'leagues/L1/archives/0/matches/m1/comments/c1'), { text: 'x' }));
+  await bek('Takım sahibi formasını kaydeder', true, () => set(ref(ali, T + 'sahaFormalar/T1'), { ic: 'x', ts: 1 }));
+  await bek('Başkasının formasını değiştiremez', false, () => set(ref(veli, T + 'sahaFormalar/T1'), { ic: 'y', ts: 2 }));
+  await bek('Transfer akışına yeni kayıt', true, () => set(ref(ali, T + 'sahaTransferAkis/t1'), { tur: 'al', oyuncu: 'x', tutar: 5, ts: 1 }));
+  await bek('Transfer akışı kaydı değiştirilemez', false, () => set(ref(kotu, T + 'sahaTransferAkis/t1'), { tur: 'sat', oyuncu: 'y', tutar: 9, ts: 2 }));
+  await bek('Genel sohbete yazılır', true, () => set(ref(anon, T + 'paylasilan/genelSohbet/g1'), { text: 'x' }));
+  await bek('Kullanıcı TV kanallarını değiştiremez', false, () => set(ref(anon, T + 'paylasilan/tvKanallari/k1'), { ad: 'x' }));
+  await bek('Dal kaydı yazılır', true, () => set(ref(anon, T + '_dalKaydi/leagues'), 1));
+  // 8) Kök (yayındaki eski sürüm) değişmedi
   await bek('Kök: eski kural aynen (anonim kendi alanına yazar)', true, () => set(ref(anon, 'kullanicilar/v_kok/para'), 6));
   const satir = sonuc.join('\n');
   console.log(satir);
