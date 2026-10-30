@@ -516,10 +516,39 @@ var SahaGuncelleme = (function(){
     if(x.h.length !== y.h.length) return x.h.length < y.h.length ? -1 : 1;
     return x.h < y.h ? -1 : (x.h > y.h ? 1 : 0);
   }
-  var _min = null, _ov = null, _gecildi = null, _bekZ = 0, _o = {};
+  var _minYonetici = null, _sunucu = null, _min = null, _ov = null, _gecildi = null, _bekZ = 0, _o = {};
+  /* SUNUCUDAKİ SÜRÜM (2026-10-30-C, kullanıcı: "az önce yüklediğin dosya için hiçbir uygulama güncelleme istemedi"). KÖK SEBEP:
+     ekran yalnızca yönetici admin panelinden "en düşük sürüm" yazınca açılıyordu; dosya yüklemek tek başına hiçbir şeyi
+     tetiklemiyordu. ŞİMDİ: her uygulama, yanındaki surum.json dosyasına (GitHub her yüklemede dosyaların içindeki
+     APP_BUILD'den kendiliğinden üretir) açılışta, 10 dakikada bir ve uygulamaya geri dönüldüğünde bakar; sunucudaki
+     sürümü kendisininkinden yeniyse aynı güncelleme ekranını gösterir. Yöneticinin elle yazdığı en düşük sürüm de geçerli.
+     Önbellek eski dosyayı verirse sonsuz döngü olmasın diye aynı hedef için güncelleme 3 dakikada bir denenir. */
+  function hedefHesapla(){
+    var a = _minYonetici, b = _sunucu ? { build:_sunucu, mesaj:'' } : null;
+    _min = !a ? b : (!b ? a : (karsilastir(a.build, b.build) >= 0 ? a : b));
+  }
+  function sunucuIzle(dosya){
+    if(!dosya || !window.fetch) return;
+    var bak = function(){
+      try{
+        if(document.hidden) return;
+        fetch(new URL('surum.json?t=' + Date.now(), location.href).href, { cache:'no-store' })
+          .then(function(r){ return r.ok ? r.json() : null; })
+          .then(function(j){
+            var b = j && j[dosya]; if(!b || karsilastir(window.APP_BUILD, b) >= 0){ if(_sunucu){ _sunucu = null; hedefHesapla(); goster(); } return; }
+            var son = 0; try{ son = Number(sessionStorage.getItem('sg-denendi-' + b)) || 0; }catch(e){}
+            if(Date.now() - son < 180000) return;       // az önce bu sürüme güncellendi ama önbellek eskiyi verdi: biraz bekle
+            _sunucu = String(b); hedefHesapla(); goster();
+          }).catch(function(){});
+      }catch(e){}
+    };
+    setTimeout(bak, 8000); setInterval(bak, 600000);
+    document.addEventListener('visibilitychange', function(){ if(!document.hidden) bak(); });
+  }
   function esc(t){ return String(t == null ? '' : t).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
   function guncelle(){
     try{ var b = document.getElementById('sgGuncelleDug'); if(b){ b.disabled = true; b.textContent = 'Güncelleniyor…'; } }catch(e){}
+    try{ if(_min) sessionStorage.setItem('sg-denendi-' + _min.build, String(Date.now())); }catch(e){}
     var isler = [];
     try{ if(window.caches) isler.push(caches.keys().then(function(ad){ return Promise.all(ad.filter(function(k){ return k.indexOf('saha-medya-') !== 0; }).map(function(k){ return caches.delete(k); })); })); }catch(e){}
     try{ if(navigator.serviceWorker) isler.push(navigator.serviceWorker.getRegistrations().then(function(r){ return Promise.all(r.map(function(x){ return x.update().catch(function(){}); })); })); }catch(e){}
@@ -539,7 +568,7 @@ var SahaGuncelleme = (function(){
       + '<div style="width:64px;height:64px;margin:0 auto 16px;border-radius:20px;background:#3f8a45;display:flex;align-items:center;justify-content:center">'
       + '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></div>'
       + '<div style="font-size:21px;font-weight:900;margin-bottom:8px">Yeni sürüm yayında</div>'
-      + '<div style="font-size:14px;line-height:1.55;opacity:.85;margin-bottom:6px">' + (_min.mesaj ? esc(_min.mesaj) : 'Bu sürüm artık desteklenmiyor. Devam etmek için uygulamayı güncelle.') + '</div>'
+      + '<div style="font-size:14px;line-height:1.55;opacity:.85;margin-bottom:6px">' + (_min.mesaj ? esc(_min.mesaj) : 'Uygulamanın yeni sürümü yüklendi. Devam etmek için güncelle; birkaç saniye sürer.') + '</div>'
       + '<div style="font-size:12px;opacity:.6;margin-bottom:18px">Yüklü: ' + esc(window.APP_BUILD || '?') + ' · Gerekli: ' + esc(_min.build) + '</div>'
       + '<button id="sgGuncelleDug" type="button" style="width:100%;min-height:48px;border:0;border-radius:14px;background:#3f8a45;color:#fff;font-size:16px;font-weight:800;cursor:pointer">Şimdi güncelle</button>'
       + (_o.gecilebilir ? '<button id="sgGecDug" type="button" style="width:100%;min-height:44px;margin-top:10px;border:1px solid rgba(255,255,255,.25);border-radius:14px;background:transparent;color:#eef2ee;font-size:14px;font-weight:700;cursor:pointer">Şimdilik geç (yönetici)</button>' : '')
@@ -554,11 +583,12 @@ var SahaGuncelleme = (function(){
       try{
         refFn('globalConfig/minSurum').on('value', function(sn){
           var v = sn.val(); var b = v ? (typeof v === 'string' ? v : v.build) : null;
-          _min = b ? { build:String(b), mesaj:(v && v.mesaj) || '' } : null; goster();
+          _minYonetici = b ? { build:String(b), mesaj:(v && v.mesaj) || '' } : null; hedefHesapla(); goster();
         }, function(){ deneme++; if(deneme <= 40) setTimeout(kur, Math.min(15000, 1500 * deneme)); });
       }catch(e){ deneme++; if(deneme <= 40) setTimeout(kur, Math.min(15000, 1500 * deneme)); }
     };
     kur();
+    try{ sunucuIzle(_o.dosya); }catch(e){}
   }
   return { karsilastir:karsilastir, baslat:baslat, guncelle:guncelle, durum:function(){ return _min; } };
 })();
@@ -590,8 +620,28 @@ var SahaYukleme = (function(){
       x.send(blob);
     });
   }
+  // HEIC/HEIF (iPhone): tarayıcı açamazsa Puan Tablosu'ndaki aynı dönüştürücü (heic2any) yüklenip JPEG'e çevrilir.
+  var _heicBek = null;
+  function heicKutuphane(){
+    if(window.heic2any) return Promise.resolve();
+    if(_heicBek) return _heicBek;
+    return (_heicBek = new Promise(function(coz, red){
+      var s = document.createElement('script'); s.src = 'https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js';
+      s.onload = function(){ window.heic2any ? coz() : red(new Error('dönüştürücü yüklenemedi')); };
+      s.onerror = function(){ _heicBek = null; red(new Error('dönüştürücü indirilemedi (internetini kontrol et)')); };
+      document.head.appendChild(s);
+    }));
+  }
+  function heicCevir(dosya){
+    return heicKutuphane().then(function(){ return window.heic2any({ blob:dosya, toType:'image/jpeg', quality:.9 }); })
+      .then(function(c){ return Array.isArray(c) ? c[0] : c; });
+  }
   function resim(dosya, klasor, o){
     o = o || {};
+    if(dosya && (/\.(heic|heif)$/i.test(dosya.name || '') || /image\/hei[cf]/i.test(dosya.type || '')) && !o._cevrildi){
+      return heicCevir(dosya).then(function(b){ return resim(b, klasor, Object.assign({}, o, { _cevrildi:true })); },
+        function(){ return resim(dosya, klasor, Object.assign({}, o, { _cevrildi:true })); });   // dönüştürücü yoksa tarayıcı denensin
+    }
     return new Promise(function(coz, red){
       if(!dosya) return red(new Error('Dosya seçilmedi'));
       if(!(dosya.type || '').match(/^image\//) && !/\.(jpe?g|png|gif|webp|bmp|heic|heif|avif)$/i.test(dosya.name || '')) return red(new Error((dosya.name || 'Dosya') + ' bir resim değil'));

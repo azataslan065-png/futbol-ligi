@@ -169,7 +169,7 @@
 </script>
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=3f013263"></script>
+<script src="ortak/ortak.js?v=fd54e5d4"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-10-30-B</title>
+<title>SAHA — 3D Futbol v2026-10-30-C</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -12910,7 +12910,7 @@ function _sahaBakimDinle(){
     if(!fbHazir) return;
     // (2026-10-30-A) Zorunlu güncelleme: maç ya da izleme sürerken ekran açılmaz, maç bitince açılır.
     if(!window._sahaGuncelDinleniyor){ window._sahaGuncelDinleniyor = true;
-      try{ SahaGuncelleme.baslat(function(y){ return fbDb.ref(y); }, { ertele:sahaMacSuruyorMu }); }catch(e){ _sessiz(e, 'SahaGuncelleme', 'saha_ag'); } }
+      try{ SahaGuncelleme.baslat(function(y){ return fbDb.ref(y); }, { ertele:sahaMacSuruyorMu, dosya:'saha' }); }catch(e){ _sessiz(e, 'SahaGuncelleme', 'saha_ag'); } }
     try{ sahaSurumDinle(); }catch(e){}
     try{ if(benimUid && sahaLigId) sahaGbDinle(); }catch(e){}
     if(!window._sahaKureselBakimDinleniyor){
@@ -13990,7 +13990,8 @@ function menuGoster(){
     var sh = document.getElementById('p-shell');
     if(ps){ ps.classList.toggle('on', !girisli); ps.classList.toggle('giris-modu', !girisli); }
     if(sh) sh.classList.toggle('on', girisli);
-    if(girisli && !window._sahaYenilikZ) window._sahaYenilikZ = setTimeout(function(){ try{ sahaYenilikler(false); }catch(e){} }, 5000);
+    // (2026-10-30-C, kullanıcı: "yeni sürüm mevcutsa ilk girişte uyarı çıkıyor; kullanıcı kendisi kontrol etmeden uyarı
+    // çıkmasın"): Yenilikler artık kendiliğinden açılmaz; yalnızca Ayarlar > Destek'teki satırda "Yeni" rozeti görünür.
     var sr = document.getElementById('surumRozet');
     if(sr) sr.style.display = girisli ? 'none' : 'block';
 
@@ -14436,7 +14437,7 @@ function sahaSurumDinle(){
   fbDb.ref('sahaSurumNotlari').on('value', function(sn){
     var v = sn.val(); _sahaSurumler = v == null ? [] : (Array.isArray(v) ? v : (v.versions || []));
     _sahaSurumler = _sahaSurumler.filter(function(x){ return x && x.v; });
-    if(window._sahaYenilikZ === 'bekle') sahaYenilikler(false);
+    try{ if(document.querySelector('#shellMenu .sh-tab.on[data-s="ayar"]')) sayAyarCiz(); }catch(e){}
   }, function(){ window._sahaSurumDin = false; setTimeout(sahaSurumDinle, 3000); });
 }
 function _yenilikKategori(t){
@@ -14445,6 +14446,10 @@ function _yenilikKategori(t){
   if(/tasarım|görünüm|renk|stil|ikon/.test(t)) return { ad:'Tasarım', r:'#a78bfa' };
   if(/eklendi|sistemi|özelliği/.test(t)) return { ad:'Yeni Özellik', r:'#4ade80' };
   return { ad:'İyileştirme', r:'#60a5fa' };
+}
+function sahaYenilikYeniMi(){
+  var V = _sahaSurumler || []; if(!V.length) return false;
+  try{ return localStorage.getItem('saha-yenilik-gor') !== V[0].v; }catch(e){ return false; }
 }
 function sahaYenilikDetay(i){
   var V = _sahaSurumler || [], x = V[i]; if(!x) return;
@@ -14456,23 +14461,10 @@ function sahaYenilikDetay(i){
 }
 function sahaYenilikler(zorla){
   try{
+    if(!zorla) return;      // (2026-10-30-C) kendiliğinden açılmaz; kullanıcı Ayarlar > Destek > Yenilikler'den açar
     var V = _sahaSurumler;
-    if(!zorla){
-      if(V === null){ window._sahaYenilikZ = 'bekle'; return; }        // notlar gelince yeniden denenir
-      if(!V.length || !benimUid) return;
-      var anah = 'saha-yenilik-gor', gor = ''; try{ gor = localStorage.getItem(anah) || ''; }catch(e){}
-      if(gor === V[0].v) return;
-      // Rehber, başka bir pencere ya da maç açıksa üstüne binmez: kapanınca gösterilir (en çok 10 dk bekler).
-      var _acik = function(id){ var e = document.getElementById(id); return !!(e && getComputedStyle(e).display !== 'none'); };
-      if(sahaMacSuruyorMu() || _acik('rehberKutu') || _acik('sahaSoruKutu') || _acik('sahaGbPen')){
-        window._sahaYenilikDeneme = (window._sahaYenilikDeneme || 0) + 1;
-        if(window._sahaYenilikDeneme < 150) setTimeout(function(){ sahaYenilikler(false); }, 4000);
-        return;
-      }
-      try{ localStorage.setItem(anah, V[0].v); }catch(e){}
-      window._sahaYenilikZ = 'bitti';
-      sahaYenilikDetay(0); return;
-    }
+    try{ if(V && V[0]) localStorage.setItem('saha-yenilik-gor', V[0].v); }catch(e){}
+    try{ if(document.querySelector('#shellMenu .sh-tab.on[data-s="ayar"]')) setTimeout(sayAyarCiz, 0); }catch(e){}
     V = V || [];
     var g = V.length ? '<div class="sp-aciklama">Bir sürüme dokunarak güncelleme notlarını gör.</div>' + V.map(function(x, i){
         return '<button type="button" class="yn-satir" onclick="sahaYenilikDetay(' + i + ')"><span class="yn-v">' + esc(x.v) + '</span>'
@@ -17511,7 +17503,7 @@ function sayAyarCiz(){
   h += '<div class="sh-kart"><div class="sh-kart-bas">Destek</div>'
     + '<div class="sh-ayar"><div class="et">Geri bildirim gönder' + (window._sahaGbYeniYanit ? ' <span class="sh-yeni-rozet">' + window._sahaGbYeniYanit + ' yeni yanıt</span>' : '') + '<small>Hata ya da öneri; fotoğraf/video eklenebilir. Gönderdiklerin ve yanıtlar da burada</small></div>'
       + '<button type="button" onclick="sahaSorunBildir()">Aç</button></div>'
-    + '<div class="sh-ayar"><div class="et">Yenilikler<small>' + ((_sahaSurumler && _sahaSurumler[0]) ? 'Güncel: ' + esc(_sahaSurumler[0].v) : 'Sürüm notları') + ' · yüklü ' + esc(window.sahaSurumYazi ? sahaSurumYazi() : (window.APP_BUILD || '')) + '</small></div>'
+    + '<div class="sh-ayar"><div class="et">Yenilikler' + (sahaYenilikYeniMi() ? ' <span class="sh-yeni-rozet">Yeni</span>' : '') + '<small>' + ((_sahaSurumler && _sahaSurumler[0]) ? 'Güncel: ' + esc(_sahaSurumler[0].v) : 'Sürüm notları') + ' · yüklü ' + esc(window.sahaSurumYazi ? sahaSurumYazi() : (window.APP_BUILD || '')) + '</small></div>'
       + '<button type="button" onclick="sahaYenilikler(true)">Göster</button></div>'
     + '</div>';
 
@@ -20096,7 +20088,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-10-30-B';
+window.APP_BUILD='2026-10-30-C';
 window.APP_SURUM='1.4.0';   // (2026-10-30-A) üç uygulamada ortak sürüm numarası
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
 try{
