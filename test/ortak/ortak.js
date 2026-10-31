@@ -885,20 +885,21 @@ var SahaSes = (function(){
   var SESLER = { fahrettin:'Fahrettin', dfki:'Deniz', fettah:'Fettah' };
   var ROL = { spiker:'fahrettin', yorumcu:'dfki' }, HIZ = { spiker:1.08, yorumcu:0.94, anons:1 };
   var isci = null, hazir = {}, yuk = {}, bek = {}, n = 0, ctx = null, yuzde = {}, hata = '', dinleyici = [], calan = null, disBaglam = null, indir = 0;
-  var ON = {}, ONS = [], OLC = { adet:0, oran:null, son:null };   // OLC: üretim hızı (oran: üretim süresi / ses süresi; 1'in üstü cihaz yetişemiyor)   // üretilmiş sesler (aynı cümle tekrar üretilmez: özet, gol videosu, tekrar)
+  var ON = {}, ONS = [], OLC = { adet:0, oran:null, son:null, hiz:null };   // hiz: işçinin saf üretim süresi / ses süresi (ortalama)   // OLC: üretim hızı (oran: üretim süresi / ses süresi; 1'in üstü cihaz yetişemiyor)   // üretilmiş sesler (aynı cümle tekrar üretilmez: özet, gol videosu, tekrar)
   function kok(){ try{ return new URL('ortak/ses/', location.href).href; }catch(e){ return 'ortak/ses/'; } }
   function destek(){ try{ return !!(window.Worker && window.WebAssembly && window.caches && typeof BigInt64Array !== 'undefined'); }catch(e){ return false; } }
   function haber(){ dinleyici.forEach(function(f){ try{ f(); }catch(e){} }); }
   function baslat(){
     if(isci || !destek()) return !!isci;
     try{
-      isci = new Worker(kok() + 'ses-isci.js?v=2');
+      isci = new Worker(kok() + 'ses-isci.js?v=3');
       isci.onmessage = function(e){ var v = e.data || {};
         if(v.tip === 'ilerleme'){ yuzde[v.ses] = v.yuzde; haber(); return; }
         if(v.tip === 'hazir'){ hazir[v.ses] = true; yuzde[v.ses] = 100; indir = Math.max(0, indir - 1); var b = bek['y' + v.ses]; if(b){ delete bek['y' + v.ses]; b.c(); } haber(); return; }
         if(v.tip === 'hata' && v.ses && !v.id){ hata = v.mesaj; indir = Math.max(0, indir - 1); var b2 = bek['y' + v.ses]; if(b2){ delete bek['y' + v.ses]; b2.r(new Error(v.mesaj)); } yuk[v.ses] = null; haber(); return; }
         var w = bek[v.id]; if(!w) return; delete bek[v.id];
-        if(v.tip === 'ses') w.c({ pcm:v.pcm, hz:v.hz }); else w.r(new Error(v.mesaj || 'ses üretilemedi'));
+        if(v.tip === 'ses'){ try{ if(v.ms){ var hh = v.ms / 1000 / Math.max(0.3, v.pcm.length / v.hz); OLC.hiz = OLC.hiz == null ? hh : +(OLC.hiz * 0.6 + hh * 0.4).toFixed(2); } }catch(e){} w.c({ pcm:v.pcm, hz:v.hz }); }
+        else w.r(new Error(v.mesaj || 'ses üretilemedi'));
       };
       isci.onerror = function(e){ hata = (e && e.message) || 'ses işçisi çalışmadı'; haber(); };
     }catch(e){ isci = null; hata = e.message; }
@@ -937,8 +938,8 @@ var SahaSes = (function(){
     if(h >= 1) m = m.replace(/\.\s*$/, '!');
     return m;
   }
-  function istek(mt, s, hz, gr, gw){
-    var id = 'u' + (++n);
+  function istek(mt, s, hz, gr, gw, ids){
+    var id = 'u' + (++n); if(ids) ids.push(id);
     return new Promise(function(c, r){ bek[id] = { c:c, r:r }; isci.postMessage({ tip:'soyle', id:id, metin:mt, ses:s, hiz:hz, gurultu:gr, gw:gw });
       setTimeout(function(){ if(bek[id]){ delete bek[id]; r(new Error('ses zamanında üretilemedi')); } }, 20000); });
   }
@@ -955,14 +956,14 @@ var SahaSes = (function(){
     h = h == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, h | 0));
     var s = sesAdi(rol), H = HEY[h], hz = (HIZ[rol] || 1) * H.hiz, mt = metniHazirla(metin, h), an = s + '|' + h + '|' + mt;
     if(ON[an]) return ON[an];
-    var t0 = 0, cb = (h >= 2 && rol !== 'yorumcu') ? cigliBol(mt) : null;
+    var t0 = 0, cb = (h >= 2 && rol !== 'yorumcu') ? cigliBol(mt) : null, ids = [];
     var p = hazirla(rol).then(function(){ t0 = Date.now();
-      if(!cb) return istek(mt, s, hz, H.gr, H.gw);
+      if(!cb) return istek(mt, s, hz, H.gr, H.gw, ids);
       var parca = [];
-      if(cb.on) parca.push(istek(cb.on, s, hz, H.gr, H.gw));
-      parca.push(istek('Goooooool!', s, hz * 0.42, H.gr * 1.15, H.gw * 0.7));
-      if(cb.tekrar) parca.push(istek(cb.tekrar, s, hz * 1.05, H.gr, H.gw));
-      if(cb.geri) parca.push(istek(cb.geri, s, hz, H.gr, H.gw));
+      if(cb.on) parca.push(istek(cb.on, s, hz, H.gr, H.gw, ids));
+      parca.push(istek('Goooooool!', s, hz * 0.42, H.gr * 1.15, H.gw * 0.7, ids));
+      if(cb.tekrar) parca.push(istek(cb.tekrar, s, hz * 1.05, H.gr, H.gw, ids));
+      if(cb.geri) parca.push(istek(cb.geri, s, hz, H.gr, H.gw, ids));
       return Promise.all(parca).then(function(L){
         var hzx = L[0].hz, bosluk = Math.round(hzx * 0.14), top = 0, cIx = cb.on ? 1 : 0, cBas = 0, cSon = 0;
         L.forEach(function(x, i){ top += x.pcm.length + (i < L.length - 1 ? bosluk : 0); });
@@ -971,9 +972,33 @@ var SahaSes = (function(){
         return { pcm:o, hz:hzx, cig:[cBas / hzx, cSon / hzx] };
       });
     }).then(function(x){ x.h = h; try{ var sn = x.pcm.length / x.hz; OLC.son = { ms:Date.now() - t0, sn:+sn.toFixed(2) }; OLC.oran = +((Date.now() - t0) / 1000 / Math.max(0.3, sn)).toFixed(2); OLC.adet++; }catch(e){} return x; });
+    p._ids = ids; p.then(function(){ p._bitti = true; }, function(){ p._bitti = true; });
     ON[an] = p; ONS.push(an); if(ONS.length > 60) delete ON[ONS.shift()];
     p.catch(function(){ delete ON[an]; });
     return p;
+  }
+  /* İPTAL (2026-10-31-D): geç kalıp okunmayacak cümlenin üretimi, sırada bekliyorsa hiç başlamaz (telefonun vakti boşa gitmez). */
+  function birak(metin, rol, h){
+    try{ h = h == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, h | 0));
+      var an = sesAdi(rol) + '|' + h + '|' + metniHazirla(metin, h), p = ON[an];
+      if(p && !p._bitti){ (p._ids || []).forEach(function(id){ try{ isci.postMessage({ tip:'iptal', id:id }); }catch(e){} }); delete ON[an]; } }catch(e){}
+  }
+  /* HAZIR ÇIĞLIKLAR (2026-10-31-D, kullanıcı: "gizli sekmede yeni spiker çalışıyor fakat beraberinde robot da konuşuyor"). Teşhis kartı: bu telefonda
+     sinir ağı sesi, 3B oyun çalışırken cümleyi okuma süresinin 1-3 katında üretebiliyor - canlı anlatıma yetişemiyordu; geç kalan cümleler cihaz
+     sesiyle (robot) okunduğu için iki ses karışıyordu. ŞİMDİ: gol, kırmızı kart ve penaltı çığlıkları ses hazır olur olmaz bir kez önceden üretilir
+     ve olay anında BEKLEMEDEN çalar; cümlenin geri kalanı (oyuncu adı, skor) çığlık sürerken üretilir ve arkasından gelir. */
+  var BANKA = {}, BANKA_METIN = { gol:'Gooool! Gol gol gol!', kirmizi:'Kırmızı kart! Kırmızı!', penalti:'Penaltı! Penaltı!' };
+  function bankaHazirla(rol){
+    if(rol === 'yorumcu') return; var s = sesAdi(rol);
+    Object.keys(BANKA_METIN).forEach(function(k){ var a = s + '|' + k; if(!BANKA[a]){ BANKA[a] = tampon(BANKA_METIN[k], rol, 2); BANKA[a].then(function(b){ BANKA[a]._b = b; }, function(){ delete BANKA[a]; }); } });
+  }
+  function onEkBol(metin, rol, h){
+    if(rol === 'yorumcu' || h < 2) return null;
+    var mt = metniHazirla(metin, h), m;
+    if((m = /^(?:Ve |İşte |Ve vurdu, ve |Ne vuruş, ne gol! )?(?:Go+l+!\s*)+(.*)$/i.exec(mt))) return { k:'gol', geri:m[1] };
+    if((m = /^(?:Ve )?Kırmızı(?: kart)?!(?:\s*Kırmızı!)?\s*(.*)$/i.exec(mt))) return { k:'kirmizi', geri:m[1] };
+    if((m = /^(?:Ve )?Penaltı!(?:\s*Penaltı!)?\s*(.*)$/i.exec(mt))) return { k:'penalti', geri:m[1] };
+    return null;
   }
   function tampon(metin, rol, h){
     return uret(metin, rol, h).then(function(x){
@@ -1008,9 +1033,8 @@ var SahaSes = (function(){
   }
   var _egri = null;
   function egri(){ if(_egri) return _egri; var N = 1024, a = new Float32Array(N); for(var i = 0; i < N; i++){ var x = i / (N - 1) * 2 - 1; a[i] = Math.tanh(1.8 * x) / Math.tanh(1.8); } return (_egri = a); }
-  function cal(metin, rol, o){
-    o = o || {};
-    return tampon(metin, rol, o.heyecan).then(function(b){
+  function calB(b, o){
+    return Promise.resolve(b).then(function(b){
       var c0 = baglam(); if(!c0) throw new Error('ses çalınamıyor');
       return calisir(c0).then(function(c){ return new Promise(function(coz){
         var H = HEY[b._h || 0], k = c.createBufferSource(), son0 = c.createGain();
@@ -1034,10 +1058,25 @@ var SahaSes = (function(){
       }); });
     });
   }
+  function cal(metin, rol, o){
+    o = o || {};
+    var h = o.heyecan == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, o.heyecan | 0)), ob = onEkBol(metin, rol, h), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
+    if(bk && bk._b){
+      var geri = ob.geri ? tampon(ob.geri, rol, h) : null;      // çığlık çalarken geri kalanı üretilir
+      return calB(bk._b, o).then(function(){ if(!geri) return; return Promise.race([geri, new Promise(function(z, red){ setTimeout(function(){ red(new Error('geç')); }, 7000); })])
+        .then(function(b){ return calB(b, o); }, function(){ birak(ob.geri, rol, h); }); });
+    }
+    return calB(tampon(metin, rol, h), o);
+  }
+  function hazirBekle(metin, rol, h){   // çalmaya hazır mı (hazır çığlıkla başlayan cümle hemen hazırdır)
+    h = h == null ? heyecanBul(metin, rol) : h; var ob = onEkBol(metin, rol, h), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
+    if(bk && bk._b) return Promise.resolve(true);
+    return tampon(metin, rol, h).then(function(){ return true; });
+  }
   function sustur(){ try{ if(calan){ var k = calan; calan = null; k.stop(); } }catch(e){} }
   function ayarla(v){ v = v || {}; if(v.spiker && SESLER[v.spiker]) ROL.spiker = v.spiker; if(v.yorumcu && SESLER[v.yorumcu]) ROL.yorumcu = v.yorumcu; haber(); }
   return { destek:destek, hazirla:hazirla, hazirMi:hazirMi, cal:cal, tampon:tampon, sustur:sustur, ayarla:ayarla, sesler:SESLER,
     rolSesi:function(r){ return sesAdi(r); }, yuzde:function(r){ return yuzde[sesAdi(r)] || 0; }, hata:function(){ return hata; },
-    dinle:function(f){ dinleyici.push(f); }, baglam:baglam, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
+    dinle:function(f){ dinleyici.push(f); }, baglam:baglam, birak:birak, bankaHazirla:bankaHazirla, hazirBekle:hazirBekle, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
     heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return indir > 0; }, olcum:function(){ return OLC; } };
 })();

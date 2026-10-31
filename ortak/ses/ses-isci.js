@@ -62,7 +62,7 @@ function fonem(metin, dil){
     }, function(e){ if(!bitti){ bitti = true; red(e); } });
   });
 }
-var SIRA = Promise.resolve();
+var SIRA = Promise.resolve(), IPTAL = {};   // (2026-10-31-D) iptal edilen istek sıraya girmişse başlamadan atlanır
 function soyle(v){
   return yukle(v.ses).then(function(M){
     var cfg = M.cfg, inf = cfg.inference || {};
@@ -80,8 +80,11 @@ function soyle(v){
 self.onmessage = function(e){
   var v = e.data || {};
   if(v.tip === 'yukle'){ yukle(v.ses).then(function(){ self.postMessage({ tip:'hazir', ses:v.ses }); }, function(err){ self.postMessage({ tip:'hata', ses:v.ses, mesaj:String((err && err.message) || err) }); }); return; }
+  if(v.tip === 'iptal'){ IPTAL[v.id] = 1; return; }
   if(v.tip === 'soyle'){
-    SIRA = SIRA.then(function(){ return soyle(v).then(function(r){ var p = new Float32Array(r.pcm); self.postMessage({ tip:'ses', id:v.id, pcm:p, hz:r.hz }, [p.buffer]); },
+    SIRA = SIRA.then(function(){ if(IPTAL[v.id]){ delete IPTAL[v.id]; self.postMessage({ tip:'hata', id:v.id, mesaj:'iptal' }); return; }
+      var t0 = Date.now();
+      return soyle(v).then(function(r){ var p = new Float32Array(r.pcm); self.postMessage({ tip:'ses', id:v.id, pcm:p, hz:r.hz, ms:Date.now() - t0 }, [p.buffer]); },
       function(err){ self.postMessage({ tip:'hata', id:v.id, mesaj:String((err && err.message) || err) }); }); });
   }
 };
