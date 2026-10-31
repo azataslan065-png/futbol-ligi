@@ -169,7 +169,7 @@
 </script>
 <meta charset="UTF-8"/>
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=5b5d2389"></script>
+<script src="ortak/ortak.js?v=b2a20f45"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -3339,7 +3339,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-30-E';
+window.APP_BUILD='2026-10-31-A';
 window.APP_SURUM='1.4.0';   // (2026-10-30-A) üç uygulamada ortak sürüm numarası; ekranda "V1.4.0 (build)"
 try{ SahaGuncelleme.baslat(function(y){ return firebase.database().ref(y); }, { dosya:'index', giris:function(){ var e = document.getElementById('loginScreen'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // zorunlu güncelleme (ortak/ortak.js)
 
@@ -14396,15 +14396,21 @@ function ptMacOzetHtml(id,m,h,a){
            yüzünden yayını kendiliğinden SESSİZ başlatıyor; bu zorunlu sessizlik "kullanıcı sesi kapattı" sanılıp bütün anlatım atlanıyordu.
            Artık yalnızca kullanıcı sesi kendisi kapattıysa (ya da sesi sıfıra indirdiyse) anlatım susar. */
         if(_ist&&((_ist.mut&&window._ptpKullaniciSessiz)||_ist.vol<=0.01))continue;
-        /* (2026-10-30-D) SAHA artık kayıtlı spiker replikleri gönderir (k = dosya kimliği): sahadaki repliğin aynısı buradan çalınır. */
-        if(x.k){
-          konusuyor=true;
-          var a=new Audio('spiker/'+encodeURIComponent(x.k)+'.mp3'); a.volume=_ist?Math.max(0.05,Math.min(1,_ist.vol)):1;
-          var kb=false,kson=function(){if(kb)return;kb=true;konusuyor=false;window._ptSahaKlip=null;setTimeout(siradaki,200);};
-          a.onended=kson;a.onerror=kson;setTimeout(kson,16000);window._ptSahaKlip=a;
-          var pr=a.play();if(pr&&pr.catch)pr.catch(kson);
-          return;
-        }
+        /* (2026-10-31-A) DOĞAL SES: SAHA'daki gibi aynı metin Piper sesiyle (ortak/ortak.js SahaSes); hazır değilse arka planda
+           indirilir, bu sırada cihaz sesi. Spiker ve yorumcunun sesi yöneticinin seçtiğidir (sahaGorunum/ses). */
+        try{
+          if(window.SahaSes&&SahaSes.destek()){
+            ptSahaSesAyarOku();
+            var _r=x.r==='yorumcu'?'yorumcu':'spiker';
+            if(SahaSes.hazirMi(_r)){
+              konusuyor=true;
+              var _db=false,_ds=function(){if(_db)return;_db=true;konusuyor=false;setTimeout(siradaki,200);};
+              SahaSes.cal(x.m,_r,{duzey:_ist?Math.max(0.05,Math.min(1,_ist.vol)):1}).then(_ds,_ds);setTimeout(_ds,16000);
+              return;
+            }
+            if(!window._ptSesIstendi){window._ptSesIstendi=true;SahaSes.hazirla('spiker').then(function(){return SahaSes.hazirla('yorumcu');}).catch(function(){window._ptSesIstendi=false;});}
+          }
+        }catch(_e){}
         if(!window.speechSynthesis||!window.SpeechSynthesisUtterance)continue;
         var u=new SpeechSynthesisUtterance(x.m); u.lang='tr-TR'; if(_ist) u.volume=Math.max(0.05,Math.min(1,_ist.vol));
         var l=sesler(), er=l.filter(function(y){return y.erkek;});
@@ -14421,11 +14427,15 @@ function ptMacOzetHtml(id,m,h,a){
       return;
     }
   }
-  window.ptSahaKonus=function(m,r,k){
+  window.ptSahaSesAyarOku=function(){
+    if(window._ptSahaSesAyar)return; window._ptSahaSesAyar=true;
+    try{firebase.database().ref('sahaGorunum/ses').once('value').then(function(sn){var v=sn.val()||{};SahaSes.ayarla({spiker:v.spkSesSpiker,yorumcu:v.spkSesYorumcu});}).catch(function(){window._ptSahaSesAyar=false;});}catch(e){}
+  };
+  window.ptSahaKonus=function(m,r){
     try{
-      if(!k&&(!window.speechSynthesis||!window.SpeechSynthesisUtterance||!m))return;
+      if(!m||(!window.speechSynthesis&&!(window.SahaSes&&SahaSes.destek())))return;
       if(sira.length>=3)sira.shift();
-      sira.push({m:String(m||''),r:r||'anons',k:k||'',ts:Date.now()});
+      sira.push({m:String(m),r:r||'anons',ts:Date.now()});
       siradaki();
     }catch(e){self.__ds&&self.__ds(13817,e)}
   };
@@ -14437,8 +14447,8 @@ function ptMacOzetHtml(id,m,h,a){
       // Yalnızca kendi sitemizdeki SAHA çerçevesinden gelen mesaj kabul edilir.
       if(e.origin&&e.origin!==location.origin&&e.origin!=='null')return;
       // (2026-10-06-E) Özette pozisyon bitti: bekleyen ve süren cümle kesilir - spiker bir sonraki pozisyona taşmaz.
-      if(d.event==='sahaKonusKes'){sira=[];konusuyor=false;try{if(window.speechSynthesis)speechSynthesis.cancel();}catch(_c){}try{if(window._ptSahaKlip){window._ptSahaKlip.pause();window._ptSahaKlip=null;}}catch(_c){}return;}
-      window.ptSahaKonus(d.m,d.r,typeof d.k==='string'&&/^[A-Za-z0-9_]{3,40}$/.test(d.k)?d.k:'');
+      if(d.event==='sahaKonusKes'){sira=[];konusuyor=false;try{if(window.speechSynthesis)speechSynthesis.cancel();}catch(_c){}try{SahaSes.sustur();}catch(_c){}return;}
+      window.ptSahaKonus(d.m,d.r);
     }catch(err){self.__ds&&self.__ds(13829,err)}
   });
 })();
@@ -14450,7 +14460,6 @@ function ptMacOzetHtml(id,m,h,a){
   function kapat(){
     try{if(document.fullscreenElement&&document.exitFullscreen)document.exitFullscreen().catch(function(__e){self.__ds&&self.__ds(13838,__e)});}catch(e){self.__ds&&self.__ds(13838,e)}
     try{if(window.speechSynthesis)speechSynthesis.cancel();}catch(e){self.__ds&&self.__ds(13839,e)}
-    try{if(window._ptSahaKlip){window._ptSahaKlip.pause();window._ptSahaKlip=null;}}catch(e){}
     try{if(window.PTPlayer&&PTPlayer.isActive())PTPlayer.destroy();}catch(e){self.__ds&&self.__ds(13840,e)}
     window._ptAktifKanalId=null;
     try{var b=document.getElementById('ptOzetKapatBtn');if(b)b.remove();}catch(e){self.__ds&&self.__ds(13842,e)}

@@ -876,3 +876,81 @@ var SahaDestek = (function(){
   }
   return { yenilikler:yenilikler, detay:detay, geriBildirim:geriBildirim, gecmisYenile:gecmisYenile, pencere:pencere, ikon:IK, acikMi:function(id){ var e = document.getElementById(id); return !!(e && e.style.display !== 'none'); } };
 })();
+/* ═══ DOĞAL SPİKER SESİ (2026-10-31-A, kullanıcı: "hem insan sesi sunan hem de pozisyonu doğru okuyacak bir sistem geliştir").
+   Anlatım metni oyundaki olaydan kurulur (pozisyon doğru), cihazın robot sesi yerine Piper sinir ağı sesiyle (Türkçe, insan sesine
+   yakın) seslendirilir. Ses her cihazda aynıdır; sentez ayrı iş parçacığında yapılır (bkz. ortak/ses/ses-isci.js). Model bir kez
+   indirilir (~38 MB, önbellekte kalır). Hazır olana kadar ya da desteklenmeyen cihazda cihaz sesi kullanılır.
+   SahaSes.cal(metin, rol, {duzey}) → Promise (bitince) · SahaSes.tampon(metin, rol) → Promise<AudioBuffer> · SahaSes.hazirla(rol) */
+var SahaSes = (function(){
+  var SESLER = { fahrettin:'Fahrettin', dfki:'Deniz', fettah:'Fettah' };
+  var ROL = { spiker:'fahrettin', yorumcu:'dfki' }, HIZ = { spiker:1.08, yorumcu:0.94, anons:1 };
+  var isci = null, hazir = {}, yuk = {}, bek = {}, n = 0, ctx = null, yuzde = {}, hata = '', dinleyici = [], calan = null;
+  var ON = {}, ONS = [];   // üretilmiş sesler (aynı cümle tekrar üretilmez: özet, gol videosu, tekrar)
+  function kok(){ try{ return new URL('ortak/ses/', location.href).href; }catch(e){ return 'ortak/ses/'; } }
+  function destek(){ try{ return !!(window.Worker && window.WebAssembly && window.caches && typeof BigInt64Array !== 'undefined'); }catch(e){ return false; } }
+  function haber(){ dinleyici.forEach(function(f){ try{ f(); }catch(e){} }); }
+  function baslat(){
+    if(isci || !destek()) return !!isci;
+    try{
+      isci = new Worker(kok() + 'ses-isci.js?v=1');
+      isci.onmessage = function(e){ var v = e.data || {};
+        if(v.tip === 'ilerleme'){ yuzde[v.ses] = v.yuzde; haber(); return; }
+        if(v.tip === 'hazir'){ hazir[v.ses] = true; yuzde[v.ses] = 100; var b = bek['y' + v.ses]; if(b){ delete bek['y' + v.ses]; b.c(); } haber(); return; }
+        if(v.tip === 'hata' && v.ses && !v.id){ hata = v.mesaj; var b2 = bek['y' + v.ses]; if(b2){ delete bek['y' + v.ses]; b2.r(new Error(v.mesaj)); } yuk[v.ses] = null; haber(); return; }
+        var w = bek[v.id]; if(!w) return; delete bek[v.id];
+        if(v.tip === 'ses') w.c({ pcm:v.pcm, hz:v.hz }); else w.r(new Error(v.mesaj || 'ses üretilemedi'));
+      };
+      isci.onerror = function(e){ hata = (e && e.message) || 'ses işçisi çalışmadı'; haber(); };
+    }catch(e){ isci = null; hata = e.message; }
+    return !!isci;
+  }
+  function sesAdi(rol){ return ROL[rol] || ROL.spiker; }
+  function hazirla(rol){
+    var s = sesAdi(rol);
+    if(hazir[s]) return Promise.resolve();
+    if(!baslat()) return Promise.reject(new Error('Bu cihaz doğal sesi desteklemiyor'));
+    if(!yuk[s]) yuk[s] = new Promise(function(c, r){ bek['y' + s] = { c:c, r:r }; isci.postMessage({ tip:'yukle', ses:s }); });
+    return yuk[s];
+  }
+  function hazirMi(rol){ return !!hazir[sesAdi(rol)]; }
+  function uret(metin, rol){
+    var s = sesAdi(rol), h = HIZ[rol] || 1, an = s + '|' + h + '|' + metin;
+    if(ON[an]) return ON[an];
+    var id = 'u' + (++n);
+    var p = hazirla(rol).then(function(){ return new Promise(function(c, r){ bek[id] = { c:c, r:r }; isci.postMessage({ tip:'soyle', id:id, metin:metin, ses:s, hiz:h });
+      setTimeout(function(){ if(bek[id]){ delete bek[id]; r(new Error('ses zamanında üretilemedi')); } }, 20000); }); });
+    ON[an] = p; ONS.push(an); if(ONS.length > 60) delete ON[ONS.shift()];
+    p.catch(function(){ delete ON[an]; });
+    return p;
+  }
+  function tampon(metin, rol){
+    return uret(metin, rol).then(function(x){
+      var b = new AudioBuffer({ length:Math.max(1, x.pcm.length), sampleRate:x.hz, numberOfChannels:1 });
+      b.copyToChannel(x.pcm, 0); return b;
+    });
+  }
+  function baglam(){
+    if(!ctx){ var C = window.AudioContext || window.webkitAudioContext; if(!C) return null; ctx = new C(); }
+    if(ctx.state === 'suspended'){ try{ ctx.resume(); }catch(e){} }
+    return ctx;
+  }
+  try{ document.addEventListener('pointerdown', function(){ try{ baglam(); }catch(e){} }, { capture:true, passive:true }); }catch(e){}
+  function cal(metin, rol, o){
+    o = o || {};
+    return tampon(metin, rol).then(function(b){
+      var c = baglam(); if(!c) throw new Error('ses çalınamıyor');
+      return new Promise(function(coz){
+        var k = c.createBufferSource(), g = c.createGain(); k.buffer = b; g.gain.value = o.duzey == null ? 1 : o.duzey;
+        k.connect(g); g.connect(o.hedef || c.destination);
+        var bitti = false, son = function(){ if(bitti) return; bitti = true; if(calan === k) calan = null; coz(); };
+        k.onended = son; setTimeout(son, b.duration * 1000 + 1500);
+        calan = k; k.start();
+      });
+    });
+  }
+  function sustur(){ try{ if(calan){ var k = calan; calan = null; k.stop(); } }catch(e){} }
+  function ayarla(v){ v = v || {}; if(v.spiker && SESLER[v.spiker]) ROL.spiker = v.spiker; if(v.yorumcu && SESLER[v.yorumcu]) ROL.yorumcu = v.yorumcu; haber(); }
+  return { destek:destek, hazirla:hazirla, hazirMi:hazirMi, cal:cal, tampon:tampon, sustur:sustur, ayarla:ayarla, sesler:SESLER,
+    rolSesi:function(r){ return sesAdi(r); }, yuzde:function(r){ return yuzde[sesAdi(r)] || 0; }, hata:function(){ return hata; },
+    dinle:function(f){ dinleyici.push(f); }, baglam:baglam };
+})();
