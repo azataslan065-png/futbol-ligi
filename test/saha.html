@@ -169,7 +169,7 @@
 </script>
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=230000cd"></script>
+<script src="ortak/ortak.js?v=b3704b8e"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-10-31-I</title>
+<title>SAHA — 3D Futbol v2026-11-01-A</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -11750,7 +11750,8 @@ function spkSoyle(rol, metin, tur, onemli, aralikMs){
     if(tur && SPK.sonTur[tur] && simdi - SPK.sonTur[tur] < aralikMs) return;
     /* KAYITLI ANLATIM (2026-10-31-I): üretilen ses kaldırıldı; bu türün KAYDI varsa cümle o kaydın metniyle değişir, yoksa hiç söylenmez. */
     var _kk = null;
-    if(_spkKayitModu()){ _kk = SahaSes.kayitSec(rol === 'yorumcu' ? 'yorumcu' : 'spiker', tur, { dk:(function(){ try{ return macDakika(); }catch(e){ return null; } })(), haric:SPK._sonKlip || [] });
+    if(_spkKayitModu()){ var _ht = SPK._klipT || {}, _har = Object.keys(_ht).filter(function(id){ return simdi - _ht[id] < 45000; });   // (2026-11-01) aynı kayıt 45 sn içinde tekrarlanmaz
+      _kk = SahaSes.kayitSec(rol === 'yorumcu' ? 'yorumcu' : 'spiker', tur, { dk:(function(){ try{ return macDakika(); }catch(e){ return null; } })(), haric:_har });
       if(!_kk) return; metin = _kk.m; }
     var x = { rol:rol, metin:metin, onemli:!!onemli, ts:simdi, tur:tur, oncelik:_spkOncelik(rol, tur, onemli), klip:_kk ? _kk.id : null };
     if(!_spkTepkiBagla(x)) return;                                      // (2026-10-31-G) bkz. SÖZ SIRASI
@@ -11769,7 +11770,7 @@ function spkSoyle(rol, metin, tur, onemli, aralikMs){
     x.h = spkHeyecan(tur, x.metin, rol);
     if(!_spkSirayaKoy(x)) return;                                       // sıra doluysa/sessiz değilse dolgu atlanır
     if(tur && !window._sahaOdaHost) SPK.sonTur[tur] = simdi;
-    if(_kk){ var _sk2 = SPK._sonKlip || (SPK._sonKlip = []); _sk2.push(_kk.id); while(_sk2.length > 6) _sk2.shift(); }   // aynı kayıt art arda çalınmaz
+    if(_kk) (SPK._klipT || (SPK._klipT = {}))[_kk.id] = simdi;          // aynı kayıt 45 sn içinde yeniden seçilmez
     try{ if(onemli && AYAR.spiker !== false && spkDogalAcik() && SahaSes.hazirMi(rol === 'yorumcu' ? 'yorumcu' : 'spiker')) SahaSes.hazirBekle(String(x.metin).replace(/([A-Za-zÇĞİÖŞÜçğıöşü]{3,})sp\b/g, '$1spor'), rol === 'yorumcu' ? 'yorumcu' : 'spiker', x.h, _spkOnEk(rol, tur, x.metin)).catch(function(){}); }catch(e){}   // (2026-10-31-A) önceden üret
     _spkSiradaki();
   }catch(e){ _sessiz(e, 'spkSoyle', 'saha_ses'); }
@@ -11878,11 +11879,21 @@ function _spkIstatYorumu(){
   }catch(e){ return _spkSkorYorumu(); }
 }
 // Önemli olayı sıradakileri SİLMEDEN ve konuşanı KESMEDEN kuyruğa ekler (maç sonu bilgilendirmesi).
+// Maçın oynandığı statın adı: lig maçında ev sahibinin yönetici panelinde girilen stadyum adı, yoksa oynanan statın adı.
+function _spkStadAdi(){
+  var stad = '';
+  try{ var _st = STAD_TEMALAR[STAD_TEMA] || STAD_TEMALAR.notr; stad = _st.ad || ''; }catch(e){}
+  try{ var fk = window._sahaAktifFikstur, m = fk && sahaFikstur[fk.matchId], ev = m && sahaLigTakimlar[m.homeId];
+    if(ev && String(ev.stadium || '').trim()) stad = String(ev.stadium).trim(); }catch(e){}
+  return stad;
+}
 function _spkKayitModu(){ try{ return !!(window.SahaSes && SahaSes.kayitModu && SahaSes.kayitModu()); }catch(e){ return false; } }
 // Maç önü diyaloğu (kayıtlı): spiker ile yorumcunun sıralı satırları (liste.json'da 'macOnu' türü, 'sira' ile).
 function _spkKayitMacOnu(){
   try{ if(!_spkKayitModu() || !_spkAcik() || (SPK._macOnuT && Date.now() - SPK._macOnuT < 600000)) return false;
-    var D = SahaSes.kayitDizi('macOnu'); if(!D.length) return false; SPK._macOnuT = Date.now();
+    var D = SahaSes.kayitDizi('macOnu'), st = SahaSes.kayitStad ? SahaSes.kayitStad(_spkStadAdi()) : null;
+    if(st) D = [st].concat(D);                                          // (2026-11-01) önce maçın oynandığı stadın kaydı
+    if(!D.length) return false; SPK._macOnuT = Date.now();
     D.forEach(function(k){ if(k.rol === 'yorumcu' && AYAR.yorumcu === false) return; SPK.sira.push({ rol:k.rol, metin:k.m, onemli:true, ts:Date.now() + 20000, oncelik:2, klip:k.id }); });
     _spkSiradaki(); return true; }catch(e){ return false; }
 }
@@ -13110,7 +13121,7 @@ function _sahaBakimDinle(){
     if(!fbHazir) return;
     // (2026-10-30-A) Zorunlu güncelleme: maç ya da izleme sürerken ekran açılmaz, maç bitince açılır.
     if(!window._sahaGuncelDinleniyor && !window._sahaIzleModu){ window._sahaGuncelDinleniyor = true;   // izleme çerçevesinde Puan Tablosu gösterir
-      try{ SahaGuncelleme.baslat(function(y){ return fbDb.ref(y); }, { ertele:sahaMacSuruyorMu, dosya:'saha', giris:function(){ return !benimUid; } }); }catch(e){ _sessiz(e, 'SahaGuncelleme', 'saha_ag'); } }
+      try{ SahaGuncelleme.baslat(function(y){ return fbDb.ref(y); }, { ertele:sahaMacSuruyorMu, dosya:'saha', giris:function(){ return !benimUid; }, kap:function(){ return document.getElementById('p-start'); } }); }catch(e){ _sessiz(e, 'SahaGuncelleme', 'saha_ag'); } }
     try{ sahaSurumDinle(); }catch(e){}
     try{ if(benimUid && sahaLigId) sahaGbDinle(); }catch(e){}
     if(!window._sahaKureselBakimDinleniyor){
@@ -13613,6 +13624,10 @@ function sahaSesDinle(){
 try{ sahaSesDinle(); }catch(e){_sessiz(e,'sahaSesDinle:cagri','saha_ses');}
 // Küresel bakım, aktif lig okunmasını beklemeden bağlanır (bkz. _sahaBakimDinle notu).
 try{ _sahaBakimDinle(); }catch(e){_sessiz(e,'_sahaBakimDinle:ilk','saha_ag');}
+/* (2026-11-01) Giriş ekranındaki "Yeni sürüm" bandı Firebase bağlanmasını beklemesin: sunucudaki sürüm (surum.json) sayfa açılır açılmaz
+   denetlenir; yöneticinin en düşük sürüm ayarı Firebase gelince eklenir (bağlantı yoksa arka planda yeniden dener). */
+try{ if(!window._sahaGuncelDinleniyor && !window._sahaIzleModu){ window._sahaGuncelDinleniyor = true;
+  SahaGuncelleme.baslat(function(y){ if(!fbDb) throw new Error('firebase yok'); return fbDb.ref(y); }, { ertele:sahaMacSuruyorMu, dosya:'saha', giris:function(){ return !benimUid; }, kap:function(){ return document.getElementById('p-start'); } }); } }catch(e){}
 
 // Kayıt tamam mı? Takım seçimi (2026-09-22-R) kayıttan ÖNCE yapılabildiği için düğümde
 // yalnızca takimId olabilir; kayıt, formun yazdığı 'durum' alanıyla anlaşılır.
@@ -20268,7 +20283,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-10-31-I';
+window.APP_BUILD='2026-11-01-A';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };

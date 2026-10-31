@@ -562,7 +562,18 @@ var SahaGuncelleme = (function(){
      panelinde isim ve şifre girmeden önce giriş ekranında bunu görmeli ve indirebilmelidir"). Giriş ekranı açıkken (secenek.giris()
      true) tam ekran yerine üstte bir bant çıkar: yeni sürüm ve "Güncelle" düğmesi. Giriş yapılınca bant kalkar, güncelleme ekranı gelir. */
   var _bant = null, _bantZ = 0;
-  function bantKaldir(){ if(_bant){ try{ _bant.remove(); }catch(e){} _bant = null; } }
+  /* (2026-11-01) Bant giriş ekranının üst kısmını (logo, başlık) örtüyordu: bant açıkken giriş kabının üst boşluğu bant yüksekliği kadar
+     artırılır, bant kalkınca eski haline döner. Kap, uygulamanın verdiği secenek.kap() ile bulunur. */
+  var _kapEl = null;
+  function kapKaydir(px){
+    try{
+      if(_kapEl && (!px || _kapEl !== (_o.kap && _o.kap()))){ _kapEl.style.paddingTop = _kapEl._sgEski; _kapEl = null; }
+      if(!px) return; var k = _o.kap && _o.kap(); if(!k) return;
+      if(_kapEl !== k){ k._sgEski = k.style.paddingTop; k._sgTemel = parseFloat(getComputedStyle(k).paddingTop) || 0; _kapEl = k; }
+      k.style.paddingTop = (k._sgTemel + px) + 'px';
+    }catch(e){}
+  }
+  function bantKaldir(){ if(_bant){ try{ _bant.remove(); }catch(e){} _bant = null; kapKaydir(0); } }
   function bantGoster(){
     if(!_bant){ _bant = document.createElement('div'); _bant.id = 'sahaGuncelleBant'; document.body.appendChild(_bant); }
     _bant.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483500;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
@@ -576,6 +587,7 @@ var SahaGuncelleme = (function(){
     try{ var ust = 0; [].forEach.call(document.body.children, function(e){ if(e === _bant) return; var cs = getComputedStyle(e);
       if((cs.position === 'fixed' || cs.position === 'sticky') && cs.display !== 'none'){ var r = e.getBoundingClientRect(); if(r.top <= 1 && r.height > 0 && r.height < 60 && r.width > innerWidth * 0.8) ust = Math.max(ust, r.bottom); } });
       if(ust) _bant.style.top = ust + 'px'; }catch(e){}
+    try{ var r = _bant.getBoundingClientRect(); kapKaydir(Math.ceil(r.bottom)); }catch(e){}
   }
   function goster(){
     if(!_min || karsilastir(window.APP_BUILD, _min.build) >= 0 || _gecildi === _min.build){ kaldir(); bantKaldir(); return; }
@@ -1173,6 +1185,8 @@ var SahaSes = (function(){
     if(!yeni.length) return null;                                     // az önce çalınan kayıt hemen tekrarlanmaz (o an sessiz geçer)
     return yeni[Math.floor(Math.random() * yeni.length)];
   }
+  function kayStad(ad){ if(!KY || !ad) return null; var n = kyNorm(ad), L = KY.L.filter(function(k){ return k.stad && kyNorm(k.stad) === n; });
+    return L.length ? L[Math.floor(Math.random() * L.length)] : null; }
   function kayDizi(tur){ return KY ? KY.L.filter(function(k){ return k.tur.indexOf(tur) >= 0 && k.sira; }).sort(function(a, b){ return a.sira - b.sira; }) : []; }
   var _bos = function(){ return Promise.resolve(); };
   return { destek:function(){ return !!(window.AudioContext || window.webkitAudioContext); },
@@ -1186,6 +1200,6 @@ var SahaSes = (function(){
     rolSesi:function(){ return 'kayit'; }, parcala:parcala, yuzde:function(){ return KY ? 100 : 0; }, hata:function(){ return KY ? '' : 'kayıtlı ses yok'; },
     dinle:function(f){ dinleyici.push(f); }, baglam:baglam, birak:function(){}, bankaHazirla:function(){}, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
     heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return false; }, olcum:function(){ return {}; },
-    kayitModu:function(){ return true; }, kayitHazir:function(){ return !!KY; }, kayitSec:kaySec, kayitDizi:kayDizi, kayitVar:function(m, r){ return !!kyBul(m, r); },
+    kayitModu:function(){ return true; }, kayitHazir:function(){ return !!KY; }, kayitSec:kaySec, kayitDizi:kayDizi, kayitStad:kayStad, kayitVar:function(m, r){ return !!kyBul(m, r); },
     kayitListe:function(){ return KY ? KY.L.slice() : []; }, kayitYukle:kyYukle };
 })();
