@@ -542,7 +542,7 @@ var SahaGuncelleme = (function(){
           }).catch(function(){});
       }catch(e){}
     };
-    setTimeout(bak, 8000); setInterval(bak, 600000);
+    setTimeout(bak, 1200); setInterval(bak, 600000);
     document.addEventListener('visibilitychange', function(){ if(!document.hidden) bak(); });
   }
   function esc(t){ return String(t == null ? '' : t).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
@@ -558,10 +558,35 @@ var SahaGuncelleme = (function(){
     setTimeout(git, 6000);
   }
   function kaldir(){ if(_ov){ try{ _ov.remove(); }catch(e){} _ov = null; } }
+  /* GİRİŞ EKRANI BANDI (2026-10-30-E, kullanıcı: "yeni güncelleme mevcut olduğunda kullanıcı SAHA'da, Puan Tablosu'nda ve admin
+     panelinde isim ve şifre girmeden önce giriş ekranında bunu görmeli ve indirebilmelidir"). Giriş ekranı açıkken (secenek.giris()
+     true) tam ekran yerine üstte bir bant çıkar: yeni sürüm ve "Güncelle" düğmesi. Giriş yapılınca bant kalkar, güncelleme ekranı gelir. */
+  var _bant = null, _bantZ = 0;
+  function bantKaldir(){ if(_bant){ try{ _bant.remove(); }catch(e){} _bant = null; } }
+  function bantGoster(){
+    if(!_bant){ _bant = document.createElement('div'); _bant.id = 'sahaGuncelleBant'; document.body.appendChild(_bant); }
+    _bant.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483500;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+      + 'padding:calc(10px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) 10px max(14px,env(safe-area-inset-left,0px));'
+      + 'background:#14301d;color:#eef2ee;border-bottom:1px solid rgba(255,255,255,.14);box-shadow:0 6px 20px rgba(0,0,0,.35);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif';
+    _bant.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#7ee0a0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>'
+      + '<div style="flex:1;min-width:160px"><b style="display:block;font-size:14.5px">Yeni sürüm mevcut</b><span style="font-size:12.5px;opacity:.75">' + esc(_min.build) + (_min.mesaj ? ' · ' + esc(_min.mesaj) : ' · giriş yapmadan önce güncelleyebilirsin') + '</span></div>'
+      + '<button id="sgBantDug" type="button" style="min-height:40px;padding:0 18px;border:0;border-radius:999px;background:#3f8a45;color:#fff;font-weight:800;font-size:14px;cursor:pointer">Güncelle</button>';
+    _bant.querySelector('#sgBantDug').onclick = function(){ this.disabled = true; this.textContent = 'Güncelleniyor…'; guncelle(); };
+    // Üstte sabit bir şerit (ör. test ortamı uyarısı) varsa bant onun altına iner.
+    try{ var ust = 0; [].forEach.call(document.body.children, function(e){ if(e === _bant) return; var cs = getComputedStyle(e);
+      if((cs.position === 'fixed' || cs.position === 'sticky') && cs.display !== 'none'){ var r = e.getBoundingClientRect(); if(r.top <= 1 && r.height > 0 && r.height < 60 && r.width > innerWidth * 0.8) ust = Math.max(ust, r.bottom); } });
+      if(ust) _bant.style.top = ust + 'px'; }catch(e){}
+  }
   function goster(){
-    if(!_min || karsilastir(window.APP_BUILD, _min.build) >= 0 || _gecildi === _min.build){ kaldir(); return; }
+    if(!_min || karsilastir(window.APP_BUILD, _min.build) >= 0 || _gecildi === _min.build){ kaldir(); bantKaldir(); return; }
+    var giriste = false; try{ giriste = !!(_o.giris && _o.giris()); }catch(e){}
+    if(!_bantZ) _bantZ = setInterval(function(){ if(_min) goster(); }, 1500);   // giriş durumu değişince bant ↔ ekran
+    if(giriste){ kaldir(); if(!_bant || _bant._hedef !== _min.build){ bantGoster(); _bant._hedef = _min.build; } return; }
+    bantKaldir();
+    if(_ov && _ov._hedef === _min.build) return;                                 // ekran zaten açık (yeniden çizilmez)
     try{ if(_o.ertele && _o.ertele()){ if(!_bekZ) _bekZ = setTimeout(function(){ _bekZ = 0; goster(); }, 5000); return; } }catch(e){}
     if(!_ov){ _ov = document.createElement('div'); _ov.id = 'sahaGuncelleEkran'; document.body.appendChild(_ov); }
+    _ov._hedef = _min.build;
     _ov.style.cssText = 'position:fixed;inset:0;z-index:2147483600;display:flex;align-items:center;justify-content:center;padding:20px;'
       + 'background:rgba(6,12,9,.94);color:#eef2ee;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center';
     _ov.innerHTML = '<div style="max-width:380px;width:100%">'
@@ -680,4 +705,174 @@ var SahaYukleme = (function(){
     });
   }
   return { resim:resim, video:video };
+})();
+/* ═══ YENİLİKLER + GERİ BİLDİRİM (2026-10-30-E, kullanıcı: "Puan Tablosu ve SAHA'daki yenilikler, geri bildirim sistemi ve
+   ikonlar tamamen aynı olmalı; ikon olarak sahadakiler kullanılabilir"). İki uygulama da bu tek bileşeni çağırır: aynı pencere,
+   aynı düzen, aynı SAHA ikonları (SahaIkon yazı tipi, U+E9xx). Veri kaynağı ve yazılacak yol uygulamadan gelir:
+   SahaDestek.yenilikler({ surumler:[{v,date,notes}], yuklu:'V1.4.0 (…)', geriBildirim:fn, ek:html, acildi:fn })
+   SahaDestek.geriBildirim({ gonder:function(veri){→Promise}, gecmis:function(){→Promise<[...]>}, klasor:'feedback/…', aciklama }) */
+var SahaDestek = (function(){
+  var IK = { yeni:'', gb:'', hata:'', oneri:'', diger:'', tasarim:'', iyi:'', foto:'', video:'', gonder:'', bos:'' };
+  function esc(t){ return String(t == null ? '' : t).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
+  function stil(){
+    if(document.getElementById('sahaDestekStil')) return;
+    var st = document.createElement('style'); st.id = 'sahaDestekStil';
+    st.textContent = '.sd-ort{position:fixed;inset:0;z-index:2147482500;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(4,9,6,.72);backdrop-filter:blur(3px)}'
+      + '.sd-kart{width:100%;max-width:460px;max-height:min(88vh,760px);display:flex;flex-direction:column;overflow:hidden;background:#111a15;color:#eef2ee;border:1px solid rgba(255,255,255,.14);border-radius:18px;box-shadow:0 24px 60px rgba(0,0,0,.5);font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;text-align:left}'
+      + '.sd-bas{display:flex;align-items:center;gap:10px;padding:13px 14px 13px 16px;border-bottom:1px solid rgba(255,255,255,.1)}'
+      + '.sd-ik{width:36px;height:36px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;font-size:19px;background:linear-gradient(150deg,#3f8a45,#2c6e33);color:#fff}'
+      + '.sd-bas b{flex:1;font-size:17px;font-weight:900}'
+      + '.sd-kapat{width:40px;height:40px;border-radius:50%;border:0;background:rgba(255,255,255,.08);color:inherit;font-size:22px;cursor:pointer}'
+      + '.sd-gov{padding:14px 16px 18px;overflow:auto}'
+      + '.sd-aciklama{font-size:13px;opacity:.75;line-height:1.55;margin-bottom:12px}'
+      + '.sd-et{font-size:12px;font-weight:800;opacity:.6;text-transform:uppercase;letter-spacing:.06em;margin:12px 0 6px}'
+      + '.sd-bosk{text-align:center;opacity:.65;padding:18px 8px;font-size:13px;line-height:1.7}'
+      + '.sd-satir{width:100%;display:flex;align-items:center;gap:10px;min-height:48px;padding:8px 12px;margin-bottom:6px;border-radius:12px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.05);color:inherit;font:inherit;cursor:pointer;text-align:left}'
+      + '.sd-v{background:linear-gradient(135deg,#3f8a45,#2c6e33);color:#fff;border-radius:8px;padding:3px 9px;font-size:13px;font-weight:800;flex:none}'
+      + '.sd-ad{flex:1;font-weight:700}.sd-ok{opacity:.5;font-size:18px}'
+      + '.sd-ust{display:flex;align-items:center;gap:10px;margin-bottom:8px}.sd-t{font-size:12px;opacity:.6}'
+      + '.sd-liste{list-style:none;padding:0;margin:0}.sd-liste li{display:flex;gap:10px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.08);line-height:1.5}'
+      + '.sd-kat{flex:none;width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:16px;background:rgba(255,255,255,.06)}'
+      + '.sd-kat-et{display:block;font-size:11px;font-weight:800;letter-spacing:.03em;margin-bottom:1px}'
+      + '.sd-dug{width:100%;min-height:46px;margin-top:12px;border:0;border-radius:12px;background:#3f8a45;color:#fff;font:inherit;font-size:15px;font-weight:800;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}'
+      + '.sd-dug.ikincil{background:rgba(255,255,255,.08);color:inherit;border:1px solid rgba(255,255,255,.16)}'
+      + '.sd-surum{text-align:center;font-size:12px;opacity:.6;margin-top:12px}'
+      + '.sd-turler{display:flex;gap:6px}.sd-cip{flex:1;min-height:40px;border-radius:999px;border:1px solid rgba(255,255,255,.22);background:transparent;color:inherit;font:inherit;font-size:13.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px}'
+      + '.sd-cip.on{background:#3f8a45;border-color:transparent;color:#fff}'
+      + '.sd-metin{width:100%;box-sizing:border-box;border-radius:12px;padding:10px;font:inherit;font-size:14px;background:rgba(255,255,255,.06);color:inherit;border:1px solid rgba(255,255,255,.18);resize:vertical}'
+      + '.sd-ekle{display:flex;gap:8px;margin:10px 0 6px}.sd-ekle .sd-dug{margin:0;flex:1;min-height:42px;font-size:14px}'
+      + '.sd-gizli{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}'
+      + '.sd-medya{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px}'
+      + '.sd-med{position:relative;width:76px;height:76px;border-radius:10px;overflow:hidden;background:#000}.sd-med img,.sd-med video{width:100%;height:100%;object-fit:cover}'
+      + '.sd-med button{position:absolute;top:3px;right:3px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(0,0,0,.65);color:#fff;font-size:16px;cursor:pointer}'
+      + '.sd-ilerle{width:100%;display:grid;grid-template-columns:1fr auto;gap:4px 8px;font-size:12px;background:rgba(255,255,255,.06);border-radius:10px;padding:8px 10px}'
+      + '.sd-ilerle i{grid-column:1/3;height:6px;border-radius:3px;background:rgba(255,255,255,.12);overflow:hidden}.sd-ilerle b{display:block;height:100%;background:#3f8a45}.sd-ilerle em{font-style:normal;opacity:.7}'
+      + '.sd-gecmis{background:rgba(255,255,255,.05);border-radius:12px;padding:10px 12px;margin-bottom:8px;font-size:13px;line-height:1.5}'
+      + '.sd-g-ust{display:flex;align-items:center;gap:8px}.sd-g-ust span{flex:1;opacity:.55;font-size:12px}'
+      + '.sd-g-ust em{font-style:normal;font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px;background:rgba(245,194,107,.18);color:#f5c26b}'
+      + '.sd-g-ust em.inc{background:rgba(96,165,250,.18);color:#93c5fd}.sd-g-ust em.yan{background:rgba(74,222,128,.18);color:#86efac}'
+      + '.sd-g-metin{margin-top:4px;overflow-wrap:anywhere}.sd-g-ek{font-size:12px;opacity:.6;margin-top:3px}'
+      + '.sd-g-yanit{margin-top:6px;padding:8px 10px;border-radius:10px;background:rgba(74,222,128,.1);border-left:3px solid #4ade80}'
+      + '.sd-dug:focus-visible,.sd-cip:focus-visible,.sd-satir:focus-visible,.sd-kapat:focus-visible{outline:2px solid #7ee0a0;outline-offset:2px}';
+    document.head.appendChild(st);
+  }
+  function pencere(id, ik, baslik, icerik){
+    stil();
+    var el = document.getElementById(id);
+    if(!el){ el = document.createElement('div'); el.id = id; document.body.appendChild(el); }
+    el.className = 'sd-ort'; el.style.display = 'flex';
+    el.innerHTML = '<div class="sd-kart" role="dialog" aria-modal="true"><div class="sd-bas"><span class="sd-ik">' + ik + '</span><b>' + esc(baslik) + '</b>'
+      + '<button type="button" class="sd-kapat" aria-label="Kapat">×</button></div><div class="sd-gov">' + icerik + '</div></div>';
+    var kapat = function(){ el.style.display = 'none'; el.innerHTML = ''; };
+    el.querySelector('.sd-kapat').onclick = kapat;
+    el.onclick = function(ev){ if(ev.target === el) kapat(); };
+    el._kapat = kapat;
+    return el;
+  }
+  function kategori(n){
+    var t = String(n || '').toLocaleLowerCase('tr');
+    if(/düzeltildi|hata|sorun|bozuk|çalışmıyor|kaybol/.test(t)) return { ik:IK.hata, ad:'Hata Düzeltmesi', r:'#f87171' };
+    if(/tasarım|görünüm|renk|stil|ikon/.test(t)) return { ik:IK.tasarim, ad:'Tasarım', r:'#a78bfa' };
+    if(/eklendi|sistemi|özelliği/.test(t)) return { ik:IK.yeni, ad:'Yeni Özellik', r:'#4ade80' };
+    return { ik:IK.iyi, ad:'İyileştirme', r:'#60a5fa' };
+  }
+  var _Y = null;
+  function detay(i){
+    var o = _Y || {}, V = o.surumler || [], x = V[i]; if(!x) return;
+    var g = '<div class="sd-ust"><span class="sd-v">' + esc(x.v) + '</span><span class="sd-t">' + esc(x.date || '') + (i === 0 ? ' · güncel sürüm' : '') + '</span></div>'
+      + '<ul class="sd-liste">' + (x.notes || []).map(function(n){ var k = kategori(n);
+        return '<li><span class="sd-kat" style="color:' + k.r + '">' + k.ik + '</span><span><span class="sd-kat-et" style="color:' + k.r + '">' + k.ad + '</span>' + esc(n) + '</span></li>'; }).join('') + '</ul>'
+      + (V.length > 1 ? '<button type="button" class="sd-dug ikincil" data-sd="liste">Bütün sürümler</button>' : '');
+    var el = pencere('sahaDestekYenilik', IK.yeni, 'Yenilikler', g);
+    var b = el.querySelector('[data-sd="liste"]'); if(b) b.onclick = function(){ yenilikler(o); };
+  }
+  function yenilikler(o){
+    _Y = o = o || {};
+    var V = o.surumler || [];
+    var g = V.length ? '<div class="sd-aciklama">Bir sürüme dokunarak güncelleme notlarını gör.</div>' + V.map(function(x, i){
+        return '<button type="button" class="sd-satir" data-i="' + i + '"><span class="sd-v">' + esc(x.v) + '</span><span class="sd-ad">'
+          + (i === 0 ? 'En son sürüm' : esc((x.date || '') + ' sürümü')) + '</span><span class="sd-ok">›</span></button>'; }).join('')
+      : '<div class="sd-bosk">' + IK.bos + ' Henüz sürüm notu eklenmemiş.<br><small>Yeni özellikler ve düzeltmeler burada listelenecek.</small></div>';
+    if(o.geriBildirim) g += '<button type="button" class="sd-dug" data-sd="gb">' + IK.gb + ' Geri Bildirim Gönder</button>';
+    g += (o.ek || '') + (o.yuklu ? '<div class="sd-surum">Yüklü sürüm: <b>' + esc(o.yuklu) + '</b></div>' : '');
+    var el = pencere('sahaDestekYenilik', IK.yeni, 'Yenilikler', g);
+    el.querySelectorAll('.sd-satir[data-i]').forEach(function(b){ b.onclick = function(){ detay(+b.getAttribute('data-i')); }; });
+    var gb = el.querySelector('[data-sd="gb"]'); if(gb) gb.onclick = function(){ el._kapat(); o.geriBildirim(); };
+    try{ if(o.acildi) o.acildi(el); }catch(e){}
+    return el;
+  }
+  var GB = { foto:null, video:null, yuk:0, tur:'bug', o:null };
+  function medyaCiz(){
+    var k = document.getElementById('sdMedya'); if(!k) return;
+    k.querySelectorAll('.sd-med').forEach(function(x){ x.remove(); });
+    var h = '';
+    if(GB.foto) h += '<div class="sd-med"><img src="' + esc(GB.foto) + '" alt=""><button type="button" data-sil="foto" aria-label="Kaldır">×</button></div>';
+    if(GB.video) h += '<div class="sd-med"><video src="' + esc(GB.video) + '" muted playsinline></video><button type="button" data-sil="video" aria-label="Kaldır">×</button></div>';
+    k.insertAdjacentHTML('afterbegin', h);
+    k.querySelectorAll('[data-sil]').forEach(function(b){ b.onclick = function(){ GB[b.getAttribute('data-sil')] = null; medyaCiz(); }; });
+  }
+  function yukle(input, tur){
+    var f = input.files && input.files[0]; input.value = ''; if(!f) return;
+    var k = document.getElementById('sdMedya'); if(!k || !window.SahaYukleme) return;
+    var sid = 'sdy' + Date.now();
+    k.insertAdjacentHTML('beforeend', '<div class="sd-ilerle" id="' + sid + '"><span>' + esc((f.name || (tur === 'foto' ? 'Fotoğraf' : 'Video')).slice(0, 34)) + '</span><i><b style="width:0%"></b></i><em>%0</em></div>');
+    var cub = function(o){ var e = document.getElementById(sid); if(!e) return; var y = Math.round(o * 100); e.querySelector('b').style.width = y + '%'; e.querySelector('em').textContent = o >= 1 ? 'kaydediliyor…' : '%' + y; };
+    GB.yuk++;
+    var is = tur === 'foto' ? SahaYukleme.resim(f, GB.o.klasor, { maxDim:900, quality:.78, maxMB:15, ilerleme:cub }) : SahaYukleme.video(f, GB.o.klasor, { maxMB:50, maxSn:180, ilerleme:cub });
+    is.then(function(u){ GB[tur] = u; }).catch(function(e){ bildir((tur === 'foto' ? 'Fotoğraf' : 'Video') + ' yüklenemedi: ' + ((e && e.message) || 'hata')); })
+      .then(function(){ GB.yuk--; var e = document.getElementById(sid); if(e) e.remove(); medyaCiz(); });
+  }
+  function bildir(m){ try{ (GB.o && GB.o.bildir) ? GB.o.bildir(m) : alert(m); }catch(e){} }
+  function gecmisHtml(L){
+    L = L || [];
+    if(!L.length) return '<div class="sd-bosk" style="padding:10px">Henüz geri bildirim göndermedin.</div>';
+    var ad = { bug:'Hata', suggestion:'Öneri', other:'Diğer' }, ik = { bug:IK.hata, suggestion:IK.oneri, other:IK.diger };
+    return L.slice(0, 20).map(function(x){
+      var t = x.ts ? new Date(x.ts).toLocaleString('tr-TR', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+      return '<div class="sd-gecmis"><div class="sd-g-ust"><b>' + (ik[x.type] || IK.diger) + ' ' + (ad[x.type] || 'Diğer') + '</b><span>' + t + '</span>'
+        + '<em class="' + (x.adminReply ? 'yan' : (x.status === 'reviewed' ? 'inc' : '')) + '">' + (x.adminReply ? 'Yanıtlandı' : (x.status === 'reviewed' ? 'İncelendi' : 'Bekliyor')) + '</em></div>'
+        + (x.text ? '<div class="sd-g-metin">' + esc(x.text) + '</div>' : '')
+        + ((x.photo || x.video) ? '<div class="sd-g-ek">' + (x.photo ? IK.foto + ' Fotoğraf' : '') + (x.photo && x.video ? ' · ' : '') + (x.video ? IK.video + ' Video' : '') + '</div>' : '')
+        + (x.adminReply ? '<div class="sd-g-yanit"><b>Yönetici:</b> ' + esc(x.adminReply.text || '') + '</div>' : '') + '</div>';
+    }).join('');
+  }
+  function geriBildirim(o){
+    GB.o = o = o || {}; GB.foto = null; GB.video = null; GB.tur = 'bug';
+    var g = '<div class="sd-aciklama">' + esc(o.aciklama || 'Bir hata mı buldun, yoksa bir öneri mi var? Yaz; istersen fotoğraf ya da video (en fazla 50 MB, 3 dakika) ekle. Yönetici gönderdiğini görüp inceler, yanıtı burada görünür.') + '</div>'
+      + '<div class="sd-et">Konu</div><div class="sd-turler" id="sdTur">'
+      + [['bug','Hata',IK.hata],['suggestion','Öneri',IK.oneri],['other','Diğer',IK.diger]].map(function(x, i){ return '<button type="button" class="sd-cip' + (i ? '' : ' on') + '" data-t="' + x[0] + '">' + x[2] + ' ' + x[1] + '</button>'; }).join('') + '</div>'
+      + '<div class="sd-et">Mesajın</div><textarea id="sdMetin" class="sd-metin" rows="5" maxlength="1500" placeholder="Ne oldu, ne görmek istersin..."></textarea>'
+      + '<div class="sd-ekle"><button type="button" class="sd-dug ikincil" data-sd="foto">' + IK.foto + ' Fotoğraf ekle</button><button type="button" class="sd-dug ikincil" data-sd="video">' + IK.video + ' Video ekle</button></div>'
+      + '<input type="file" id="sdFotoInp" accept="image/*,.heic,.heif" class="sd-gizli"><input type="file" id="sdVideoInp" accept="video/*" class="sd-gizli">'
+      + '<div id="sdMedya" class="sd-medya"></div>'
+      + '<button type="button" class="sd-dug" id="sdGonder">' + IK.gonder + ' Gönder</button>'
+      + '<div class="sd-et" style="margin-top:16px">Geri bildirimlerim</div><div id="sdGecmis"><div class="sd-bosk" style="padding:10px">Yükleniyor…</div></div>';
+    var el = pencere('sahaDestekGb', IK.gb, 'Geri Bildirim Gönder', g);
+    var tr = el.querySelector('#sdTur');
+    tr.onclick = function(ev){ var b = ev.target.closest('button[data-t]'); if(!b) return; GB.tur = b.getAttribute('data-t'); tr.querySelectorAll('button').forEach(function(x){ x.classList.toggle('on', x === b); }); };
+    el.querySelector('[data-sd="foto"]').onclick = function(){ el.querySelector('#sdFotoInp').click(); };
+    el.querySelector('[data-sd="video"]').onclick = function(){ el.querySelector('#sdVideoInp').click(); };
+    el.querySelector('#sdFotoInp').onchange = function(){ yukle(this, 'foto'); };
+    el.querySelector('#sdVideoInp').onchange = function(){ yukle(this, 'video'); };
+    var gon = el.querySelector('#sdGonder');
+    gon.onclick = function(){
+      var metin = String(el.querySelector('#sdMetin').value || '').trim();
+      if(GB.yuk > 0) return bildir('Dosya yükleniyor, bitince gönder.');
+      if(!metin && !GB.foto && !GB.video) return bildir('Bir mesaj yaz ya da fotoğraf/video ekle.');
+      gon.disabled = true; gon.textContent = 'Gönderiliyor…';
+      var v = { type:GB.tur, text:metin, ts:Date.now(), status:'pending' }; if(GB.foto) v.photo = GB.foto; if(GB.video) v.video = GB.video;
+      Promise.resolve().then(function(){ return o.gonder(v); })
+        .then(function(){ bildir('Geri bildirimin gönderildi, teşekkürler!'); el._kapat(); })
+        .catch(function(e){ gon.disabled = false; gon.innerHTML = IK.gonder + ' Gönder'; bildir('Gönderilemedi: ' + ((e && e.message) || 'bilinmeyen hata')); });
+    };
+    gecmisYenile();
+    return el;
+  }
+  function gecmisYenile(L){
+    var k = document.getElementById('sdGecmis'); if(!k) return;
+    if(L){ k.innerHTML = gecmisHtml(L); return; }
+    try{ Promise.resolve(GB.o && GB.o.gecmis ? GB.o.gecmis() : []).then(function(x){ var kk = document.getElementById('sdGecmis'); if(kk) kk.innerHTML = gecmisHtml(x || []); },
+      function(){ var kk = document.getElementById('sdGecmis'); if(kk) kk.innerHTML = gecmisHtml([]); }); }catch(e){}
+  }
+  return { yenilikler:yenilikler, detay:detay, geriBildirim:geriBildirim, gecmisYenile:gecmisYenile, pencere:pencere, ikon:IK, acikMi:function(id){ var e = document.getElementById(id); return !!(e && e.style.display !== 'none'); } };
 })();
