@@ -22,6 +22,12 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     console.log('-- ses/müzik/spiker ayrıntı --');
     satir.filter(x => /ses|muzik|spk|medya|anonim|Okuma/i.test((x.mod || '') + ' ' + (x.title || '') + ' ' + (x.detail || ''))).slice(-40)
       .forEach(x => { let d = String(x.detail || ''); try{ const j = JSON.parse(d); delete j.kullanici; delete j.user; d = JSON.stringify(j); }catch(e){} console.log(saat(x.ts), x.mod, x.kind, x.title, d.slice(0, 260), '|', String(x.ua || '').replace(/Mozilla\/5.0 \(|\) AppleWebKit.*?(Chrome\/[\d]+|Version\/[\d.]+).*$/g, ' $1').slice(0, 90)); });
+    const SD = await al(kok + 'diagnostics/sesDurum') || {};
+    const sd = Object.values(SD).filter(x => x && x.ts > sinir).sort((a, b) => b.ts - a.ts);
+    console.log('-- SES DURUM KARTLARI (' + sd.length + ') --');
+    sd.slice(0, 6).forEach(x => { console.log(saat(x.ts), x.surum, String(x.ua || '').replace(/Mozilla\/5.0 \(|\) AppleWebKit.*?(Chrome\/[\d]+|Version\/[\d.]+).*$/g, ' $1').slice(0, 80));
+      console.log('   ayar', JSON.stringify(x.ayar), 'girişli', x.girisli, 'maçta', x.macta, 'maç motoru', x.macMotoru);
+      console.log('   müzik', JSON.stringify(x.muzik)); console.log('   doğal', JSON.stringify(x.dogal)); (x.olay || []).forEach(o => console.log('     · ' + o)); });
     const D = await al(kok + 'diagnostics/devices') || {};
     const cihaz = Object.values(D).filter(x => x && (x.sonGorulme || 0) > sinir);
     console.log('son 12 saatte görülen cihaz:', cihaz.length); cihaz.slice(0, 10).forEach(x => console.log('  ', x.sahaSurum || x.surum || '', x.marka || '', x.model || '', String(x.ua || '').slice(0, 110)));
