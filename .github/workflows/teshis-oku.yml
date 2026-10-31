@@ -1,0 +1,31 @@
+# Gerçek cihazlardan gelen SAHA teşhis kayıtlarını okur ve "teshis" dalına rapor yazar (kullanıcı adı yazılmaz, yayın yapmaz).
+name: Teshis oku
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/teshis-oku.yml, .github/teshis/**]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  oku:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Oku
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json" >/dev/null 2>&1 || true
+          mkdir -p /tmp/t && cd /tmp/t && npm init -y >/dev/null && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          cp "$GITHUB_WORKSPACE/.github/teshis/oku.js" . && node oku.js > rapor.txt 2>&1 || true
+          rm -f "$RUNNER_TEMP/sa.json"
+      - name: Rapor dalina yaz
+        run: |
+          mkdir /tmp/r && cp /tmp/t/rapor.txt /tmp/r/ && cd /tmp/r
+          git init -q && git checkout -q -b teshis && git config user.name github-actions && git config user.email actions@github.com
+          git add -A && git commit -qm "Teshis $(date -u +%FT%TZ)" && git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" teshis
