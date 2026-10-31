@@ -169,7 +169,7 @@
 </script>
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=67edc680"></script>
+<script src="ortak/ortak.js?v=8e55f133"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-10-31-F</title>
+<title>SAHA — 3D Futbol v2026-10-31-G</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -9456,7 +9456,9 @@ function _modelHazirla(gltf, ad){
   var kutu = new THREE.Box3().setFromObject(kok);
   var boy = kutu.max.y - kutu.min.y;
   if(boy > 0.01) kok.scale.multiplyScalar(1.8 / boy);
-  kok.traverse(function(o){ if(o.isMesh){ o.castShadow = true; o.receiveShadow = false; } });
+  /* (2026-10-31-G) Gölgeyi gövde, forma ve şort verir; saç, krampon, tozluk ve kirpik gölge haritasına çizilmez (oyuncu başına ~14 bin üçgen,
+     22 oyuncuda ~0,3 milyon üçgen tasarruf; yayın kamerasından gölgede fark görünmez). */
+  kok.traverse(function(o){ if(o.isMesh){ o.castShadow = !/(^|\b)(sac|saç|hair|krampon|shoe|boot|tozluk|sock|kirpik|eyelash)/i.test(String(o.name || '') + ' ' + String((o.material && o.material.name) || '')); o.receiveShadow = false; } });
   // Sırt numarasının yeri: göğüs hizasında (boyun %72'si) ortadaki köşelerin en geridekisi.
   var sirt = { y: 1.3, z: -0.14 };
   try{
@@ -10887,20 +10889,25 @@ function stadyumZil(){
   _sesKaydet('zil');
   try{ ton(784, 0, 0.55, 'sine', 0.09); setTimeout(function(){ ton(622, 0, 0.8, 'sine', 0.08); }, 420); }catch(e){self.__ds&&self.__ds(10089,e)}
 }
+/* (2026-10-31-G) Stat anonsu da spiker/yorumcu ile AYNI söz sırasında: eskiden onlar konuşurken üstlerine konuşuyordu. Konuşan cümle kesilmez;
+   anons sıranın önüne girer ve o cümle bitince okunur. Maç dışında (tören öncesi, menü) sıra boşsa hemen okunur. */
 function _anonsKonus(metin){
   try{
-    /* (2026-10-31-F) Stat spikeri de robot değil doğal ses (Fettah). Ses henüz inmediyse anons sessiz geçer. */
-    if(window.SahaSes && SahaSes.destek()){ if(SahaSes.hazirMi('anons')){ var _dz = Math.max(0, Math.min(1, ((AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100) * 1.1)); SahaSes.cal(metin, 'anons', { duzey:_dz, heyecan:0 }).catch(function(){}); } else SahaSes.hazirla('anons').catch(function(){}); }
-    return;
-    var ss = window.speechSynthesis; if(!ss || !window.SpeechSynthesisUtterance) return;
-    var u = new SpeechSynthesisUtterance(metin);
-    u.lang = 'tr-TR'; u.rate = 1.02; u.pitch = 0.92; u.volume = 1;
-    var sesler = ss.getVoices ? ss.getVoices() : [];
-    var tr = sesler.find(function(v){ return /^tr/i.test(v.lang); });
-    if(tr) u.voice = tr;
-    if(!(typeof SPK !== 'undefined' && SPK.konusuyor)) ss.cancel();   // spikeri yarıda kesme, sıraya gir
-    ss.speak(u);
+    if(!(window.SahaSes && SahaSes.destek())) return;
+    if(!SahaSes.hazirMi('anons')){ SahaSes.hazirla('anons').catch(function(){}); return; }
+    var x = { rol:'anons', metin:String(metin), onemli:true, ts:Date.now(), oncelik:2 }, i = 0;
+    while(i < SPK.sira.length && SPK.sira[i].rol === 'anons') i++;
+    SPK.sira.splice(i, 0, x);
+    _spkSiradaki();
   }catch(e){self.__ds&&self.__ds(10101,e)}
+}
+function _anonsOku(metin, bitti, gecerli){
+  try{
+    if(gecerli && !gecerli()) return;
+    var _dz = Math.max(0, Math.min(1, ((AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100) * 1.1)), _b = false, son = function(){ if(_b) return; _b = true; bitti(); };
+    setTimeout(function(){ if(!_b){ try{ SahaSes.sustur(); }catch(e){} son(); } }, 15000);
+    SahaSes.cal(metin, 'anons', { duzey:_dz, heyecan:0 }).then(son, son);
+  }catch(e){ setTimeout(bitti, 300); }
 }
 function stadyumAnons(metin, zil){
   try{
@@ -10977,7 +10984,7 @@ function _spkDisariyaIlet(metin, rol){
   }catch(e){self.__ds&&self.__ds(10175,e)}
   return false;
 }
-function _spkOku(metin, rol, bitti, heyecan, onemli, tur){
+function _spkOku(metin, rol, bitti, heyecan, onemli, tur, gecerli){
   try{
     // Kısaltılmış kulüp adları seslendirmede açılır ("Mazlumsp" → "Mazlumspor"); yazılı adlar değişmez.
     try{ metin = String(metin).replace(/([A-Za-zÇĞİÖŞÜçğıöşü]{3,})sp\b/g, '$1spor'); }catch(e){self.__ds&&self.__ds(10181,e)}
@@ -11003,10 +11010,15 @@ function _spkOku(metin, rol, bitti, heyecan, onemli, tur){
         var _dolgu = /^(durgun|durgunY|durumY|devreY|uzatmaY|sariY|faulY|kurtarisY|kafaY|calimY|kapmaY|ofsaytY|direkY|kactiY|golY|kirmiziY|penaltiY|macOnu)/.test(String(tur || ''));
         var _bek = setTimeout(function(){ if(_db) return; _gec = true; _db = true; sesDurumOlay('cümle geç, atlandı (' + _r + (onemli ? ', önemli' : '') + ')', 1); try{ SahaSes.birak(metin, _r, heyecan); }catch(e){} bitti(); }, onemli ? Math.max(7000, String(metin).length * 90) : (_dolgu ? 10000 : 4500));
         SahaSes.hazirBekle(metin, _r, heyecan).then(function(){ if(_gec) return; clearTimeout(_bek);
+          // (2026-10-31-G) Ses hazırlanırken cümle kesildiyse (daha önemli bir an geldi) hiç çalınmaz: eskiden kesilen cümle, sesi sonradan
+          // hazır olunca yeni cümlenin üstünde çalmaya başlıyordu.
+          if(gecerli && !gecerli()){ _db = true; try{ SahaSes.birak(metin, _r, heyecan); }catch(e){} return; }
           return SahaSes.cal(metin, _r, { duzey:_dz, heyecan:heyecan }).then(function(){ sesDurumOlay('spiker doğal ' + (Date.now() - _t0) + 'ms', 1); _ds(); });
         }).catch(function(e){ clearTimeout(_bek); if(_db) return; _db = true; sesDurumOlay('spiker hata: ' + ((e && e.message) || e));
           try{ DiagSaha('spkDogalSes', e, { tur:'medya', anlami:'Doğal spiker sesi çalınamadı; cümle atlandı.' }); }catch(_e){} bitti(); });
-        setTimeout(function(){ if(!_gec) _ds(); }, 25000);
+        /* (2026-10-31-G) 25 sn güvenlik sınırı dolunca ses hâlâ çalıyorsa önce SUSTURULUR, sonra sıra bırakılır: eskiden yalnızca sıra
+           bırakılıyordu, çalan cümle sürerken sıradaki cümle başlıyor, iki ses üst üste biniyordu. */
+        setTimeout(function(){ if(!_gec && !_db){ try{ SahaSes.sustur(); }catch(e){} _ds(); } }, 25000);
         return;
       }
       spkDogalHazirla(); sesDurumOlay('ses hazır değil, cümle atlandı %' + SahaSes.yuzde(_r), 1);
@@ -11057,22 +11069,83 @@ function _spkCihazOku(metin, rol, bitti){
     ss.speak(u);
   }catch(e){ setTimeout(bitti, 1500); }
 }
+/* SÖZ SIRASI (2026-10-31-G, kullanıcı: "spikerlerden biri konuşurken diğeri de konuşuyor, birbirlerinden bağımsızlar; bazı durumlarda
+   pozisyonlara tepki vermiyorlar"). KÖK SEBEPLER:
+   (1) Önemli olay (gol, kart…) çalan cümleyi kesince, kesilen cümlenin "bitti" geri çağrısı SONRADAN geliyor ve o an konuşan YENİ
+       cümlenin üzerinde "konuşma bitti" diyordu; sıra bir sonraki cümleyi başlatıyor, iki ses üst üste biniyordu. Ayrıca kesilen cümlenin
+       kalan parçaları çalmaya devam ediyordu (bkz. ortak.js SUSTURMA DÖNEMİ).
+   (2) Stat spikeri (anons) sıraya hiç girmiyordu; spiker/yorumcu konuşurken onların üstüne konuşuyordu.
+   (3) Yorumcunun tepkisi olaydan sabit süre sonra sıraya giriyordu: spikerin o olayı anlatıp anlatmadığına bakılmıyordu (spikerin
+       cümlesi atlandıysa yorumcu anlatılmamış bir pozisyonu yorumluyordu), arada yeni pozisyon olduysa eskisini yorumluyordu.
+   (4) Sıradan dolgu cümlesi (pas, taç, kale vuruşu) konuşulurken şut/kurtarış/direk gelirse sıranın sonuna ekleniyor, dolgu cümlesi
+       bitene kadar bekliyor, 4 sn'yi geçince "bayat" sayılıp ATILIYORDU - pozisyon hiç anlatılmıyordu.
+   ŞİMDİ: her cümlenin bir sıra numarası var; yalnızca o an konuşan cümlenin "bitti"si sırayı ilerletir. Cümlelerin önceliği var:
+   0 dolgu, 1 pozisyon, 2 önemli. Pozisyon gelince konuşulan dolgu (ve yorumcunun genel yorumu) yarıda kesilir, sıradaki dolgular atılır;
+   spiker pozisyonu anında anlatır. Yorumcu tepkisi yalnızca spiker o olayı GERÇEKTEN anlattıysa/anlatıyorsa ve arada yeni bir pozisyon
+   olmadıysa söylenir ve spikerin cümlesinin hemen ardına girer (sohbet gibi: spiker anlatır, yorumcu cevap verir). Stat anonsu da aynı
+   sıradadır. Konuşmalar arasında rol değişince kısa bir nefes payı bırakılır. */
+var SPK_DOLGU = /^(pas|kaleciPas|tac|kale|kaleciAldi|kapma|avantaj|durgun|ara|durgunY|durumY)$/;
+var SPK_TEPKI = /^(golY|kirmiziY|penaltiY|direkY|kurtarisY|kactiY|kafaY|calimY|kapmaY|faulY|ofsaytY|sariY|devreY|ikinciY|uzatmaY)$/;
+SPK.no = 0; SPK.olay = {}; SPK.olayNo = 0; SPK.sonPozNo = 0; SPK.calan = null;
+function _spkOncelik(rol, tur, onemli){
+  if(onemli || rol === 'anons') return 2;
+  if(tur && SPK_DOLGU.test(tur)) return 0;
+  if(rol === 'yorumcu' && !(tur && SPK_TEPKI.test(tur))) return 0;     // yorumcunun genel (olaya bağlı olmayan) yorumu
+  return 1;
+}
+// Konuşan cümleyi temiz keser: sıra numarası değişir (eski cümlenin "bitti"si artık hiçbir şeyi etkilemez), kalan parçalar da susar.
+function _spkKes(){
+  SPK.no++; SPK.konusuyor = false; SPK.calan = null; SPK._onemliOkunuyor = false;
+  try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(e){}
+  try{ window.SahaSes && SahaSes.sustur(); }catch(e){}
+}
+// Spikerin anlattığı olay kaydedilir: yorumcunun tepkisi buna bağlanır (bkz. _spkTepkiBagla).
+function _spkOlayKaydet(x){
+  if(x.rol !== 'spiker' || !x.tur || x._kayitli) return; x._kayitli = true;
+  x.olayNo = ++SPK.olayNo; if(x.oncelik >= 1) SPK.sonPozNo = x.olayNo;
+  SPK.olay[x.tur] = { no:x.olayNo, ts:Date.now(), x:x };
+}
+// Yeni cümleyi sıraya koyar; önceliğe göre keser/atar. true: sıraya girdi.
+function _spkSirayaKoy(x){
+  var o = x.oncelik, c = SPK.calan;
+  _spkOlayKaydet(x);
+  if(x.tepki){
+    // Tepki: ait olduğu spiker cümlesi sıradaysa hemen arkasına, konuşuluyorsa sıranın en önüne girer.
+    var ei = -1; for(var i = 0; i < SPK.sira.length; i++){ if(SPK.sira[i] === x.ana) { ei = i; break; } }
+    if(ei >= 0) SPK.sira.splice(ei + 1, 0, x); else SPK.sira.unshift(x);
+    return true;
+  }
+  if(o === 0){ if(c || SPK.sira.length) return false; SPK.sira.push(x); return true; }     // dolgu yalnızca tamamen sessizken
+  // Pozisyon/önemli: sıradaki dolgu ve eski pozisyonlar (önemli değilse) atılır.
+  SPK.sira = SPK.sira.filter(function(y){ return y.oncelik >= 2 || (o < 2 && y.oncelik >= o && Date.now() - y.ts < 1500); });
+  if(c && (c.oncelik < o || (o === 1 && c.oncelik === 1 && c.rol === 'yorumcu'))) _spkKes();     // daha önemsiz konuşma yarıda kesilir
+  if(o === 1 && SPK.sira.length >= 2) return false;
+  SPK.sira.push(x); return true;
+}
 function _spkSiradaki(){
   if(SPK.konusuyor) return;
   var simdi = Date.now();
   while(SPK.sira.length){
     var x = SPK.sira.shift();
-    if(!x.onemli && simdi - x.ts > 4000) continue;     // bayat anlatım okunmaz
-    SPK.konusuyor = true; SPK.sonKonusma = simdi;
+    var _bayat = x.tepki ? 6000 : (x.oncelik === 1 ? 4500 : 3000);
+    if(x.oncelik < 2 && simdi - x.ts > _bayat) continue;                              // bayat anlatım okunmaz
+    if(x.tepki && x.ana && !x.ana.basladi) continue;                                    // spiker o olayı anlatmadıysa yorumcu da yorumlamaz
+    // Rol değişince kısa nefes payı (aynı anda başlıyormuş gibi duyulmasın); önemli cümle beklemez.
+    var _ara = ((x.oncelik < 2 || x.tepki) && SPK._sonRol && SPK._sonRol !== x.rol) ? 380 - (simdi - (SPK.sonKonusma || 0)) : 0;
+    if(_ara > 30){ SPK.sira.unshift(x); clearTimeout(SPK._araT); SPK._araT = setTimeout(_spkSiradaki, _ara); return; }
+    var no = ++SPK.no;
+    SPK.konusuyor = true; SPK.sonKonusma = simdi; SPK.calan = x; x.basladi = simdi; SPK._onemliOkunuyor = x.oncelik >= 2;
     if(x.rol === 'yorumcu') SPK.sonYorum = simdi; else SPK.sonAnlati = simdi;
-    try{ yayinAnonsGonder(x.metin, x.rol); }catch(e){self.__ds&&self.__ds(10209,e)}
-    try{ SPK.log.push({ ts:simdi, r:x.rol, m:x.metin }); if(SPK.log.length > 60) SPK.log.shift(); }catch(e){self.__ds&&self.__ds(10210,e)}
-    var _bit = function(){ SPK.konusuyor = false; SPK.sonKonusma = Date.now(); setTimeout(_spkSiradaki, 250); };
-    _spkOku(x.metin, x.rol, _bit, x.h, x.onemli, x.tur);
+    if(x.rol !== 'anons'){ try{ yayinAnonsGonder(x.metin, x.rol); }catch(e){self.__ds&&self.__ds(10209,e)}
+      try{ SPK.log.push({ ts:simdi, r:x.rol, m:x.metin }); if(SPK.log.length > 60) SPK.log.shift(); }catch(e){self.__ds&&self.__ds(10210,e)} }
+    var _bit = function(){ if(no !== SPK.no) return;                                     // kesilmiş cümlenin geç gelen "bitti"si yok sayılır
+      x.bitti0 = Date.now(); SPK.konusuyor = false; SPK.calan = null; SPK._onemliOkunuyor = false; SPK.sonKonusma = x.bitti0; SPK._sonRol = x.rol; setTimeout(_spkSiradaki, 200); };
+    var _gec = function(){ return no === SPK.no; };
+    if(x.rol === 'anons') _anonsOku(x.metin, _bit, _gec);
+    else _spkOku(x.metin, x.rol, _bit, x.h, x.oncelik >= 2, x.tur, _gec);
     return;
   }
 }
-// tur: aynı türün tekrar aralığı için anahtar. onemli: sırayı keser.
 /* EK ANLATIM HAVUZU (2026-10-07-A, kullanıcı: "spiker ve yorumcu için daha fazla anlatım kelimesi ekle"): mevcut
    cümle listelerine dokunmadan, her anlatım türüne (spkSoyle'deki 'tur' anahtarı) ek cümleler. spk() olayın
    bağlamını (_spkBag: oyuncu, takım, rakip, pas alan, rakip oyuncu, duran top takımı) bırakır; spkSoyle ek havuzu
@@ -11630,21 +11703,32 @@ function _spkEkSec(tur, metin){
    cümleleri maç olaylarından (gol, faul, şut…) üretiliyor; bu olaylar yalnızca maçı yöneten cihazda hesaplanıyor. Konuğun cihazında
    hiçbir olay oluşmadığı için spiker ve yorumcu maç boyunca susuyordu. ŞİMDİ: yöneten cihaz söylenecek her cümleyi (kendi spikeri kapalı
    olsa bile) durum paketine koyar; konuk aynı cümleleri kendi ses ayarlarıyla (spiker/yorumcu açık-kapalı, sıklık, ses) okur. */
-function _spkYayinla(rol, metin, onemli){
+function _spkYayinla(rol, metin, onemli, tur){
   try{ if(!window._sahaOdaHost) return; var L = SPK.yayin || (SPK.yayin = []); SPK.yayinN = (SPK.yayinN || 0) + 1;
-    L.push({ n:SPK.yayinN, r:rol, m:String(metin).slice(0, 220), o:onemli ? 1 : 0 }); while(L.length > 4) L.shift(); SPK.yayinT = Date.now(); }catch(e){}
+    L.push({ n:SPK.yayinN, r:rol, m:String(metin).slice(0, 220), o:onemli ? 1 : 0, t:tur || '' }); while(L.length > 4) L.shift(); SPK.yayinT = Date.now(); }catch(e){}
 }
-function _spkUzaktan(rol, metin, onemli){
+function _spkUzaktan(rol, metin, onemli, tur){
   try{
     if(!_spkAcik() || !metin) return;
     if(rol === 'yorumcu' && AYAR.yorumcu === false) return;
     if(!onemli && (AYAR.spkSiklik || 'normal') === 'az' && Math.random() < 0.5) return;
-    if(onemli){ SPK.sira = SPK.sira.filter(function(x){ return x.onemli; });
-      if(SPK.konusuyor && !SPK._onemliOkunuyor){ try{ window.speechSynthesis && window.speechSynthesis.cancel(); SahaSes.sustur(); }catch(e){} SPK.konusuyor = false; } }
-    else if(SPK.sira.length >= 2) return;
-    SPK.sira.push({ rol:rol, metin:String(metin), onemli:!!onemli, ts:Date.now() });
-    _spkSiradaki();
+    // (2026-10-31-G) Konukta da aynı söz sırası: yöneten cihazın gönderdiği tür ile öncelik ve yorumcu tepkisinin hangi cümleye ait olduğu bilinir.
+    var x = { rol:rol, metin:String(metin), onemli:!!onemli, ts:Date.now(), tur:tur || '', oncelik:_spkOncelik(rol, tur, onemli) };
+    if(!_spkTepkiBagla(x)) return;
+    if(_spkSirayaKoy(x)) _spkSiradaki();
   }catch(e){ _sessiz(e, '_spkUzaktan', 'saha_ses'); }
+}
+/* Yorumcu tepkisi (…Y türleri) ait olduğu spiker cümlesine bağlanır. Bağlanamazsa (spiker o olayı anlatmadı, olay eskidi ya da arada
+   yeni bir pozisyon oldu) tepki söylenmez: yorumcu anlatılmamış ya da geçmiş bir pozisyonu yorumlamaz. */
+function _spkTepkiBagla(x){
+  if(x.rol !== 'yorumcu' || !x.tur || !SPK_TEPKI.test(x.tur)) return true;
+  var a = SPK.olay[x.tur.slice(0, -1)], simdi = Date.now();
+  if(!a || !a.x || simdi - a.ts > (a.x.oncelik >= 2 ? 14000 : 9000)) return false;
+  if(SPK.sonPozNo > a.no) return false;                                   // arada yeni pozisyon anlatıldı
+  var ax = a.x, bekliyor = SPK.calan === ax || SPK.sira.indexOf(ax) >= 0;
+  if(!bekliyor && !ax.basladi) return false;                              // spiker cümlesi atıldı
+  if(!bekliyor && ax.bitti0 && simdi - ax.bitti0 > 5000) return false;
+  x.tepki = true; x.ana = ax; return true;
 }
 function spkSoyle(rol, metin, tur, onemli, aralikMs){
   try{
@@ -11654,23 +11738,24 @@ function spkSoyle(rol, metin, tur, onemli, aralikMs){
     aralikMs = (aralikMs || 6000) * (_sk === 'az' ? 2 : (_sk === 'cok' ? 0.6 : 1));
     var simdi = Date.now();
     if(tur && SPK.sonTur[tur] && simdi - SPK.sonTur[tur] < aralikMs) return;
-    if(window._sahaOdaHost){ var _m0 = _spkEkSec(tur, metin); if(tur) SPK.sonTur[tur] = simdi; _spkYayinla(rol, _m0, onemli);
-      if(!_spkAcik() || (rol === 'yorumcu' && AYAR.yorumcu === false) || (!onemli && _sk === 'az' && Math.random() < 0.5)) return; metin = _m0; }
+    var x = { rol:rol, metin:metin, onemli:!!onemli, ts:simdi, tur:tur, oncelik:_spkOncelik(rol, tur, onemli) };
+    if(!_spkTepkiBagla(x)) return;                                      // (2026-10-31-G) bkz. SÖZ SIRASI
+    if(window._sahaOdaHost){ x.metin = _spkEkSec(tur, metin); if(tur) SPK.sonTur[tur] = simdi; _spkYayinla(rol, x.metin, onemli, tur);
+      if(!_spkAcik() || (rol === 'yorumcu' && AYAR.yorumcu === false) || (!onemli && _sk === 'az' && Math.random() < 0.5)){
+        // Bu cihazda okunmasa da konuğa gitti: olay kaydedilir ki yorumcunun tepkisi de bağlanıp gönderilebilsin.
+        if(rol === 'spiker' && tur){ x.basladi = simdi; x.bitti0 = simdi + Math.min(5000, 600 + String(x.metin).length * 60); _spkOlayKaydet(x); }
+        return; } }
     else {
       if(!_spkAcik()) return;
       if(rol === 'yorumcu' && AYAR.yorumcu === false) return;           // yorumcu ayrıca kapatılabilir (B20)
       // Sıklık (B20): az = sıradan anlatımın yarısı atlanır ve tekrar aralığı iki katı; çok = aralık kısalır.
       if(!onemli && _sk === 'az' && Math.random() < 0.5) return;
-      metin = _spkEkSec(tur, metin);
-      if(tur) SPK.sonTur[tur] = simdi;
+      x.metin = _spkEkSec(tur, metin);
     }
-    if(onemli){
-      SPK.sira = SPK.sira.filter(function(x){ return x.onemli; });
-      if(SPK.konusuyor && !SPK._onemliOkunuyor){ try{ window.speechSynthesis && window.speechSynthesis.cancel(); SahaSes.sustur(); }catch(e){self.__ds&&self.__ds(10792,e)} SPK.konusuyor = false; }
-    } else if(SPK.sira.length >= 2) return;           // sıra doluysa sıradan anlatım atlanır
-    var _h = spkHeyecan(tur, metin, rol);
-    SPK.sira.push({ rol:rol, metin:metin, onemli:!!onemli, ts:simdi, tur:tur, h:_h });
-    try{ if(onemli && AYAR.spiker !== false && spkDogalAcik() && SahaSes.hazirMi(rol === 'yorumcu' ? 'yorumcu' : 'spiker')) SahaSes.hazirBekle(String(metin).replace(/([A-Za-zÇĞİÖŞÜçğıöşü]{3,})sp\b/g, '$1spor'), rol === 'yorumcu' ? 'yorumcu' : 'spiker', _h).catch(function(){}); }catch(e){}   // (2026-10-31-A) önceden üret
+    x.h = spkHeyecan(tur, x.metin, rol);
+    if(!_spkSirayaKoy(x)) return;                                       // sıra doluysa/sessiz değilse dolgu atlanır
+    if(tur && !window._sahaOdaHost) SPK.sonTur[tur] = simdi;
+    try{ if(onemli && AYAR.spiker !== false && spkDogalAcik() && SahaSes.hazirMi(rol === 'yorumcu' ? 'yorumcu' : 'spiker')) SahaSes.hazirBekle(String(x.metin).replace(/([A-Za-zÇĞİÖŞÜçğıöşü]{3,})sp\b/g, '$1spor'), rol === 'yorumcu' ? 'yorumcu' : 'spiker', x.h).catch(function(){}); }catch(e){}   // (2026-10-31-A) önceden üret
     _spkSiradaki();
   }catch(e){ _sessiz(e, 'spkSoyle', 'saha_ses'); }
 }
@@ -11782,7 +11867,7 @@ function _spkKuyruk(rol, metin){
   try{
     if(!_spkAcik() || !metin) return;
     if(rol === 'yorumcu' && AYAR.yorumcu === false) return;
-    SPK.sira.push({ rol:rol, metin:metin, onemli:true, ts:Date.now() });
+    SPK.sira.push({ rol:rol, metin:metin, onemli:true, ts:Date.now(), oncelik:2 });
     _spkSiradaki();
   }catch(e){self.__ds&&self.__ds(10908,e)}
 }
@@ -12473,7 +12558,7 @@ function macOnuSesleri(){
     setTimeout(function(){ sesAlkisDalga(4, 0.7); }, 1200);
     setTimeout(function(){ sesAlkisDalga(3.5, 0.8); try{ tezahurat(true); }catch(e){self.__ds&&self.__ds(11588,e)} }, 5200);
     if(!_spkAcik()) return;
-    SPK.sira = []; SPK.sonTur = {};
+    SPK.sira = []; SPK.sonTur = {}; SPK.olay = {}; SPK.sonPozNo = 0; SPK.olayNo = 0;
     var ta = _spkTakim(0), tb = _spkTakim(1), s = new Date().getHours();
     var selam = s < 11 ? 'Günaydın' : (s < 17 ? 'İyi günler' : (s < 22 ? 'İyi akşamlar' : 'İyi geceler'));
     var hava = (typeof AYAR !== 'undefined' && AYAR.hava) || 'gunduz';
@@ -17700,7 +17785,7 @@ function ayarSesKanal(k, v){
   if(k === 'sesTus') try{ sahaTusSesi(); }catch(e){self.__ds&&self.__ds(15758,e)}   // duyarak ayarlansın
 }
 function ayarMuzikAcKapa(){ AYAR.muzik = (AYAR.muzik === false); ayarKaydet(); try{ sahaMuzikDenetle(); }catch(e){self.__ds&&self.__ds(15760,e)} sayAyarCiz(); }
-function ayarSpikerAcKapa(){ AYAR.spiker = (AYAR.spiker === false); if(AYAR.spiker === false){ try{ SPK.sira = []; window.speechSynthesis && window.speechSynthesis.cancel(); }catch(e){self.__ds&&self.__ds(15761,e)} } ayarKaydet(); sayAyarCiz(); }
+function ayarSpikerAcKapa(){ AYAR.spiker = (AYAR.spiker === false); if(AYAR.spiker === false){ try{ SPK.sira = SPK.sira.filter(function(y){ return y.rol === 'anons'; }); if(SPK.calan && SPK.calan.rol !== 'anons') _spkKes(); setTimeout(_spkSiradaki, 50); }catch(e){self.__ds&&self.__ds(15761,e)} } ayarKaydet(); sayAyarCiz(); }
 function ayarTekrarAcKapa(){ AYAR.tekrar = !AYAR.tekrar; ayarKaydet(); ayarUygula(); sayAyarCiz(); }
 /* TAM EKRAN (kullanıcı talebi): Tarayıcı tam ekranı yalnızca bir KULLANICI HAREKETİ
    içinde açılabilir - bu yüzden düğmeye basıldığı anda çağrılır, ayar olarak saklanıp
@@ -18445,7 +18530,7 @@ function rovansBaslat(){
   try{
     window._klipCiz = null; window._klipKayit = null; OZET.aktif = false;
     try{ var el = document.getElementById('macSonuEkran'); if(el) el.style.display = 'none'; _sahaHudGeri(); }catch(e){}
-    try{ SPK.sira = []; SPK.konusuyor = false; if(window.speechSynthesis) window.speechSynthesis.cancel(); try{ SahaSes.sustur(); }catch(_k){} }catch(e){}
+    try{ SPK.sira = []; _spkKes(); }catch(e){}
     try{ odaNetDurdur(); }catch(e){}
     window._sahaOdaMacBasladi = true;
     odaMacBaslat();
@@ -19382,7 +19467,7 @@ function odaNetKonukHud(v){
     try{ if(window._knSpN == null && !(v.sp && v.sp.length)) window._knSpN = 0; }catch(e){}
     try{ if(v.sp && v.sp.length){ var _sn = window._knSpN;
       if(_sn == null){ window._knSpN = v.sp[v.sp.length - 1].n; }           // ilk paket: geçmiş cümleler okunmaz
-      else v.sp.forEach(function(x){ if(x && x.n > window._knSpN){ window._knSpN = x.n; _spkUzaktan(x.r, x.m, !!x.o); } }); } }catch(e){}
+      else v.sp.forEach(function(x){ if(x && x.n > window._knSpN){ window._knSpN = x.n; _spkUzaktan(x.r, x.m, !!x.o, x.t); } }); } }catch(e){}
     try{ var _vb = v.vb ? JSON.stringify(v.vb) : ''; if(_vb !== window._knVbImza){ window._knVbImza = _vb; if(v.vb) varBantGoster(v.vb.b, v.vb.a, v.vb.c, v.vb.e); else varBantGoster(null); } }catch(e){}
     try{ if(v.hv){ if(window._knHavaHedef == null) window._knHavaHedef = v.hv;
       else if(v.hv !== window._knHavaHedef){ window._knHavaHedef = v.hv; if(window._ligHavaOnceki == null) window._ligHavaOnceki = AYAR.hava; havaGecisBaslat(AYAR.hava, v.hv); } } }catch(e){}
@@ -20153,7 +20238,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-10-31-F';
+window.APP_BUILD='2026-10-31-G';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -28632,7 +28717,7 @@ function macSonuEkraniKapat(){
     window._klipCiz = null; window._klipKayit = null;
     OZET.aktif = false; _ozetEtiket('');
     // Ana sayfaya dönülünce maç sonu bilgilendirmesi/vedası yarıda kalır, menüde konuşmaya devam etmez.
-    try{ SPK.sira = []; SPK.konusuyor = false; if(window.speechSynthesis) window.speechSynthesis.cancel(); try{ SahaSes.sustur(); }catch(_k){} }catch(e){self.__ds&&self.__ds(26269,e)}
+    try{ SPK.sira = []; _spkKes(); }catch(e){self.__ds&&self.__ds(26269,e)}
     var el = document.getElementById('macSonuEkran'); if(el) el.style.display = 'none';
     _sahaHudGeri();
     try{ yayinDurdur(); }catch(e){self.__ds&&self.__ds(26272,e)}
@@ -30139,6 +30224,13 @@ var _stadEkran = (function(){
     _frustum.setFromProjectionMatrix(_mat);
     var gorunur = E.ekranlar.some(function(e){ return e.grup.visible && _frustum.intersectsSphere(e.kure); });
     if (!gorunur) return;
+    /* KOPYA YAYIN (2026-10-31-G, kullanıcı: "yapay zeka maçlarında bile çok donma oluyor"). ÖLÇÜM: sahnede ~2,1 milyon üçgen var (oyuncu
+       modelleri); dev ekranın canlı yayını için sahne Yüksek grafikte İKİ KAREDE BİR yeniden çiziliyordu - o karelerde ekran kartının
+       yükü ikiye katlanıyor, kareler bir uzun bir kısa geliyor (takılma). Uyarlanabilir sınır da işe yaramıyordu: süre işlemcide ölçülüyor,
+       ekran kartının asıl süresi ölçüye girmiyordu (güçlü telefonda "ucuz" görünüyordu). ŞİMDİ sahne ikinci kez ÇİZİLMEZ: ana kare çizildikten
+       hemen sonra ekranın orta bölümü ekran kartı içinde dev ekran dokusuna kopyalanır (işlemciye geri okuma yok, maliyeti yok denecek kadar
+       az). Dev ekran yayını bu yüzden oyunun yakın plan görüntüsüdür. Kopya desteklenmeyen cihazda eski yönteme dönülür. */
+    if (!E.kopyaYok){ E.kopyaIste = true; return; }
     var eskiOran = camera.aspect, eskiFov = camera.fov;
     var gorunurlukler = E.ekranlar.map(function(e){ return e.grup.visible; });
     // (2026-10-05-F, teşhis "guncelle() 26ms"): ikinci çizimde gölge haritası YENİDEN hesaplanmaz - ana çizimin
@@ -30223,7 +30315,31 @@ var _stadEkran = (function(){
       e.grup.visible = !e.gizli;
     });
   }
-  return { guncelle:function(){ try{ guncelle(); }catch(e){_sessiz(e,'bitir:5451','saha_oynanis');} }, temaUygula:temaUygula, _E:E };
+  // Ana çizimin hemen ardından çağrılır (bkz. loop): istenmişse çizim tamponunun ortası dev ekran dokusuna kopyalanır.
+  var _kp = new THREE.Vector2(), _tb = new THREE.Vector2();
+  function kopyala(){
+    if (!E.kopyaIste || E.kopyaYok) return; E.kopyaIste = false;
+    try{
+      renderer.getDrawingBufferSize(_tb);
+      var w = Math.min(1024, Math.floor(_tb.x * 0.5)), h = Math.floor(w / E.basOran);
+      if (h > _tb.y * 0.8){ h = Math.floor(_tb.y * 0.8); w = Math.floor(h * E.basOran); }
+      w -= w % 2; h -= h % 2; if (w < 64 || h < 32) return;
+      if (!E.kopyaDoku || E.kopyaDoku.image.width !== w || E.kopyaDoku.image.height !== h){
+        if (E.kopyaDoku) E.kopyaDoku.dispose();
+        var d = new THREE.DataTexture(new Uint8Array(w * h * 3), w, h, THREE.RGBFormat);
+        d.minFilter = THREE.LinearFilter; d.magFilter = THREE.LinearFilter; d.generateMipmaps = false; d.needsUpdate = true;
+        E.kopyaDoku = d;
+      }
+      _kp.set(Math.floor((_tb.x - w) / 2), Math.floor((_tb.y - h) / 2));
+      // Hata denetimi (ekran kartıyla eşzamanlama ister) yalnızca ilk kopyada yapılır; sonra her kare denetlenmez.
+      var gl = renderer.getContext(), ilk = !E.kopyaOnay; if (ilk) while (gl.getError() !== gl.NO_ERROR){}
+      renderer.copyFramebufferToTexture(_kp, E.kopyaDoku);
+      if (ilk){ if (gl.getError() !== gl.NO_ERROR) throw new Error('kopya desteklenmiyor'); E.kopyaOnay = true; }
+      if (yayinMat.map !== E.kopyaDoku){ yayinMat.map = E.kopyaDoku; yayinMat.needsUpdate = true; }
+    }catch(e){ E.kopyaYok = true; try{ yayinMat.map = E.rt.texture; yayinMat.needsUpdate = true; }catch(_m){}
+      try{ DiagSaha('stadEkranKopya', e, { tur:'uyari', modul:'saha_grafik', anlami:'Dev ekran kopyası bu cihazda çalışmadı; eski (ikinci çizim) yönteme dönüldü.' }); }catch(_e){} }
+  }
+  return { guncelle:function(){ try{ guncelle(); }catch(e){_sessiz(e,'bitir:5451','saha_oynanis');} }, kopyala:kopyala, temaUygula:temaUygula, _E:E };
 })();
 
 // ══════════════════════════════════════════════════════════════════════════════════════════
@@ -31194,6 +31310,7 @@ function _sahneKapaliMi(){
   }catch(e){ return 0; }
 }
 var _kapakSay = 0;
+var _golgeKare = 0;
 function loop(){
   requestAnimationFrame(loop);
   if(window._klipOffline){ try{ clock.getDelta(); }catch(e){} return; }   // (2026-10-18-K) kare kare kayıt sürüyor: sahneyi kayıt sürücüsü çizer
@@ -31266,7 +31383,12 @@ function loop(){
     var _gw = innerWidth, _gh = innerHeight, _cv = renderer.domElement;
     var _ol = _gw + 'x' + _gh;
     if(_gw > 0 && _gh > 0 && !window._sahaIzleModu && (Math.abs(camera.aspect - _gw / _gh) > 0.01 || (window._oranSon !== _ol && (Math.abs(_cv.clientWidth - _gw) > 2 || Math.abs(_cv.clientHeight - _gh) > 2)))){ window._oranSon = _ol; ekranOraniUygula(); } } }catch(e){}
+  /* GÖLGE HARİTASI YARI HIZDA (2026-10-31-G, bkz. KOPYA YAYIN ölçümü): gerçek gölge için oyuncu modelleri her karede bir kez daha (gölge
+     haritasına) çiziliyordu - ekran kartının en büyük ikinci yükü. Gölge haritası artık iki karede bir yenilenir (saniyede 30 kez); yayın
+     kamerası uzaklığında aradaki fark gözle seçilmez. */
+  try{ if (renderer.shadowMap.enabled){ renderer.shadowMap.autoUpdate = false; if (((++_golgeKare) & 1) === 0 || window._golgeHerKare) renderer.shadowMap.needsUpdate = true; } }catch(e){}
   if (window._varEkranAktif && (VAR.aktif || window._knVarEkran)) varEkranCiz(); else renderer.render(scene, camera);   // (2026-10-17-G) konukta da VAR ekranı
+  if (!window._varEkranAktif || !(VAR.aktif || window._knVarEkran)) _stadEkran.kopyala();   // (2026-10-31-G) dev ekran: ana karenin kopyası (bkz. KOPYA YAYIN)
   if (!window._macOncesi && MO_FIG.gorunur) _moFigurGizle();
   if (window._klipCiz) { try{ window._klipCiz(); window._klipHata = 0; }catch(e){   // gol klibi kaydı (bkz. golKlibiKaydet)
     // (2026-10-17-J) Hata artık sessizce kaydı dondurmaz: teşhise yazılır, ancak art arda 5 karede tekrarlarsa kayıt bırakılır.

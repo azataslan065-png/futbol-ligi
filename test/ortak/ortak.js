@@ -1046,6 +1046,7 @@ var SahaSes = (function(){
     return Promise.resolve(b).then(function(b){
       var c0 = baglam(); if(!c0) throw new Error('ses çalınamıyor');
       return calisir(c0).then(function(c){ return new Promise(function(coz){
+        if(o._d0 != null && o._d0 !== DONEM) return coz();          // (2026-10-31-G) çalmaya hazırlanırken susturuldu: hiç başlamaz
         var H = HEY[b._h || 0], k = c.createBufferSource(), son0 = c.createGain();
         k.buffer = b;
         // Her cümlede ton biraz değişir (insan aynı cümleyi hep aynı tonda söylemez); gol çığlığında ton çığlık boyunca yükselir, sonra iner.
@@ -1078,33 +1079,40 @@ var SahaSes = (function(){
     // çok uzun parça virgülsüz ise olduğu gibi kalır
     return o.length ? o : [String(metin || '')];
   }
-  function calSira(parcalar, rol, h, o){
+  /* SUSTURMA DÖNEMİ (2026-10-31-G, kullanıcı: "spikerlerden biri konuşurken diğeri de konuşuyor"). KÖK SEBEP: sustur() yalnızca o an çalan
+     PARÇAYI durduruyordu; cümle parça parça okunduğu için (bkz. PARÇA PARÇA OKUMA) durdurulan parçanın ardından aynı cümlenin sonraki
+     parçaları çalmaya devam ediyor, yeni cümleyle üst üste biniyordu. ŞİMDİ her sustur() dönemi bir artırır; çalmakta olan cümle bir
+     sonraki parçaya geçmeden dönemi denetler, değiştiyse durur ve kalan parçaların üretimini iptal eder. */
+  var DONEM = 0;
+  function calSira(parcalar, rol, h, o, d0){
     var P = parcalar.map(function(x){ return tampon(x, rol, h); });     // hepsi sıraya girer (işçi sırayla üretir)
-    var i = 0, durdu = false, ilkCalan = null;
+    var i = 0, durdu = false, ilkCalan = null; if(d0 == null) d0 = DONEM;
     var bir = function(){
+      if(!durdu && d0 !== DONEM){ durdu = true; for(var k = i; k < parcalar.length; k++) birak(parcalar[k], rol, h); }
       if(durdu || i >= P.length) return Promise.resolve();
       var j = i++;
       return Promise.race([P[j], new Promise(function(z, red){ setTimeout(function(){ red(new Error('geç')); }, j === 0 ? 20000 : 6000); })])
-        .then(function(b){ if(durdu) return; return calB(b, o).then(bir); }, function(){ durdu = true; for(var k = j; k < parcalar.length; k++) birak(parcalar[k], rol, h); });
+        .then(function(b){ if(durdu || d0 !== DONEM) return bir(); return calB(b, o).then(bir); }, function(){ durdu = true; for(var k = j; k < parcalar.length; k++) birak(parcalar[k], rol, h); });
     };
     return bir();
   }
   function cal(metin, rol, o){
     o = o || {}; o._sap = 1 + (Math.random() * 2 - 1) * 0.015;   // cümlenin bütün parçaları aynı tonda
     var h = o.heyecan == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, o.heyecan | 0)), ob = onEkBol(metin, rol, h), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
+    var d0 = DONEM; o._d0 = d0;
     if(bk && bk._b){
       var gp = ob.geri ? parcala(ob.geri) : [];
       if(gp.length) tampon(gp[0], rol, h).catch(function(){});           // çığlık çalarken geri kalanın ilk parçası üretilir
-      return calB(bk._b, o).then(function(){ if(gp.length) return calSira(gp, rol, h, o); });
+      return calB(bk._b, o).then(function(){ if(gp.length) return calSira(gp, rol, h, o, d0); });
     }
-    return calSira(parcala(metin), rol, h, o);
+    return calSira(parcala(metin), rol, h, o, d0);
   }
   function hazirBekle(metin, rol, h){   // çalmaya başlamaya hazır mı: hazır çığlık ya da cümlenin ilk parçası
     h = h == null ? heyecanBul(metin, rol) : h; var ob = onEkBol(metin, rol, h), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
     if(bk && bk._b) return Promise.resolve(true);
     return tampon(parcala(metin)[0], rol, h).then(function(){ return true; });
   }
-  function sustur(){ try{ if(calan){ var k = calan; calan = null; k.stop(); } }catch(e){} }
+  function sustur(){ DONEM++; try{ if(calan){ var k = calan; calan = null; k.stop(); } }catch(e){} }
   function ayarla(v){ v = v || {}; if(v.spiker && SESLER[v.spiker]) ROL.spiker = v.spiker; if(v.yorumcu && SESLER[v.yorumcu]) ROL.yorumcu = v.yorumcu; haber(); }
   return { destek:destek, hazirla:hazirla, hazirMi:hazirMi, cal:cal, tampon:tampon, sustur:sustur, ayarla:ayarla, sesler:SESLER,
     rolSesi:function(r){ return sesAdi(r); }, parcala:parcala, yuzde:function(r){ return yuzde[sesAdi(r)] || 0; }, hata:function(){ return hata; },
