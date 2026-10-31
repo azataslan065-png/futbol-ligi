@@ -163,6 +163,7 @@ button.sil{ color:#ffb4ae; border-color:#5a2724; }
   <h2>Eğitim paketini indir</h2>
   <p id="indirAcik">Bütün cümleler bitince (ya da en az %80'i) bu rolün paketini indir. Diyalog sekmesinde bu role ait kaydedilen satırlar da pakete eklenir. Paket, Colab defterinde sesi eğitmek için kullanılır: <i>wavs</i> klasörü (22.050 Hz mono WAV) ve <i>metadata.csv</i>.</p>
   <button class="ana" id="indir">Paketi indir (.zip)</button>
+  <div class="ikili" id="indirIki" style="display:none"><button class="ana" id="indirS">Spiker paketini indir</button><button class="ana" id="indirY" style="background:#2b5f8a">Yorumcu paketini indir</button></div>
   <div class="not" id="indirNot"></div>
 </div>
 
@@ -410,28 +411,30 @@ function zip(dosyalar){
   e.setUint32(12, mb, true); e.setUint32(16, ofs, true);
   return new Blob(parca.concat(merkez, [new Uint8Array(e.buffer)]), { type:'application/zip' });
 }
-function paketIndir(){
-  var not = $('indirNot'), ROL = MOD;
-  if(ROL === 'diyalog') return;
+/* (2026-10-31) Her paket TEK kişinin sesidir: o rolün cümleleri + diyalogda o rolün okuduğu satırlar. Diyalog sekmesinde iki düğme (spiker / yorumcu)
+   aynı paketleri indirir; iki kişinin sesi tek pakete konmaz (iki ayrı ses modeli eğitilir). */
+function paketIndir(ROL){
+  var not = $('indirNot');
   var metinler = {}; CUMLELER[ROL].forEach(function(x){ metinler[x.id] = x.m; }); DLG.forEach(function(x){ if(x.rol === ROL) metinler[x.id] = x.m; });
-  var anaN = CUMLELER[ROL].filter(function(x){ return kayitlar[x.id]; }).length, T = CUMLELER[ROL].length;
-  if(!anaN){ not.textContent = 'Henüz kayıt yok.'; return; }
-  if(anaN < T * 0.8 && !confirm('Cümlelerin yalnızca ' + anaN + '/' + T + ' kadarı kaydedildi. Eksik paket de eğitilebilir ama ses daha zayıf olur. Yine de indirilsin mi?')) return;
-  not.textContent = 'Paket hazırlanıyor…';
-  var dosyalar = [], csv = [], tek = 0, dlg = 0, enc = new TextEncoder();
+  not.textContent = (ROL === 'spiker' ? 'Spiker' : 'Yorumcu') + ' paketi hazırlanıyor…';
+  var kayit = [], enc = new TextEncoder();
   new Promise(function(coz, red){ var t = db.transaction('kayit'), s = t.objectStore('kayit'), r = s.openCursor();
     r.onsuccess = function(){ var c = r.result; if(!c){ coz(); return; } var k = String(c.key);
       if(k.indexOf(ROL + '/') === 0){ var id = k.slice(ROL.length + 1), m = c.value.metin || metinler[id];
-        if(metinler[id] != null && m && c.value.pcm && c.value.pcm.byteLength > 2000){
-          dosyalar.push({ ad:'wavs/' + id + '.wav', veri:wav(new Int16Array(c.value.pcm)) }); csv.push(id + '.wav|' + String(m).replace(/[|\n]/g, ' ')); tek++; if(/^dlg_/.test(id)) dlg++; } }
+        if(metinler[id] != null && m && c.value.pcm && c.value.pcm.byteLength > 2000) kayit.push({ id:id, m:m, pcm:c.value.pcm }); }
       c.continue(); }; r.onerror = function(){ red(r.error); }; })
   .then(function(){
+    var dlg = kayit.filter(function(x){ return /^dlg_/.test(x.id); }).length, anaN = kayit.length - dlg, T = CUMLELER[ROL].length;
+    if(!kayit.length){ not.textContent = (ROL === 'spiker' ? 'Spiker' : 'Yorumcu') + ' için henüz kayıt yok.'; return; }
+    if(anaN < T * 0.8 && !confirm((ROL === 'spiker' ? 'Spiker' : 'Yorumcu') + ' cümlelerinin yalnızca ' + anaN + '/' + T + ' kadarı kaydedildi (' + dlg + ' diyalog satırı ayrıca var). Eksik paket de eğitilebilir ama ses daha zayıf olur. Yine de indirilsin mi?')){ not.textContent = ''; return; }
+    var dosyalar = [], csv = [];
+    kayit.forEach(function(x){ dosyalar.push({ ad:'wavs/' + x.id + '.wav', veri:wav(new Int16Array(x.pcm)) }); csv.push(x.id + '.wav|' + String(x.m).replace(/[|\n]/g, ' ')); });
     dosyalar.push({ ad:'metadata.csv', veri:enc.encode(csv.join('\n') + '\n') });
-    dosyalar.push({ ad:'bilgi.json', veri:enc.encode(JSON.stringify({ rol:ROL, adet:tek, diyalog:dlg, hz:HZ, surum:CUMLELER.surum, tarih:new Date().toISOString() }, null, 1)) });
+    dosyalar.push({ ad:'bilgi.json', veri:enc.encode(JSON.stringify({ rol:ROL, adet:kayit.length, diyalog:dlg, hz:HZ, surum:CUMLELER.surum, tarih:new Date().toISOString() }, null, 1)) });
     var b = zip(dosyalar), a = document.createElement('a'), tarih = new Date().toISOString().slice(0, 10);
     a.href = URL.createObjectURL(b); a.download = 'saha-ses-' + ROL + '-' + tarih + '.zip'; document.body.appendChild(a); a.click();
     setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 60000);
-    not.textContent = tek + ' kayıt paketlendi (' + dlg + ' diyalog satırı dahil, ' + (b.size / 1048576).toFixed(1) + ' MB). Dosya İndirilenler klasörüne kaydedildi.';
+    not.textContent = (ROL === 'spiker' ? 'Spiker' : 'Yorumcu') + ': ' + kayit.length + ' kayıt paketlendi (' + dlg + ' diyalog satırı dahil, ' + (b.size / 1048576).toFixed(1) + ' MB). Dosya İndirilenler klasörüne kaydedildi.';
   }).catch(function(e){ not.textContent = 'Paket hazırlanamadı: ' + ((e && e.message) || e); });
 }
 
@@ -440,8 +443,8 @@ function rolSec(r){
   if(kaydediliyor) return; MOD = r; try{ localStorage.setItem('sesKayitRol', r); }catch(e){}
   ['spiker', 'yorumcu', 'diyalog'].forEach(function(k){ $('r' + k.charAt(0).toUpperCase() + k.slice(1)).classList.toggle('on', r === k); });
   var dl = r === 'diyalog';
-  $('indir').disabled = dl; $('indir').style.opacity = dl ? '.4' : '';
-  $('indirAcik').textContent = dl ? 'Diyalog satırları okuyan kişinin paketine kendiliğinden eklenir. Paketi Spiker ya da Yorumcu sekmesinden indir.'
+  $('indir').style.display = dl ? 'none' : ''; $('indirIki').style.display = dl ? 'grid' : 'none';
+  $('indirAcik').textContent = dl ? 'Spiker ve yorumcu iki ayrı ses olarak eğitildiği için iki ayrı paket iner. Her pakette o kişinin kendi cümleleri ve diyalogda okuduğu satırlar vardır; iki dosyayı da Drive\'daki SAHA-ses klasörüne yükle.'
     : 'Bütün cümleler bitince (ya da en az %80\'i) bu rolün paketini indir. Diyalog sekmesinde bu role ait kaydedilen satırlar da pakete eklenir. Paket, Colab defterinde sesi eğitmek için kullanılır: wavs klasörü (22.050 Hz mono WAV) ve metadata.csv.';
   $('indirNot').textContent = ''; duzenKapat();
   bilgileriYukle().then(function(){ i = Math.min(L().length - 1, +(localStorage.getItem('sesKayitSira_' + r) || 0) || 0); ilerlemeCiz(); listeCiz(); cumleCiz(); });
@@ -461,7 +464,9 @@ $('seciliDinle').onclick = function(){ if(DZ) cal(seciliPcm()); };
 $('metinGeri').onclick = function(){ if(DZ) $('metinK').value = DZ.x.m; };
 $('duzenVazgec').onclick = function(){ durdurDinle(); duzenKapat(); };
 $('duzenKaydet').onclick = duzenKaydet;
-$('indir').onclick = paketIndir;
+$('indir').onclick = function(){ if(MOD !== 'diyalog') paketIndir(MOD); };
+$('indirS').onclick = function(){ paketIndir('spiker'); };
+$('indirY').onclick = function(){ paketIndir('yorumcu'); };
 $('siradaki').onclick = function(){ var n = L().findIndex(function(x){ return !kayitlar[x.id]; }); git(n < 0 ? L().length - 1 : n); };
 $('uyariliGit').onclick = function(){ var bas = i + 1, T = L().length;
   for(var k = 0; k < T; k++){ var n = (bas + k) % T, r = kayitlar[L()[n].id]; if(r && r.uyari.length){ git(n); return; } }
