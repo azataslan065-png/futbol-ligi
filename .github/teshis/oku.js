@@ -8,6 +8,11 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
   const tok = (await (await auth.getClient()).getAccessToken()).token;
   const al = async (y, q) => { const r = await fetch(DB + y + '.json' + (q || ''), { headers: { Authorization: 'Bearer ' + tok } }); return r.ok ? r.json() : { HATA: r.status }; };
   const sinir = Date.now() - 12 * 3600e3, saat = ts => new Date(ts + 3 * 3600e3).toISOString().slice(5, 19).replace('T', ' ');
+  for(const yol of ['test/sahaVeri/leagues', 'test/leagues', 'leagues']){
+    const L = await al(yol, '?shallow=true') || {};
+    for(const lid of Object.keys(L).slice(-6)){ const T = await al(yol + '/' + lid + '/teams') || {};
+      const st = Object.values(T).map(t => t && t.stadium).filter(Boolean); if(st.length) console.log('STADYUM', yol, lid, JSON.stringify(st)); }
+  }
   for(const kok of ['test/', '']){
     console.log('\n===== ' + (kok || 'KÖK') + ' =====');
     const ses = await al(kok + 'sahaGorunum/ses') || {};
