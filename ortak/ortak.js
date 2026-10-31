@@ -997,9 +997,31 @@ var SahaSes = (function(){
      sesiyle (robot) okunduğu için iki ses karışıyordu. ŞİMDİ: gol, kırmızı kart ve penaltı çığlıkları ses hazır olur olmaz bir kez önceden üretilir
      ve olay anında BEKLEMEDEN çalar; cümlenin geri kalanı (oyuncu adı, skor) çığlık sürerken üretilir ve arkasından gelir. */
   var BANKA = {}, BANKA_METIN = { gol:'Gooool! Gol gol gol!', kirmizi:'Kırmızı kart! Kırmızı!', penalti:'Penaltı! Penaltı!' };
+  /* ANINDA TEPKİ (2026-10-31-H, kullanıcı: "gol pozisyonları başta olmak üzere spikerler pozisyonlarda gerekli tepkiyi göstermiyor ve pozisyonlar
+     biraz geç anlatılıyor"). KÖK SEBEP: her pozisyon cümlesi olay anında sıfırdan üretiliyordu; telefonda ilk parçanın üretimi 1-2 sn sürdüğü için
+     spiker pozisyondan sonra konuşuyordu. Hazır çığlık yalnızca "Gol!/Kırmızı!/Penaltı!" ile BAŞLAYAN cümlelerde kullanılıyordu; gol cümlelerinin
+     çoğu ("Ve top ağlarda!", "Ağlar havalandı!"…) bu kalıba uymadığı için gol de bekletiliyor, çığlıksız okunuyordu. ŞİMDİ pozisyonların kısa
+     ünlemleri (Şut! Kurtarış! Direk! Kafa vuruşu! Ofsayt! Faul! Korner! Az farkla!) ses hazır olur olmaz bir kez üretilip saklanır; pozisyon
+     anında ünlem BEKLEMEDEN çalar, cümlenin kalanı ünlem sürerken üretilir. Gol, kırmızı kart ve penaltıda cümle hangi kalıpla başlarsa başlasın
+     önce hazır çığlık çalar. Cümle ünlemle aynı sözle başlıyorsa söz tekrarlanmaz. */
+  var BANKA_EK = { sut:['Şut!', /^(Ve )?şut!\s*/i], kurtaris:['Kurtarış!', /^(Ve )?kurtarış!\s*/i], direk:['Direk!', /^(Ve )?direk!\s*/i],
+    kafa:['Kafa vuruşu!', /^(Ve )?kafa( vuruşu)?!\s*/i], ofsayt:['Ofsayt!', /^(Ve )?ofsayt!\s*/i], faul:['Faul!', /^(Ve )?faul!\s*/i],
+    korner:['Korner!', /^(Ve )?korner!\s*/i], kacti:['Aaah, az farkla!', /^(Ah+|A+h+),?\s*(az farkla!|olmadı!)?\s*/i] };
   function bankaHazirla(rol){
     if(rol === 'yorumcu') return; var s = sesAdi(rol);
     Object.keys(BANKA_METIN).forEach(function(k){ var a = s + '|' + k; if(!BANKA[a]){ BANKA[a] = tampon(BANKA_METIN[k], rol, 2); BANKA[a].then(function(b){ BANKA[a]._b = b; }, function(){ delete BANKA[a]; }); } });
+    Object.keys(BANKA_EK).forEach(function(k){ var a = s + '|' + k; if(!BANKA[a]){ BANKA[a] = tampon(BANKA_EK[k][0], rol, 1); BANKA[a].then(function(b){ BANKA[a]._b = b; }, function(){ delete BANKA[a]; }); } });
+  }
+  // Cümlenin önüne çalınacak hazır ünlem: {k, geri} ya da null. ek: anlatım türü (sut, gol…), yalnızca spikerde.
+  function onEkBul(metin, rol, h, ek){
+    var ob = onEkBol(metin, rol, h); if(ob) return ob;
+    if(!ek || rol === 'yorumcu' || !BANKA[sesAdi(rol) + '|' + ek]) return null;
+    var mt = metniHazirla(metin, h), geri = mt;
+    if(BANKA_EK[ek]) geri = mt.replace(BANKA_EK[ek][1], '');
+    else if(ek === 'gol') geri = mt.replace(/^(Ve |İşte )?(Go+l+!\s*)+/i, '');
+    else if(ek === 'kirmizi') geri = mt.replace(/^(Ve )?Kırmızı( kart)?!\s*/i, '');
+    else if(ek === 'penalti') geri = mt.replace(/^(Ve )?Penaltı!\s*/i, '');
+    return { k:ek, geri:geri.trim() };
   }
   function onEkBol(metin, rol, h){
     if(rol === 'yorumcu' || h < 2) return null;
@@ -1098,7 +1120,7 @@ var SahaSes = (function(){
   }
   function cal(metin, rol, o){
     o = o || {}; o._sap = 1 + (Math.random() * 2 - 1) * 0.015;   // cümlenin bütün parçaları aynı tonda
-    var h = o.heyecan == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, o.heyecan | 0)), ob = onEkBol(metin, rol, h), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
+    var h = o.heyecan == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, o.heyecan | 0)), ob = onEkBul(metin, rol, h, o.ek), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
     var d0 = DONEM; o._d0 = d0;
     if(bk && bk._b){
       var gp = ob.geri ? parcala(ob.geri) : [];
@@ -1107,9 +1129,9 @@ var SahaSes = (function(){
     }
     return calSira(parcala(metin), rol, h, o, d0);
   }
-  function hazirBekle(metin, rol, h){   // çalmaya başlamaya hazır mı: hazır çığlık ya da cümlenin ilk parçası
-    h = h == null ? heyecanBul(metin, rol) : h; var ob = onEkBol(metin, rol, h), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
-    if(bk && bk._b) return Promise.resolve(true);
+  function hazirBekle(metin, rol, h, ek){   // çalmaya başlamaya hazır mı: hazır çığlık/ünlem ya da cümlenin ilk parçası
+    h = h == null ? heyecanBul(metin, rol) : h; var ob = onEkBul(metin, rol, h, ek), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
+    if(bk && bk._b){ if(ob.geri) tampon(parcala(ob.geri)[0], rol, h).catch(function(){}); return Promise.resolve(true); }   // kalanın ilk parçası şimdiden üretilir
     return tampon(parcala(metin)[0], rol, h).then(function(){ return true; });
   }
   function sustur(){ DONEM++; try{ if(calan){ var k = calan; calan = null; k.stop(); } }catch(e){} }
