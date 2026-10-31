@@ -879,12 +879,12 @@ var SahaDestek = (function(){
 /* ═══ DOĞAL SPİKER SESİ (2026-10-31-A, kullanıcı: "hem insan sesi sunan hem de pozisyonu doğru okuyacak bir sistem geliştir").
    Anlatım metni oyundaki olaydan kurulur (pozisyon doğru), cihazın robot sesi yerine Piper sinir ağı sesiyle (Türkçe, insan sesine
    yakın) seslendirilir. Ses her cihazda aynıdır; sentez ayrı iş parçacığında yapılır (bkz. ortak/ses/ses-isci.js). Model bir kez
-   indirilir (~38 MB, önbellekte kalır). Hazır olana kadar ya da desteklenmeyen cihazda cihaz sesi kullanılır.
+   indirilir (ses başına ~14 MB, önbellekte kalır). Hazır olana kadar ya da desteklenmeyen cihazda cihaz sesi kullanılır.
    SahaSes.cal(metin, rol, {duzey}) → Promise (bitince) · SahaSes.tampon(metin, rol) → Promise<AudioBuffer> · SahaSes.hazirla(rol) */
 var SahaSes = (function(){
   var SESLER = { fahrettin:'Fahrettin', dfki:'Deniz', fettah:'Fettah' };
   var ROL = { spiker:'fahrettin', yorumcu:'dfki' }, HIZ = { spiker:1.08, yorumcu:0.94, anons:1 };
-  var isci = null, hazir = {}, yuk = {}, bek = {}, n = 0, ctx = null, yuzde = {}, hata = '', dinleyici = [], calan = null;
+  var isci = null, hazir = {}, yuk = {}, bek = {}, n = 0, ctx = null, yuzde = {}, hata = '', dinleyici = [], calan = null, disBaglam = null, indir = 0;
   var ON = {}, ONS = [];   // üretilmiş sesler (aynı cümle tekrar üretilmez: özet, gol videosu, tekrar)
   function kok(){ try{ return new URL('ortak/ses/', location.href).href; }catch(e){ return 'ortak/ses/'; } }
   function destek(){ try{ return !!(window.Worker && window.WebAssembly && window.caches && typeof BigInt64Array !== 'undefined'); }catch(e){ return false; } }
@@ -892,11 +892,11 @@ var SahaSes = (function(){
   function baslat(){
     if(isci || !destek()) return !!isci;
     try{
-      isci = new Worker(kok() + 'ses-isci.js?v=1');
+      isci = new Worker(kok() + 'ses-isci.js?v=2');
       isci.onmessage = function(e){ var v = e.data || {};
         if(v.tip === 'ilerleme'){ yuzde[v.ses] = v.yuzde; haber(); return; }
-        if(v.tip === 'hazir'){ hazir[v.ses] = true; yuzde[v.ses] = 100; var b = bek['y' + v.ses]; if(b){ delete bek['y' + v.ses]; b.c(); } haber(); return; }
-        if(v.tip === 'hata' && v.ses && !v.id){ hata = v.mesaj; var b2 = bek['y' + v.ses]; if(b2){ delete bek['y' + v.ses]; b2.r(new Error(v.mesaj)); } yuk[v.ses] = null; haber(); return; }
+        if(v.tip === 'hazir'){ hazir[v.ses] = true; yuzde[v.ses] = 100; indir = Math.max(0, indir - 1); var b = bek['y' + v.ses]; if(b){ delete bek['y' + v.ses]; b.c(); } haber(); return; }
+        if(v.tip === 'hata' && v.ses && !v.id){ hata = v.mesaj; indir = Math.max(0, indir - 1); var b2 = bek['y' + v.ses]; if(b2){ delete bek['y' + v.ses]; b2.r(new Error(v.mesaj)); } yuk[v.ses] = null; haber(); return; }
         var w = bek[v.id]; if(!w) return; delete bek[v.id];
         if(v.tip === 'ses') w.c({ pcm:v.pcm, hz:v.hz }); else w.r(new Error(v.mesaj || 'ses üretilemedi'));
       };
@@ -909,48 +909,104 @@ var SahaSes = (function(){
     var s = sesAdi(rol);
     if(hazir[s]) return Promise.resolve();
     if(!baslat()) return Promise.reject(new Error('Bu cihaz doğal sesi desteklemiyor'));
-    if(!yuk[s]) yuk[s] = new Promise(function(c, r){ bek['y' + s] = { c:c, r:r }; isci.postMessage({ tip:'yukle', ses:s }); });
+    if(!yuk[s]){ indir++; yuk[s] = new Promise(function(c, r){ bek['y' + s] = { c:c, r:r }; isci.postMessage({ tip:'yukle', ses:s }); }); }
     return yuk[s];
   }
   function hazirMi(rol){ return !!hazir[sesAdi(rol)]; }
-  function uret(metin, rol){
-    var s = sesAdi(rol), h = HIZ[rol] || 1, an = s + '|' + h + '|' + metin;
+  /* HEYECAN (2026-10-31-B, kullanıcı: "gol, kırmızı kart gibi anlarda daha gerçekçi bağırmalı, pozisyonları normal insanlar gibi
+     heyecanlı anlatmalı"). KÖK SEBEP: her cümle aynı sakin ayarla (aynı hız, aynı ton, aynı düzey) üretiliyordu; "Gol!" ile
+     "Taç atışı" aynı tonda okunuyordu. ŞİMDİ üç düzey: 0 sakin anlatım, 1 heyecanlı pozisyon (şut, kafa, kurtarış, direk, tehlike),
+     2 bağırış (gol, kırmızı kart, penaltı kararı). Düzey yükseldikçe: konuşma hızlanır, ses modeli daha değişken (dalgalı) vurgu
+     üretir, ses tonu yükselir, ses gücü artar, "basınçlı" bağırma tınısı (orta tiz yükseltme + hafif doyma) eklenir, sıkıştırıcı
+     bağırışı patlatmadan öne çıkarır. Gol çığlığı uzatılır ("Gooooool!"). Düzey verilmezse cümleden anlaşılır. */
+  var HEY = [ { hiz:1, gr:1, gw:1, oran:1, kaz:1, tiz:0, doy:0 },
+              { hiz:1.07, gr:1.12, gw:1.12, oran:1.04, kaz:1.18, tiz:3, doy:0 },
+              { hiz:1.10, gr:1.25, gw:1.25, oran:1.085, kaz:1.45, tiz:6, doy:1.6 } ];
+  function heyecanBul(metin, rol){
+    var m = String(metin || ''), k = m.toLocaleLowerCase('tr-TR');
+    if(rol !== 'yorumcu' && /(^|[^a-zçğıöşü])(go+l+(?![a-zçğıöşü])|golü (buldu|attı)|ağlar|file havaland|kırmızı|penaltı!|penaltı kararı|beyaz noktayı gösterdi|kendi kalesine gol|maç sona eriyor|son düdük)/.test(k)) return 2;
+    if(/!/.test(m) || /(şut|kafa|direk|kurtar|tehlike|çalım|ceza sahas|kaçtı|son anda|inanılmaz|müthiş|penaltı|nefes)/.test(k)) return 1;
+    return 0;
+  }
+  function metniHazirla(metin, h){
+    var m = String(metin || '');
+    if(h >= 2){
+      m = m.replace(/\b(Go+l+|GO+L+)!/g, 'Gooooool!').replace(/\bGol gol gol!/gi, 'Gol! Gol! Gooooool!').replace(/^Ve gol!/, 'Ve gooool!')
+           .replace(/^İşte gol!/, 'İşte gooool!').replace(/^Kırmızı kart!/, 'Kırmızı kart! Kırmızı!');
+    }
+    if(h >= 1) m = m.replace(/\.\s*$/, '!');
+    return m;
+  }
+  function uret(metin, rol, h){
+    h = h == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, h | 0));
+    var s = sesAdi(rol), H = HEY[h], hz = (HIZ[rol] || 1) * H.hiz, mt = metniHazirla(metin, h), an = s + '|' + h + '|' + mt;
     if(ON[an]) return ON[an];
     var id = 'u' + (++n);
-    var p = hazirla(rol).then(function(){ return new Promise(function(c, r){ bek[id] = { c:c, r:r }; isci.postMessage({ tip:'soyle', id:id, metin:metin, ses:s, hiz:h });
-      setTimeout(function(){ if(bek[id]){ delete bek[id]; r(new Error('ses zamanında üretilemedi')); } }, 20000); }); });
+    var p = hazirla(rol).then(function(){ return new Promise(function(c, r){ bek[id] = { c:c, r:r }; isci.postMessage({ tip:'soyle', id:id, metin:mt, ses:s, hiz:hz, gurultu:H.gr, gw:H.gw });
+      setTimeout(function(){ if(bek[id]){ delete bek[id]; r(new Error('ses zamanında üretilemedi')); } }, 20000); }); })
+      .then(function(x){ x.h = h; return x; });
     ON[an] = p; ONS.push(an); if(ONS.length > 60) delete ON[ONS.shift()];
     p.catch(function(){ delete ON[an]; });
     return p;
   }
-  function tampon(metin, rol){
-    return uret(metin, rol).then(function(x){
-      var b = new AudioBuffer({ length:Math.max(1, x.pcm.length), sampleRate:x.hz, numberOfChannels:1 });
-      b.copyToChannel(x.pcm, 0); return b;
+  function tampon(metin, rol, h){
+    return uret(metin, rol, h).then(function(x){
+      // Ses düzeyi eşitlenir: sesler (Fahrettin, Deniz…) farklı yükseklikte kaydedilmiş; yorumcu spikerin yarısı kadar kısık duyuluyordu.
+      var d = x.pcm, t = 0, pk = 0, i; if(!x.esit){ for(i = 0; i < d.length; i++){ var a = d[i]; t += a * a; if(a > pk) pk = a; else if(-a > pk) pk = -a; }
+        var rms = Math.sqrt(t / Math.max(1, d.length)), k = rms > 1e-4 ? Math.min(0.11 / rms, 0.95 / Math.max(pk, 1e-4)) : 1; if(Math.abs(k - 1) > 0.02) for(i = 0; i < d.length; i++) d[i] *= k; x.esit = true; }
+      var b = new AudioBuffer({ length:Math.max(1, d.length), sampleRate:x.hz, numberOfChannels:1 });
+      b.copyToChannel(d, 0); b._h = x.h; return b;
     });
   }
+  /* TEK SES MOTORU (2026-10-31-B, kullanıcı: "saha uygulamasında arka plan müziği ve yeni eklenen spiker çalışmıyor"). KÖK SEBEP: doğal ses
+     kendi ses motorunu (AudioContext) açıyordu - üstelik sayfadaki İLK dokunuşta, spiker hiç konuşmadan. Uygulamanın müzik ve maç
+     motorlarının yanında üçüncü/dördüncü motor oluyordu; telefonlarda (özellikle iPhone) aynı anda açık motorlar ses oturumunu
+     birbirinden alabiliyor, arka plandan dönünce bu motoru kimse uyandırmadığı için de "askıda" kalıp spiker SESSİZ çalıyordu.
+     ŞİMDİ: sayfa kendi motorunu verir (SahaSes.baglamVer); motor yalnızca gerçekten konuşulacağı an istenir; motor çalışmıyorsa
+     ses sessizce "çalınmış" sayılmaz, hata verilir ve cihaz sesine geçilir. */
   function baglam(){
+    try{ if(disBaglam){ var d = disBaglam(); if(d && d.state !== 'closed') return d; } }catch(e){}
     if(!ctx){ var C = window.AudioContext || window.webkitAudioContext; if(!C) return null; ctx = new C(); }
-    if(ctx.state === 'suspended'){ try{ ctx.resume(); }catch(e){} }
+    if(ctx.state !== 'running'){ try{ ctx.resume(); }catch(e){} }
     return ctx;
   }
-  try{ document.addEventListener('pointerdown', function(){ try{ baglam(); }catch(e){} }, { capture:true, passive:true }); }catch(e){}
+  // Dokunuş: tarayıcı sesi yalnızca dokunuşla açar. Kendi motoru ancak doğal ses kullanılmaya başladıysa (indiriliyor/hazır) ve sayfa motor vermiyorsa kurulur.
+  try{ document.addEventListener('pointerdown', function(){ try{
+    if(ctx){ if(ctx.state !== 'running') ctx.resume(); return; }
+    if(!disBaglam && (indir > 0 || Object.keys(hazir).length)){ var C = window.AudioContext || window.webkitAudioContext; if(C){ ctx = new C(); } }
+  }catch(e){} }, { capture:true, passive:true }); }catch(e){}
+  function calisir(c){
+    if(c.state === 'running') return Promise.resolve(c);
+    try{ c.resume(); }catch(e){}
+    return new Promise(function(coz, red){ var t0 = Date.now(), b = function(){ if(c.state === 'running') return coz(c); if(Date.now() - t0 > 600) return red(new Error('ses motoru askıda')); setTimeout(b, 60); }; b(); });
+  }
+  var _egri = null;
+  function egri(){ if(_egri) return _egri; var N = 1024, a = new Float32Array(N); for(var i = 0; i < N; i++){ var x = i / (N - 1) * 2 - 1; a[i] = Math.tanh(1.6 * x) / Math.tanh(1.6); } return (_egri = a); }
   function cal(metin, rol, o){
     o = o || {};
-    return tampon(metin, rol).then(function(b){
-      var c = baglam(); if(!c) throw new Error('ses çalınamıyor');
-      return new Promise(function(coz){
-        var k = c.createBufferSource(), g = c.createGain(); k.buffer = b; g.gain.value = o.duzey == null ? 1 : o.duzey;
-        k.connect(g); g.connect(o.hedef || c.destination);
-        var bitti = false, son = function(){ if(bitti) return; bitti = true; if(calan === k) calan = null; coz(); };
-        k.onended = son; setTimeout(son, b.duration * 1000 + 1500);
+    return tampon(metin, rol, o.heyecan).then(function(b){
+      var c0 = baglam(); if(!c0) throw new Error('ses çalınamıyor');
+      return calisir(c0).then(function(c){ return new Promise(function(coz){
+        var H = HEY[b._h || 0], k = c.createBufferSource(), son0 = c.createGain();
+        k.buffer = b; k.playbackRate.value = H.oran;
+        var uc = k;
+        if(H.tiz){ var eq = c.createBiquadFilter(); eq.type = 'peaking'; eq.frequency.value = 2600; eq.Q.value = 0.9; eq.gain.value = H.tiz; uc.connect(eq); uc = eq;
+          var alt = c.createBiquadFilter(); alt.type = 'highpass'; alt.frequency.value = 140; uc.connect(alt); uc = alt; }
+        if(H.doy){ var ws = c.createWaveShaper(); ws.curve = egri(); ws.oversample = '2x'; uc.connect(ws); uc = ws; }
+        // Güç önce verilir, sıkıştırıcı en sonda sınırlayıcıdır: bağırış öne çıkar ama cızırtı (kırpılma) olmaz.
+        var cmp = c.createDynamicsCompressor(); cmp.threshold.value = -14; cmp.knee.value = 8; cmp.ratio.value = 8; cmp.attack.value = 0.003; cmp.release.value = 0.15;
+        son0.gain.value = Math.min(2.2, (o.duzey == null ? 1 : o.duzey) * H.kaz);
+        uc.connect(son0); son0.connect(cmp); cmp.connect(o.hedef || c.destination);
+        var bitti = false, son = function(){ if(bitti) return; bitti = true; if(calan === k) calan = null; try{ cmp.disconnect(); }catch(e){} coz(); };
+        k.onended = son; setTimeout(son, b.duration / H.oran * 1000 + 1500);
         calan = k; k.start();
-      });
+      }); });
     });
   }
   function sustur(){ try{ if(calan){ var k = calan; calan = null; k.stop(); } }catch(e){} }
   function ayarla(v){ v = v || {}; if(v.spiker && SESLER[v.spiker]) ROL.spiker = v.spiker; if(v.yorumcu && SESLER[v.yorumcu]) ROL.yorumcu = v.yorumcu; haber(); }
   return { destek:destek, hazirla:hazirla, hazirMi:hazirMi, cal:cal, tampon:tampon, sustur:sustur, ayarla:ayarla, sesler:SESLER,
     rolSesi:function(r){ return sesAdi(r); }, yuzde:function(r){ return yuzde[sesAdi(r)] || 0; }, hata:function(){ return hata; },
-    dinle:function(f){ dinleyici.push(f); }, baglam:baglam };
+    dinle:function(f){ dinleyici.push(f); }, baglam:baglam, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
+    heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return indir > 0; } };
 })();

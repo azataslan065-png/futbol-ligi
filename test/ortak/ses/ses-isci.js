@@ -1,13 +1,15 @@
-/* SAHA DOĞAL SES İŞÇİSİ (2026-10-31-A)
+/* SAHA DOĞAL SES İŞÇİSİ (2026-10-31-A, 2026-10-31-B: yalnızca Türkçe ses birimi verisi ~1 MB; düşük öncelikli indirme; heyecan ayarı)
    Piper (açık kaynak sinir ağı ses sentezi, MIT) ile Türkçe metni insan sesine yakın bir sese çevirir. Oyunu dondurmamak için
    ayrı bir iş parçacığında (Web Worker) çalışır. Metin → espeak-ng ile ses birimleri (piper_phonemize, GPL-3) → onnxruntime-web
    ile ses modeli (tr_TR, Rhasspy Piper sesleri) → 22.050 Hz ses örnekleri. Dosyalar bir kez indirilir, tarayıcı önbelleğinde
    ('saha-ses-v1') saklanır; sonraki açılışlarda ağdan çekilmez.
    Mesajlar: {tip:'yukle', ses} → {tip:'ilerleme', yuzde} … {tip:'hazir', ses}
-             {tip:'soyle', id, metin, ses, hiz} → {tip:'ses', id, pcm(Float32Array), hz} | {tip:'hata', id, mesaj} */
+             {tip:'soyle', id, metin, ses, hiz, gurultu, gw} → {tip:'ses', id, pcm(Float32Array), hz} | {tip:'hata', id, mesaj} */
 var KOK = self.location.href.replace(/[^/]*$/, '');
 var ONBELLEK = 'saha-ses-v1';
-importScripts(KOK + 'ort.wasm.min.js', KOK + 'piper_phonemize.js');
+importScripts(KOK + 'ort.wasm.min.js', KOK + 'piper_phonemize_tr.js');
+// Eski sürümün 18 MB'lık bütün diller verisi önbellekten silinir (yer kaplamasın).
+try{ caches.open(ONBELLEK).then(function(c){ c.delete(KOK + 'piper_phonemize.data'); }).catch(function(){}); }catch(e){}
 ort.env.wasm.numThreads = 1;
 ort.env.wasm.wasmPaths = KOK;
 var VERI = null, WASM = null, MODEL = {}, BEKLE = {};
@@ -16,7 +18,9 @@ function al(ad, ilerle){
   return caches.open(ONBELLEK).then(function(c){
     return c.match(url).then(function(r){
       if(r) return r.arrayBuffer();
-      return fetch(url).then(function(r2){
+      /* DÜŞÜK ÖNCELİK (2026-10-31-B, kullanıcı: "arka plan müziği ve yeni spiker çalışmıyor"): indirme, akışla çalan arka plan
+         müziğiyle aynı bağlantıyı paylaşıyor; yavaş ağda müzik takılıyordu. Artık tarayıcı önce müziği/oyunu besler. */
+      return fetch(url, { priority:'low' }).then(function(r2){
         if(!r2.ok) throw new Error(ad + ' indirilemedi (HTTP ' + r2.status + ')');
         var top = Number(r2.headers.get('content-length')) || 0;
         if(!r2.body || !ilerle || !top) return r2.arrayBuffer().then(function(b){ c.put(url, new Response(b)).catch(function(){}); return b; });
@@ -32,7 +36,7 @@ function al(ad, ilerle){
 }
 function yukle(ses){
   if(BEKLE[ses]) return BEKLE[ses];
-  var dosyalar = [['piper_phonemize.data', 18.1], ['piper_phonemize.wasm', 0.6], ['tr_TR-' + ses + '-medium.int8.onnx', 18.7]];
+  var dosyalar = [['piper_phonemize_tr.data', 1.0], ['piper_phonemize.wasm', 0.6], ['tr_TR-' + ses + '-medium.int8.onnx', 18.7]];
   var toplamMb = dosyalar.reduce(function(t, d){ return t + d[1]; }, 0), bitenMb = 0;
   var ilerle = function(mb){ return function(a, t){ self.postMessage({ tip:'ilerleme', ses:ses, yuzde:Math.min(99, Math.round((bitenMb + mb * a / t) / toplamMb * 100)) }); }; };
   BEKLE[ses] = (VERI ? Promise.resolve(VERI) : al(dosyalar[0][0], ilerle(dosyalar[0][1])).then(function(b){ VERI = b; bitenMb += dosyalar[0][1]; return b; }))
@@ -66,7 +70,7 @@ function soyle(v){
       var feeds = {
         input: new ort.Tensor('int64', BigInt64Array.from(ids.map(function(x){ return BigInt(x); })), [1, ids.length]),
         input_lengths: new ort.Tensor('int64', BigInt64Array.from([BigInt(ids.length)])),
-        scales: new ort.Tensor('float32', Float32Array.from([inf.noise_scale || 0.667, (inf.length_scale || 1) / (v.hiz || 1), inf.noise_w || 0.8]))
+        scales: new ort.Tensor('float32', Float32Array.from([(inf.noise_scale || 0.667) * (v.gurultu || 1), (inf.length_scale || 1) / (v.hiz || 1), (inf.noise_w || 0.8) * (v.gw || 1)]))
       };
       if(cfg.speaker_id_map && Object.keys(cfg.speaker_id_map).length) feeds.sid = new ort.Tensor('int64', BigInt64Array.from([0n]));
       return M.s.run(feeds).then(function(o){ return { pcm:o.output.data, hz:(cfg.audio && cfg.audio.sample_rate) || 22050 }; });
