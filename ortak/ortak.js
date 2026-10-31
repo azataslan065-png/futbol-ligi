@@ -1136,8 +1136,56 @@ var SahaSes = (function(){
   }
   function sustur(){ DONEM++; try{ if(calan){ var k = calan; calan = null; k.stop(); } }catch(e){} }
   function ayarla(v){ v = v || {}; if(v.spiker && SESLER[v.spiker]) ROL.spiker = v.spiker; if(v.yorumcu && SESLER[v.yorumcu]) ROL.yorumcu = v.yorumcu; haber(); }
-  return { destek:destek, hazirla:hazirla, hazirMi:hazirMi, cal:cal, tampon:tampon, sustur:sustur, ayarla:ayarla, sesler:SESLER,
-    rolSesi:function(r){ return sesAdi(r); }, parcala:parcala, yuzde:function(r){ return yuzde[sesAdi(r)] || 0; }, hata:function(){ return hata; },
-    dinle:function(f){ dinleyici.push(f); }, baglam:baglam, birak:birak, bankaHazirla:bankaHazirla, hazirBekle:hazirBekle, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
-    heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return indir > 0; }, olcum:function(){ return OLC; } };
+  /* KAYITLI SES (2026-10-31-I, kullanıcı: "şimdilik denemek amaçlı bu dosyaları ekle, diğer spiker sistemini de tamamen kaldır").
+     Üretilen sesler (Fahrettin, Deniz, Fettah) KALDIRILDI: ses modelleri silindi, hiçbir cihazda indirilmez ve konuşma üretilmez.
+     Spiker ve yorumcu yalnızca kaydedilmiş insan sesini çalar: ortak/ses/kayit/liste.json'daki klipler (metin, rol, anlatım türü).
+     Oyun bir olayda o türün kaydı varsa onu seçer (bkz. saha.html KAYITLI ANLATIM); izleyici/konuk cihazlara giden metin aynı kaydın
+     metnidir, orada da metinden aynı klip bulunur. Kaydı olmayan cümle çalınmaz (sessiz geçer).
+     Not: Piper motoru (aşağıdaki üretim kodu ve ses/ klasöründeki çalışma dosyaları) silinmedi, KULLANILMIYOR; kullanıcının kendi kayıtlarıyla
+     eğitilecek spiker/yorumcu modeli aynı motorla çalışacak. */
+  var KY = null, KY_P = null, KB = {};
+  function kyNorm(m){ return String(m || '').toLocaleLowerCase('tr-TR').replace(/[^a-zçğıöşü0-9]+/g, ' ').trim(); }
+  function kyYukle(){
+    if(KY_P) return KY_P;
+    KY_P = fetch(kok() + 'kayit/liste.json?t=' + Math.floor(Date.now() / 600000), { cache:'no-cache' }).then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(j){ var L = (j && j.klipler) || []; if(!L.length){ KY = null; return null; }
+        KY = { L:L, m:{} }; L.forEach(function(k){ KY.m[k.rol + '|' + kyNorm(k.m)] = k; }); haber(); return KY; })
+      .catch(function(){ KY_P = null; return null; });
+    return KY_P;
+  }
+  try{ kyYukle(); }catch(e){}
+  function kyBul(metin, rol){ if(!KY) return null; return KY.m[(rol === 'yorumcu' ? 'yorumcu' : (rol === 'anons' ? 'anons' : 'spiker')) + '|' + kyNorm(metin)] || null; }
+  function kyTampon(k){
+    if(KB[k.id]) return KB[k.id];
+    KB[k.id] = fetch(kok() + 'kayit/' + k.d).then(function(r){ if(!r.ok) throw new Error('kayıt indirilemedi'); return r.arrayBuffer(); })
+      .then(function(b){ var c = baglam(); if(!c) throw new Error('ses çalınamıyor'); return new Promise(function(coz, red){ c.decodeAudioData(b, coz, red); }); })
+      .then(function(b){ b._h = 0; return b; });
+    KB[k.id].catch(function(){ delete KB[k.id]; });
+    return KB[k.id];
+  }
+  function kyYok(){ var e = new Error('kayıt yok'); e.kayitYok = true; return e; }
+  // Oyunun seçtiği tür için kayıt: tur (gol, direk, kurtarisY…), o.dk (maç dakikası, dkMax koşulu), o.haric (son çalınanlar).
+  function kaySec(rol, tur, o){
+    if(!KY || !tur) return null; o = o || {};
+    var L = KY.L.filter(function(k){ return k.rol === rol && k.tur.indexOf(tur) >= 0 && !(k.dkMax && o.dk != null && o.dk > k.dkMax) && !(k.sira && !o.sirali); });
+    if(!L.length) return null;
+    var yeni = L.filter(function(k){ return !(o.haric && o.haric.indexOf(k.id) >= 0); });
+    if(!yeni.length) return null;                                     // az önce çalınan kayıt hemen tekrarlanmaz (o an sessiz geçer)
+    return yeni[Math.floor(Math.random() * yeni.length)];
+  }
+  function kayDizi(tur){ return KY ? KY.L.filter(function(k){ return k.tur.indexOf(tur) >= 0 && k.sira; }).sort(function(a, b){ return a.sira - b.sira; }) : []; }
+  var _bos = function(){ return Promise.resolve(); };
+  return { destek:function(){ return !!(window.AudioContext || window.webkitAudioContext); },
+    hazirla:function(){ return kyYukle().then(function(k){ if(!k) throw new Error('Kayıtlı ses bulunamadı'); }); },
+    hazirMi:function(){ return !!KY; },
+    cal:function(metin, rol, o){ o = o || {}; var k = kyBul(metin, rol); if(!k) return kyYukle().then(function(){ var k2 = kyBul(metin, rol); if(!k2) throw kyYok(); return kyTampon(k2); }).then(function(b){ o._d0 = DONEM; o._sap = 1; return calB(b, o); });
+      o._d0 = DONEM; o._sap = 1; return kyTampon(k).then(function(b){ return calB(b, o); }); },
+    tampon:function(metin, rol){ var k = kyBul(metin, rol); return k ? kyTampon(k) : Promise.reject(kyYok()); },
+    hazirBekle:function(metin, rol){ var k = kyBul(metin, rol); return k ? kyTampon(k).then(function(){ return true; }) : Promise.reject(kyYok()); },
+    sustur:sustur, ayarla:function(){}, sesler:{ kayit:'Kayıtlı insan sesi (deneme)' },
+    rolSesi:function(){ return 'kayit'; }, parcala:parcala, yuzde:function(){ return KY ? 100 : 0; }, hata:function(){ return KY ? '' : 'kayıtlı ses yok'; },
+    dinle:function(f){ dinleyici.push(f); }, baglam:baglam, birak:function(){}, bankaHazirla:function(){}, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
+    heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return false; }, olcum:function(){ return {}; },
+    kayitModu:function(){ return true; }, kayitHazir:function(){ return !!KY; }, kayitSec:kaySec, kayitDizi:kayDizi, kayitVar:function(m, r){ return !!kyBul(m, r); },
+    kayitListe:function(){ return KY ? KY.L.slice() : []; }, kayitYukle:kyYukle };
 })();
