@@ -885,7 +885,7 @@ var SahaSes = (function(){
   var SESLER = { fahrettin:'Fahrettin', dfki:'Deniz', fettah:'Fettah' };
   var ROL = { spiker:'fahrettin', yorumcu:'dfki' }, HIZ = { spiker:1.08, yorumcu:0.94, anons:1 };
   var isci = null, hazir = {}, yuk = {}, bek = {}, n = 0, ctx = null, yuzde = {}, hata = '', dinleyici = [], calan = null, disBaglam = null, indir = 0;
-  var ON = {}, ONS = [];   // üretilmiş sesler (aynı cümle tekrar üretilmez: özet, gol videosu, tekrar)
+  var ON = {}, ONS = [], OLC = { adet:0, oran:null, son:null };   // OLC: üretim hızı (oran: üretim süresi / ses süresi; 1'in üstü cihaz yetişemiyor)   // üretilmiş sesler (aynı cümle tekrar üretilmez: özet, gol videosu, tekrar)
   function kok(){ try{ return new URL('ortak/ses/', location.href).href; }catch(e){ return 'ortak/ses/'; } }
   function destek(){ try{ return !!(window.Worker && window.WebAssembly && window.caches && typeof BigInt64Array !== 'undefined'); }catch(e){ return false; } }
   function haber(){ dinleyici.forEach(function(f){ try{ f(); }catch(e){} }); }
@@ -921,7 +921,7 @@ var SahaSes = (function(){
      bağırışı patlatmadan öne çıkarır. Gol çığlığı uzatılır ("Gooooool!"). Düzey verilmezse cümleden anlaşılır. */
   var HEY = [ { hiz:1, gr:1, gw:1, oran:1, kaz:1, tiz:0, doy:0 },
               { hiz:1.07, gr:1.12, gw:1.12, oran:1.04, kaz:1.18, tiz:3, doy:0 },
-              { hiz:1.10, gr:1.25, gw:1.25, oran:1.085, kaz:1.45, tiz:6, doy:1.6 } ];
+              { hiz:1.12, gr:1.3, gw:1.3, oran:1.09, kaz:1.5, tiz:7, doy:1.8 } ];
   function heyecanBul(metin, rol){
     var m = String(metin || ''), k = m.toLocaleLowerCase('tr-TR');
     if(rol !== 'yorumcu' && /(^|[^a-zçğıöşü])(go+l+(?![a-zçğıöşü])|golü (buldu|attı)|ağlar|file havaland|kırmızı|penaltı!|penaltı kararı|beyaz noktayı gösterdi|kendi kalesine gol|maç sona eriyor|son düdük)/.test(k)) return 2;
@@ -937,14 +937,40 @@ var SahaSes = (function(){
     if(h >= 1) m = m.replace(/\.\s*$/, '!');
     return m;
   }
+  function istek(mt, s, hz, gr, gw){
+    var id = 'u' + (++n);
+    return new Promise(function(c, r){ bek[id] = { c:c, r:r }; isci.postMessage({ tip:'soyle', id:id, metin:mt, ses:s, hiz:hz, gurultu:gr, gw:gw });
+      setTimeout(function(){ if(bek[id]){ delete bek[id]; r(new Error('ses zamanında üretilemedi')); } }, 20000); });
+  }
+  /* GOL ÇIĞLIĞI (2026-10-31-C, kullanıcı: "heyecanı biraz daha gerçekçi yap"). Gerçek spiker "Gol" demez; "Goooooool!" diye uzun, yükselen
+     bir çığlık atar, sonra nefes alıp golü anlatır. Ses modeli tek cümleyi tek tempoda okuduğu için çığlık kısa kalıyordu. ŞİMDİ cümlenin
+     başındaki gol çığlığı ayrı ve çok yavaş (uzatılmış) üretilir, çalarken tonu sonuna doğru yükselir (bkz. cal), kısa bir nefes arasından
+     sonra cümlenin geri kalanı heyecanlı tempoyla gelir. Çığlıkta tekrarlar ("Gol! Gol!") çığlıktan sonra hızlı söylenir. */
+  function cigliBol(mt){
+    var m = /^((?:Ve |İşte |Ve vurdu, ve )?)((?:Go+l+!\s*)+)(.*)$/i.exec(mt); if(!m) return null;
+    var adet = (m[2].match(/Go+l+!/gi) || []).length;
+    return { on:m[1].trim(), tekrar:adet > 1 ? 'Gol! Gol! Gol!' : '', geri:m[3].trim() };
+  }
   function uret(metin, rol, h){
     h = h == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, h | 0));
     var s = sesAdi(rol), H = HEY[h], hz = (HIZ[rol] || 1) * H.hiz, mt = metniHazirla(metin, h), an = s + '|' + h + '|' + mt;
     if(ON[an]) return ON[an];
-    var id = 'u' + (++n);
-    var p = hazirla(rol).then(function(){ return new Promise(function(c, r){ bek[id] = { c:c, r:r }; isci.postMessage({ tip:'soyle', id:id, metin:mt, ses:s, hiz:hz, gurultu:H.gr, gw:H.gw });
-      setTimeout(function(){ if(bek[id]){ delete bek[id]; r(new Error('ses zamanında üretilemedi')); } }, 20000); }); })
-      .then(function(x){ x.h = h; return x; });
+    var t0 = 0, cb = (h >= 2 && rol !== 'yorumcu') ? cigliBol(mt) : null;
+    var p = hazirla(rol).then(function(){ t0 = Date.now();
+      if(!cb) return istek(mt, s, hz, H.gr, H.gw);
+      var parca = [];
+      if(cb.on) parca.push(istek(cb.on, s, hz, H.gr, H.gw));
+      parca.push(istek('Goooooool!', s, hz * 0.42, H.gr * 1.15, H.gw * 0.7));
+      if(cb.tekrar) parca.push(istek(cb.tekrar, s, hz * 1.05, H.gr, H.gw));
+      if(cb.geri) parca.push(istek(cb.geri, s, hz, H.gr, H.gw));
+      return Promise.all(parca).then(function(L){
+        var hzx = L[0].hz, bosluk = Math.round(hzx * 0.14), top = 0, cIx = cb.on ? 1 : 0, cBas = 0, cSon = 0;
+        L.forEach(function(x, i){ top += x.pcm.length + (i < L.length - 1 ? bosluk : 0); });
+        var o = new Float32Array(top), k = 0;
+        L.forEach(function(x, i){ if(i === cIx) cBas = k; o.set(x.pcm, k); k += x.pcm.length; if(i === cIx) cSon = k; if(i < L.length - 1) k += bosluk; });
+        return { pcm:o, hz:hzx, cig:[cBas / hzx, cSon / hzx] };
+      });
+    }).then(function(x){ x.h = h; try{ var sn = x.pcm.length / x.hz; OLC.son = { ms:Date.now() - t0, sn:+sn.toFixed(2) }; OLC.oran = +((Date.now() - t0) / 1000 / Math.max(0.3, sn)).toFixed(2); OLC.adet++; }catch(e){} return x; });
     ON[an] = p; ONS.push(an); if(ONS.length > 60) delete ON[ONS.shift()];
     p.catch(function(){ delete ON[an]; });
     return p;
@@ -955,7 +981,7 @@ var SahaSes = (function(){
       var d = x.pcm, t = 0, pk = 0, i; if(!x.esit){ for(i = 0; i < d.length; i++){ var a = d[i]; t += a * a; if(a > pk) pk = a; else if(-a > pk) pk = -a; }
         var rms = Math.sqrt(t / Math.max(1, d.length)), k = rms > 1e-4 ? Math.min(0.11 / rms, 0.95 / Math.max(pk, 1e-4)) : 1; if(Math.abs(k - 1) > 0.02) for(i = 0; i < d.length; i++) d[i] *= k; x.esit = true; }
       var b = new AudioBuffer({ length:Math.max(1, d.length), sampleRate:x.hz, numberOfChannels:1 });
-      b.copyToChannel(d, 0); b._h = x.h; return b;
+      b.copyToChannel(d, 0); b._h = x.h; b._cig = x.cig || null; return b;
     });
   }
   /* TEK SES MOTORU (2026-10-31-B, kullanıcı: "saha uygulamasında arka plan müziği ve yeni eklenen spiker çalışmıyor"). KÖK SEBEP: doğal ses
@@ -981,14 +1007,19 @@ var SahaSes = (function(){
     return new Promise(function(coz, red){ var t0 = Date.now(), b = function(){ if(c.state === 'running') return coz(c); if(Date.now() - t0 > 600) return red(new Error('ses motoru askıda')); setTimeout(b, 60); }; b(); });
   }
   var _egri = null;
-  function egri(){ if(_egri) return _egri; var N = 1024, a = new Float32Array(N); for(var i = 0; i < N; i++){ var x = i / (N - 1) * 2 - 1; a[i] = Math.tanh(1.6 * x) / Math.tanh(1.6); } return (_egri = a); }
+  function egri(){ if(_egri) return _egri; var N = 1024, a = new Float32Array(N); for(var i = 0; i < N; i++){ var x = i / (N - 1) * 2 - 1; a[i] = Math.tanh(1.8 * x) / Math.tanh(1.8); } return (_egri = a); }
   function cal(metin, rol, o){
     o = o || {};
     return tampon(metin, rol, o.heyecan).then(function(b){
       var c0 = baglam(); if(!c0) throw new Error('ses çalınamıyor');
       return calisir(c0).then(function(c){ return new Promise(function(coz){
         var H = HEY[b._h || 0], k = c.createBufferSource(), son0 = c.createGain();
-        k.buffer = b; k.playbackRate.value = H.oran;
+        k.buffer = b;
+        // Her cümlede ton biraz değişir (insan aynı cümleyi hep aynı tonda söylemez); gol çığlığında ton çığlık boyunca yükselir, sonra iner.
+        var oran = H.oran * (1 + (Math.random() * 2 - 1) * 0.015), t = c.currentTime + 0.02, pr = k.playbackRate;
+        pr.setValueAtTime(oran, t);
+        if(b._cig){ var cb0 = b._cig[0] / oran, cb1 = b._cig[1] / (oran * 1.06);
+          pr.setValueAtTime(oran * 0.97, t + cb0); pr.linearRampToValueAtTime(oran * 1.16, t + cb1); pr.linearRampToValueAtTime(oran, t + cb1 + 0.12); }
         var uc = k;
         if(H.tiz){ var eq = c.createBiquadFilter(); eq.type = 'peaking'; eq.frequency.value = 2600; eq.Q.value = 0.9; eq.gain.value = H.tiz; uc.connect(eq); uc = eq;
           var alt = c.createBiquadFilter(); alt.type = 'highpass'; alt.frequency.value = 140; uc.connect(alt); uc = alt; }
@@ -998,8 +1029,8 @@ var SahaSes = (function(){
         son0.gain.value = Math.min(2.2, (o.duzey == null ? 1 : o.duzey) * H.kaz);
         uc.connect(son0); son0.connect(cmp); cmp.connect(o.hedef || c.destination);
         var bitti = false, son = function(){ if(bitti) return; bitti = true; if(calan === k) calan = null; try{ cmp.disconnect(); }catch(e){} coz(); };
-        k.onended = son; setTimeout(son, b.duration / H.oran * 1000 + 1500);
-        calan = k; k.start();
+        k.onended = son; setTimeout(son, b.duration / H.oran * 1000 + 2000);
+        calan = k; k.start(t);
       }); });
     });
   }
@@ -1008,5 +1039,5 @@ var SahaSes = (function(){
   return { destek:destek, hazirla:hazirla, hazirMi:hazirMi, cal:cal, tampon:tampon, sustur:sustur, ayarla:ayarla, sesler:SESLER,
     rolSesi:function(r){ return sesAdi(r); }, yuzde:function(r){ return yuzde[sesAdi(r)] || 0; }, hata:function(){ return hata; },
     dinle:function(f){ dinleyici.push(f); }, baglam:baglam, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
-    heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return indir > 0; } };
+    heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return indir > 0; }, olcum:function(){ return OLC; } };
 })();

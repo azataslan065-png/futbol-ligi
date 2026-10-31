@@ -169,7 +169,7 @@
 </script>
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=cd7d2fad"></script>
+<script src="ortak/ortak.js?v=5001a4e0"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-10-31-B</title>
+<title>SAHA — 3D Futbol v2026-10-31-C</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -10986,12 +10986,21 @@ function _spkOku(metin, rol, bitti, heyecan){
       var _r = rol === 'yorumcu' ? 'yorumcu' : 'spiker';
       if(SahaSes.hazirMi(_r)){
         var _dz = Math.max(0, Math.min(1, ((AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100) * ((AYAR.sesSpiker == null ? 100 : AYAR.sesSpiker) / 100) * 1.3));
-        var _db = false, _ds = function(){ if(_db) return; _db = true; bitti(); };
-        SahaSes.cal(metin, _r, { duzey:_dz, heyecan:heyecan }).then(_ds, function(e){ _db = true; try{ DiagSaha('spkDogalSes', e, { tur:'medya', anlami:'Doğal spiker sesi çalınamadı; cihaz sesine geçildi.' }); }catch(_e){} _spkCihazOku(metin, rol, bitti); });
-        setTimeout(_ds, 16000);
+        /* GECİKME BEKÇİSİ (2026-10-31-C, kullanıcı: "yeni spiker çalışmıyor"). KÖK SEBEPLERDEN BİRİ: ses cümle cümle telefonda üretiliyor; maçta
+           söylenen HER cümle (sonradan atlananlar dahil) önceden üretim sırasına giriyordu. Telefon yetişemeyince sıra uzuyor, spiker pozisyondan
+           saniyelerce geç konuşuyor ya da zaman aşımıyla hiç konuşmuyordu. ŞİMDİ: yalnızca önemli cümleler önceden üretilir; ses 2,5 sn içinde
+           hazır olmazsa o cümle cihaz sesiyle hemen okunur (geç kalmaz, susmaz). Durum teşhis kartına yazılır (bkz. SES DURUM KARTI). */
+        var _db = false, _ds = function(){ if(_db) return; _db = true; bitti(); }, _t0 = Date.now(), _gec = false;
+        var _tp = SahaSes.tampon(metin, _r, heyecan);
+        var _bek = setTimeout(function(){ if(_db) return; _gec = true; _db = true; sesDurumOlay('spiker geç (' + _r + ')'); _spkCihazOku(metin, rol, bitti); }, 2500);
+        _tp.then(function(){ if(_gec) return; clearTimeout(_bek);
+          return SahaSes.cal(metin, _r, { duzey:_dz, heyecan:heyecan }).then(function(){ sesDurumOlay('spiker doğal ' + (Date.now() - _t0) + 'ms', 1); _ds(); });
+        }).catch(function(e){ clearTimeout(_bek); if(_db) return; _db = true; sesDurumOlay('spiker hata: ' + ((e && e.message) || e));
+          try{ DiagSaha('spkDogalSes', e, { tur:'medya', anlami:'Doğal spiker sesi çalınamadı; cihaz sesine geçildi.' }); }catch(_e){} _spkCihazOku(metin, rol, bitti); });
+        setTimeout(function(){ if(!_gec) _ds(); }, 16000);
         return;
       }
-      spkDogalHazirla();
+      spkDogalHazirla(); sesDurumOlay('spiker cihaz (doğal ses hazır değil %' + SahaSes.yuzde(_r) + ')', 1);
     }
     _spkCihazOku(metin, rol, bitti);
   }catch(e){ setTimeout(bitti, 1500); }
@@ -11004,11 +11013,18 @@ var SPK_HEYECAN = { gol:2, kirmizi:2, penalti:2, son:2,
 function spkHeyecan(tur, metin, rol){ try{ if(tur && SPK_HEYECAN[tur] != null) return rol === 'yorumcu' ? Math.min(1, SPK_HEYECAN[tur]) : SPK_HEYECAN[tur]; return window.SahaSes ? SahaSes.heyecan(metin, rol) : 0; }catch(e){ return 0; } }
 // Doğal ses, uygulamanın kendi ses motorunu kullanır (maçta maç motoru, menüde müzik motoru) - ayrı motor açılmaz (bkz. ortak.js TEK SES MOTORU).
 try{ SahaSes.baglamVer(function(){ if(ac && ac.state === 'running') return ac; var c = _sahaSesCtx(); if(c && c.state === 'running') return c; return ac || c; }); }catch(e){}
+function spkDogalOnbellekte(){
+  try{ if(!window.caches || !window.SahaSes) return Promise.resolve(false);
+    var u = new URL('ortak/ses/tr_TR-' + SahaSes.rolSesi('spiker') + '-medium.int8.onnx', location.href).href;
+    return caches.open('saha-ses-v1').then(function(c){ return c.match(u); }).then(function(x){ return !!x; }).catch(function(){ return false; });
+  }catch(e){ return Promise.resolve(false); }
+}
 function spkDogalAcik(){ try{ return AYAR.spkSes !== 'cihaz' && !!window.SahaSes && SahaSes.destek(); }catch(e){ return false; } }
 function spkDogalHazirla(){
   try{ if(!spkDogalAcik() || window._spkDogalIstendi) return; window._spkDogalIstendi = true;
     SahaSes.hazirla('spiker').then(function(){ return SahaSes.hazirla('yorumcu'); })
-      .catch(function(e){ window._spkDogalIstendi = false; try{ DiagSaha('spkDogalYukle', e, { tur:'ag', anlami:'Doğal spiker sesi indirilemedi; cihaz sesi kullanılıyor.' }); }catch(_e){} });
+      .then(function(){ sesDurumOlay('doğal ses hazır'); sesDurumKart(); })
+      .catch(function(e){ window._spkDogalIstendi = false; sesDurumOlay('doğal ses yüklenemedi: ' + ((e && e.message) || e)); try{ DiagSaha('spkDogalYukle', e, { tur:'ag', anlami:'Doğal spiker sesi indirilemedi; cihaz sesi kullanılıyor.' }); }catch(_e){} });
   }catch(e){}
 }
 function _spkCihazOku(metin, rol, bitti){
@@ -11626,7 +11642,7 @@ function spkSoyle(rol, metin, tur, onemli, aralikMs){
     } else if(SPK.sira.length >= 2) return;           // sıra doluysa sıradan anlatım atlanır
     var _h = spkHeyecan(tur, metin, rol);
     SPK.sira.push({ rol:rol, metin:metin, onemli:!!onemli, ts:simdi, tur:tur, h:_h });
-    try{ if(AYAR.spiker !== false && spkDogalAcik() && SahaSes.hazirMi(rol === 'yorumcu' ? 'yorumcu' : 'spiker')) SahaSes.tampon(String(metin).replace(/([A-Za-zÇĞİÖŞÜçğıöşü]{3,})sp\b/g, '$1spor'), rol === 'yorumcu' ? 'yorumcu' : 'spiker', _h).catch(function(){}); }catch(e){}   // (2026-10-31-A) önceden üret
+    try{ if(onemli && AYAR.spiker !== false && spkDogalAcik() && SahaSes.hazirMi(rol === 'yorumcu' ? 'yorumcu' : 'spiker')) SahaSes.tampon(String(metin).replace(/([A-Za-zÇĞİÖŞÜçğıöşü]{3,})sp\b/g, '$1spor'), rol === 'yorumcu' ? 'yorumcu' : 'spiker', _h).catch(function(){}); }catch(e){}   // (2026-10-31-A) önceden üret
     _spkSiradaki();
   }catch(e){ _sessiz(e, 'spkSoyle', 'saha_ses'); }
 }
@@ -12783,7 +12799,8 @@ try{
     if(_hatirlananIsim){
       setTimeout(function(){
         var isimEl = document.getElementById('gsIsim');
-        if(isimEl && !isimEl.value){ isimEl.value = _hatirlananIsim; try{ gsProfilAra(); }catch(e){self.__ds&&self.__ds(11867,e)} girisYap(); }
+        // (2026-10-31-C) yalnızca isim doldurulur; otomatik giriş YOK - şifre her açılışta istenir.
+        if(isimEl && !isimEl.value){ isimEl.value = _hatirlananIsim; try{ gsProfilAra(); }catch(e){self.__ds&&self.__ds(11867,e)} try{ var _sf = document.getElementById('gsSifre'); if(_sf) _sf.focus(); }catch(e){} }
       }, 300);
     }
   }catch(e){_sessiz(e,'sesTribun:1639','saha_ses');}
@@ -13299,7 +13316,7 @@ function sahaMuzikDenetle(){
           var _u = String(_el.currentSrc || _el.src || '');
           DiagSaha('sahaMuzikTakildi', new Error('Parça 15 sn ilerlemedi'), { tur:'medya', url:_u.slice(0,120), readyState:_el.readyState, networkState:_el.networkState, paused:_el.paused,
             anlami:'Arka plan müziği takıldı; sıradaki parçaya geçildi.' });
-          W.ard = (W.ard || 0) + 1; W.el = null;
+          W.ard = (W.ard || 0) + 1; W.el = null; sesDurumOlay('müzik takıldı rs=' + _el.readyState + ' ns=' + _el.networkState);
           if(W.ard >= 3 && !(window.SahaSes && SahaSes.indiriyor && SahaSes.indiriyor())) SAHA_SES.akisYok = true;   // (2026-10-31-B) ses modeli inerken yaşanan takılma akışı kalıcı kapatmaz
           if(_u) SAHA_SES.hata[_u] = simdiB + 60000;
           _sahaMuzikDur(); if(SAHA_SES.liste.length > 1) _sahaMuzikSiradaki(true);
@@ -13339,12 +13356,13 @@ function sahaMuzikDenetle(){
         var s2 = { _el:el, onended:null, stop:function(){ try{ el.onended = el.onerror = null; el.pause(); el.removeAttribute('src'); el.load(); }catch(e){} } };
         el.onended = function(){ if(SAHA_SES.src !== s2) return; SAHA_SES.src = null; _sahaMuzikTamam(); _sahaMuzikSiradaki(true); sahaMuzikDenetle(); };
         el.onerror = function(){
-          if(SAHA_SES.src !== s2) return; SAHA_SES.src = null; _sahaMuzikYarim(); SAHA_SES.hata[url] = Date.now() + 60000;
+          if(SAHA_SES.src !== s2) return; SAHA_SES.src = null; _sahaMuzikYarim(); SAHA_SES.hata[url] = Date.now() + 60000; sesDurumOlay('müzik açılamadı kod ' + ((el.error && el.error.code) || '?'));
           DiagSaha('sahaMuzikAkis', new Error('Ses dosyası açılamadı (kod ' + ((el.error && el.error.code) || '?') + ')'), { tur:'veri', url:String(url).slice(0,120), anlami:'Arka plan müziği parçası açılamadı; sıradakine geçildi.' });
           if(SAHA_SES.liste.length > 1) _sahaMuzikSiradaki(true);
         };
         SAHA_SES.src = s2; _sahaMuzikCalindi(url);
-        var pr = el.play(); if(pr && pr.catch) pr.catch(function(e){ if(e && e.name === 'NotAllowedError'){ /* dokunuş bekleniyor: bir sonraki denetimde tekrar */ } });
+        sesDurumOlay('müzik başlat', 1);
+        var pr = el.play(); if(pr && pr.catch) pr.catch(function(e){ sesDurumOlay('müzik play reddi: ' + ((e && e.name) || e), 1); if(e && e.name === 'NotAllowedError'){ /* dokunuş bekleniyor: bir sonraki denetimde tekrar */ } });
         return;
       }catch(e){ SAHA_SES.akisYok = true; _sessiz(e, 'sahaMuzikAkis', 'saha_ses'); }
     }
@@ -13358,6 +13376,35 @@ function sahaMuzikDenetle(){
       });
   }catch(e){ _sessiz(e,'sahaMuzikDenetle','saha_ses'); }
 }
+/* SES DURUM KARTI (2026-10-31-C, kullanıcı: "arka plan müziği ve yeni spiker çalışmıyor"). Sorun yalnızca gerçek telefonda görülüyor;
+   bilgisayar tarayıcısında müzik de doğal spiker de çalışıyor. Telefonda NEDEN çalışmadığını tahmin etmek yerine görmek için: müzik
+   çalarının, ses motorlarının ve doğal sesin durumu (indirme yüzdesi, üretim hızı, son hata) 30 sn'de bir - değiştiyse - teşhis dalına
+   yazılır (diagnostics/sesDurum/{cihaz}). Kullanıcı adı yazılmaz; ekranda hiçbir şey görünmez. */
+var _SDK = { olay:[], son:'', sayac:{} };
+function sesDurumOlay(m, seyrek){
+  try{ m = String(m).slice(0, 120); if(seyrek){ var k = m.replace(/\d+/g, '#'); _SDK.sayac[k] = (_SDK.sayac[k] || 0) + 1; if(_SDK.sayac[k] > 3) return; }
+    _SDK.olay.push(new Date().toTimeString().slice(0, 8) + ' ' + m); if(_SDK.olay.length > 25) _SDK.olay.shift(); }catch(e){}
+}
+function sesDurumKart(){
+  try{
+    if(document.hidden || !fbHazir || !fbDb || window._sahaIzleModu) return;
+    var el = SAHA_SES.src && SAHA_SES.src._el, B = window.ptBildirimsizSes, S = window.SahaSes;
+    var k = { surum:window.APP_BUILD, ua:String(navigator.userAgent || '').slice(0, 160), girisli:_sahaGirisli(), macta:_sahaMacta(),
+      ayar:{ ses:AYAR.ses !== false, muzik:AYAR.muzik !== false, sesMuzik:AYAR.sesMuzik == null ? 100 : AYAR.sesMuzik, genel:AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye, spkSes:AYAR.spkSes || 'dogal', spiker:AYAR.spiker !== false },
+      muzik:{ liste:SAHA_SES.liste.length, kilit:!!SAHA_SES.kilitAcik, akisYok:!!SAHA_SES.akisYok, yukleniyor:!!SAHA_SES.yukleniyor, duzey:+_sahaMuzikDuzey().toFixed(2),
+        calan:el ? { t:+(el.currentTime || 0).toFixed(1), dur:!!el.paused, rs:el.readyState, ns:el.networkState, hata:el.error ? el.error.code : 0, ses:+el.volume.toFixed(2) } : (SAHA_SES.src ? 'tampon' : null),
+        motor:SAHA_SES.ctx ? SAHA_SES.ctx.state : null, kazanc:SAHA_SES.gain ? +SAHA_SES.gain.gain.value.toFixed(2) : null,
+        akisYolu:B ? { kapali:!!B.kapali, hata:String(B.hata || '').slice(0, 80) } : 'yok', hataliParca:Object.keys(SAHA_SES.hata || {}).filter(function(u){ return SAHA_SES.hata[u] > Date.now(); }).length },
+      macMotoru:(typeof ac !== 'undefined' && ac) ? ac.state : null,
+      dogal:S ? { destek:S.destek(), spiker:S.hazirMi('spiker') ? 'hazır' : '%' + S.yuzde('spiker'), yorumcu:S.hazirMi('yorumcu') ? 'hazır' : '%' + S.yuzde('yorumcu'), indiriyor:S.indiriyor(),
+        onbellek:!!window._spkDogalOnbellek, hata:String(S.hata() || '').slice(0, 120), olcum:S.olcum(), istendi:!!window._spkDogalIstendi } : 'yok',
+      olay:_SDK.olay.slice(-15) };
+    var j = JSON.stringify(k); if(j === _SDK.son) return; _SDK.son = j;
+    var dev = 'dev_gecici'; try{ dev = localStorage.getItem('diag_deviceId') || dev; }catch(e){}
+    k.ts = Date.now(); fbDb.ref('diagnostics/sesDurum/' + dev).set(k).catch(function(){});
+  }catch(e){}
+}
+try{ setInterval(sesDurumKart, 30000); document.addEventListener('visibilitychange', function(){ if(!document.hidden) setTimeout(sesDurumKart, 4000); }); }catch(e){}
 function sahaSesDinle(){
   try{
     if(typeof fbHazir === 'undefined' || !fbHazir || !fbDb){ setTimeout(sahaSesDinle, 500); return; }
@@ -13488,7 +13535,13 @@ function hesabiDinle(){
     _benimKayitYuklendi = true;
     try{ sahaParaBildirim(benimKayit); }catch(e){self.__ds&&self.__ds(12476,e)}
     try{ sahaSupheliBildirim(benimKayit); }catch(e){}
-    try{ if(!window._spkDogalOnZ){ window._spkDogalOnZ = setTimeout(function(){ var c = navigator.connection; if(!(c && c.saveData)) spkDogalHazirla(); }, 20000); } }catch(e){}   // (2026-10-31-A) doğal sesi arka planda indir
+    /* (2026-10-31-C, kullanıcı: "her girişte spiker için indirme uygulanıyor"). İndirilmiş ses cihazda (tarayıcı önbelleği) durur ve ağdan tekrar
+       çekilmez; ama her açılışta önbellekten belleğe yüklenmesi birkaç saniye sürüyor ve bu sırada Ayarlar "İndiriliyor %0" yazıyordu - yeniden
+       indiriliyor gibi görünüyordu, ilk maç başlarken de hazır olmuyordu. ŞİMDİ: önbellekte varsa girişte HEMEN (ağ kullanmadan) yüklenir ve
+       "Yükleniyor" yazar; yalnızca hiç indirilmemişse 20 sn sonra indirilir. */
+    try{ if(!window._spkDogalOnZ){ window._spkDogalOnZ = 1; spkDogalOnbellekte().then(function(var_){ window._spkDogalOnbellek = var_;
+      if(var_){ spkDogalHazirla(); return; }
+      setTimeout(function(){ var c = navigator.connection; if(!(c && c.saveData)) spkDogalHazirla(); }, 20000); }); } }catch(e){}
     try{ sahaGbDinle(); }catch(e){}   // (2026-10-30-B) geri bildirim yanıtları
     try{ davetLinkIsle(); }catch(e){}
     try{ macHazirKontrol(); }catch(e){}
@@ -13872,7 +13925,8 @@ function girisYap(){
     var _kimlikVar = !!(window.SahaKimlik && window.firebase && firebase.auth);
     var _kRef = function(y){ return fbDb.ref(y); };
     if(v.authEposta && _kimlikVar){
-      if(!sifre && SahaKimlik.oturumBuProfil(v)){ _girisDevam(); return; }
+      /* (2026-10-31-C, kullanıcı: "Beni Hatırla işaretliyken bir sonraki girişte doğrudan içeri alıyor; yalnızca isim hatırlanmalı, şifre her
+         koşulda girilmeli"). KÖK SEBEP: bu tarayıcıda hesabın Firebase oturumu açık kaldığı için şifre sorulmadan giriliyordu. Artık şifresiz giriş yok. */
       if(!sifre){ girisMesaj('Şifreni gir.', true); return; }
       var _gt = gecici && sifre.toLocaleUpperCase('tr') === String(gecici).toLocaleUpperCase('tr');   // geçici şifre harf duyarsız
       SahaKimlik.giris(_kRef, visitorId, _gt ? String(gecici) : sifre, v).then(function(r){
@@ -17539,7 +17593,8 @@ function spkSesDurumYazi(){
     if(SahaSes.hazirMi('spiker') && SahaSes.hazirMi('yorumcu')) return 'İnsan sesine yakın, bu cihazda hazır';
     if(SahaSes.hata() && !window._spkDogalIstendi) return 'İndirilemedi; dokunup yeniden dene';
     var y = Math.round((SahaSes.yuzde('spiker') + SahaSes.yuzde('yorumcu')) / 2);
-    return window._spkDogalIstendi ? 'İndiriliyor %' + y + ' (bir kez, ~30 MB); hazır olana kadar cihaz sesi' : 'İnsan sesine yakın; bir kez indirilir (~30 MB)';
+    if(window._spkDogalOnbellek && window._spkDogalIstendi) return 'Cihazdan yükleniyor (indirme yok)…';
+    return window._spkDogalIstendi ? 'İndiriliyor %' + y + ' (yalnızca ilk kez, ~30 MB); hazır olana kadar cihaz sesi' : 'İnsan sesine yakın; yalnızca ilk kez indirilir (~30 MB)';
   }catch(e){ return ''; }
 }
 try{ SahaSes.dinle(function(){ try{ if(document.querySelector('#shellMenu .sh-tab.on[data-s="ayar"]') && !window._spkAyarZ) window._spkAyarZ = setTimeout(function(){ window._spkAyarZ = 0; sayAyarCiz(); }, 800); }catch(e){} }); }catch(e){}
@@ -20037,7 +20092,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-10-31-B';
+window.APP_BUILD='2026-10-31-C';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
