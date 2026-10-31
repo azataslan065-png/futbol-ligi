@@ -1,0 +1,40 @@
+# TEK SEFERLİK: kaldırılan kayıtlı spiker sisteminin veritabanında bıraktığı düğümleri siler
+# (sahaGorunum/spiker ve liglerdeki spkRapor; test ve kök). Çalıştıktan sonra bu dosya silinir.
+name: Spiker kalintilarini temizle
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/spiker-temizle.yml]
+jobs:
+  temizle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Sil
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json" >/dev/null
+          cd "$RUNNER_TEMP" && npm i --silent firebase-admin@12 >/dev/null 2>&1
+          NODE_PATH="$RUNNER_TEMP/node_modules" node -e '
+            const admin=require("firebase-admin"); const SA=JSON.parse(require("fs").readFileSync(process.env.RUNNER_TEMP+"/sa_temiz","utf8"));
+            admin.initializeApp({credential:admin.credential.cert(SA),databaseURL:"https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app"});
+            const db=admin.database(); const up={}; let n=0;
+            (async()=>{
+              for(const k of ["","test/"]){
+                up[k+"sahaGorunum/spiker"]=null; n++;
+                for(const kol of ["leagues","sahaVeri/leagues"]){
+                  const sn=await db.ref(k+kol).once("value"); const L=sn.val()||{};
+                  for(const lig of Object.keys(L)){ if(L[lig]&&L[lig].spkRapor){ up[k+kol+"/"+lig+"/spkRapor"]=null; n++; } }
+                }
+              }
+              await db.ref().update(up);
+              console.log("::notice::Spiker kalintilari silindi: "+Object.keys(up).join(", "));
+              process.exit(0);
+            })().catch(e=>{console.log("::error::"+e.message);process.exit(1);});
+          '
+          rm -f "$RUNNER_TEMP/sa.json" "$RUNNER_TEMP/sa_temiz"

@@ -126,13 +126,7 @@ const { ref, set, update, get, remove, runTransaction } = require('firebase/data
   await bek('Kök: yönetici SAHA sürüm notlarını yazar', true, () => set(ref(admin, 'sahaSurumNotlari'), { versions: [], seeded: true }));
   await bek('Kök: kullanıcı SAHA sürüm notlarını yazamaz', false, () => set(ref(anon, 'sahaSurumNotlari'), { versions: [] }));
   await bek('Fotoğraflı geri bildirim yazılır', true, () => set(ref(ali, T + 'sahaVeri/leagues/L1/feedback/fb2'), { user: 'Ali', uid: 'v_ali', text: 'x', photo: 'https://x/y.jpg', ts: 1, status: 'pending' }));
-  // 9) Uymayan spiker repliği bildirimi ve yönetici düzeltmesi (2026-10-30-E)
-  await bek('Oyuncu uymayan repliği bildirir', true, () => set(ref(ali, T + 'sahaVeri/leagues/L1/spkRapor/E_A1_33_0012'), { n: 1, tur: 'gol', ts: 1 }));
-  await bek('Bildirimde sayı zorunlu', false, () => set(ref(ali, T + 'sahaVeri/leagues/L1/spkRapor/E_A1_33_0013'), { tur: 'gol' }));
-  await bek('Kullanıcı replik düzeltmesi yapamaz', false, () => set(ref(ali, T + 'sahaGorunum/spiker/kapali/E_A1_33_0012'), true));
-  await bek('Yönetici repliği kapatır', true, () => set(ref(admin, T + 'sahaGorunum/spiker/kapali/E_A1_33_0012'), true));
-  await bek('Kök: oyuncu bildirir', true, () => set(ref(anon, 'sahaVeri/leagues/L1/spkRapor/E_A1_33_0012'), { n: 1 }));
-  // 10) Kök (yayındaki eski sürüm) değişmedi
+  // 9) Kök (yayındaki eski sürüm) değişmedi
   await bek('Kök: eski kural aynen (anonim kendi alanına yazar)', true, () => set(ref(anon, 'kullanicilar/v_kok/para'), 6));
   const satir = sonuc.join('\n');
   console.log(satir);
