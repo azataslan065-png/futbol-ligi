@@ -169,7 +169,7 @@
 </script>
 <meta charset="UTF-8"/>
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=8a0e2838"></script>
+<script src="ortak/ortak.js?v=67edc680"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -3339,7 +3339,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-10-31-D';
+window.APP_BUILD='2026-10-31-F';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return firebase.database().ref(y); }, { dosya:'index', giris:function(){ var e = document.getElementById('loginScreen'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // zorunlu güncelleme (ortak/ortak.js)
@@ -11077,7 +11077,11 @@ window.testVoiceAnnouncer=function(){
   announceEvent('Gol! Örnek Takım takımından Örnek Oyuncu. Dakika 23.');
 };
 function announceEvent(text){
-  if(!_voiceAnnouncerOn||!('speechSynthesis' in window))return;
+  if(!_voiceAnnouncerOn)return;
+  /* (2026-10-31-F) Sesli anons da robot değil doğal ses (stat spikeri Fettah); ses henüz inmediyse indirilir, o anons sessiz geçer. */
+  if(typeof isQuietHoursActive==='function'&&isQuietHoursActive())return;
+  try{ if(window.SahaSes&&SahaSes.destek()){ ptSahaSesAyarOku(); if(SahaSes.hazirMi('anons')) SahaSes.cal(text,'anons',{heyecan:/gol/i.test(text)?1:0}).catch(function(){}); else SahaSes.hazirla('anons').catch(function(){}); } }catch(e){}
+  return;
   // KULLANICI TALEBİ: Sessiz Saatler aktifse (varsayılan 22:00-08:00), sesli anons
   // otomatik olarak atlanır - geç saatte maç izleyen ama ses istemeyen kullanıcılar için.
   if(typeof isQuietHoursActive==='function'&&isQuietHoursActive())return;
@@ -14405,19 +14409,20 @@ function ptMacOzetHtml(id,m,h,a){
         try{
           if(window.SahaSes&&SahaSes.destek()){
             ptSahaSesAyarOku();
-            var _r=x.r==='yorumcu'?'yorumcu':'spiker';
-            if(SahaSes.hazirMi(_r)&&!x.cihaz){
+            var _r=x.r==='yorumcu'?'yorumcu':(x.r==='spiker'?'spiker':'anons');
+            if(SahaSes.hazirMi(_r)){
               konusuyor=true;
               var _db=false,_ds=function(){if(_db)return;_db=true;konusuyor=false;setTimeout(siradaki,200);};
               /* (2026-10-31-B) doğal ses çalınamazsa (ses motoru askıda) cümle sessiz geçmez: cihaz sesiyle okunur. */
-              var _dh=function(){if(_db)return;_db=true;konusuyor=false;x.cihaz=true;sira.unshift(x);setTimeout(siradaki,50);};
+              var _dh=_ds;   // (2026-10-31-F) robot ses yok: çalınamayan cümle atlanır
               SahaSes.cal(x.m,_r,{duzey:_ist?Math.max(0.05,Math.min(1,_ist.vol)):1}).then(_ds,_dh);setTimeout(_ds,16000);
               return;
             }
-            if(!window._ptSesIstendi){window._ptSesIstendi=true;SahaSes.hazirla('spiker').then(function(){try{SahaSes.bankaHazirla('spiker');}catch(e){}return SahaSes.hazirla('yorumcu');}).catch(function(){window._ptSesIstendi=false;});}
+            if(!window._ptSesIstendi){window._ptSesIstendi=true;SahaSes.hazirla('spiker').then(function(){try{SahaSes.bankaHazirla('spiker');}catch(e){}return SahaSes.hazirla('yorumcu');}).then(function(){return SahaSes.hazirla('anons');}).catch(function(){window._ptSesIstendi=false;});}
           }
         }catch(_e){}
-        if(!window.speechSynthesis||!window.SpeechSynthesisUtterance)continue;
+        /* ROBOT SES KALDIRILDI (2026-10-31-F, kullanıcı: "robot spiker ve yorumcuyu tamamen kaldır"): doğal ses hazır değilse cümle atlanır. */
+        continue;
         var u=new SpeechSynthesisUtterance(x.m); u.lang='tr-TR'; if(_ist) u.volume=Math.max(0.05,Math.min(1,_ist.vol));
         var l=sesler(), er=l.filter(function(y){return y.erkek;});
         var sec=(x.r==='yorumcu'?(er[1]||er[0]):er[0])||l[0];
@@ -14439,7 +14444,7 @@ function ptMacOzetHtml(id,m,h,a){
   };
   window.ptSahaKonus=function(m,r){
     try{
-      if(!m||(!window.speechSynthesis&&!(window.SahaSes&&SahaSes.destek())))return;
+      if(!m||!(window.SahaSes&&SahaSes.destek()))return;
       if(sira.length>=3)sira.shift();
       sira.push({m:String(m),r:r||'anons',ts:Date.now()});
       siradaki();

@@ -883,7 +883,7 @@ var SahaDestek = (function(){
    SahaSes.cal(metin, rol, {duzey}) → Promise (bitince) · SahaSes.tampon(metin, rol) → Promise<AudioBuffer> · SahaSes.hazirla(rol) */
 var SahaSes = (function(){
   var SESLER = { fahrettin:'Fahrettin', dfki:'Deniz', fettah:'Fettah' };
-  var ROL = { spiker:'fahrettin', yorumcu:'dfki' }, HIZ = { spiker:1.08, yorumcu:0.94, anons:1 };
+  var ROL = { spiker:'fahrettin', yorumcu:'dfki', anons:'fettah' }, HIZ = { spiker:1.08, yorumcu:0.94, anons:1 };   // anons: stat spikeri (2026-10-31-F, robot ses kaldırıldı)
   var isci = null, hazir = {}, yuk = {}, bek = {}, n = 0, ctx = null, yuzde = {}, hata = '', dinleyici = [], calan = null, disBaglam = null, indir = 0;
   var ON = {}, ONS = [], OLC = { adet:0, oran:null, son:null, hiz:null };   // hiz: işçinin saf üretim süresi / ses süresi (ortalama)   // OLC: üretim hızı (oran: üretim süresi / ses süresi; 1'in üstü cihaz yetişemiyor)   // üretilmiş sesler (aynı cümle tekrar üretilmez: özet, gol videosu, tekrar)
   function kok(){ try{ return new URL('ortak/ses/', location.href).href; }catch(e){ return 'ortak/ses/'; } }
@@ -929,8 +929,17 @@ var SahaSes = (function(){
     if(/!/.test(m) || /(şut|kafa|direk|kurtar|tehlike|çalım|ceza sahas|kaçtı|son anda|inanılmaz|müthiş|penaltı|nefes)/.test(k)) return 1;
     return 0;
   }
+  /* OKUNUŞ (2026-10-31-F, kullanıcı: "spiker stadyum ismini doğru telaffuz etmiyor"). KÖK SEBEP: ses birimlerini çıkaran motor (espeak)
+     Türkçede ünlü + i/ı yan yana gelince ikisini tek hece (İngilizcedeki gibi kayan ünlü) okuyor: "Naimspor Stadı" → "Naym-spor".
+     Türkçede iki ünlü ayrı hece olduğundan araya hafif bir "y" konur ("Na-yim"). Tamamı büyük harfle yazılmış adlar (ör. yöneticinin
+     girdiği "ŞÜKRÜ SARACOĞLU") kısaltma gibi harf harf okunmasın diye normal yazıma çevrilir; "&", "/", "_" gibi işaretler okunur hale gelir. */
+  function okunus(m){
+    m = String(m || '').replace(/[’`´]/g, "'").replace(/\s*&\s*/g, ' ve ').replace(/[_/]+/g, ' ').replace(/\b(Std|Stad)\./gi, 'Stadı');
+    m = m.replace(/[A-ZÇĞİÖŞÜ]{2,}/g, function(w){ return w.length <= 3 && /^(TV|VAR|FC|SK)$/.test(w) ? w : w.charAt(0) + w.slice(1).toLocaleLowerCase('tr-TR'); });
+    return m.replace(/([aeıioöuüAEIİOÖUÜ])([iı])/g, '$1y$2');
+  }
   function metniHazirla(metin, h){
-    var m = String(metin || '');
+    var m = okunus(metin);
     if(h >= 2){
       m = m.replace(/\b(Go+l+|GO+L+)!/g, 'Gooooool!').replace(/\bGol gol gol!/gi, 'Gol! Gol! Gooooool!').replace(/^Ve gol!/, 'Ve gooool!')
            .replace(/^İşte gol!/, 'İşte gooool!').replace(/^Kırmızı kart!/, 'Kırmızı kart! Kırmızı!');
@@ -978,8 +987,8 @@ var SahaSes = (function(){
     return p;
   }
   /* İPTAL (2026-10-31-D): geç kalıp okunmayacak cümlenin üretimi, sırada bekliyorsa hiç başlamaz (telefonun vakti boşa gitmez). */
-  function birak(metin, rol, h){
-    try{ h = h == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, h | 0));
+  function birak(metin, rol, h, ic){
+    try{ if(!ic){ var pp = parcala(metin); if(pp.length > 1) pp.forEach(function(x){ birak(x, rol, h, true); }); } h = h == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, h | 0));
       var an = sesAdi(rol) + '|' + h + '|' + metniHazirla(metin, h), p = ON[an];
       if(p && !p._bitti){ (p._ids || []).forEach(function(id){ try{ isci.postMessage({ tip:'iptal', id:id }); }catch(e){} }); delete ON[an]; } }catch(e){}
   }
@@ -1040,7 +1049,7 @@ var SahaSes = (function(){
         var H = HEY[b._h || 0], k = c.createBufferSource(), son0 = c.createGain();
         k.buffer = b;
         // Her cümlede ton biraz değişir (insan aynı cümleyi hep aynı tonda söylemez); gol çığlığında ton çığlık boyunca yükselir, sonra iner.
-        var oran = H.oran * (1 + (Math.random() * 2 - 1) * 0.015), t = c.currentTime + 0.02, pr = k.playbackRate;
+        var oran = H.oran * (o._sap || 1), t = c.currentTime + 0.02, pr = k.playbackRate;
         pr.setValueAtTime(oran, t);
         if(b._cig){ var cb0 = b._cig[0] / oran, cb1 = b._cig[1] / (oran * 1.06);
           pr.setValueAtTime(oran * 0.97, t + cb0); pr.linearRampToValueAtTime(oran * 1.16, t + cb1); pr.linearRampToValueAtTime(oran, t + cb1 + 0.12); }
@@ -1058,25 +1067,47 @@ var SahaSes = (function(){
       }); });
     });
   }
+  /* PARÇA PARÇA OKUMA (2026-10-31-E, kullanıcı: "spiker sesleri biraz geriden geliyor"). KÖK SEBEP: cümle BÜTÜNÜYLE üretilmeden çalmaya
+     başlanmıyordu; telefonda (teşhis kartı: üretim, okuma süresinin ~0,7 katı - maçta daha fazla) 4 saniyelik bir cümle için 3-5 sn
+     sessiz bekleniyordu. ŞİMDİ cümle noktalama yerlerinden kısa parçalara bölünür; ilk parça hazır olur olmaz çalmaya başlar, sonraki
+     parçalar o çalarken üretilir. Gecikme bütün cümlenin değil yalnızca ilk kısa parçanın üretim süresi kadardır. */
+  function parcala(metin){
+    var L = String(metin || '').split(/(?<=[!?.;:…])\s+|(?<=,)\s+(?=\S{3,})/), o = [];
+    L.forEach(function(x){ x = x.trim(); if(!x) return;
+      if(o.length && (o[o.length - 1].length < 14 || x.length < 8) && !/^Go+l/i.test(x) && !/^Go+l/i.test(o[o.length - 1])) o[o.length - 1] += ' ' + x; else o.push(x); });
+    // çok uzun parça virgülsüz ise olduğu gibi kalır
+    return o.length ? o : [String(metin || '')];
+  }
+  function calSira(parcalar, rol, h, o){
+    var P = parcalar.map(function(x){ return tampon(x, rol, h); });     // hepsi sıraya girer (işçi sırayla üretir)
+    var i = 0, durdu = false, ilkCalan = null;
+    var bir = function(){
+      if(durdu || i >= P.length) return Promise.resolve();
+      var j = i++;
+      return Promise.race([P[j], new Promise(function(z, red){ setTimeout(function(){ red(new Error('geç')); }, j === 0 ? 20000 : 6000); })])
+        .then(function(b){ if(durdu) return; return calB(b, o).then(bir); }, function(){ durdu = true; for(var k = j; k < parcalar.length; k++) birak(parcalar[k], rol, h); });
+    };
+    return bir();
+  }
   function cal(metin, rol, o){
-    o = o || {};
+    o = o || {}; o._sap = 1 + (Math.random() * 2 - 1) * 0.015;   // cümlenin bütün parçaları aynı tonda
     var h = o.heyecan == null ? heyecanBul(metin, rol) : Math.max(0, Math.min(2, o.heyecan | 0)), ob = onEkBol(metin, rol, h), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
     if(bk && bk._b){
-      var geri = ob.geri ? tampon(ob.geri, rol, h) : null;      // çığlık çalarken geri kalanı üretilir
-      return calB(bk._b, o).then(function(){ if(!geri) return; return Promise.race([geri, new Promise(function(z, red){ setTimeout(function(){ red(new Error('geç')); }, 7000); })])
-        .then(function(b){ return calB(b, o); }, function(){ birak(ob.geri, rol, h); }); });
+      var gp = ob.geri ? parcala(ob.geri) : [];
+      if(gp.length) tampon(gp[0], rol, h).catch(function(){});           // çığlık çalarken geri kalanın ilk parçası üretilir
+      return calB(bk._b, o).then(function(){ if(gp.length) return calSira(gp, rol, h, o); });
     }
-    return calB(tampon(metin, rol, h), o);
+    return calSira(parcala(metin), rol, h, o);
   }
-  function hazirBekle(metin, rol, h){   // çalmaya hazır mı (hazır çığlıkla başlayan cümle hemen hazırdır)
+  function hazirBekle(metin, rol, h){   // çalmaya başlamaya hazır mı: hazır çığlık ya da cümlenin ilk parçası
     h = h == null ? heyecanBul(metin, rol) : h; var ob = onEkBol(metin, rol, h), bk = ob && BANKA[sesAdi(rol) + '|' + ob.k];
     if(bk && bk._b) return Promise.resolve(true);
-    return tampon(metin, rol, h).then(function(){ return true; });
+    return tampon(parcala(metin)[0], rol, h).then(function(){ return true; });
   }
   function sustur(){ try{ if(calan){ var k = calan; calan = null; k.stop(); } }catch(e){} }
   function ayarla(v){ v = v || {}; if(v.spiker && SESLER[v.spiker]) ROL.spiker = v.spiker; if(v.yorumcu && SESLER[v.yorumcu]) ROL.yorumcu = v.yorumcu; haber(); }
   return { destek:destek, hazirla:hazirla, hazirMi:hazirMi, cal:cal, tampon:tampon, sustur:sustur, ayarla:ayarla, sesler:SESLER,
-    rolSesi:function(r){ return sesAdi(r); }, yuzde:function(r){ return yuzde[sesAdi(r)] || 0; }, hata:function(){ return hata; },
+    rolSesi:function(r){ return sesAdi(r); }, parcala:parcala, yuzde:function(r){ return yuzde[sesAdi(r)] || 0; }, hata:function(){ return hata; },
     dinle:function(f){ dinleyici.push(f); }, baglam:baglam, birak:birak, bankaHazirla:bankaHazirla, hazirBekle:hazirBekle, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
     heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return indir > 0; }, olcum:function(){ return OLC; } };
 })();
