@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-01-G</title>
+<title>SAHA — 3D Futbol v2026-11-01-H</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -20391,7 +20391,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-01-G';
+window.APP_BUILD='2026-11-01-H';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -23634,7 +23634,44 @@ let bSpin = 0, topKilit = 0;
    belirli bir varış hızıyla ulaşır, ötesine kaçmaz; (4) havadan paslar (uzun pas, orta, kale vuruşu, kaleci vuruşu)
    bir takım arkadaşı seçip onun koşu noktasına düşecek şekilde, aynı fizikle benzetimle hesaplanır; (5) pasın alıcısı
    topa (havadaysa düşeceği noktaya) koşar, başka arkadaş araya girmez. */
-const TOP_SURT0 = 1.0, TOP_SURT1 = 0.33, HAVA_SURT = 0.0105, TOP_G = 21;
+/* GERÇEK YERÇEKİMİ (2026-11-01-H, kullanıcı: "topun, oyuncuların ve hakemlerin ilgili pozisyonlarda sistemin robotik hareketlerinden çıkarılıp
+   olabildiğince gerçeği yansıtması"). KÖK SEBEP: saha gerçek ölçülerde (105×68 m) ama top 21 m/s² ile düşüyordu (gerçeğin 2,1 katı): 40 m'lik uzun
+   pas 7,5 m yükselip taş gibi iniyor, şutlar yukarı fırlayıp hızla aşağı kıvrılıyordu. ŞİMDİ gerçek değer 9,81. Atış hızlarının çoğu bu sabitle
+   hesaplanıyor (pas, orta, kale vuruşu, penaltı nişanı, baraj üstü, yapay zekâ tahminleri) - aynı sürede aynı noktaya, daha alçak ve doğal bir yayla
+   gider. Elle yazılmış eski dikey hızlar iki yoldan dönüştürülür:
+     gHedef(vy, vh, d): şutlar - top d metre ötedeki kale çizgisine ESKİSİYLE AYNI yükseklikte varır (nişan değişmez, yay alçalır);
+     gUcus(vy):         taç ve kafayla indirme (pas hedefi olan) - top eskisiyle aynı sürede, aynı yere düşer.
+   Hedefsiz uzaklaştırmalar (kaleci/kale vuruşu yedeği, defans uzaklaştırması, kalecinin çelmesi) eski dikey hızıyla kalır: eski yerçekimiyle
+   23 m/s'lik "uzun" vuruş 16 m'de düşüyordu, gerçek yerçekimiyle ~36 m gider ve 3-4 m yükselir (gerçek bir kaleci vuruşu gibi). */
+const TOP_SURT0 = 1.0, TOP_SURT1 = 0.33, HAVA_SURT = 0.0105, TOP_G = 9.81, TOP_G_ESKI = 21;
+function _tHava(vh, d){ vh = Math.max(1, vh); return (Math.exp(HAVA_SURT * d) - 1) / (HAVA_SURT * vh); }   // hava direnciyle d metreyi geçme süresi
+function gUcus(vy){ return vy * TOP_G / TOP_G_ESKI; }
+function gHedef(vy, vh, d){ var t = _tHava(vh, Math.max(1, d)); if(2 * vy / TOP_G_ESKI < t) return gUcus(vy);   // eski yay kaleden önce yere düşüyordu: düşme noktası korunur
+  return vy - (TOP_G_ESKI - TOP_G) * t / 2; }
+const _topEksen = new THREE.Vector3(), _topDikey = new THREE.Vector3(0, 1, 0), DIREK_R = 0.09;
+// Kale çerçevesi çarpışması (bkz. DİREK VE ÜST DİREK): direkler dikey, üst direk yatay silindir; ağ ve arka çerçeve ayrı (agTopAdim).
+function _cerceveYansit(nx, ny, nz){
+  const vn = bVel.x*nx + bVel.y*ny + bVel.z*nz; if (vn >= 0) return 0;
+  bVel.x -= (1 + 0.62) * vn * nx; bVel.y -= (1 + 0.62) * vn * ny; bVel.z -= (1 + 0.62) * vn * nz;
+  const tx = bVel.x - (bVel.x*nx + bVel.y*ny + bVel.z*nz) * nx, ty = bVel.y - (bVel.x*nx + bVel.y*ny + bVel.z*nz) * ny, tz = bVel.z - (bVel.x*nx + bVel.y*ny + bVel.z*nz) * nz;
+  bVel.x -= tx * 0.1; bVel.y -= ty * 0.1; bVel.z -= tz * 0.1; bSpin *= 0.4;
+  return -vn;
+}
+function _kaleCercevesi(){
+  const b = ball.position, s = Math.sign(b.x) || 1, gx = s * HLX, Rm = R_BALL + DIREK_R; let vur = 0;
+  if (b.y < GOAL_H + Rm){
+    for (const pz of [-GOAL_HW, GOAL_HW]){
+      const dx = b.x - gx, dz = b.z - pz, d = Math.hypot(dx, dz);
+      if (d < Rm && d > 1e-4 && b.y < GOAL_H){ const nx = dx / d, nz = dz / d; b.x = gx + nx * Rm; b.z = pz + nz * Rm; vur = Math.max(vur, _cerceveYansit(nx, 0, nz)); }
+    }
+    if (Math.abs(b.z) < GOAL_HW){
+      const dx = b.x - gx, dy = b.y - GOAL_H, d = Math.hypot(dx, dy);
+      if (d < Rm && d > 1e-4){ const nx = dx / d, ny = dy / d; b.x = gx + nx * Rm; b.y = GOAL_H + ny * Rm; vur = Math.max(vur, _cerceveYansit(nx, ny, 0)); }
+    }
+  }
+  if (vur > 1.5){ _sesKaydet('n'); gurultu(0.08, Math.min(0.3, 0.1 + vur * 0.012), 1400); _direktenDondu(); }
+}
+function _kaleMesafe(px, dx, dir){ var u = dir * HLX - px, c = dx * dir; return (c > 0.1) ? Math.max(3, Math.min(45, Math.abs(u / dx))) : 30; }
 /* HAVA OYNANIŞI ETKİLER (2026-10-11-A, onaylanan öneri 1). Önceden yağmur, kar ve sis yalnızca görüntüydü. Katsayılar:
    surt  - yerde yuvarlanma sürtünmesi (yağmurda ıslak çim topu kaydırır: daha uzağa ve hızlı gider; karda çabuk durur)
    sekme - yere düşen topun dikey sekmesi (ıslak/karlı zeminde top alçak seker), yatay - sekmede korunan yatay hız
@@ -24992,7 +25029,7 @@ function sut(o){
   if (kafa){
     // Kafa vurusunun gucu de nitelige bagli.
     const _nk = (p.nSut || 1);
-    bVel.set(d.x*(13 + g*9)*_nk, 3.6, d.z*(13 + g*9)*_nk);
+    { const _kv = (13 + g*9)*_nk; bVel.set(d.x*_kv, gHedef(3.6, _kv, _kaleMesafe(ball.position.x, d.x, p.dir)), d.z*_kv); }
     bSpin = 0;
     olayMesaj('', 'Kafa vuruşu', 700);
     try{ spk('kafa', { p:p }); }catch(e){self.__ds&&self.__ds(22505,e)}
@@ -25009,13 +25046,13 @@ function sut(o){
       bVel.set(d.x * L.vh * _ns, L.vy, d.z * L.vh * _ns); bSpin = 0;
       try{ olayMesaj('', 'Aşırtma', 700); }catch(e){}
     } else if (_tur === 'plase'){
-      bVel.set(d.x*(16 + g*9)*_ns, (1.1 + g*1.6), d.z*(16 + g*9)*_ns);
+      { const _pv = (16 + g*9)*_ns; bVel.set(d.x*_pv, gHedef(1.1 + g*1.6, _pv, _kaleMesafe(ball.position.x, d.x, p.dir)), d.z*_pv); }
       // Kale ortasına doğru kıvrılır (uzak direk): nişan kale ortasının hangi yanındaysa ters yöne falso.
       const _gz = -ball.position.z, _yan = (d.x * _gz - d.z * (p.dir * HLX - ball.position.x)) > 0 ? 1 : -1;
       bSpin = _yan * 3.4;
       try{ olayMesaj('', 'Plase', 700); }catch(e){}
     } else {
-      bVel.set(d.x*(19 + g*22)*_ns, (2.2 + g*6.2)*(0.85+_ns*0.15), d.z*(19 + g*22)*_ns);
+      { const _sv = (19 + g*22)*_ns; bVel.set(d.x*_sv, gHedef((2.2 + g*6.2)*(0.85+_ns*0.15), _sv, _kaleMesafe(ball.position.x, d.x, p.dir)), d.z*_sv); }
       // falso: nişan yönü bakış yönünden saparsa top kavis yapar
       const f = yon(p);
       bSpin = (f.z*d.x - f.x*d.z) * 5.5 * (0.4 + g);
@@ -25201,7 +25238,7 @@ function pas(o, tur){
     egtOlay('pas');
     // PAS ANIMASYONU: sutle ayni klip, daha yavas ve hafif - pas bir vurus degil dokunus.
     try{ if(ball.position.y <= 1.2 && p.obj.userData.hazirModel) modelTekSefer(p.obj.userData, 'pas', 1.2); }catch(e){_sessiz(e,'pas:3934','saha_oynanis');}
-    if (ball.position.y > 1.2) bVel.y = 2.6;             // kafayla indirilen pas
+    if (ball.position.y > 1.2) bVel.y = gUcus(2.6);      // kafayla indirilen pas
     bSpin = 0;
     if (duran && duran.takim === t){ duranSonrasiKur(duran, p); duran = null; }
   }
@@ -25350,7 +25387,7 @@ function _gkHedef(p){
     if (mesafe > 0.9 && t.t < 0.6 && !(p._dalisCd > 0)){
       p.dalis = t.z; p._dalisTam = null; p._dalisX = gp.x; p.dalisT = 0.85; p._dalisSure = 0.85; p._dalisCd = 1.6;
       // Topun kaleci hizasına geldiğindeki yüksekliği: yüksek topa HAVADA yana uzanır (gövde yerden kalkar).
-      var _yTop = ball.position.y + bVel.y * t.t - 10.5 * t.t * t.t;
+      var _yTop = ball.position.y + bVel.y * t.t - 0.5 * TOP_G * t.t * t.t;   // (2026-11-01-H) gerçek yerçekimi
       p._dalisH = Math.max(0.05, Math.min(1.05, _yTop - 0.55));
       p._dalisYon = (t.z - gp.z) * (-Math.sin(p.obj.rotation.y)) >= 0 ? 1 : -1;      // +1 = kalecinin solu
       try{ if (p.obj.userData.hazirModel){ var _solZ = -Math.sin(p.obj.rotation.y);
@@ -25801,7 +25838,7 @@ function aiVurus(p){
     const d = kale.sub(ball.position).setY(0).normalize();
     const _ss = (26 + Math.random()*6) * nit(p,'nSut',1);
     _aiVurusAnim(p);
-    bVel.set(d.x*_ss, 2.6, d.z*_ss);
+    bVel.set(d.x*_ss, gHedef(2.6, _ss, _kaleMesafe(ball.position.x, d.x, p.dir)), d.z*_ss);
     topKilit = 0.3;
     p.cd = 0.5; p.tcd = 0.4;
     sonDokunan = p.team; sonDokunanOyuncu = p;
@@ -26443,7 +26480,7 @@ function duranCalistir(){
     } else if (duran.duvar && _r < 0.75){
       bVel.set(d.x*25, 0.25, d.z*25); bSpin = 0;                        // alttan sert
     } else {
-      bVel.set(d.x*26, 3.2, d.z*26);
+      bVel.set(d.x*26, gHedef(3.2, 26, D0), d.z*26);
     }
     if (window._baraj) window._baraj.atis = performance.now();
     (p.team === 0 ? istat.a : istat.b).sut++;
@@ -26464,7 +26501,7 @@ function duranCalistir(){
       ball.position.z = _s * (HWZ - R_BALL - 0.1); }
     if (pasVer(p, duran.takim)){
       ball.position.y = 1.9;                      // elden cikiyor
-      bVel.y = Math.max(bVel.y, 3.4);             // tac atisi havadan, hafif yayla gider
+      bVel.y = Math.max(bVel.y, gUcus(3.4));      // tac atisi havadan, hafif yayla gider
       ofsaytTemizle();                            // Kural 11: taçtan ofsayt olmaz (pasVer hesaplamıştı)
     } else {
       bVel.set(p.dir*18, 5, (Math.random()-0.5)*8);
@@ -29755,7 +29792,13 @@ function update(dt){
       const _va = Math.hypot(bVel.x, bVel.y, bVel.z), _kd = Math.max(0, 1 - HAVA_SURT*_va*dt);
       bVel.x *= _kd; bVel.y *= _kd; bVel.z *= _kd;
     }
-    ball.position.addScaledVector(bVel, dt);
+    /* DİREK VE ÜST DİREK (2026-11-01-H). KÖK SEBEP: direk, çevresindeki 0,9 m'lik bir KUTU gibi denetleniyordu; top kutuya her girdiği karede hız
+       yeniden ters çevriliyor (titreme), yan hız yansımadan bağımsız sabit bir değere atanıyordu ve 30 m/s'lik şut bir karede 0,5 m ilerlediği için
+       direğin içinden geçebiliyordu. ŞİMDİ direk ve üst direk gerçek boyutlarında (9 cm yarıçaplı) silindir; top hızlıysa kare küçük adımlara bölünür,
+       çarpışma yüzey normaline göre yansır (dik bileşen %62 korunur, teğet %90): direğin iç yüzüne çarpan top ağlara, dış yüzüne çarpan top dışarı,
+       tam önüne çarpan top geri döner. */
+    { const _adim = Math.min(8, Math.max(1, Math.ceil(Math.hypot(bVel.x, bVel.y, bVel.z) * dt / 0.1))), _h = dt / _adim;
+      for (let _i = 0; _i < _adim; _i++){ ball.position.addScaledVector(bVel, _h); if (Math.abs(Math.abs(ball.position.x) - HLX) < 0.6) _kaleCercevesi(); } }
     if (ball.position.y < R_BALL){
       ball.position.y = R_BALL;
       if (bVel.y < -0.6){ const _hf = havaFizik(); bVel.y = -bVel.y * 0.5 * _hf.sekme; bVel.x *= _hf.yatay; bVel.z *= _hf.yatay; gurultu(0.05, 0.05, 400); } else bVel.y = 0;
@@ -29768,37 +29811,23 @@ function update(dt){
       if (_yeni < 0.15){ bVel.x = 0; bVel.z = 0; }
     }
     const spb = Math.hypot(bVel.x, bVel.z);
+    /* FALSO = MAGNUS ETKİSİ (2026-11-01-H). KÖK SEBEP: kıvrılma ivmesi topun hızından bağımsızdı (bSpin×9 m/s²): yavaş giden falsolu top hızlı şut
+       kadar keskin dönüyordu. Gerçekte Magnus kuvveti hızla orantılıdır: şimdi ivme hız/26 m/s ile ölçeklenir (26 m/s'lik şutta eskisiyle aynı,
+       yavaş topta az, çok sert şutta biraz fazla). Top yere değdiğinde dönüş yerde sürtünmeyle hızla söner. */
     if (ball.position.y > R_BALL + 0.06 && Math.abs(bSpin) > 0.02 && spb > 0.5){
-      const px = -bVel.z/spb, pz = bVel.x/spb;            // hıza dik yön
-      bVel.x += px * bSpin * dt * 9;
-      bVel.z += pz * bSpin * dt * 9;
+      const px = -bVel.z/spb, pz = bVel.x/spb, _mg = Math.min(1.5, spb / 26);   // hıza dik yön, hıza bağlı Magnus
+      bVel.x += px * bSpin * dt * 9 * _mg;
+      bVel.z += pz * bSpin * dt * 9 * _mg;
       bSpin *= Math.pow(0.5, dt);
-    } else if (ball.position.y <= R_BALL + 0.06) bSpin = 0;
+    } else if (ball.position.y <= R_BALL + 0.06) bSpin *= Math.pow(0.02, dt);
+    if (Math.abs(bSpin) < 0.02) bSpin = 0;
     if (spb > 0.05){
-      const ax = new THREE.Vector3(bVel.z, 0, -bVel.x).normalize();
-      ball.rotateOnWorldAxis(ax, (spb*dt)/R_BALL);
+      _topEksen.set(bVel.z, 0, -bVel.x).normalize();
+      ball.rotateOnWorldAxis(_topEksen, (spb*dt)/R_BALL);
     }
+    if (bSpin) ball.rotateOnWorldAxis(_topDikey, -bSpin * dt * 9);   // falsolu top kendi ekseninde döner (görsel)
     topGolge.position.set(ball.position.x, 0.02, ball.position.z);
     topGolge.scale.setScalar(0.55 / (1 + ball.position.y*0.25));
-
-    /* direkler */
-    [-1,1].forEach(s => {
-      if (Math.abs(ball.position.x - s*HLX) < 0.45 && ball.position.y < GOAL_H){
-        [-GOAL_HW, GOAL_HW].forEach(pz => {
-          if (Math.abs(ball.position.z - pz) < R_BALL + 0.1){
-            bVel.x *= -0.55; bVel.z = (ball.position.z - pz)*9;
-            _sesKaydet('n'); gurultu(0.08, 0.2, 1400);
-            _direktenDondu();
-          }
-        });
-      }
-      if (Math.abs(ball.position.x - s*HLX) < 0.5 &&
-          Math.abs(ball.position.y - GOAL_H) < R_BALL + 0.1 && Math.abs(ball.position.z) < GOAL_HW){
-        bVel.y = -Math.abs(bVel.y)*0.5;
-        _sesKaydet('n'); gurultu(0.08, 0.2, 1400);
-        _direktenDondu();
-      }
-    });
 
     /* sürüş, ilk dokunuş ve ofsayt teması tek yerde */
     topKontrol(dt);
