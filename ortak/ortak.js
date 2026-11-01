@@ -1156,6 +1156,11 @@ var SahaSes = (function(){
      Not: Piper motoru (aşağıdaki üretim kodu ve ses/ klasöründeki çalışma dosyaları) silinmedi, KULLANILMIYOR; kullanıcının kendi kayıtlarıyla
      eğitilecek spiker/yorumcu modeli aynı motorla çalışacak. */
   var KY = null, KY_P = null, KB = {};
+  /* SİLİNEN KAYITLAR (2026-11-01-D, kullanıcı: "sesler spiker, yorumcu ve diyalog şeklinde ayrı ayrı listelenmeli; admin bunları tek tek
+     veya toplu olarak silebilmeli"). Klip dosyaları depoda kalır; admin panelinde silinen kaydın kimliği sahaGorunum/ses/kayitSilinen'e
+     yazılır ve burada hiçbir yoldan (olay seçimi, metinle eşleme, stadyum, maç önü diyalog) çalınmaz. Geri alınınca yeniden çalınır. */
+  var GIZ = {};
+  function gz(k){ return !!(k && GIZ[k.id]); }
   function kyNorm(m){ return String(m || '').toLocaleLowerCase('tr-TR').replace(/[^a-zçğıöşü0-9]+/g, ' ').trim(); }
   function kyYukle(){
     if(KY_P) return KY_P;
@@ -1166,7 +1171,7 @@ var SahaSes = (function(){
     return KY_P;
   }
   try{ kyYukle(); }catch(e){}
-  function kyBul(metin, rol){ if(!KY) return null; return KY.m[(rol === 'yorumcu' ? 'yorumcu' : (rol === 'anons' ? 'anons' : 'spiker')) + '|' + kyNorm(metin)] || null; }
+  function kyBul(metin, rol){ if(!KY) return null; var k = KY.m[(rol === 'yorumcu' ? 'yorumcu' : (rol === 'anons' ? 'anons' : 'spiker')) + '|' + kyNorm(metin)] || null; return gz(k) ? null : k; }
   function kyTampon(k){
     if(KB[k.id]) return KB[k.id];
     KB[k.id] = fetch(kok() + 'kayit/' + k.d).then(function(r){ if(!r.ok) throw new Error('kayıt indirilemedi'); return r.arrayBuffer(); })
@@ -1179,15 +1184,15 @@ var SahaSes = (function(){
   // Oyunun seçtiği tür için kayıt: tur (gol, direk, kurtarisY…), o.dk (maç dakikası, dkMax koşulu), o.haric (son çalınanlar).
   function kaySec(rol, tur, o){
     if(!KY || !tur) return null; o = o || {};
-    var L = KY.L.filter(function(k){ return k.rol === rol && k.tur.indexOf(tur) >= 0 && !(k.dkMax && o.dk != null && o.dk > k.dkMax) && !(k.sira && !o.sirali); });
+    var L = KY.L.filter(function(k){ return !gz(k) && k.rol === rol && k.tur.indexOf(tur) >= 0 && !(k.dkMax && o.dk != null && o.dk > k.dkMax) && !(k.sira && !o.sirali); });
     if(!L.length) return null;
     var yeni = L.filter(function(k){ return !(o.haric && o.haric.indexOf(k.id) >= 0); });
     if(!yeni.length) return null;                                     // az önce çalınan kayıt hemen tekrarlanmaz (o an sessiz geçer)
     return yeni[Math.floor(Math.random() * yeni.length)];
   }
-  function kayStad(ad){ if(!KY || !ad) return null; var n = kyNorm(ad), L = KY.L.filter(function(k){ return k.stad && kyNorm(k.stad) === n; });
+  function kayStad(ad){ if(!KY || !ad) return null; var n = kyNorm(ad), L = KY.L.filter(function(k){ return !gz(k) && k.stad && kyNorm(k.stad) === n; });
     return L.length ? L[Math.floor(Math.random() * L.length)] : null; }
-  function kayDizi(tur){ return KY ? KY.L.filter(function(k){ return k.tur.indexOf(tur) >= 0 && k.sira; }).sort(function(a, b){ return a.sira - b.sira; }) : []; }
+  function kayDizi(tur){ return KY ? KY.L.filter(function(k){ return !gz(k) && k.tur.indexOf(tur) >= 0 && k.sira; }).sort(function(a, b){ return a.sira - b.sira; }) : []; }
   var _bos = function(){ return Promise.resolve(); };
   return { destek:function(){ return !!(window.AudioContext || window.webkitAudioContext); },
     hazirla:function(){ return kyYukle().then(function(k){ if(!k) throw new Error('Kayıtlı ses bulunamadı'); }); },
@@ -1201,5 +1206,8 @@ var SahaSes = (function(){
     dinle:function(f){ dinleyici.push(f); }, baglam:baglam, birak:function(){}, bankaHazirla:function(){}, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
     heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return false; }, olcum:function(){ return {}; },
     kayitModu:function(){ return true; }, kayitHazir:function(){ return !!KY; }, kayitSec:kaySec, kayitDizi:kayDizi, kayitStad:kayStad, kayitVar:function(m, r){ return !!kyBul(m, r); },
-    kayitListe:function(){ return KY ? KY.L.slice() : []; }, kayitYukle:kyYukle };
+    kayitListe:function(){ return KY ? KY.L.filter(function(k){ return !gz(k); }) : []; }, kayitYukle:kyYukle,
+    kayitTum:function(){ return KY ? KY.L.map(function(k){ return Object.assign({ gizli:gz(k) }, k); }) : []; },
+    kayitGizle:function(m){ GIZ = (m && typeof m === 'object') ? m : {}; haber(); },
+    kayitCal:function(id, o){ var k = KY && KY.L.find(function(x){ return x.id === id; }); if(!k) return Promise.reject(kyYok()); o = o || {}; o._d0 = DONEM; o._sap = 1; return kyTampon(k).then(function(b){ return calB(b, o); }); } };
 })();
