@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-01-I</title>
+<title>SAHA — 3D Futbol v2026-11-01-J</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -20392,7 +20392,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-01-I';
+window.APP_BUILD='2026-11-01-J';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -26033,8 +26033,16 @@ function topKontrol(dt){
   else { const f = yon(p); fx = f.x; fz = f.z; }
   p._dokT = (p._dokT || 0) - dt;
   let itme = 0;
-  if (p._dokT <= 0 && gv > 0.8){
+  /* DOKUNUŞ RİTMİ (2026-11-01-J, kullanıcı: "robotik hareketler"). KÖK SEBEP: top, oyuncunun önündeki sabit noktaya her karede çekiliyordu;
+     "dokunuş" yalnızca tek karelik 0,2-0,4 m'lik bir hedef kaymasıydı (ekranda ~10 cm titreme) - top ayağa yapışık kayıyordu. ŞİMDİ her
+     dokunuşta top öne açılır (0,1 sn'de), oyuncu yetiştikçe bir sonraki dokunuşa kadar ayağa geri yaklaşır; dokunuş koşu animasyonunda ayağın
+     yere bastığı ana denk gelir, top dokunan ayağın tarafına hafifçe kayar. Açılma mesafesi deparda ve zayıf sürme becerisinde büyük. */
+  let _anFaz = null; try{ const _ra = p.obj.userData.anim && p.obj.userData.anim.eylem && p.obj.userData.anim.eylem.run; if (_ra) _anFaz = (_ra.time / (_ra.getClip().duration || 1)) % 1; }catch(e){}
+  const _adimAn = _anFaz != null && p._anFaz0 != null && Math.floor(_anFaz * 2) !== Math.floor(p._anFaz0 * 2);   // adım evresi yarım tur geçti: ayak yere bastı
+  p._anFaz0 = _anFaz;
+  if (p._dokT <= 0 && gv > 0.8 && (_adimAn || _anFaz == null || p._dokT < -0.25)){
     p._dokT = (p.kos ? 0.30 : 0.45) / Math.max(0.7, ns);
+    p._dokS = 0; p._dokP = p._dokT; p._dokAyak = -(p._dokAyak || 1);
     itme = 1;
     // Sert dokunuş: yalnızca depar atarken ve beceriye bağlı (güçlüde ~%0, zayıfta ~%9).
     // (2026-10-05-D) Sert dokunuş insanın oyuncusunda "kendi kendine vurdu" gibi görünüyordu: sıklık yarıya, itme 2 m/sn'ye indi.
@@ -26052,9 +26060,13 @@ function topKontrol(dt){
       return;
     }
   }
-  const mesafe = (p.kos ? 0.78 : 0.55) + (1.15 - ns) * 0.25 + itme * (0.18 + tasimaYorgunluk(p) * 0.22);
-  const hx = p.obj.position.x + fx*mesafe;
-  const hz = p.obj.position.z + fz*mesafe;
+  p._dokS = (p._dokS == null ? 9 : p._dokS) + dt;
+  const _tau = p._dokP ? p._dokS / p._dokP : 9, _egri = _tau < 0.22 ? Math.sin(_tau / 0.22 * Math.PI / 2) : Math.max(0, 1 - (_tau - 0.22) / 0.78);
+  const _acil = gv > 0.8 ? (p.kos ? 0.55 : 0.3) * (0.75 + (1.15 - ns) * 0.9 + tasimaYorgunluk(p) * 0.6) : 0;
+  const mesafe = (p.kos ? 0.62 : 0.48) + (1.15 - ns) * 0.2 + _acil * _egri;
+  const _yan = (p._dokAyak || 1) * 0.09 * _egri;                          // dokunan ayağın tarafı
+  const hx = p.obj.position.x + fx*mesafe - fz*_yan;
+  const hz = p.obj.position.z + fz*mesafe + fx*_yan;
   // Topu yeni alan oyuncuda (ilk ~0,3 sn) ayağa çekme yumuşak yapılır; top bir karede ayağa "ışınlanmaz".
   if ((p._alT || 0) > 0) p._alT -= dt;
   const a = Math.min(1, dt * (((p._alT || 0) > 0 || sonDokunanOyuncu !== p) ? (6 + ns * 4) : (14 + ns * 8)));          // topu ayağa çekme sertliği
@@ -29710,9 +29722,30 @@ function update(dt){
     /* TEPKİ (2026-10-11-G, kullanıcı geri bildirimi: "oyun ağır"): kullanıcının oyuncusu çubuğa daha çabuk tepki verir -
        kalkış ve duruş daha hızlı, keskin dönüşte hız daha az düşer, gövde yeni yöne daha çabuk döner. Yapay zekâ aynı kalır. */
     // (2026-10-16-B) Kullanıcı oyuncusunda ivme biraz yumuşatıldı (11/15 → 9/13): kalkış ve duruşta gerçekçi bir ağırlık.
+    /* GERÇEKÇİ İVME (2026-11-01-J, kullanıcı: "oyuncuların ilgili pozisyonlarda robotik hareketlerden çıkarılıp gerçeği yansıtması"). ÖLÇÜM:
+       hız, istenen hıza saniyede 7-13 kat oranla yaklaşıyordu (birinci derece gecikme): duran oyuncu 60-77 m/s² ile kalkıyor (gerçek sprinter
+       7-9 m/s²), tam hızdan 86-110 m/s² ile duruyor, 180° dönüşü hız vektörü sıfırın üstünden atlayarak bir anda yapıyordu - oyuncular yarım
+       saniyede tam hıza çıkıp duruyor, keskin köşelerle yön değiştiriyordu. ŞİMDİ hız değişimi üç bileşene ayrılır, her biri sınırlıdır:
+         hızlanma (hızın yönünde): durağanken A0, hızlandıkça azalır (tepe hıza yaklaşan oyuncu zor hızlanır);
+         frenleme (hızın tersine): D;  dönüş (hıza dik, yan ivme): L - hızlı koşan oyuncu geniş yayla döner, ters yöne dönmek isteyen önce
+         frenler, sonra yeni yöne kalkar. Değerler gerçeğin biraz üstünde (kullanıcı oyuncusu çubuğa ağır tepki vermesin): kullanıcı 20/20/18,
+         yapay zekâ 14/15/14 m/s²; güç niteliği hızlanmayı etkiler (gucIvme). Kaleci (plonjon/kurtarış dengesi) ve beceri hareketleri eski kuralla. */
+    if (!p.gk && !p._beceriGor){
+      const _ins = insan >= 0, _v = Math.hypot(p.vel.x, p.vel.z), A0 = (_ins ? 20 : 14) * gucIvme(p), D = _ins ? 20 : 15, Ly = _ins ? 18 : 14;
+      let ax = istekX - p.vel.x, az = istekZ - p.vel.z;
+      if (_v < 0.4){ const m = Math.hypot(ax, az), lim = A0 * dt; if (m > lim){ ax *= lim / m; az *= lim / m; } }
+      else {
+        const ux = p.vel.x / _v, uz = p.vel.z / _v; let par = ax * ux + az * uz, px = ax - par * ux, pz = az - par * uz;
+        par = par > 0 ? Math.min(par, Math.max(1.5, A0 * (1 - _v / 10)) * dt) : Math.max(par, -D * dt);
+        const pm = Math.hypot(px, pz), limL = Ly * dt; if (pm > limL){ px *= limL / pm; pz *= limL / pm; }
+        ax = par * ux + px; az = par * uz + pz;
+      }
+      p.vel.x += ax; p.vel.z += az;
+    } else {
     const k = Math.min(1, (insan >= 0 ? (hizlaniyor ? 9 : 13) : (hizlaniyor ? 7 : 10)) * (hizlaniyor && !p.gk ? gucIvme(p) : 1) * dt);
     p.vel.x += (istekX - p.vel.x) * k;
     p.vel.z += (istekZ - p.vel.z) * k;
+    }
 
     // dönüş ataleti: baktığı yönden sapmışsa yavaşlar
     const sp = Math.hypot(p.vel.x, p.vel.z);
@@ -29776,9 +29809,14 @@ function update(dt){
       const dx = b.x - a.x, dz = b.z - a.z;
       const d = Math.hypot(dx, dz);
       if (d < 0.9 && d > 0.0001){
-        const push = (0.9 - d)/2;
-        a.x -= dx/d*push; a.z -= dz/d*push;
-        b.x += dx/d*push; b.z += dz/d*push;
+        /* YUMUŞAK TEMAS (2026-11-01-J). KÖK SEBEP: iç içe giren iki oyuncunun aradaki farkı HER KAREDE bir anda kapatılıyordu; kalabalıkta
+           oyuncular titriyor, bir karede 10-20 cm sıçrıyordu (ölçüm: konumdan hesaplanan ivme %1'de 70-80 m/s²). Artık itme en fazla 2,5 m/s
+           hızla (birkaç karede, omuz omuza mücadele gibi) çözülür ve birbirine doğru koşan iki oyuncunun yaklaşma hızı yarıya iner. */
+        const nx = dx/d, nz = dz/d, push = Math.min((0.9 - d)/2, 2.5 * dt);
+        a.x -= nx*push; a.z -= nz*push;
+        b.x += nx*push; b.z += nz*push;
+        const va = players[i].vel, vb = players[j].vel;
+        if (va && vb){ const yak = (va.x - vb.x)*nx + (va.z - vb.z)*nz; if (yak > 0){ const h = yak * 0.25; va.x -= nx*h; va.z -= nz*h; vb.x += nx*h; vb.z += nz*h; } }
       }
     }
   }
