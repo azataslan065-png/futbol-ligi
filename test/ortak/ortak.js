@@ -1160,7 +1160,8 @@ var SahaSes = (function(){
      veya toplu olarak silebilmeli"). Klip dosyaları depoda kalır; admin panelinde silinen kaydın kimliği sahaGorunum/ses/kayitSilinen'e
      yazılır ve burada hiçbir yoldan (olay seçimi, metinle eşleme, stadyum, maç önü diyalog) çalınmaz. Geri alınınca yeniden çalınır. */
   var GIZ = {};
-  function gz(k){ return !!(k && GIZ[k.id]); }
+  // (2026-11-01-F) Silinmeden SONRA eklenen kayıt (liste.json'da t: eklenme zamanı, yeniden kaydedilip gönderilen cümle) gizlenmez.
+  function gz(k){ var g = k && GIZ[k.id]; return !!g && !(k.t && k.t > +g); }
   function kyNorm(m){ return String(m || '').toLocaleLowerCase('tr-TR').replace(/[^a-zçğıöşü0-9]+/g, ' ').trim(); }
   function kyYukle(){
     if(KY_P) return KY_P;

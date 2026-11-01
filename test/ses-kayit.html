@@ -97,6 +97,7 @@ button.sil{ color:#ffb4ae; border-color:#5a2724; }
 .liste div.kyok .m{ color:#ffd2ce; }
 .liste div.kyok .s{ color:#e5534b; }
 .liste .yt{ display:inline-block; margin-left:6px; padding:0 6px; border-radius:6px; background:#b9741a; color:#fff; font-size:11px; font-weight:800; vertical-align:1px; }
+.liste .st{ display:inline-block; margin-left:6px; padding:0 6px; border-radius:6px; background:#7a2a26; color:#fff; font-size:11px; font-weight:800; vertical-align:1px; }
 .liste .tt{ display:inline-block; margin-left:6px; padding:0 6px; border-radius:6px; background:#16283a; color:#8cc6f2; font-size:11px; font-weight:700; vertical-align:1px; }
 .filtre{ display:flex; gap:6px; flex-wrap:wrap; margin:2px 0 8px; }
 .filtre button{ border:1px solid var(--cizgi); background:var(--kart2); color:var(--soluk); font:600 12px system-ui; border-radius:999px; padding:6px 10px; }
@@ -227,7 +228,10 @@ function bilgileriYukle(){
   kayitlar = {}; var ids = {}; L().forEach(function(x){ ids[anahtar(x)] = x.id; });
   return new Promise(function(coz){ var t = db.transaction('kayit'), s = t.objectStore('kayit'), r = s.openCursor();
     r.onsuccess = function(){ var c = r.result; if(!c){ coz(); return; }
-      var id = ids[String(c.key)]; if(id) kayitlar[id] = { sure:c.value.sure, uyari:c.value.uyari || [], metin:c.value.metin || null };
+      var id = ids[String(c.key)];
+      // (2026-11-01-F) admin panelinde silinmiş kaydın ESKİ çekimi kayıtlı sayılmaz (yeniden kaydedilmesi gerekir); silmeden sonraki çekim sayılır.
+      if(id && SILINEN[id] && (c.value.ts || 0) < SILINEN[id]) id = null;
+      if(id) kayitlar[id] = { sure:c.value.sure, uyari:c.value.uyari || [], metin:c.value.metin || null };
       c.continue(); }; r.onerror = function(){ coz(); }; });
 }
 
@@ -237,7 +241,12 @@ function bilgileriYukle(){
    paketlerde var; telefonda olmasa da kaydedilmiş sayılır), kaydedilmemiş (ikisi de değil, KIRMIZI), yeni (son eklenen grup ve kaydı yok, TURUNCU). */
 var TESLIM = { spiker:{}, yorumcu:{} }; (function(){ var t = CUMLELER.teslim || {}; ['spiker', 'yorumcu'].forEach(function(r){ (t[r] || []).forEach(function(id){ TESLIM[r][id] = 1; }); }); })();
 var FILTRE = 'hepsi';
-function teslimMi(x){ return !!TESLIM[rolu(x)][x.id]; }
+/* SİLİNEN KAYITLAR (2026-11-01-F, kullanıcı: "silinen sesler kayıt yapma bölümünde hâlâ görünüyor"). KÖK SEBEP: admin panelinde silinen kayıtlar
+   yalnızca veritabanına (sahaGorunum/ses/kayitSilinen, test ve gerçek) yazılıyordu; bu sayfa onu hiç okumuyor, cümleyi "Kayıtlı" / "Gönderildi"
+   gösteriyordu. Artık silinen cümle KAYDEDİLMEDİ sayılır, "SİLİNDİ · yeniden kaydet" etiketiyle görünür, eski çekimi pakete girmez. */
+var SILINEN = {};
+function silindiMi(x){ return !!SILINEN[x.id] && !kayitlar[x.id]; }
+function teslimMi(x){ return !!TESLIM[rolu(x)][x.id] && !SILINEN[x.id]; }
 function kyokMu(x){ return !kayitlar[x.id] && !teslimMi(x); }
 function yeniMi(x){ return (x.v || 0) >= (CUMLELER.yeniSurum || 99) && !kayitlar[x.id]; }
 function uyarMi(x){ var k = kayitlar[x.id]; return !!(k && k.uyari.length); }
@@ -254,6 +263,7 @@ function cumleCiz(){
   var k = kayitlar[x.id], d = $('durum'), ts = teslimMi(x), yeni = yeniMi(x);
   $('metin').textContent = (k && k.metin && k.metin !== x.m) ? k.metin : x.m;
   if(k){ d.className = 'etiket durum' + (k.uyari.length ? ' uyari' : ' var'); d.textContent = k.uyari.length ? 'Kayıtlı · uyarı var' : 'Kayıtlı ✓'; }
+  else if(silindiMi(x)){ d.className = 'etiket kyok'; d.textContent = 'SİLİNDİ · yeniden kaydet'; }
   else if(ts){ d.className = 'etiket teslim'; d.textContent = 'Gönderildi (bu telefonda yok)'; }
   else { d.className = 'etiket kyok'; d.textContent = 'KAYDEDİLMEDİ'; }
   $('kart').className = 'cumle' + (yeni ? ' yeni' : (kyokMu(x) ? ' kyok' : ''));
@@ -272,21 +282,21 @@ function cumleCiz(){
     if(x.stad){ on.innerHTML = '<b>Stadyum:</b> '; on.appendChild(document.createTextNode(x.stad + (x.takim ? ' (' + x.takim + ')' : ''))); on.style.display = 'block'; } else on.style.display = 'none';
   }
   $('uyari').className = 'uyarilar' + (k && !k.uyari.length ? ' iyi' : '');
-  $('uyari').textContent = k ? (k.uyari.length ? '⚠ ' + k.uyari.join(' · ') : (k.sure.toFixed(1) + ' sn · temiz kayıt')) : (ts ? 'Bu cümlenin kaydı daha önce gönderildi; istersen yeniden kaydedebilirsin.' : '');
+  $('uyari').textContent = k ? (k.uyari.length ? '⚠ ' + k.uyari.join(' · ') : (k.sure.toFixed(1) + ' sn · temiz kayıt')) : (silindiMi(x) ? 'Bu kayıt admin panelinde silindi, maçta çalınmıyor. Yeniden kaydedip gönderirsen yeni kayıt kullanılır.' : (ts ? 'Bu cümlenin kaydı daha önce gönderildi; istersen yeniden kaydedebilirsin.' : ''));
   $('dinle').disabled = $('duzenle').disabled = $('sil').disabled = !k;
   $('geri').disabled = i === 0; $('ileri').disabled = i >= L().length - 1;
   try{ localStorage.setItem('sesKayitSira_' + MOD, String(i)); }catch(e){}
   listeIsaretle();
 }
 function filtreUygunMu(x){ return FILTRE === 'hepsi' || (FILTRE === 'kyok' && kyokMu(x)) || (FILTRE === 'yeni' && yeniMi(x)) || (FILTRE === 'uyar' && uyarMi(x)) || (FILTRE === 'teslim' && teslimMi(x)); }
-function satirIsaret(x){ var k = kayitlar[x.id]; return k ? (k.uyari.length ? '⚠' : '✓') : (teslimMi(x) ? '↗' : '●'); }
+function satirIsaret(x){ var k = kayitlar[x.id]; return k ? (k.uyari.length ? '⚠' : '✓') : (silindiMi(x) ? '✕' : (teslimMi(x) ? '↗' : '●')); }
 function listeCiz(){
   var h = [], adet = 0; L().forEach(function(x, n){ if(!filtreUygunMu(x)) return; adet++;
     var ust = (MOD === 'diyalog' && (x.j === 0 || FILTRE !== 'hepsi')) ? '<div style="color:var(--yazi);font-weight:700;border-bottom:0;padding-top:12px">Diyalog ' + (x.dn + 1) + ' · ' + x.d.b + '</div>' : '';
     h.push(ust + '<div data-i="' + n + '" class="' + (n === i ? 'cari ' : '') + (kyokMu(x) ? 'kyok' : '') + '"><span class="n">' + (MOD === 'diyalog' ? (x.rol === 'spiker' ? 'S' : 'Y') : (n + 1)) + '</span><span class="s">' + satirIsaret(x) + '</span><span class="m"></span></div>'); });
   var el = $('liste'); el.innerHTML = adet ? h.join('') : '<div style="color:var(--soluk);border:0">Bu grupta cümle yok.</div>';
   el.querySelectorAll('div[data-i]').forEach(function(d){ var n = +d.getAttribute('data-i'), x = L()[n], m = d.querySelector('.m');
-    m.textContent = x.m; if(yeniMi(x)) m.insertAdjacentHTML('beforeend', '<span class="yt">YENİ</span>'); if(teslimMi(x)) m.insertAdjacentHTML('beforeend', '<span class="tt">gönderildi</span>');
+    m.textContent = x.m; if(yeniMi(x)) m.insertAdjacentHTML('beforeend', '<span class="yt">YENİ</span>'); if(teslimMi(x)) m.insertAdjacentHTML('beforeend', '<span class="tt">gönderildi</span>'); if(silindiMi(x)) m.insertAdjacentHTML('beforeend', '<span class="st">silindi</span>');
     d.onclick = function(){ git(n); }; });
 }
 function listeIsaretle(){ $('liste').querySelectorAll('div[data-i]').forEach(function(d){ var n = +d.getAttribute('data-i'), x = L()[n];
@@ -476,7 +486,7 @@ function paketIndir(ROL){
   new Promise(function(coz, red){ var t = db.transaction('kayit'), s = t.objectStore('kayit'), r = s.openCursor();
     r.onsuccess = function(){ var c = r.result; if(!c){ coz(); return; } var k = String(c.key);
       if(k.indexOf(ROL + '/') === 0){ var id = k.slice(ROL.length + 1), m = c.value.metin || metinler[id];
-        if(metinler[id] != null && m && c.value.pcm && c.value.pcm.byteLength > 2000 && !(yalniz && TESLIM[ROL][id] && !c.value.duzenlendi && (c.value.ts || 0) < (CUMLELER.teslimTs || 0))) kayit.push({ id:id, m:m, pcm:c.value.pcm }); }
+        if(metinler[id] != null && m && c.value.pcm && c.value.pcm.byteLength > 2000 && !(SILINEN[id] && (c.value.ts || 0) < SILINEN[id]) && !(yalniz && TESLIM[ROL][id] && !c.value.duzenlendi && (c.value.ts || 0) < (CUMLELER.teslimTs || 0))) kayit.push({ id:id, m:m, pcm:c.value.pcm }); }
       c.continue(); }; r.onerror = function(){ red(r.error); }; })
   .then(function(){
     var dlg = kayit.filter(function(x){ return /^dlg_/.test(x.id); }).length, anaN = kayit.length - dlg, T = CUMLELER[ROL].length;
@@ -566,6 +576,15 @@ function stadCumleleri(L){
      [a + e + ' maç başlamak üzere.', 'Canlı']].forEach(function(c, j){
       CUMLELER.spiker.push({ id:'stad_' + sl + '_' + (j + 1), m:c[0], t:c[1], v:99, stad:a, takim:st.takim, tur:['stadyum'] }); }); });
 }
+// Admin panelinde silinen kayıtlar: test ve gerçek veritabanı birleştirilir (en son silme zamanı), değişince sayfa yeniden çizilir.
+function silinenDinle(d){
+  var P = { 'test/':{}, '':{} };
+  ['test/', ''].forEach(function(o){ d.ref(o + 'sahaGorunum/ses/kayitSilinen').on('value', function(sn){ P[o] = sn.val() || {};
+    var S = {}; [P['test/'], P['']].forEach(function(m){ Object.keys(m).forEach(function(id){ var t = +m[id] || 1; if(!S[id] || t > S[id]) S[id] = t; }); });
+    SILINEN = S; try{ localStorage.setItem('sesKayitSilinen', JSON.stringify(S)); }catch(e){}
+    if(!kaydediliyor && db) bilgileriYukle().then(function(){ ilerlemeCiz(); listeCiz(); cumleCiz(); }); }, function(){}); });
+}
+try{ SILINEN = JSON.parse(localStorage.getItem('sesKayitSilinen') || '{}') || {}; }catch(e){}
 function stadYukle(){
   var on = []; try{ on = JSON.parse(localStorage.getItem('sesKayitStad') || '[]'); }catch(e){}
   if(on.length) stadCumleleri(on);
@@ -578,6 +597,7 @@ function stadYukle(){
       return oku(o + 'sahaVeri/leaguesMeta').then(function(m){ m = m || {}; var ids = Object.keys(m), ac = ids.filter(function(k){ return (m[k] || {}).status !== 'finished'; });
         var h = ac.length ? ac : ids; h.sort(function(a, b){ return ((m[b] || {}).createdAt || 0) - ((m[a] || {}).createdAt || 0); }); return h[0] || null; }); }); };
     return (au.currentUser ? Promise.resolve() : au.signInAnonymously()).then(function(){
+      silinenDinle(d);
       return Promise.all(['test/', ''].map(function(o){ return ligBul(o).then(function(id){ return id ? oku(o + 'sahaVeri/leagues/' + id + '/teams') : null; }); }));
     }).then(function(R){
       var gor = {}, L = [];
