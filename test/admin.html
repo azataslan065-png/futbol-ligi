@@ -1727,7 +1727,7 @@ html.hafif-cihaz .pu-ort,html.hafif-cihaz .pu-etik{-webkit-backdrop-filter:none 
       </div>
       <!-- SPİKER VE YORUMCU KAYITLARI (2026-11-01-D, kullanıcı: "sesler spiker, yorumcu ve diyalog şeklinde ayrı ayrı listelenmeli; admin bunları
            tek tek veya toplu olarak silebilmeli"). Oyundaki kayıtlı insan sesleri (ortak/ses/kayit/liste.json). Silinen kayıt hiçbir cihazda çalınmaz
-           (sahaGorunum/ses/kayitSilinen); "Silinenler" bölümünden geri alınabilir. Eski üretilen ses seçimi (Fahrettin/Deniz) kaldırıldı. -->
+           (sahaGorunum/ses/kayitSilinen). (2026-11-01-G, kullanıcı: "kayıtlar silindiği zaman geri alınamaz") silme kalıcıdır, geri alma yok. -->
       <div class="ses2-blok" id="kySes">
         <div class="ses2-bas">Spiker ve yorumcu kayıtları <span id="kySay" class="ses2-say"></span></div>
         <div class="ky-sekme" role="tablist">
@@ -1740,11 +1740,6 @@ html.hafif-cihaz .pu-ort,html.hafif-cihaz .pu-etik{-webkit-backdrop-filter:none 
           <button type="button" id="kySilBtn" class="ky-sil" disabled onclick="kySeciliSil()"> Seçilenleri sil</button>
         </div>
         <div id="kyListe" class="ses2-liste" style="max-height:340px"></div>
-        <details id="kyCopKutu" class="ky-cop"><summary>Silinenler <span id="kyCopSay"></span></summary>
-          <div class="ky-arac" style="margin-top:.35rem"><span class="ses2-say" style="flex:1">Silinen kayıt maçta çalınmaz; geri alınca yeniden çalınır.</span>
-            <button type="button" class="ky-geri" onclick="kyHepsiGeriAl()"> Tümünü geri al</button></div>
-          <div id="kyCop" class="ses2-liste"></div>
-        </details>
         <div id="spkSesDurum" style="font-size:.62rem;color:var(--mu);margin-top:.3rem"></div>
       </div>
       <div class="ses2-blok">
@@ -3394,7 +3389,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-01-F';
+window.APP_BUILD='2026-11-01-G';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true, dosya:'admin', kap:function(){ return document.getElementById('loginWrap'); }, giris:function(){ var e = document.getElementById('loginWrap'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // yönetici geçebilir
@@ -9225,7 +9220,7 @@ function sahaSesCiz(){
   }catch(e){ DiagSil('sahaSesCiz', e); }
 }
 /* SPİKER VE YORUMCU KAYITLARI (2026-11-01-D) - bkz. HTML'deki #kySes notu. Kayıt listesi liste.json'dan okunur (SahaSes.kayitTum);
-   silme/geri alma yalnızca sahaGorunum/ses/kayitSilinen/{id} işaretini yazar/siler; oyun ve Puan Tablosu bunu canlı dinler. Diyalog kayıtları
+   silme sahaGorunum/ses/kayitSilinen/{id} işaretini yazar (kalıcı, geri alma yok); oyun ve Puan Tablosu bunu canlı dinler. Diyalog kayıtları
    (dlg_NNN_k) diyalog olarak gruplanır: bir diyalog bütün halinde silinir (yarım diyalog maçta anlamsız olur), parçaları tek tek dinlenir. */
 var KY_SEKME = 'spiker', KY_SECILI = {}, KY_CALAN = null;
 var KY_TUR = { gol:'Gol', golY:'Gol yorumu', sut:'Şut', kurtaris:'Kurtarış', kurtarisY:'Kurtarış yorumu', kacti:'Kaçan fırsat', kactiY:'Kaçan fırsat yorumu',
@@ -9276,14 +9271,6 @@ function kyCiz(){
     var n = Object.keys(KY_SECILI).length, hb = qs('kyHepsi'), sb = qs('kySilBtn');
     if(hb){ hb.checked = L.length > 0 && n === L.length; hb.indeterminate = n > 0 && n < L.length; hb.disabled = !L.length; }
     if(sb){ sb.disabled = !n; sb.textContent = ' ' + (n ? n + ' seçileni sil' : 'Seçilenleri sil'); }
-    // Silinenler (üç bölümün hepsi)
-    var C = [].concat(V.spiker.filter(function(k){ return k.gizli; }).map(function(k){ return { id:k.id, ad:'Spiker', m:k.m }; }),
-                      V.yorumcu.filter(function(k){ return k.gizli; }).map(function(k){ return { id:k.id, ad:'Yorumcu', m:k.m }; }),
-                      V.diyalog.filter(function(g){ return g.gizli; }).map(function(g){ return { id:g.id, ad:'Diyalog ' + g.no, m:g.parca.map(function(x){ return x.m; }).join(' / ') }; }));
-    qs('kyCopSay').textContent = C.length ? '(' + C.length + ')' : '';
-    var ck = qs('kyCopKutu'); if(ck) ck.style.display = C.length ? '' : 'none';
-    admHtml(qs('kyCop'), C.map(function(c){ return '<div class="ses2-s ky-s"><span class="ses2-ad"><b style="font-size:.6rem;color:var(--mu)">' + c.ad + '</b> ' + escHtml(c.m) + '</span>'
-      + '<button type="button" title="Geri al" style="color:#16a34a" onclick="kyGeriAl([\'' + c.id + '\'])"></button></div>'; }).join(''));
   }catch(e){ DiagSil('kyCiz', e); }
 }
 function kySec(id, ac){ if(ac) KY_SECILI[id] = 1; else delete KY_SECILI[id]; kyCiz(); }
@@ -9293,17 +9280,12 @@ function _kyAc(ids){ var V = _kyVeri(), out = []; ids.forEach(function(id){ var 
 function kySil(ids){
   var tum = _kyAc(ids); if(!tum.length) return;
   var ad = ids.length > 1 ? ids.length + (KY_SEKME === 'diyalog' ? ' diyalog' : ' kayıt') : (KY_SEKME === 'diyalog' ? 'Bu diyalog' : 'Bu kayıt');
-  ptOnay(ad + ' silinsin mi? Silinen kayıt hiçbir maçta çalınmaz; "Silinenler" bölümünden geri alabilirsin.', { baslik:'Kaydı Sil', ikon:'', tehlikeli:true, tamamYazi:'Sil' }).then(function(ok){ if(!ok) return;
+  ptOnay(ad + ' kalıcı olarak silinsin mi? Bu işlem geri alınamaz; kayıt hiçbir maçta çalınmaz ve kayıt sayfasında kaydedilmemiş olarak görünür.', { baslik:'Kaydı Sil', ikon:'', tehlikeli:true, tamamYazi:'Sil' }).then(function(ok){ if(!ok) return;
     var u = {}, t = Date.now(); tum.forEach(function(id){ u[id] = t; });
     _sahaSesRef('kayitSilinen').update(u).then(function(){ ids.forEach(function(id){ delete KY_SECILI[id]; }); toast(ad + ' silindi'); })
       .catch(function(e){ toast('Silinemedi: ' + ((e && e.message) || ''), 'er'); }); });
 }
 function kySeciliSil(){ var ids = Object.keys(KY_SECILI); if(ids.length) kySil(ids); }
-function kyGeriAl(ids){ var u = {}; _kyAc(ids).forEach(function(id){ u[id] = null; });
-  _sahaSesRef('kayitSilinen').update(u).then(function(){ toast('Geri alındı'); }).catch(function(e){ toast('Geri alınamadı: ' + ((e && e.message) || ''), 'er'); }); }
-function kyHepsiGeriAl(){ ptOnay('Silinen bütün kayıtlar geri alınsın mı?', { baslik:'Geri Al', ikon:'', tamamYazi:'Geri al' }).then(function(ok){ if(ok) _kyHepsiGeri(); }); }
-function _kyHepsiGeri(){
-  _sahaSesRef('kayitSilinen').remove().then(function(){ toast('Hepsi geri alındı'); }).catch(function(e){ toast('Geri alınamadı: ' + ((e && e.message) || ''), 'er'); }); }
 function kyDinle(id){
   try{
     if(!window.SahaSes) return;

@@ -225,12 +225,12 @@ function dbAc(){ return new Promise(function(coz, red){ var r = indexedDB.open('
 function dbIs(mod, f){ return new Promise(function(coz, red){ var t = db.transaction('kayit', mod), s = t.objectStore('kayit'), r = f(s);
   t.oncomplete = function(){ coz(r && r.result); }; t.onerror = function(){ red(t.error); }; t.onabort = function(){ red(t.error || new Error('Kayıt yazılamadı (depolama dolu olabilir)')); }; }); }
 function bilgileriYukle(){
-  kayitlar = {}; var ids = {}; L().forEach(function(x){ ids[anahtar(x)] = x.id; });
+  kayitlar = {}; var ids = {}, sil = []; L().forEach(function(x){ ids[anahtar(x)] = x.id; });
   return new Promise(function(coz){ var t = db.transaction('kayit'), s = t.objectStore('kayit'), r = s.openCursor();
-    r.onsuccess = function(){ var c = r.result; if(!c){ coz(); return; }
+    r.onsuccess = function(){ var c = r.result; if(!c){ silinenleriTemizle(sil); coz(); return; }
       var id = ids[String(c.key)];
       // (2026-11-01-F) admin panelinde silinmiş kaydın ESKİ çekimi kayıtlı sayılmaz (yeniden kaydedilmesi gerekir); silmeden sonraki çekim sayılır.
-      if(id && SILINEN[id] && (c.value.ts || 0) < SILINEN[id]) id = null;
+      if(id && SILINEN[id] && (c.value.ts || 0) < SILINEN[id]){ sil.push(c.key); id = null; }
       if(id) kayitlar[id] = { sure:c.value.sure, uyari:c.value.uyari || [], metin:c.value.metin || null };
       c.continue(); }; r.onerror = function(){ coz(); }; });
 }
@@ -243,9 +243,11 @@ var TESLIM = { spiker:{}, yorumcu:{} }; (function(){ var t = CUMLELER.teslim || 
 var FILTRE = 'hepsi';
 /* SİLİNEN KAYITLAR (2026-11-01-F, kullanıcı: "silinen sesler kayıt yapma bölümünde hâlâ görünüyor"). KÖK SEBEP: admin panelinde silinen kayıtlar
    yalnızca veritabanına (sahaGorunum/ses/kayitSilinen, test ve gerçek) yazılıyordu; bu sayfa onu hiç okumuyor, cümleyi "Kayıtlı" / "Gönderildi"
-   gösteriyordu. Artık silinen cümle KAYDEDİLMEDİ sayılır, "SİLİNDİ · yeniden kaydet" etiketiyle görünür, eski çekimi pakete girmez. */
+   gösteriyordu. Artık silinen cümle KAYDEDİLMEDİ sayılır, eski çekimi pakete girmez. */
 var SILINEN = {};
-function silindiMi(x){ return !!SILINEN[x.id] && !kayitlar[x.id]; }
+// (2026-11-01-G, kullanıcı: "kayıtlar silindiği zaman geri alınamaz ve silinen kayıtlar kayıt tarafında hâlâ görünüyor") silinen cümlenin eski çekimi
+// bu telefondan da SİLİNİR; cümle hiç kaydedilmemiş gibi yalnızca KAYDEDİLMEDİ görünür (ayrı "silindi" etiketi yok).
+function silinenleriTemizle(K){ if(!K.length) return; try{ var t = db.transaction('kayit', 'readwrite'), s = t.objectStore('kayit'); K.forEach(function(k){ s.delete(k); }); }catch(e){} }
 function teslimMi(x){ return !!TESLIM[rolu(x)][x.id] && !SILINEN[x.id]; }
 function kyokMu(x){ return !kayitlar[x.id] && !teslimMi(x); }
 function yeniMi(x){ return (x.v || 0) >= (CUMLELER.yeniSurum || 99) && !kayitlar[x.id]; }
@@ -263,7 +265,6 @@ function cumleCiz(){
   var k = kayitlar[x.id], d = $('durum'), ts = teslimMi(x), yeni = yeniMi(x);
   $('metin').textContent = (k && k.metin && k.metin !== x.m) ? k.metin : x.m;
   if(k){ d.className = 'etiket durum' + (k.uyari.length ? ' uyari' : ' var'); d.textContent = k.uyari.length ? 'Kayıtlı · uyarı var' : 'Kayıtlı ✓'; }
-  else if(silindiMi(x)){ d.className = 'etiket kyok'; d.textContent = 'SİLİNDİ · yeniden kaydet'; }
   else if(ts){ d.className = 'etiket teslim'; d.textContent = 'Gönderildi (bu telefonda yok)'; }
   else { d.className = 'etiket kyok'; d.textContent = 'KAYDEDİLMEDİ'; }
   $('kart').className = 'cumle' + (yeni ? ' yeni' : (kyokMu(x) ? ' kyok' : ''));
@@ -282,21 +283,21 @@ function cumleCiz(){
     if(x.stad){ on.innerHTML = '<b>Stadyum:</b> '; on.appendChild(document.createTextNode(x.stad + (x.takim ? ' (' + x.takim + ')' : ''))); on.style.display = 'block'; } else on.style.display = 'none';
   }
   $('uyari').className = 'uyarilar' + (k && !k.uyari.length ? ' iyi' : '');
-  $('uyari').textContent = k ? (k.uyari.length ? '⚠ ' + k.uyari.join(' · ') : (k.sure.toFixed(1) + ' sn · temiz kayıt')) : (silindiMi(x) ? 'Bu kayıt admin panelinde silindi, maçta çalınmıyor. Yeniden kaydedip gönderirsen yeni kayıt kullanılır.' : (ts ? 'Bu cümlenin kaydı daha önce gönderildi; istersen yeniden kaydedebilirsin.' : ''));
+  $('uyari').textContent = k ? (k.uyari.length ? '⚠ ' + k.uyari.join(' · ') : (k.sure.toFixed(1) + ' sn · temiz kayıt')) : (ts ? 'Bu cümlenin kaydı daha önce gönderildi; istersen yeniden kaydedebilirsin.' : '');
   $('dinle').disabled = $('duzenle').disabled = $('sil').disabled = !k;
   $('geri').disabled = i === 0; $('ileri').disabled = i >= L().length - 1;
   try{ localStorage.setItem('sesKayitSira_' + MOD, String(i)); }catch(e){}
   listeIsaretle();
 }
 function filtreUygunMu(x){ return FILTRE === 'hepsi' || (FILTRE === 'kyok' && kyokMu(x)) || (FILTRE === 'yeni' && yeniMi(x)) || (FILTRE === 'uyar' && uyarMi(x)) || (FILTRE === 'teslim' && teslimMi(x)); }
-function satirIsaret(x){ var k = kayitlar[x.id]; return k ? (k.uyari.length ? '⚠' : '✓') : (silindiMi(x) ? '✕' : (teslimMi(x) ? '↗' : '●')); }
+function satirIsaret(x){ var k = kayitlar[x.id]; return k ? (k.uyari.length ? '⚠' : '✓') : (teslimMi(x) ? '↗' : '●'); }
 function listeCiz(){
   var h = [], adet = 0; L().forEach(function(x, n){ if(!filtreUygunMu(x)) return; adet++;
     var ust = (MOD === 'diyalog' && (x.j === 0 || FILTRE !== 'hepsi')) ? '<div style="color:var(--yazi);font-weight:700;border-bottom:0;padding-top:12px">Diyalog ' + (x.dn + 1) + ' · ' + x.d.b + '</div>' : '';
     h.push(ust + '<div data-i="' + n + '" class="' + (n === i ? 'cari ' : '') + (kyokMu(x) ? 'kyok' : '') + '"><span class="n">' + (MOD === 'diyalog' ? (x.rol === 'spiker' ? 'S' : 'Y') : (n + 1)) + '</span><span class="s">' + satirIsaret(x) + '</span><span class="m"></span></div>'); });
   var el = $('liste'); el.innerHTML = adet ? h.join('') : '<div style="color:var(--soluk);border:0">Bu grupta cümle yok.</div>';
   el.querySelectorAll('div[data-i]').forEach(function(d){ var n = +d.getAttribute('data-i'), x = L()[n], m = d.querySelector('.m');
-    m.textContent = x.m; if(yeniMi(x)) m.insertAdjacentHTML('beforeend', '<span class="yt">YENİ</span>'); if(teslimMi(x)) m.insertAdjacentHTML('beforeend', '<span class="tt">gönderildi</span>'); if(silindiMi(x)) m.insertAdjacentHTML('beforeend', '<span class="st">silindi</span>');
+    m.textContent = x.m; if(yeniMi(x)) m.insertAdjacentHTML('beforeend', '<span class="yt">YENİ</span>'); if(teslimMi(x)) m.insertAdjacentHTML('beforeend', '<span class="tt">gönderildi</span>');
     d.onclick = function(){ git(n); }; });
 }
 function listeIsaretle(){ $('liste').querySelectorAll('div[data-i]').forEach(function(d){ var n = +d.getAttribute('data-i'), x = L()[n];
