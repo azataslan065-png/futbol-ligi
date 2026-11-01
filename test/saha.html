@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-01-B</title>
+<title>SAHA — 3D Futbol v2026-11-01-C</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -7054,6 +7054,7 @@ const GOLGE_YON = new THREE.Vector3(-26, 60, 22);
 sun.shadow.camera.left = -30; sun.shadow.camera.right = 30;
 sun.shadow.camera.top = 30; sun.shadow.camera.bottom = -30;
 sun.shadow.camera.near = 20; sun.shadow.camera.far = 140;
+sun.shadow.camera.layers.enable(1);   // (2026-11-01-C) katman 1: yalnızca gölgeye çizilen seyreltilmiş oyuncu ağları (bkz. SEYRELTİLMİŞ AĞ)
 sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.02;
 function golgeKalite(){
   try{
@@ -9576,6 +9577,9 @@ function lodGuncelle(kam, pencereH){
     var _tf = Math.tan((camera.fov || 40) * Math.PI / 360) * 2, _eh = Math.max(120, _vpH || innerHeight || 400);
     var oyEsik = 1.8 * _eh / (_tf * pxEsik);   // bu mesafeden uzak = ekranda pxEsik'ten kısa
     var _ts = (typeof topSahibi === 'function') ? topSahibi() : null;
+    // (2026-11-01-C) Seyreltilmiş ağ eşiği (bkz. SEYRELTİLMİŞ AĞ): ekranda bu boydan kısa figür ~%22 üçgenle çizilir. Bu boyda iki ağ
+    // ayırt edilmez (köşe, doku ve renk aynı; yalnızca kıvrımlar biraz daha az yuvarlak). Kare hızı düşerse eşik büyür.
+    try{ _lodSec(camera, _eh, (gk >= 2 ? 110 : (gk >= 1.5 ? 140 : 170)) + Math.min(4, window._otoKalite || 0) * 25); }catch(e){ _sessiz(e, '_lodSec', 'saha_grafik'); }
     // Güvenlik: cihaz ayrıntılı oyuncuları kaldıramıyor ve kare hızı ciddi düşmüşse (otomatik kalite 3+) yalnızca
     // 50 m'den uzaktaki oyuncular hafif modele geçer; kare hızı toparlanınca yine hepsi ayrıntılı.
     if(typeof players !== 'undefined') players.forEach(function(p){ var ud = p.obj && p.obj.userData, L = ud && ud.lod;
@@ -9639,7 +9643,8 @@ function _aktifModel(){
       _modelAdim('hafif', 'hata: ' + String((err && err.message) || err || 'dosya yok').slice(0, 80)); window._sahaModelDurum = 'dosya-yok'; });
     try{
       _modelAdim('detayli', 'indiriliyor');
-      new THREE.GLTFLoader().load('ortak/saha_oyuncu.glb?v=1f10b954', hazirOl('detayli'), undefined, function(err){
+      var _detayliHazir = hazirOl('detayli');
+      new THREE.GLTFLoader().load('ortak/saha_oyuncu.glb?v=1f10b954', function(g){ _lodSoz.then(function(v){ window._LODV = v; _detayliHazir(g); }); }, undefined, function(err){
         _modelAdim('detayli', 'hata: ' + String((err && err.message) || err || 'dosya yok').slice(0, 80));
         try{ DiagSaha('detayliModel', err instanceof Error ? err : new Error(String(err)), { tur:'uyari', anlami:'Detaylı oyuncu modeli indirilemedi; hafif model kullanılıyor.' }); }catch(e){} });
     }catch(e){ _modelAdim('detayli', 'hata: ' + String(e && e.message || e).slice(0, 80)); _sessiz(e, 'detayliModel', 'saha_oyun'); }
@@ -9767,6 +9772,92 @@ function _figurBirlestir(kok){
     return true;
   }catch(e){ _sessiz(e, '_figurBirlestir', 'saha_grafik'); return false; }
 }
+/* SEYRELTİLMİŞ AĞ - UZAK OYUNCU VE GÖLGE (2026-11-01-C, kullanıcı: "donmalar, takılmalar, gecikmeler... hepsini çözmeliyiz").
+   ÖLÇÜM: maçta karede 2,12 milyon üçgen ve 366 çizim çağrısı vardı; 1,22 milyonu oyuncu modelleri (25 figür × 48 bin üçgen),
+   0,83 milyonu aynı modellerin gölge haritasına ikinci kez çizilmesi. JS oyun mantığı karede ~1 ms; telefonu boğan ekran kartı.
+   Eski "hafif model" (ayrı, kaba bir model) kullanıcı "kutu gibi" dediği için 2026-10-12'de kaldırılmıştı - geri gelmedi.
+   ÇÖZÜM: AYNI detaylı modelin köşe noktaları, dokusu, rengi, malzemesi ve iskeleti aynen kullanılır; yalnızca üçgen listesinin
+   seyreltilmiş bir kopyası (meshoptimizer, kenarlar ve doku dikişleri korunarak) eklenir (ortak/saha_oyuncu_lod.bin, 86 KB).
+   Saç ~4 bin küçük tutamdan oluştuğu için seyreltilemez; uzak seviyede alanı en büyük tutamlar (%35 üçgen) tutulur, kirpik çizilmez:
+     - "golge": forma, şort ve ten %12 - YALNIZCA gölge haritasına çizilir (katman 1; ana kamera görmez). Detaylı parça artık gölge
+       haritasına çizilmez. Gölge 30 m'lik alanda yumuşak bir leke, fark görünmez.
+     - "uzak":  ten %15, forma ve şort %20, krampon ve tozluk %30, saç %35 (oyuncu başına 48 bin yerine ~10 bin) - oyuncu ekranda küçükken (bkz. lodGuncelle) detaylı parçanın yerine çizilir.
+   Seyreltilmiş parça detaylı parçanın İSKELETİNİ paylaşır (ayrı kemik hesabı yok) ve malzemesini paylaşır (takım rengi, desen,
+   saydamlık değişiklikleri ikisine birden uygulanır). Görünürlük katmanla yönetilir, .visible ile değil: oyunun başka yerlerinde
+   parçaların görünürlüğüne dokunan kod seyreltilmiş parçayı yanlışlıkla açıp kapatamaz. */
+var _lodSoz = (function(){
+  try{
+    return new Promise(function(coz){
+      var oldu = false, bit = function(v){ if(!oldu){ oldu = true; coz(v); } };
+      setTimeout(function(){ bit(null); }, 8000);                     // dosya gelmezse model beklemez, seyreltme olmadan açılır
+      fetch('ortak/saha_oyuncu_lod.bin?v=e987c050').then(function(r){ return r.ok ? r.arrayBuffer() : null; }).then(function(b){
+        if(!b) return bit(null);
+        var n = new DataView(b).getUint32(0, true), bas = JSON.parse(new TextDecoder().decode(new Uint8Array(b, 4, n)));
+        var ix = new Uint16Array(b, 4 + n), parca = {};
+        Object.keys(bas.parca || {}).forEach(function(ad){ var P = bas.parca[ad], o = {};
+          Object.keys(P).forEach(function(sv){ o[sv] = ix.subarray(P[sv][0], P[sv][0] + P[sv][1]); }); parca[ad] = o; });
+        bit({ parca:parca });
+      }).catch(function(){ bit(null); });
+    });
+  }catch(e){ return Promise.resolve(null); }
+})();
+var _LOD_GEO = {}, _LOD_FIG = [];
+function _lodGeo(g, sv, ix){
+  var an = g.uuid + sv; if(_LOD_GEO[an]) return _LOD_GEO[an];
+  var pc = g.attributes.position.count; for(var i = 0; i < ix.length; i++) if(ix[i] >= pc) return null;   // dosya bu modele ait değil
+  var n = new THREE.BufferGeometry();
+  for(var k in g.attributes) n.setAttribute(k, g.attributes[k]);    // aynı köşe dizileri: ekran kartında ek bellek yok
+  n.setIndex(new THREE.BufferAttribute(ix, 1));
+  if(g.boundingSphere) n.boundingSphere = g.boundingSphere.clone(); if(g.boundingBox) n.boundingBox = g.boundingBox.clone();
+  return (_LOD_GEO[an] = n);
+}
+function _lodEkle(kopya, M){
+  try{
+    var V = window._LODV; if(!V || !M || M.ad !== 'detayli' || window.SAHA_COK_ZAYIF) return;
+    var hedef = [];
+    kopya.traverse(function(o){ if(o.isSkinnedMesh && !o.userData.lodSv && V.parca[o.name] && o.geometry && o.geometry.index) hedef.push(o); });
+    if(!hedef.length) return;
+    var L = { detay:[], uzak:[], golge:[], gizle:[], aktif:false, kok:kopya, yok:0 };
+    hedef.forEach(function(o){
+      var D = V.parca[o.name];
+      ['uzak', 'golge'].forEach(function(sv){
+        if(!D[sv]) return; var g = _lodGeo(o.geometry, sv, D[sv]); if(!g) return;
+        var m2 = new THREE.SkinnedMesh(g, o.material);
+        m2.name = o.name + '_' + sv; m2.userData.lodSv = sv; m2.frustumCulled = false;
+        m2.position.copy(o.position); m2.quaternion.copy(o.quaternion); m2.scale.copy(o.scale);
+        m2.bindMode = o.bindMode; m2.bind(o.skeleton, o.bindMatrix);
+        m2.castShadow = sv === 'golge'; m2.receiveShadow = false;
+        if(sv === 'golge') m2.layers.set(1); else m2.layers.disableAll();
+        o.parent.add(m2); L[sv].push(m2);
+        if(sv === 'golge') o.castShadow = false;
+        if(sv === 'uzak') L.detay.push(o);
+      });
+      if(!D.uzak) L.gizle.push(o);                                  // kirpik: uzakta hiç çizilmez (ekranda piksel altı)
+    });
+    kopya.userData.lod2 = L; _LOD_FIG.push(L);
+  }catch(e){ _sessiz(e, '_lodEkle', 'saha_grafik'); }
+}
+function _lodUygula(L, uzak){
+  if(L.aktif === uzak) return; L.aktif = uzak;
+  for(var i = 0; i < L.detay.length; i++){ if(uzak) L.detay[i].layers.disableAll(); else L.detay[i].layers.set(0); }
+  for(var j = 0; j < L.uzak.length; j++){ if(uzak) L.uzak[j].layers.set(0); else L.uzak[j].layers.disableAll(); }
+  for(var k = 0; k < L.gizle.length; k++){ if(uzak) L.gizle[k].layers.disableAll(); else L.gizle[k].layers.set(0); }
+}
+var _lodV = new THREE.Vector3();
+function _lodSahnede(o){ for(var i = 0; o && i < 8; i++){ if(o === scene) return true; if(!o.visible) return false; o = o.parent; } return false; }
+// Ekranda pxEsik pikselden kısa görünen figür seyreltilmiş ağla çizilir (%8 eşik payı: sınırda gidip gelmesin).
+function _lodSec(camera, eh, pxEsik){
+  if(!_LOD_FIG.length) return;
+  var tf = Math.tan((camera.fov || 40) * Math.PI / 360) * 2;
+  for(var i = _LOD_FIG.length - 1; i >= 0; i--){ var L = _LOD_FIG[i];
+    if(!_lodSahnede(L.kok)){ if(++L.yok > 600 && !L.kok.parent){ _LOD_FIG.splice(i, 1); } continue; }
+    L.yok = 0;
+    L.kok.getWorldPosition(_lodV);
+    var px = 1.8 * eh / (tf * Math.max(0.5, camera.position.distanceTo(_lodV)));
+    if(!L.aktif && px < pxEsik * 0.92) _lodUygula(L, true);
+    else if(L.aktif && px > pxEsik * 1.08) _lodUygula(L, false);
+  }
+}
 function insanModelKopyala(m, M, renk){
   try{
     M = M || _aktifModel();
@@ -9823,6 +9914,7 @@ function insanModelKopyala(m, M, renk){
       o.material = Array.isArray(o.material) ? yeni : yeni[0];
       o.frustumCulled = false;   // iskelet deformasyonu sinir kutusunu bozar; kirpilmayi kapat
     });
+    _lodEkle(kopya, M);          // (2026-11-01-C) seyreltilmiş uzak/gölge ağları (bkz. SEYRELTİLMİŞ AĞ)
     return kopya;
   }catch(e){ return null; }
 }
@@ -20286,7 +20378,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-01-B';
+window.APP_BUILD='2026-11-01-C';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
