@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-01-H</title>
+<title>SAHA — 3D Futbol v2026-11-01-I</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -10027,6 +10027,7 @@ function modelAnimGuncelle(ud, dt, hiz){
   try{
     var a = ud && ud.anim;
     if(!a) return;
+    ud._anHiz = hiz;                                                    // (2026-11-01-I) tekrar kaydı için (bkz. ANİMASYON KAYDI)
     if(a.tekBitis && performance.now() < a.tekBitis){ a.mixer.update(dt); return; }
     if(a.tekBitis){
       // Tek seferlik hareket bitti: mevcut hareket klibinin agirligi geri verilir.
@@ -20391,7 +20392,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-01-H';
+window.APP_BUILD='2026-11-01-I';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -27365,9 +27366,48 @@ function kayitAl(){
     f[3+i*3] = p.obj.position.x; f[4+i*3] = p.obj.position.z; f[5+i*3] = p.obj.rotation.y;
   });
   try{ f.ek = _kayitEkTopla(); }catch(e){}
+  try{ f.an = _animTopla(players.map(function(p){ return p.obj; })); var _rl = resmiListesi(); f.han = _animTopla(_rl.map(function(r){ return r.obj; }));
+    f.hk = new Float32Array(9); _rl.forEach(function(r, j){ f.hk[j*3] = r.obj.position.x; f.hk[j*3+1] = r.obj.position.z; f.hk[j*3+2] = r.obj.rotation.y; }); }catch(e){}
   kayit.push(f);
   if (kayit.length > KAYIT_MAX) kayit.shift();
   try{ if(++_oztSay % 3 === 0) _oztKaydet(f); }catch(e){self.__ds&&self.__ds(24748,e)}
+}
+/* ANİMASYON KAYDI (2026-11-01-I, kullanıcı: "şut çekiliyor, kaleci tepki veriyor, pozisyon tekrarı oynatılırken farklı bir tepki kullanılıyor; bu maç
+   özeti ve gol kaydında da olabilir"). ÖLÇÜM: canlı oyunda ve tekrarda aynı karelerde kalecinin el ve baş kemiklerinin gövdeye göre konumu
+   karşılaştırıldı; plonjon/tutma olmayan bir kurtarışta bile 18 karede 20-38 cm fark vardı. KÖK SEBEP: kayıt oyuncunun yalnızca yerdeki konumunu
+   ve yönünü tutuyordu; yürüme/koşu/depar/duruş kliplerinin AĞIRLIĞI ve ANI (adımın hangi evresinde olduğu) kaydedilmiyordu. Tekrar ve özet bunları
+   iki kare arasındaki hızdan YENİDEN TAHMİN ediyor, klipler kendi rastgele evresinden oynuyordu: kalecinin yan adımı/hazırlanması başka bir
+   hareket, kollar ve bacaklar başka pozda görünüyordu. Hakemler hiç kaydedilmiyordu (tekrar ve özette yerlerinde donuk duruyorlardı).
+   ŞİMDİ her kayıt karesinde her figür için 5 bayt: animasyona verilen hız ve duruş/yürüme/koşu/depar kliplerinin evresi. Tekrar ve özet bunları
+   AYNEN uygular (kareler arası ara değerle), tek seferlik hareketler (HAREKET KAYDI) bunun üstüne gelir. Hakem ve yan hakemlerin konumu, yönü ve
+   animasyonu da kaydedilir. */
+var _AN_K = ['run', 'walk', 'sprint', 'idle'];
+function _animTopla(objler){
+  var n = objler.length, A = new Uint8Array(n * 5); A.fill(255);
+  for (var i = 0; i < n; i++){ var o = objler[i], ud = o && o.userData, a = ud && ud.anim; if (!a || !a.eylem || ud._anHiz == null) continue;
+    A[i*5] = Math.min(253, Math.round(Math.max(0, ud._anHiz) * 23));
+    for (var k = 0; k < 4; k++){ var e = a.eylem[_AN_K[k]]; if (!e) { A[i*5+1+k] = 0; continue; } var d = e.getClip().duration || 1, f = (e.time / d) % 1; if (f < 0) f += 1; A[i*5+1+k] = Math.min(255, Math.floor(f * 256)); } }
+  return A;
+}
+// Kayıttaki animasyon durumunu uygular (A, B ardışık kareler, u aradaki kesir). Kayıt yoksa false (çağıran eski yola düşer).
+function _animUygula(o, k, A, B, u){
+  var ud = o && o.userData, a = ud && ud.anim; if (!a || !a.eylem || !A || A[k*5] === 255) return false;
+  if (!B || B[k*5] === 255) { B = A; u = 0; }
+  var hiz = (A[k*5] + (B[k*5] - A[k*5]) * u) / 23;
+  for (var j = 0; j < 4; j++){ var e = a.eylem[_AN_K[j]]; if (!e) continue;
+    var fa = (A[k*5+1+j] + 0.5) / 256, fb = (B[k*5+1+j] + 0.5) / 256, df = fb - fa; if (df > 0.5) df -= 1; else if (df < -0.5) df += 1;
+    var f = (fa + df * u) % 1; if (f < 0) f += 1; e.time = f * (e.getClip().duration || 1); }
+  ud.hizY = hiz; modelAnimGuncelle(ud, 0, hiz);
+  return true;
+}
+// Hakemler: kayıttaki konum, yön ve animasyon (ara değerle).
+function _hakemKareUygula(f, g, u){
+  if (!f || !f.hk) return; var L = resmiListesi(); g = (g && g.hk) ? g : f;
+  L.forEach(function(r, j){ var o = r.obj; if (!o) return;
+    o.position.x = f.hk[j*3] + (g.hk[j*3] - f.hk[j*3]) * u; o.position.z = f.hk[j*3+1] + (g.hk[j*3+1] - f.hk[j*3+1]) * u;
+    var dr = Math.atan2(Math.sin(g.hk[j*3+2] - f.hk[j*3+2]), Math.cos(g.hk[j*3+2] - f.hk[j*3+2])); o.rotation.y = f.hk[j*3+2] + dr * u;
+    if (r.golge) r.golge.position.set(o.position.x, 0.02, o.position.z);
+    _animUygula(o, j, f.han, g.han, u); });
 }
 /* HAREKET KAYDI (2026-10-31-H, kullanıcı: "gol tekrarlarında veya normal tekrarlarda topun kalecilerle ilgili bazı olasılıkları doğru
    gösterilmiyor"). KÖK SEBEP: tekrar kaydı her karede yalnızca topun konumunu ve oyuncuların yerdeki konumu ile yönünü tutuyordu. Kalecinin
@@ -27380,12 +27420,12 @@ function _kayitEkTopla(){
   var L = null, simdi = performance.now();
   for (var i = 0; i < players.length; i++){
     var p = players[i], o = p && p.obj; if (!o || p.dis) continue;
-    var ud = o.userData, a = ud && ud.anim, tk = null, tt = 0, pz = null, pw = 0;
+    var ud = o.userData, a = ud && ud.anim, tk = null, tt = 0, pz = null, pw = 0, tw = 1;
     if (a && a.tek && a.tekBitis && simdi < a.tekBitis){
-      for (var k in a.tek){ var e = a.tek[k]; if (e && e.isRunning && e.isRunning()){ tk = k; tt = e.time; break; } } }
+      for (var k in a.tek){ var e = a.tek[k]; if (e && e.isRunning && e.isRunning()){ tk = k; tt = e.time; tw = e.getEffectiveWeight(); break; } } }
     if (p.gk && p.elde > 0 && _gkTutan === p && !(p.dalisT > 0)){ pz = p._eldePoz || 'topTut'; pw = Math.min(1, (p._eldeT || 0) / 0.22); }
     if (tk || pz || o.position.y > 0.004 || Math.abs(o.rotation.z) > 0.004 || Math.abs(o.rotation.x) > 0.004)
-      (L || (L = [])).push([i, o.position.y, o.rotation.z, o.rotation.x, tk, tt, pz, pw]);
+      (L || (L = [])).push([i, o.position.y, o.rotation.z, o.rotation.x, tk, tt, pz, pw, tw]);   // tw: klibin o anki ağırlığı (giriş/çıkış geçişi)
   }
   return L;
 }
@@ -27400,6 +27440,10 @@ function _kayitEkUygula(f){
       var ac = a.tek[e[4]];
       if (a._tkrKlip !== e[4] || !ac.isRunning()){ modelTekSefer(ud, e[4], 1); a._tkrKlip = e[4]; }
       ac.time = Math.min(e[5], ac.getClip().duration - 0.001); a.tekBitis = simdi + 400;   // klip kayıttaki anında durur; tek hareket kipi sürer
+      /* (2026-11-01-I) KÖK SEBEP ("tekrarda kaleci farklı tepki veriyor"): klip yumuşak girişle (fadeIn) başlatılıyor ama tekrar zamanı elle koyup
+         karıştırıcıyı ilerletmediği için giriş hiç ilerlemiyor, klibin ağırlığı 0'da kalıyordu: kalecinin tutma/plonjon klibi tekrarda görünmüyordu.
+         Ağırlık doğrudan verilir (canlıdaki gibi yürüme/koşu klipleri 0,15'e bastırılır). */
+      try{ ac.stopFading(); ac.setEffectiveWeight(e[8] != null ? e[8] : 1); Object.keys(a.eylem || {}).forEach(function(k){ a.eylem[k].setEffectiveWeight(0.15); }); }catch(_w){}
       try{ a.mixer.update(0); }catch(_m){}
     } else if (a && a._tkrKlip){ _tkrKlipBitir(a); }
     if (e[6] && ud.hazirModel){ try{ o.updateMatrixWorld(true); kemikPozUygula(o, e[6], e[7]); }catch(_k){} }
@@ -27407,7 +27451,9 @@ function _kayitEkUygula(f){
   for (var i = 0; i < players.length; i++){ if (var_[i]) continue; var q = players[i]; if (!q || !q.obj) continue;
     q.obj.rotation.z = 0; q.obj.rotation.x = 0; var qa = q.obj.userData && q.obj.userData.anim; if (qa && qa._tkrKlip) _tkrKlipBitir(qa); }
 }
-function _tkrKlipBitir(a){ try{ var ac = a.tek[a._tkrKlip]; if (ac) ac.fadeOut(0.12); }catch(e){} a._tkrKlip = null; a.tekBitis = performance.now() - 1; }
+// (2026-11-01-I) Klip DURDURULUR (eskiden fadeOut: tekrar karıştırıcıyı ilerletmediği için çıkış hiç tamamlanmıyor, biten vuruş klibi tekrarda
+// son karesinde donup kalıyordu). Yürüme/koşu kliplerinin ağırlığı bir sonraki animasyon uygulamasında (bkz. _animUygula) yeniden hesaplanır.
+function _tkrKlipBitir(a){ try{ var ac = a.tek[a._tkrKlip]; if (ac) ac.stop(); }catch(e){} a._tkrKlip = null; a.tekBitis = performance.now() - 1; }
 // Tekrar/özet başlarken ve biterken canlı oyundan kalan tek seferlik hareketler ve yatışlar temizlenir (tekrarın ilk karesine sızmasın).
 function _tekAnimSifirla(){
   try{ players.forEach(function(p){ var o = p && p.obj; if (!o) return; o.rotation.z = 0; o.rotation.x = 0; o.position.y = 0;
@@ -27429,7 +27475,7 @@ function _oztKaydet(f){
   k[0] = camera.position.x; k[1] = camera.position.y; k[2] = camera.position.z;
   k[3] = camera.position.x + d.x * 20; k[4] = camera.position.y + d.y * 20; k[5] = camera.position.z + d.z * 20;
   k[6] = 2 * Math.atan(Math.tan(camera.fov * Math.PI / 360) * (camera.aspect || 1.7)) * 180 / Math.PI;   // yatay görüş açısı
-  var tam = new Float32Array(f.length + OZT_K); tam.set(f, 0); tam.set(k, f.length); tam.ek = f.ek || null;
+  var tam = new Float32Array(f.length + OZT_K); tam.set(f, 0); tam.set(k, f.length); tam.ek = f.ek || null; tam.an = f.an || null; tam.han = f.han || null; tam.hk = f.hk || null;
   OZT.push({ f:tam, s:(typeof sonDokunan === 'number' ? sonDokunan : -1), ts:Date.now() });
   if(OZT.length > OZT_MAX) OZT.shift();
 }
@@ -28038,6 +28084,7 @@ function ozetOynat(dt){
     }
   }catch(e){self.__ds&&self.__ds(25364,e)}
   var _yeniAn = OZET._kare0 !== an;
+  var _ozI = Math.max(0, Math.min(an.veri.length - 1, Math.floor(OZET.kare))), _ozA = an.veri[_ozI], _ozB = an.veri[Math.min(an.veri.length - 1, _ozI + 1)], _ozU = Math.max(0, Math.min(1, OZET.kare - _ozI));
   players.forEach(function(p, k){
     if(3 + k*3 + 2 >= f.length - (an.K || 0)) return;
     p.obj.visible = true; p.golge.visible = true;
@@ -28052,8 +28099,11 @@ function ozetOynat(dt){
     // Koşu animasyonu hızı da yumuşatılır: koşu/yürüyüş adımı kare kare zıplamaz.
     var _hz = Math.min(11, Math.hypot(vx, vz));
     p._ozHiz = (OZET._kare0 !== an || p._ozHiz == null) ? _hz : p._ozHiz + (_hz - p._ozHiz) * Math.min(1, dt * 8);
-    try{ insanAdim(p.obj.userData, dt * hiz, p._ozHiz, true); }catch(e){self.__ds&&self.__ds(25380,e)}
+    // (2026-11-01-I) Kayıtta animasyon durumu varsa AYNEN (bkz. ANİMASYON KAYDI); yoksa (eski özet, kayıtsız oyuncu) hızdan tahmin.
+    var _oa = false; try{ _oa = _animUygula(p.obj, k, _ozA && _ozA.an, _ozB && _ozB.an, _ozU); }catch(e){}
+    if(!_oa){ try{ insanAdim(p.obj.userData, dt * hiz, p._ozHiz, true); }catch(e){self.__ds&&self.__ds(25380,e)} }
   });
+  try{ _hakemKareUygula(_ozA, _ozB, _ozU); }catch(e){}
   try{ if(_yeniAn) _tekAnimSifirla(); var _ekK = an.veri[Math.max(0, Math.min(an.veri.length - 1, Math.round(OZET.kare)))]; _kayitEkUygula(_ekK); }catch(e){}   // (2026-10-31-H) bkz. HAREKET KAYDI
   if(_yeniAn) OZET._kare0 = an;
   // KAMERA: tam pozisyon kaydında maçta izlenen açı AYNEN (konum, bakış noktası, görüş açısı);
@@ -28157,8 +28207,19 @@ function ozetKodla(an){
     if(an.ses && an.ses.length) o.ses = an.ses.map(function(e){ return [e.t, e.k, e.a, e.b]; }); }
   // (2026-10-31-H) Hareket kaydı (bkz. HAREKET KAYDI) özetle birlikte saklanır: Puan Tablosu'ndaki özette de kaleci plonjonu doğru görünür.
   try{ var _r = function(x){ return Math.round(x * 100); }, ek = [];
-    kareler.forEach(function(f, k){ (f.ek || []).forEach(function(e){ ek.push([k, e[0], _r(e[1]), _r(e[2]), _r(e[3]), e[4] || '', _r(e[5] || 0), e[6] || '', _r(e[7] || 0)]); }); });
+    kareler.forEach(function(f, k){ (f.ek || []).forEach(function(e){ ek.push([k, e[0], _r(e[1]), _r(e[2]), _r(e[3]), e[4] || '', _r(e[5] || 0), e[6] || '', _r(e[7] || 0), _r(e[8] != null ? e[8] : 1)]); }); });
     if(ek.length) o.ek = ek.slice(0, 1500); }catch(e){}
+  /* (2026-11-01-I) Animasyon kaydı (bkz. ANİMASYON KAYDI): kaleciler (topa 35 m içindeyken) ve topa 15 m'den yakın oyuncular (kameranın yakından
+     gösterdikleri; özet boyutu küçük kalır) - kare başına [sayı, (oyuncu, hız, 4 evre)…]; hakemlerin konumu (Int16) ve animasyonu ayrı. */
+  try{ var _an = [], _hk = new Int16Array(n * 9), _han = new Uint8Array(n * 15), _hv = false;
+    _han.fill(255);
+    kareler.forEach(function(f, k){ var A = f.an, sec = [];
+      if(A){ for(var i = 0; i * 5 < A.length && 5 + i*3 < LP; i++){ if(A[i*5] === 255) continue; var _md = Math.hypot(f[3+i*3] - f[0], f[4+i*3] - f[2]); if(_md <= 15 || (_md <= 35 && players[i] && players[i].gk)) sec.push(i); } }
+      _an.push(sec.length); sec.forEach(function(i){ _an.push(i); for(var q = 0; q < 5; q++) _an.push(A[i*5+q]); });
+      if(f.hk && f.han){ _hv = true; for(var q = 0; q < 9; q++){ var v = f.hk[q]; _hk[k*9+q] = Math.max(-32767, Math.min(32767, Math.round(q % 3 === 2 ? Math.atan2(Math.sin(v), Math.cos(v)) * 10000 : v * 200))); }
+        _han.set(f.han.subarray(0, 15), k * 15); } });
+    if(_an.length > n) o.an = _ozetB64(new Uint8Array(_an));
+    if(_hv){ o.hk = _ozetB64(new Uint8Array(_hk.buffer)); o.han = _ozetB64(_han); } }catch(e){}
   return o;
 }
 function ozetCoz(o){
@@ -28169,7 +28230,13 @@ function ozetCoz(o){
     veri.push(f);
   }
   try{ var _ek = o.ek ? (Array.isArray(o.ek) ? o.ek : Object.keys(o.ek).map(function(x){ return o.ek[x]; })) : [];
-    _ek.forEach(function(e){ var f = veri[e[0]]; if(!f) return; (f.ek || (f.ek = [])).push([e[1], e[2] / 100, e[3] / 100, e[4] / 100, e[5] || null, e[6] / 100, e[7] || null, e[8] / 100]); }); }catch(e){}
+    _ek.forEach(function(e){ var f = veri[e[0]]; if(!f) return; (f.ek || (f.ek = [])).push([e[1], e[2] / 100, e[3] / 100, e[4] / 100, e[5] || null, e[6] / 100, e[7] || null, e[8] / 100, e[9] != null ? e[9] / 100 : 1]); }); }catch(e){}
+  try{ var P = Math.floor((LP - 3) / 3);                                  // (2026-11-01-I) animasyon kaydı (bkz. ozetKodla)
+    if(o.an){ var B = _ozetB64Coz(o.an), x = 0; for(var k2 = 0; k2 < o.n && x < B.length; k2++){ var c = B[x++], A = new Uint8Array(P * 5); A.fill(255);
+      for(var q = 0; q < c && x + 5 < B.length + 1; q++){ var i = B[x++]; if(i < P) A.set(B.subarray(x, x + 5), i * 5); x += 5; } veri[k2].an = A; } }
+    if(o.hk && o.han){ var hu = _ozetB64Coz(o.hk), H = new Int16Array(hu.buffer, 0, Math.floor(hu.length / 2)), HA = _ozetB64Coz(o.han);
+      for(var k3 = 0; k3 < o.n; k3++){ var hk = new Float32Array(9); for(var q2 = 0; q2 < 9; q2++) hk[q2] = H[k3*9+q2] / (q2 % 3 === 2 ? 10000 : 200);
+        veri[k3].hk = hk; veri[k3].han = HA.subarray(k3 * 15, k3 * 15 + 15); } } }catch(e){}
   var soz = o.soz ? (Array.isArray(o.soz) ? o.soz : Object.keys(o.soz).map(function(x){ return o.soz[x]; })) : [];
   var _sl = o.ses ? (Array.isArray(o.ses) ? o.ses : Object.keys(o.ses).map(function(x){ return o.ses[x]; })) : null;
   var ses = _sl ? _sl.map(function(e){ return { t:e[0], k:e[1], a:e[2] || 0, b:e[3] || 0 }; }) : null;
@@ -28991,16 +29058,22 @@ function tekrarOynat(dt){
     const s = tekrar.sonra; tekrar = null; _tabelaTekrar(false); _tekAnimSifirla(); s();
     return;
   }
-  const f = tekrar.veri[i], o = tekrar.veri[Math.max(0, i - 1)];
-  ball.position.set(f[0], f[1], f[2]);
-  topGolge.position.set(f[0], 0.02, f[2]);
+  const f = tekrar.veri[i], o = tekrar.veri[Math.max(0, i - 1)], g = tekrar.veri[Math.min(tekrar.veri.length - 1, i + 1)];
+  /* (2026-11-01-I) Kareler arası ARA DEĞER: kayıt 30 kare/sn, tekrar 0,4x yavaş - eskiden her kayıt karesi 2,5 çizim karesi aynı kalıyor, oyuncular
+     ve top saniyede ~12 kez sıçrıyordu. Konum, yön ve animasyon iki kayıt karesi arasında yumuşakça ilerler. */
+  const u = tekrar._dondu ? 0 : Math.max(0, Math.min(1, tekrar.kare - i)), L = (a, b) => a + (b - a) * u;
+  ball.position.set(L(f[0], g[0]), L(f[1], g[1]), L(f[2], g[2]));
+  topGolge.position.set(ball.position.x, 0.02, ball.position.z);
   players.forEach((p, k) => {
     const vx = (f[3+k*3] - o[3+k*3]) * 30, vz = (f[4+k*3] - o[4+k*3]) * 30;
-    p.obj.position.set(f[3+k*3], 0, f[4+k*3]);
-    p.obj.rotation.y = f[5+k*3];
-    p.golge.position.set(f[3+k*3], 0.02, f[4+k*3]);
-    if (!tekrar._dondu){ try{ insanAdim(p.obj.userData, dt * tekrar.hiz, Math.min(11, Math.hypot(vx, vz)), true); }catch(e){} }   // dondurulan karede animasyon da durur
+    p.obj.position.set(L(f[3+k*3], g[3+k*3]), 0, L(f[4+k*3], g[4+k*3]));
+    p.obj.rotation.y = f[5+k*3] + Math.atan2(Math.sin(g[5+k*3] - f[5+k*3]), Math.cos(g[5+k*3] - f[5+k*3])) * u;
+    p.golge.position.set(p.obj.position.x, 0.02, p.obj.position.z);
+    // (2026-11-01-I) Animasyon kayıttaki AYNI evrede (bkz. ANİMASYON KAYDI); eski kayıtta (alan yok) hızdan tahmin.
+    let _an = false; try{ _an = _animUygula(p.obj, k, f.an, g.an, u); }catch(e){}
+    if (!_an && !tekrar._dondu){ try{ insanAdim(p.obj.userData, dt * tekrar.hiz, Math.min(11, Math.hypot(vx, vz)), true); }catch(e){} }   // dondurulan karede animasyon da durur
   });
+  try{ _hakemKareUygula(f, g, u); }catch(e){}
   try{ _kayitEkUygula(f); }catch(e){}   // (2026-10-31-H) kaleci plonjonu, tutma duruşu, vuruş klipleri (bkz. HAREKET KAYDI)
   _tekrarKameraUygula(tekrar.kare / tekrar.veri.length, tekrar.xs, tekrar.zs, _O ? Object.assign({ dur:tekrar.dur, dt:dt }, _O) : null);
 }
