@@ -1184,7 +1184,7 @@ var SahaSes = (function(){
   // Oyunun seçtiği tür için kayıt: tur (gol, direk, kurtarisY…), o.dk (maç dakikası, dkMax koşulu), o.haric (son çalınanlar).
   function kaySec(rol, tur, o){
     if(!KY || !tur) return null; o = o || {};
-    var L = KY.L.filter(function(k){ return !gz(k) && k.rol === rol && k.tur.indexOf(tur) >= 0 && !(k.dkMax && o.dk != null && o.dk > k.dkMax) && !(k.sira && !o.sirali); });
+    var L = KY.L.filter(function(k){ return !gz(k) && k.rol === rol && k.tur.indexOf(tur) >= 0 && !(k.dkMax && o.dk != null && o.dk > k.dkMax) && !(k.sira && !o.sirali) && !(k.enAz && (o.say || 0) < k.enAz); });
     if(!L.length) return null;
     var yeni = L.filter(function(k){ return !(o.haric && o.haric.indexOf(k.id) >= 0); });
     if(!yeni.length) return null;                                     // az önce çalınan kayıt hemen tekrarlanmaz (o an sessiz geçer)
@@ -1208,6 +1208,8 @@ var SahaSes = (function(){
     kayitModu:function(){ return true; }, kayitHazir:function(){ return !!KY; }, kayitSec:kaySec, kayitDizi:kayDizi, kayitStad:kayStad, kayitVar:function(m, r){ return !!kyBul(m, r); },
     kayitListe:function(){ return KY ? KY.L.filter(function(k){ return !gz(k); }) : []; }, kayitYukle:kyYukle,
     kayitTum:function(){ return KY ? KY.L.map(function(k){ return Object.assign({ gizli:gz(k) }, k); }) : []; },
+    // (2026-11-01-E) Diyalog: açılış kaydı seçilince kalan parçaları (sira) sırayla - silinmişler hariç.
+    kayitDiyalog:function(d){ return (KY && d) ? KY.L.filter(function(k){ return !gz(k) && k.dlg === d; }).sort(function(a, b){ return (a.sira || 1) - (b.sira || 1); }) : []; },
     kayitGizle:function(m){ GIZ = (m && typeof m === 'object') ? m : {}; haber(); },
     kayitCal:function(id, o){ var k = KY && KY.L.find(function(x){ return x.id === id; }); if(!k) return Promise.reject(kyYok()); o = o || {}; o._d0 = DONEM; o._sap = 1; return kyTampon(k).then(function(b){ return calB(b, o); }); } };
 })();

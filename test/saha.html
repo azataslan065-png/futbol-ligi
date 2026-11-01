@@ -169,7 +169,7 @@
 </script>
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=22b8347e"></script>
+<script src="ortak/ortak.js?v=ea0c143e"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-01-D</title>
+<title>SAHA — 3D Futbol v2026-11-01-E</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -11842,8 +11842,12 @@ function spkSoyle(rol, metin, tur, onemli, aralikMs){
     if(tur && SPK.sonTur[tur] && simdi - SPK.sonTur[tur] < aralikMs) return;
     /* KAYITLI ANLATIM (2026-10-31-I): üretilen ses kaldırıldı; bu türün KAYDI varsa cümle o kaydın metniyle değişir, yoksa hiç söylenmez. */
     var _kk = null;
-    if(_spkKayitModu()){ var _ht = SPK._klipT || {}, _har = Object.keys(_ht).filter(function(id){ return simdi - _ht[id] < 45000; });   // (2026-11-01) aynı kayıt 45 sn içinde tekrarlanmaz
-      _kk = SahaSes.kayitSec(rol === 'yorumcu' ? 'yorumcu' : 'spiker', tur, { dk:(function(){ try{ return macDakika(); }catch(e){ return null; } })(), haric:_har });
+    if(_spkKayitModu()){
+      // (2026-11-01-E) Diyalog sürerken (açılıştan sonraki ~20 sn) yorumcunun ayrı tepkisi araya girmez: diyaloğun kendi yorumcu satırları var.
+      if(rol === 'yorumcu' && SPK._dlgBitis && simdi < SPK._dlgBitis) return;
+      // (2026-11-01) aynı kayıt 45 sn içinde tekrarlanmaz; (2026-11-01-E) diyaloglar 10 dakikada bir
+      var _ht = SPK._klipT || {}, _har = Object.keys(_ht).filter(function(id){ return simdi - _ht[id] < (/^dlg_/.test(id) ? 600000 : 45000); });
+      _kk = SahaSes.kayitSec(rol === 'yorumcu' ? 'yorumcu' : 'spiker', tur, { dk:(function(){ try{ return macDakika(); }catch(e){ return null; } })(), haric:_har, say:(SPK.olaySay || {})[tur] || 0 });
       if(!_kk) return; metin = _kk.m; }
     var x = { rol:rol, metin:metin, onemli:!!onemli, ts:simdi, tur:tur, oncelik:_spkOncelik(rol, tur, onemli), klip:_kk ? _kk.id : null };
     if(!_spkTepkiBagla(x)) return;                                      // (2026-10-31-G) bkz. SÖZ SIRASI
@@ -11863,6 +11867,13 @@ function spkSoyle(rol, metin, tur, onemli, aralikMs){
     if(!_spkSirayaKoy(x)) return;                                       // sıra doluysa/sessiz değilse dolgu atlanır
     if(tur && !window._sahaOdaHost) SPK.sonTur[tur] = simdi;
     if(_kk) (SPK._klipT || (SPK._klipT = {}))[_kk.id] = simdi;          // aynı kayıt 45 sn içinde yeniden seçilmez
+    /* DİYALOG (2026-11-01-E, kullanıcı kayıt paketinde diyalogların 3. ve 4. satırları geldi). Diyaloğun açılış kaydı (ör. erken gol, üst üste
+       kurtarış) seçilince kalan satırlar spiker-yorumcu sırasıyla hemen arkasından kuyruğa girer; bu sırada başka yorumcu tepkisi araya girmez. */
+    if(_kk && _kk.dlg){ try{ var _dp = SahaSes.kayitDiyalog(_kk.dlg).filter(function(k){ return k.id !== _kk.id && (k.sira || 1) > (_kk.sira || 1); }), _dsn = _kk.sn || 3;
+      _dp.forEach(function(k){ _dsn += (k.sn || 4) + 0.4; if(k.rol === 'yorumcu' && AYAR.yorumcu === false) return;
+        SPK.sira.push({ rol:k.rol, metin:k.m, onemli:true, ts:simdi + 20000, oncelik:2, klip:k.id }); SPK._klipT[k.id] = simdi;
+        if(window._sahaOdaHost) try{ _spkYayinla(k.rol, k.m, true, 'diyalog'); }catch(_y){} });
+      if(_dp.length) SPK._dlgBitis = simdi + Math.min(30000, _dsn * 1000 + 2500); }catch(_d){} }
     try{ if(onemli && AYAR.spiker !== false && spkDogalAcik() && SahaSes.hazirMi(rol === 'yorumcu' ? 'yorumcu' : 'spiker')) SahaSes.hazirBekle(String(x.metin).replace(/([A-Za-zÇĞİÖŞÜçğıöşü]{3,})sp\b/g, '$1spor'), rol === 'yorumcu' ? 'yorumcu' : 'spiker', x.h, _spkOnEk(rol, tur, x.metin)).catch(function(){}); }catch(e){}   // (2026-10-31-A) önceden üret
     _spkSiradaki();
   }catch(e){ _sessiz(e, 'spkSoyle', 'saha_ses'); }
@@ -12079,7 +12090,7 @@ function _bolgeSoz(d){
 }
 function spk(tur, v){
   try{ if(running && !bitti) olaySesi(tur, v); }catch(e){self.__ds&&self.__ds(10990,e)}
-  try{ (SPK.olayAn || (SPK.olayAn = {}))[tur] = Date.now();
+  try{ (SPK.olayAn || (SPK.olayAn = {}))[tur] = Date.now(); if(running && !bitti){ var _os = SPK.olaySay || (SPK.olaySay = {}); _os[tur] = (_os[tur] || 0) + 1; }   // (2026-11-01-E) maçtaki olay sayısı (bkz. enAz)
     if(_spkKayitModu()){
       /* (2026-11-01-B, kullanıcı: "21 kayıt görünüyor ama maç içinde 4-5 tanesi kullanılıyor"). Yorumcunun tepkisi üretilen seste %25-35 şansa
          bağlıydı; kayıtlı seste o olayın yorumcu kaydı varsa HER seferinde denenir (aynı kayıt 45 sn içinde tekrarlanmaz, tür başına 20 sn ara). */
@@ -12688,6 +12699,7 @@ function olaySesi(tur, v){
    spiker yayını açar, statı, hakemi ve havayı anlatır; yorumcu maç öncesi değerlendirmesini yapar. */
 function macOnuSesleri(){
   try{
+    SPK.olaySay = {}; SPK._dlgBitis = 0;                                  // (2026-11-01-E) yeni maç: olay sayıları sıfırlanır (bkz. enAz)
     try{ stadyumZil(); }catch(e){self.__ds&&self.__ds(11586,e)}
     setTimeout(function(){ sesAlkisDalga(4, 0.7); }, 1200);
     setTimeout(function(){ sesAlkisDalga(3.5, 0.8); try{ tezahurat(true); }catch(e){self.__ds&&self.__ds(11588,e)} }, 5200);
@@ -20379,7 +20391,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-01-D';
+window.APP_BUILD='2026-11-01-E';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
