@@ -1193,7 +1193,17 @@ var SahaSes = (function(){
   }
   function kayStad(ad){ if(!KY || !ad) return null; var n = kyNorm(ad), L = KY.L.filter(function(k){ return !gz(k) && k.stad && kyNorm(k.stad) === n; });
     return L.length ? L[Math.floor(Math.random() * L.length)] : null; }
-  function kayDizi(tur){ return KY ? KY.L.filter(function(k){ return !gz(k) && k.tur.indexOf(tur) >= 0 && k.sira; }).sort(function(a, b){ return a.sira - b.sira; }) : []; }
+  /* (2026-11-02) Aynı türde birden çok diyalog olabilir (iki "Final", iki "Lig açılışı"): satırlar diyaloğa göre gruplanır, biri rastgele seçilir
+     (o.haric: yakında çalınan diyaloglar), seçilenin satırları sırayla döner. Eskiden bütün diyalogların satırları sıra numarasına göre karışıyordu. */
+  function kayDizi(tur, o){
+    if(!KY) return []; o = o || {}; var G = {}, ad = [];
+    KY.L.forEach(function(k){ if(gz(k) || k.tur.indexOf(tur) < 0 || !k.sira) return; var g = k.dlg || (String(k.id).match(/^dlg_\d+/) || [k.id])[0];
+      if(!G[g]){ G[g] = []; ad.push(g); } G[g].push(k); });
+    var ser = ad.filter(function(g){ return !(o.haric && o.haric.indexOf(g) >= 0); }); if(!ser.length) ser = o.haric ? [] : ad;
+    if(!ser.length) return [];
+    var sec = ser[Math.floor(Math.random() * ser.length)];
+    return G[sec].sort(function(a, b){ return a.sira - b.sira; });
+  }
   var _bos = function(){ return Promise.resolve(); };
   return { destek:function(){ return !!(window.AudioContext || window.webkitAudioContext); },
     hazirla:function(){ return kyYukle().then(function(k){ if(!k) throw new Error('Kayıtlı ses bulunamadı'); }); },
