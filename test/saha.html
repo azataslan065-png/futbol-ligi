@@ -281,7 +281,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-03-A</title>
+<title>SAHA — 3D Futbol v2026-11-03-B</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -10370,7 +10370,7 @@ function resmiHareket(r, hedef, hiz, dt, bakNoktasi, yanHakem){
   const d = hedef.clone().sub(r.obj.position).setY(0);
   const uz = d.length();
   let istenen = 0;
-  if (uz > 0.35) istenen = Math.min(hiz, uz * 1.25, yanHakem && uz < 6 ? 2.6 : 99);   // yaklaşırken yavaşla; yan hakem yakın mesafede yan adım
+  if (uz > 0.35) istenen = Math.min(hiz, uz * 1.25, yanHakem && uz < 6 ? 4.2 : 99);   // yaklaşırken yavaşla; yan hakem yakın mesafede yan adım
   const iv = new THREE.Vector3(); if (uz > 0.01) iv.copy(d).multiplyScalar(istenen / uz);
   const fark = iv.sub(r.vel), hizlaniyor = istenen > r.vel.length();
   const maxD = (hizlaniyor ? 3.6 : 6.5) * dt;
@@ -10402,13 +10402,64 @@ function resmiHareket(r, hedef, hiz, dt, bakNoktasi, yanHakem){
   r.golge.position.set(r.obj.position.x, 0.02, r.obj.position.z);
 }
 const hkHedef = new THREE.Vector3();
+/* HAKEM KONUMU - ÇAPRAZ SİSTEM VE OFSAYT ÇİZGİSİ (2026-11-03-B, kullanıcı: "hakemler ilgili pozisyonlarda robotik hareketlerden çıkarılıp
+   gerçeği yansıtmalı"; adım 5). ÖLÇÜM (yapay zekâ maçı, 120 sn): orta hakem hedefi her karede topun 7 m gerisi + 9 m yanına kilitliydi;
+   top kıpırdadıkça hakem de kıpırdıyor, zamanın yalnızca %0,2'sinde duruyor, ortalama 5 m/sn ile koşuyordu (gerçek hakem maç boyu ~2 m/sn:
+   çoğunlukla yürür ve tempolu koşar, ancak oyun hızla yer değiştirince depar atar). Yanı her zaman aynıydı (+z), iki yan hakemle topu
+   arasına almıyordu. Yan hakemler TOPUN hizasını izliyordu - ofsayt çizgisinden (son ikinci savunmacı) ortanca 12-17 m uzaktaydılar.
+   ŞİMDİ:
+     · Orta hakem çapraz sistemle durur: hücum eden takımın 5 m gerisinde, topun o yarıdaki yan hakemin KARŞI tarafında ~12 m yanında
+       (top hakemle yan hakem arasında kalır). Hedef 1 sn'lik yumuşatmayla izlenir; hakem hedefe 5 m'den yakınsa durur/yürür, uzaklaşınca
+       harekete geçer (1,5 m'ye gelince bırakır). Yan hakemin kısa mesafedeki yan adımı 2,6 → 4,2 m/sn (çizgi hızlı değişir). Hız mesafeye göre: <8 m yürüyüş/hafif koşu, <18 m tempolu koşu, ötesi depar. Oyuncuya 1,6 m'den
+       yakın hedef ve pasörle arkadaşları arasındaki pas çizgisi üzerindeki hedef yana kaydırılır.
+     · Yan hakem kendi yarısında ofsayt çizgisini izler: son ikinci savunmacı ya da top (hangisi kale çizgisine yakınsa), orta çizgiyi geçmez;
+       0,4 m'lik ölü bölgeyle (her kıpırtıya adım atmaz). */
+function _hkYumusat(r, hx, hz, dt, tau){
+  if (!r._yh){ r._yh = { x:hx, z:hz }; }
+  const k = 1 - Math.exp(-dt / tau); r._yh.x += (hx - r._yh.x) * k; r._yh.z += (hz - r._yh.z) * k;
+  return r._yh;
+}
+function _ofsCizgiX(savDir, i){
+  // savDir: savunan takımın hücum yönü (+1 ise -HLX kalesini savunur). i=0: -x yarısı, i=1: +x yarısı.
+  const xs = players.filter(function(q){ return !q.dis && q.dir === savDir; }).map(function(q){ return q.obj.position.x; }).sort(function(a, b){ return i === 0 ? a - b : b - a; });
+  const cz = xs.length > 1 ? xs[1] : 0, bx = ball.position.x;
+  return i === 0 ? Math.max(-HLX + 1, Math.min(0, Math.min(cz, bx))) : Math.min(HLX - 1, Math.max(0, Math.max(cz, bx)));
+}
 function hakemleriGuncelle(dt){
-  hkHedef.set(Math.max(-HLX+5, Math.min(HLX-5, ball.position.x - 7*dirA)), 0,
-              Math.max(-HWZ+5, Math.min(HWZ-5, ball.position.z + 9)));
-  resmiHareket(hakem, hkHedef, 7.6, dt, ball.position, false);
+  const bx = ball.position.x, bz = ball.position.z;
+  const sh = window._sahipAn, fz = window._fazTakim;
+  let hy = dirA; try{ const T = (sh ? sh.team : fz) === 1 ? teamB : ((sh ? sh.team : fz) === 0 ? teamA : null); const q = T && T.find(function(o){ return !o.dis; }); if (q) hy = q.dir; }catch(e){}
+  const sY = bx < 0 ? -1 : 1;                                   // -x yarısında yan hakem +z çizgisinde: hakem -z tarafına geçer
+  let tz = bz + sY * 12;
+  if (Math.abs(Math.max(-HWZ + 4, Math.min(HWZ - 4, tz)) - bz) < 7) tz = bz - sY * 9;
+  let tx = bx - hy * 5;
+  tx = Math.max(-HLX + 5, Math.min(HLX - 5, tx)); tz = Math.max(-HWZ + 4, Math.min(HWZ - 4, tz));
+  const Y = _hkYumusat(hakem, tx, tz, dt, 1.0);
+  let gx = Y.x, gz = Y.z;
+  // Oyuncuya ve pas çizgisine basma
+  try{
+    players.forEach(function(q){ if (q.dis) return; const dx = gx - q.obj.position.x, dz = gz - q.obj.position.z, d = Math.hypot(dx, dz);
+      if (d < 1.6){ const k = (1.6 - d) / Math.max(0.2, d); gx += dx * k; gz += dz * k; } });
+    if (sh){ (sh.team === 0 ? teamA : teamB).forEach(function(m){ if (m === sh || m.dis) return;
+      const vx = m.obj.position.x - sh.obj.position.x, vz = m.obj.position.z - sh.obj.position.z, d = Math.hypot(vx, vz); if (d < 4 || d > 30) return;
+      const rx = gx - sh.obj.position.x, rz = gz - sh.obj.position.z, t = (rx * vx + rz * vz) / (d * d); if (t < 0.1 || t > 0.9) return;
+      const yan = (rx * vz - rz * vx) / d; if (Math.abs(yan) < 1.5){ const s2 = (yan >= 0 ? 1 : -1) * (1.5 - Math.abs(yan) + 1.5); gx += vz / d * s2; gz -= vx / d * s2; } }); }
+  }catch(e){}
+  const hp = hakem.obj.position, uzH = Math.hypot(gx - hp.x, gz - hp.z);
+  if (hakem._hkGit ? uzH < 1.5 : uzH > 5.0) hakem._hkGit = !hakem._hkGit;
+  const hzH = uzH < 8 ? 2.4 : (uzH < 18 ? 4.6 : 7.4);
+  hkHedef.set(hakem._hkGit ? gx : hp.x, 0, hakem._hkGit ? gz : hp.z);
+  // Dururken üstüne gelen oyuncudan bir-iki adım çekilir (oyuncular hakemin içinden geçmesin).
+  if (!hakem._hkGit){ players.forEach(function(q){ if (q.dis) return; const dx = hp.x - q.obj.position.x, dz = hp.z - q.obj.position.z, d = Math.hypot(dx, dz);
+    if (d < 1.8){ const k = (2.6 - d) / Math.max(0.2, d); hkHedef.x += dx * k; hkHedef.z += dz * k; } }); }
+  resmiHareket(hakem, hkHedef, hzH, dt, ball.position, false);
   // Kulübe kenarındaki yan hakem teknik alanla kulübenin ÖNÜNDEN (çizgiye yakın) koşar.
-  const t0 = new THREE.Vector3(Math.max(-HLX+2, Math.min(0, ball.position.x)), 0,  HWZ+0.75);
-  const t1 = new THREE.Vector3(Math.max(0, Math.min(HLX-2, ball.position.x)), 0, -HWZ-1.8);
+  const o0 = _ofsCizgiX(1, 0), o1 = _ofsCizgiX(-1, 1);
+  [[0, o0, HWZ + 0.75], [1, o1, -HWZ - 1.8]].forEach(function(A){ const r = yanHakemler[A[0]], px = r.obj.position.x;
+    if (r._yhGit ? Math.abs(A[1] - px) < 0.15 : Math.abs(A[1] - px) > 0.4) r._yhGit = !r._yhGit;
+    r._yhX = r._yhGit ? A[1] : (r._yhX == null ? px : r._yhX); });
+  const t0 = new THREE.Vector3(yanHakemler[0]._yhX, 0,  HWZ+0.75);
+  const t1 = new THREE.Vector3(yanHakemler[1]._yhX, 0, -HWZ-1.8);
   resmiHareket(yanHakemler[0], t0, 8, dt, new THREE.Vector3(yanHakemler[0].obj.position.x, 0, 0), true);
   resmiHareket(yanHakemler[1], t1, 8, dt, new THREE.Vector3(yanHakemler[1].obj.position.x, 0, 0), true);
   try{ _yanBayrakTak(yanHakemler[0]); _yanBayrakTak(yanHakemler[1]); }catch(e){}
@@ -20555,7 +20606,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-03-A';
+window.APP_BUILD='2026-11-03-B';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -24960,7 +25011,7 @@ function destekSec(list, kov, sahip, tk){
      yakınsa ikinci oyuncu da baskıya gelir (önceden yalnızca 3 sn'lik uzun taşımada ya da baskı taktiğinde). */
   const _kaleUz = sahip ? Math.abs(sahip.obj.position.x - (list[0] ? -list[0].dir * HLX : 0)) : 99;
   const _uzun = !!(sahip && topuSuruyor(sahip) && ((sahip._tasT || 0) > 1.5 || _kaleUz < 40));
-  /* KARŞI PRES (2026-11-03-A): top kaybedildikten sonraki 2,5 sn içinde, top 15 m içindeyse ikinci oyuncu da hemen kapatmaya gelir
+  /* KARŞI PRES (2026-11-03-B): top kaybedildikten sonraki 2,5 sn içinde, top 15 m içindeyse ikinci oyuncu da hemen kapatmaya gelir
      (gerçek takımlar kaybın hemen ardından topu geri kazanmaya çalışır; önceden yalnızca uzun taşımada ya da baskı taktiğinde). */
   const _lt = list[0] ? list[0].team : -1, _kp = !!(sahip && window._kayipAn && saat - (window._kayipAn[_lt] || -99) < 2.5);
   if (!_uzun && !_kp && (!tk || !(tk.baski > 0))) return null;
@@ -25278,7 +25329,7 @@ function pasVer(p, takim, yonTercih, tur){
   });
   // Kol tuşları: 'ara' = yalnızca savunma arkasına ara pas adayları; 'uzun' = 16 m'den uzak (havadan) adaylar.
   const _araVar = tur === 'ara' && adaylar.some(a => a[3]);
-  // (2026-11-03-A) Ofsayt çizgisi pas anına göre: yapay zekâ ofsayttaki arkadaşa pas vermez; koşuya başlamış (henüz çizgide) arkadaş öne çıkar.
+  // (2026-11-03-B) Ofsayt çizgisi pas anına göre: yapay zekâ ofsayttaki arkadaşa pas vermez; koşuya başlamış (henüz çizgide) arkadaş öne çıkar.
   const _od = p.dir, _orx = rakipler.map(r => r.obj.position.x * _od).sort((a,b) => b - a), _ocz = Math.max(_orx.length > 1 ? _orx[1] : -HLX, 0), _otx = ball.position.x * _od;
   const _ofsdaMi = m => { const px = m.obj.position.x * _od; return px > _ocz + 0.4 && px > _otx + 0.4 && px > 0; };
   const _yzPas = !insanTakimi(takim);
@@ -25877,7 +25928,7 @@ function aiHedef(p, kovalayan){
   const derin = arka + oran * (on - arka) + tk.ileri * 0.5;                 // takım ağırlığı bloğu yarım ölçüde iter
   const gen = fazBiz ? 1.12 : (fazOnlar ? 0.72 : 0.9), kay = fazBiz ? 0.18 : (fazOnlar ? 0.42 : 0.3);
   const t = new THREE.Vector3(derin * p.dir, 0, p.home.z * gen + ball.position.z * kay);
-  /* (2026-11-03-A) KİŞİSEL PAY: aynı hattaki oyuncular cetvelle çizilmiş gibi TAM aynı derinlikte duruyordu (savunma hattı sapması
+  /* (2026-11-03-B) KİŞİSEL PAY: aynı hattaki oyuncular cetvelle çizilmiş gibi TAM aynı derinlikte duruyordu (savunma hattı sapması
      ölçümde ≤1 m, orta saha ikilileri aynı noktayı hedefliyordu). Her oyuncuya forma numarasından sabit, küçük bir boy/en payı (±0,6 m /
      ±0,8 m) eklenir; hat yine düzdür ama robotik değil. */
   { const _no = Math.abs(p.no || 0); t.x += (((_no * 37) % 7) - 3) * 0.2 * p.dir; t.z += (((_no * 53) % 5) - 2) * 0.4; }
@@ -25891,7 +25942,7 @@ function aiHedef(p, kovalayan){
   else if (_tl === 'kutuya' && fazBiz && bx > 12){ t.x = p.dir * (HLX - 12); t.z *= 0.4; }
   else if (_tl === 'derin' && fazBiz){ t.x -= p.dir * 10; t.z *= 0.75; }
   else if (_tl === 'arkaya' && fazBiz){ t.x += p.dir * 9; }
-  /* TAKIM YAPAY ZEKÂSI - KOŞU, PAS AÇISI, KALE TARAFI MARKAJ (2026-11-03-A, kullanıcı: "oyuncular robotik hareketlerden çıkarılıp gerçeği
+  /* TAKIM YAPAY ZEKÂSI - KOŞU, PAS AÇISI, KALE TARAFI MARKAJ (2026-11-03-B, kullanıcı: "oyuncular robotik hareketlerden çıkarılıp gerçeği
      yansıtmalı"; adım 4: yapay zekâ). ÖLÇÜM (yapay zekâ x yapay zekâ, 2×150 sn): top bizdeyken rakibin son savunma çizgisine 6 m'den yakın
      hücumcu örneklerin yalnızca %0-2'sinde vardı ve bunların %0-14'ü ileri koşuyordu - hücumcu hedefi topun en fazla 14 m önüne ve son
      savunmacının hizasına kesiliyordu, savunma arkasına koşu HİÇ yoktu (maçta 0 ofsayt). Paslar ayağa ya da yürüyen oyuncunun önüne
@@ -26099,7 +26150,7 @@ function aiVurus(p){
   /* (2026-10-16-B) Baskıyı hisset: rakip 1,8 m içindeyse ya da iki rakip sıkıştırıyorsa yapay zekâ topu elden çıkarır
      (pas/şut), sürme ihtimali çok düşer; 3,2 m'de çalım ihtimali eskisinden düşük. */
   const _sikisti = enYakinRakip < 1.8 || baskiAltindakiRakipler(p, 2.6) >= 2;
-  // (2026-11-03-A) Savunma arkasına koşu başladıysa pasör (pas görüşüne göre) koşu yoluna pası dener; uygun değilse eski karar sürer.
+  // (2026-11-03-B) Savunma arkasına koşu başladıysa pasör (pas görüşüne göre) koşu yoluna pası dener; uygun değilse eski karar sürer.
   if ((p.team === 0 ? teamA : teamB).some(m => m !== p && (m._kosuBit || 0) > saat) && Math.random() < 0.35 + 0.35 * Math.min(1, Math.max(0, nit(p,'nPas',1) - 0.6) / 0.6)
       && pasVer(p, p.team, null, 'kosu')){ p._karar = 0; return; }
   const _surSans = _sikisti ? Math.max(0.05, Math.min(0.2, 0.1 + (_sur - 1) * 0.4))
@@ -29777,7 +29828,7 @@ function update(dt){
   // iki takim da en yakin oyuncusunu gonderir - eskisi gibi.
   const _sahipK = topSahibi();
   window._fazTakim = _sahipK ? _sahipK.team : sonDokunan;   // hücum eden takım (top ayakta değilse son dokunan)
-  window._sahipAn = _sahipK;                                  // (2026-11-03-A) aiHedef koşu/pas açısı kararları için
+  window._sahipAn = _sahipK;                                  // (2026-11-03-B) aiHedef koşu/pas açısı kararları için
   if (_sahipK){ const _ks = window._sahipTk; if (_ks !== undefined && _ks !== _sahipK.team) (window._kayipAn || (window._kayipAn = {}))[_ks] = saat; window._sahipTk = _sahipK.team; }
   // Pas yoldayken alıcı topa koşar (başka arkadaş araya girmez) - bkz. TOP FİZİĞİ.
   const _paK = _pasAliciGecerli();
@@ -29929,7 +29980,7 @@ function update(dt){
     const _destekBaski = _rakipSurer && p === _destekOyuncu[p.team];
     let spd = p.gk ? (p.dalisT > 0 ? 9.5 : (p._gkAlarm ? 8.2 : 6.0)) * (0.9 + nit(p,'nKal',0.4)*0.2) : (kovaliyor ? (_rakipSurer ? 9.1 : 8.6) : (_destekBaski ? 8.0 : ((p._kosuBit || 0) > saat ? 8.4 : (uz > 10 ? 7.0 : 6.0)))) * kondCarpan(p) * nit(p, 'nHiz', 1) * havaFizik().hiz * topluHizCarpan(p);
       if (p.team === 1) spd *= zorKat();
-      /* (2026-11-03-A) TOPSUZ KOŞU HIZI: topsuz oyuncu her durumda 6 m/s ile (tempolu koşu) gidiyordu; top 3-4 sn'de bir el değiştirince
+      /* (2026-11-03-B) TOPSUZ KOŞU HIZI: topsuz oyuncu her durumda 6 m/s ile (tempolu koşu) gidiyordu; top 3-4 sn'de bir el değiştirince
          yeni yerine hiç yetişemiyor, hücumcu son savunma çizgisinden ortalama 17 m geride kalıyordu (ölçüm). Artık hedefi 10 m'den uzaksa
          7 m/s (yüksek tempolu koşu), savunma arkasına koşuda 8,4 m/s (depar; bkz. aiHedef koşu) - yorgunluk ve hız niteliği yine çarpan. */
       if (duran && duran.alici === p && !p.gk && p.obj.position.distanceTo(ball.position) > 4) spd = Math.max(spd, 8.6);   // (2026-10-16-C) atıcı topa koşar
