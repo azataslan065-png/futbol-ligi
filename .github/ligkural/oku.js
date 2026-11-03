@@ -23,4 +23,5 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
       }
     }
   }
+  for(const kok of ['test/', '']) for(const k of ['sahaSariSinir', 'sahaMacSuresiDk', 'sahaArkadasSuresiDk', 'sahaRastgeleSuresiDk']) console.log((kok || 'KÖK/') + 'globalAdminSettings/' + k + ' = ' + JSON.stringify(await al(kok + 'globalAdminSettings/' + k)));
 })().catch(e => { console.log('HATA ' + e.message); });
