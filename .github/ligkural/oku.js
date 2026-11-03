@@ -7,7 +7,7 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
   const auth = new GoogleAuth({ credentials: SAJ, scopes: ['https://www.googleapis.com/auth/firebase.database', 'https://www.googleapis.com/auth/userinfo.email'] });
   const tok = (await (await auth.getClient()).getAccessToken()).token;
   const al = async (y, q) => { const r = await fetch(DB + y + '.json' + (q || ''), { headers: { Authorization: 'Bearer ' + tok } }); return r.ok ? r.json() : { HATA: r.status }; };
-  for(const yol of ['test/leagues', 'leagues']){
+  for(const yol of ['test/leagues', 'test/sahaVeri/leagues', 'leagues', 'sahaVeri/leagues']){
     console.log('\n######## ' + yol + ' ########');
     const L = await al(yol, '?shallow=true') || {};
     for(const lid of Object.keys(L)){
@@ -23,5 +23,5 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
       }
     }
   }
-  for(const kok of ['test/', '']) for(const k of ['sahaSariSinir', 'sahaMacSuresiDk', 'sahaArkadasSuresiDk', 'sahaRastgeleSuresiDk']) console.log((kok || 'KÖK/') + 'globalAdminSettings/' + k + ' = ' + JSON.stringify(await al(kok + 'globalAdminSettings/' + k)));
+  for(const kok of ['test/', 'test/sahaVeri/', '', 'sahaVeri/']) for(const k of ['sahaSariSinir', 'sahaMacSuresiDk', 'sahaArkadasSuresiDk', 'sahaRastgeleSuresiDk']) console.log((kok || 'KÖK/') + 'globalAdminSettings/' + k + ' = ' + JSON.stringify(await al(kok + 'globalAdminSettings/' + k)));
 })().catch(e => { console.log('HATA ' + e.message); });
