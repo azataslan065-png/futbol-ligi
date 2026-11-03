@@ -12,9 +12,10 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     const L = await al(yol, '?shallow=true') || {};
     for(const lid of Object.keys(L)){
       const K = await al(yol + '/' + lid, '?shallow=true') || {};
-      console.log('\n=== LİG ' + lid + ' anahtarlar: ' + Object.keys(K).join(','));
+      if(!K.leagueRules && !K.lgConfig) continue; console.log('\n=== LİG ' + lid);
+      // YALNIZCA kural/puanlama alanları (beyaz liste) - başka hiçbir lig verisi rapora yazılmaz.
       for(const k of Object.keys(K)){
-        if(/^(teams|matches|feedback|chat|messages|users|logs|history|live|canli|fixtures|seasons|archive|reactions|polls|news)$/i.test(k)) continue;
+        if(!/^(leagueRules|leagueRulesUpdatedAt|lgConfig|rankNotes|season|leagueName|groupStage|pointsConfig)$/.test(k)) continue;
         const v = await al(yol + '/' + lid + '/' + k);
         const s = typeof v === 'string' ? v : JSON.stringify(v);
         if(k === 'leagueRules') console.log('--- leagueRules ---\n' + v + '\n--- son ---');
@@ -22,5 +23,4 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
       }
     }
   }
-  for(const kok of ['test/', '']){ const g = await al(kok + 'globalAdminSettings', '?shallow=true'); console.log('\nglobalAdminSettings ' + (kok || 'KÖK') + ': ' + JSON.stringify(g).slice(0, 600)); }
 })().catch(e => { console.log('HATA ' + e.message); });
