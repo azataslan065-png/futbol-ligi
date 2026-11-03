@@ -1,4 +1,4 @@
-// Puan Tablosu "Lig Kuralları" metnini ve lig ayarlarını (büyük listeler hariç) okur; "ligkural" dalına rapor yazar. Kullanıcı kimliği yazılmaz.
+// Puan Tablosu "Lig Kuralları" metnini ve lig ayarlarını (büyük listeler hariç) okur; "ligkural" dalına rapor yazar. Kullanıcı kimliği yazılmaz. 
 const { GoogleAuth } = require('google-auth-library'); const fs = require('fs');
 const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/';
 (async () => {
