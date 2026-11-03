@@ -2817,10 +2817,6 @@ html.hafif-cihaz .pu-ort,html.hafif-cihaz .pu-etik{-webkit-backdrop-filter:none 
   <div class="live-box" id="liveBox"></div>
 </div>
 
-<!-- PEN PANEL -->
-<div id="penOv" class="pen-ov">
-  <div class="pen-box" id="penBox"></div>
-</div>
 
 <div id="toast"></div>
 <script>
@@ -3389,7 +3385,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-03-D';
+window.APP_BUILD='2026-11-03-E';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true, dosya:'admin', kap:function(){ return document.getElementById('loginWrap'); }, giris:function(){ var e = document.getElementById('loginWrap'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // yönetici geçebilir
@@ -7117,8 +7113,8 @@ function renderScores(){
     });
     var cards=weekMatches.map(function(m){
       var h=teams[m.homeId]||{},a=teams[m.awayId]||{};
-      var pen=m.penaltyWinner?' (P)':'';
-      var win=m.homeGoals>m.awayGoals?'home':m.awayGoals>m.homeGoals?'away':m.penaltyWinner||'draw';
+      var pen='';
+      var win=m.homeGoals>m.awayGoals?'home':m.awayGoals>m.homeGoals?'away':'draw';
       return '<div class="scard"><div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.28rem"><span style="font-size:.62rem;color:var(--mu)">'+(m.date?m.date:'')+'</span><div style="display:flex;gap:.35rem">'+(m.sahaOlayKaydi?'<button class="btn bgh" title="SAHA maç olay kaydı" style="font-size:.72rem;padding:.35rem .5rem;min-height:30px;min-width:34px" onclick="olayKaydiAc(\''+m.id+'\')"></button>':'')+'<button class="btn bgh" style="font-size:.72rem;padding:.35rem .5rem;min-height:30px;min-width:34px" onclick="openScoreEdit(\''+m.id+'\')"></button><button class="btn" style="font-size:.72rem;padding:.35rem .5rem;min-height:30px;min-width:34px;background:rgba(239,68,68,.15);color:#dc2626;border:1px solid rgba(239,68,68,.45)" onclick="resetMatchScore(\''+m.id+'\')"></button></div></div>'
         +'<div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:.4rem">'
         +'<div style="font-size:.82rem;font-weight:'+(win==='home'?'800':'500')+';color:'+(win==='home'?'var(--tx)':'var(--mu)')+'">'+h.name+'</div>'
@@ -7411,7 +7407,6 @@ function openScoreEdit(id){
     +'<div style="font-size:1.3rem;color:var(--mu);margin-top:1.2rem">-</div>'
     +'<div><span class="lbl" style="text-align:center;display:block">'+a.name+'</span><input id="se_a" type="number" min="0" value="'+(m.awayGoals||0)+'" style="text-align:center;font-size:1.4rem;font-weight:900;padding:.22rem"/></div>'
     +'</div>'
-    +'<div class="field" style="margin-bottom:.6rem"><span class="lbl">Penaltı Kazananı</span><select id="se_p"><option value="">Yok</option><option value="home"'+(m.penaltyWinner==='home'?' selected':'')+'>'+h.name+' (Ev)</option><option value="away"'+(m.penaltyWinner==='away'?' selected':'')+'>'+a.name+' (Dep)</option></select></div>'
     +'<div class="g2"><button class="btn bg" onclick="saveScore(\''+id+'\',true)"> Oynandı</button><button class="btn bgh" onclick="saveScore(\''+id+'\',false)"> Taslak</button></div>'
   , 'openScoreEdit');
 }
@@ -7475,7 +7470,7 @@ function saveScore(id,played){
   // oynanmamışsa) bir match_end olayı da ekleniyor.
   var wasAlreadyPlayed=!!m.played;
   m.homeGoals=Number(qs('se_h').value)||0; m.awayGoals=Number(qs('se_a').value)||0;
-  var pen=qs('se_p').value; m.penaltyWinner=pen||undefined;
+  delete m.penaltyWinner; delete m.penaltyScore;   // (2026-11-03-E) ligde penaltı kazananı yok
   if(played){m.played=true;m.isLive=false;}
   if(played&&!wasAlreadyPlayed){
     m.events=m.events||[];
@@ -8094,8 +8089,8 @@ function getManagedLiveMatch(){
 }
 function getManagedLiveOrPenaltyMatch(){
   var sel=window._activeLivePanelMatchId;
-  if(sel&&S.matches[sel]&&(S.matches[sel].isLive||S.matches[sel].inPenalties))return S.matches[sel];
-  return Object.values(S.matches||{}).find(function(m){return m.isLive||m.inPenalties;});
+  if(sel&&S.matches[sel]&&S.matches[sel].isLive)return S.matches[sel];
+  return Object.values(S.matches||{}).find(function(m){return m.isLive;});
 }
 function getAllLiveMatches(){
   return Object.values(S.matches||{}).filter(function(m){return m.isLive;});
@@ -8118,9 +8113,9 @@ function startLive(){
   if(!m.referee)warnings.push('Hakem bilgisi girilmemiş');
 
   function doStart(){
-    m.isLive=true;m.homeGoals=0;m.awayGoals=0;m.minute=0;m.isHalftime=false;m.half=0;m.hadExtraTime=false;m.hadExtraHalf=false;m.inPenalties=false;
+    m.isLive=true;m.homeGoals=0;m.awayGoals=0;m.minute=0;m.isHalftime=false;m.half=0;
     m.events=[{type:'match_start',team:'',player:'',player2:'',min:0,id:uid()}];
-    m.penalties={homeShots:'',awayShots:'',homeNames:'',awayNames:''};
+    delete m.penalties; delete m.penaltyWinner; delete m.penaltyScore;   // (2026-11-03-E) penaltı atışı yok
     // HATA DÜZELTMESİ (kritik, kullanıcı bildirdi: "canlı maç başlatılamıyor, puan tablosu
     // bunu görmüyor"): Önceden bu işlem TÜM lig verisini kaydeden ağır save() çağrısına
     // bağlıydı ve HİÇ hata yakalama (.catch) yoktu - save() başarısız olursa "canlı" bilgisi
@@ -8163,7 +8158,6 @@ var _et='goal',_eteam='home';
 
 function openLivePanel(){
   var live=getManagedLiveMatch();if(!live)return;
-  if(live.inPenalties){openPenPanel();return;}
   buildLivePanel(live);
   qs('liveOv').classList.add('on');
 }
@@ -8207,7 +8201,6 @@ function switchActiveLiveMatch(matchId){
   window._activeLivePanelMatchId=matchId;
   var m=S.matches[matchId];
   if(!m)return;
-  if(m.inPenalties){openPenPanel();return;}
   buildLivePanel(m);
 }
 
@@ -8215,7 +8208,7 @@ function buildLivePanel(live){
   var h=(S.teams||{})[live.homeId]||{},a=(S.teams||{})[live.awayId]||{};
   var isHT=live.isHalftime||false;
   var min=(live.minute||0);
-  var phLabel=isHT?'':live.hadExtraTime?' Uzatma':min+"'";
+  var phLabel=isHT?'':min+"'";
   var evs=(live.events||[]).slice(-4).reverse();
   var evHtml=evs.map(function(e){
   var pTxt=e.type==='sub'?(e.player||'?')+(e.player2?' → '+e.player2:''):e.type==='free_comment'?(' '+(e.text||'')):e.player||'';
@@ -9846,11 +9839,9 @@ function setMin(){var live=getManagedLiveMatch();if(!live)return;live.minute=Num
 function halfTime(){
   var live=getManagedLiveMatch();if(!live)return;
   live.htHomeGoals=live.homeGoals||0;live.htAwayGoals=live.awayGoals||0;
-  var endingHalf=(!live.hadExtraTime&&(live.half||0)===0)?1:(!live.hadExtraTime&&live.half===1)?2:(live.hadExtraTime&&!live.hadExtraHalf)?3:4;
+  var endingHalf=((live.half||0)===0)?1:2;   // (2026-11-03-E) lig maçında yalnızca iki devre (30 dk uzatma devreleri kaldırıldı)
   if(endingHalf===1){live.half=1;live.minute=45;}
-  else if(endingHalf===2){live.half=2;live.minute=90;}
-  else if(endingHalf===3){live.hadExtraHalf=true;live.half=3;live.minute=105;}
-  else{live.half=4;live.minute=120;}
+  else{live.half=2;live.minute=90;}
   live.isHalftime=true;
   // ÖNEMLİ KÖK SEBEP DÜZELTMESİ: devre arası durumu (half/minute/isHalftime) artık HEMEN
   // kaydedilir, uzatma süresi diyaloğu açılmadan önce. Önceden bu değişiklikler sadece
@@ -10043,134 +10034,22 @@ function endMatch(){
       });
     });return;
   }
-  if(!live.hadExtraTime){
-    dlg('','Uzatma','Skor berabere. Uzatmaya gidilsin mi?','Evet','dop').then(function(ok){
-      if(!ok){
-        proceedWithExtraTimeCheck(live,function(){
-          live.isLive=false;live.played=true;if(_liveTimer){clearInterval(_liveTimer);_liveTimer=null;}live.events=live.events||[];live.events.push({type:'match_end',team:'',player:'',player2:'',min:live.minute||90,id:uid()});live._needsPredictionScoring=true;safeSetMatch(live.id,live,function(){closeLivePanel();renderLive();renderScores();toast(' Beraberlik');save().catch(function(_e){DiagSil('endMatch',_e);});},function(e){toast(' Kaydetme hatası, tekrar deneyin: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
-        });
-        return;
-      }
-      live.hadExtraTime=true;live.isHalftime=false;live.minute=90;safeSetMatch(live.id,live,function(){buildLivePanel(live);toast(' Uzatma başladı');save().catch(function(_e){DiagSil('endMatch',_e);});},function(e){toast(' Kaydetme hatası, tekrar deneyin: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
-    });
-  }else{
-    // KULLANICI TALEBİ: Canlı maçta penaltılar SADECE Kupa Ağacı ve Grup Tabloları
-    // formatlarında aktiftir - klasik lig formatında beraberlik geçerli sonuçtur, penaltı
-    // sorusu hiç sorulmaz, maç direkt beraberlikle biter.
-    var _fmt=(S.lgConfig&&S.lgConfig.format)||'league';
-    if(_fmt!=='cup'&&_fmt!=='group'){
-      live.isLive=false;live.played=true;if(_liveTimer){clearInterval(_liveTimer);_liveTimer=null;}
-      live.events=live.events||[];live.events.push({type:'match_end',team:'',player:'',player2:'',min:live.minute||90,id:uid()});
-      live._needsPredictionScoring=true;
-      safeSetMatch(live.id,live,function(){closeLivePanel();renderLive();renderScores();toast(' Maç beraberlikle bitti (lig formatında penaltı yok)');save().catch(function(_e){DiagSil('endMatch',_e);});},function(e){toast(' Kaydetme hatası, tekrar deneyin: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
-      return;
-    }
-    dlg('','Penaltılar','Uzatmada da beraberlik. Penaltılara gidilsin mi?','Evet','dop').then(function(ok){
-      if(!ok){
-        proceedWithExtraTimeCheck(live,function(){
-          live.isLive=false;live.played=true;if(_liveTimer){clearInterval(_liveTimer);_liveTimer=null;}live.events=live.events||[];live.events.push({type:'match_end',team:'',player:'',player2:'',min:live.minute||120,id:uid()});live._needsPredictionScoring=true;safeSetMatch(live.id,live,function(){closeLivePanel();renderLive();renderScores();toast(' Beraberlik');save().catch(function(_e){DiagSil('endMatch',_e);});},function(e){toast(' Kaydetme hatası, tekrar deneyin: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
-        });
-        return;
-      }
-      live.inPenalties=true;live.isHalftime=false;if(!live.penalties)live.penalties={homeShots:'',awayShots:'',homeNames:'',awayNames:''};
-      if(_liveTimer){clearInterval(_liveTimer);_liveTimer=null;}
-      safeSetMatch(live.id,live,function(){closeLivePanel();openPenPanel();save().catch(function(_e){DiagSil('endMatch',_e);});},function(e){toast(' Kaydetme hatası, tekrar deneyin: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
-    });
-  }
+  /* KUPA AĞACI KALINTISI KALDIRILDI (2026-11-03-E, kullanıcı: "kupa ağacından lige sıçramış, tamamen kaldır; lig maçları 30 dakikalık
+     uzatmalara, oradan penaltılara gidemez; maç berabere biterse iki takım da 1 puan alır"). Önceden beraberlikte "Uzatmaya gidilsin mi?"
+     soruluyor, kayıtlı lig formatı eski 'cup' değerinde kaldığı için uzatmadan sonra penaltı paneli de açılıyordu. Artık berabere maç
+     (2. yarı uzatma dakikası sorulduktan sonra) doğrudan beraberlikle biter. */
+  proceedWithExtraTimeCheck(live,function(){
+    live.isLive=false;live.played=true;if(_liveTimer){clearInterval(_liveTimer);_liveTimer=null;}
+    live.events=live.events||[];live.events.push({type:'match_end',team:'',player:'',player2:'',min:live.minute||90,id:uid()});
+    live._needsPredictionScoring=true;
+    safeSetMatch(live.id,live,function(){closeLivePanel();renderLive();renderScores();toast(' Maç berabere bitti - iki takıma 1 puan');save().catch(function(_e){DiagSil('endMatch',_e);});},function(e){toast(' Kaydetme hatası, tekrar deneyin: '+(e&&e.message?e.message:'bağlantı sorunu'),'er');});
+  });
 }
 
 // ── PENALTY ──
 var PC={'KL':'#f59e0b','STP1':'#60a5fa','STP2':'#60a5fa','SĞB':'#60a5fa','SLB':'#60a5fa','GÖ':'#34d399','DOS':'#34d399','OOS':'#34d399','MOS':'#34d399','SĞO':'#34d399','SLO':'#34d399','SĞK':'#a78bfa','SLK':'#a78bfa','SF':'#f87171','GF':'#f87171','SLA':'#f87171','SĞA':'#f87171'};
 
-function openPenPanel(){var live=getManagedLiveOrPenaltyMatch();if(!live)return;buildPenPanel(live);qs('penOv').classList.add('on');}
-function closePenPanel(){qs('penOv').classList.remove('on');}
-
-function buildPenPanel(live){
-  var h=(S.teams||{})[live.homeId]||{},a=(S.teams||{})[live.awayId]||{};
-  var p=live.penalties||{};
-  var hs=p.homeShots||'',as_=p.awayShots||'';
-  var hSc=hs.split('').filter(function(c){return c==='y';}).length;
-  var aSc=as_.split('').filter(function(c){return c==='y';}).length;
-  var hN=(p.homeNames||'').split('|').filter(Boolean);
-  var aN=(p.awayNames||'').split('|').filter(Boolean);
-
-  function dots(shots,names){var o='';shots.split('').forEach(function(c,i){var pn=names[i]?names[i].split(' ').pop():'';o+='<div style="display:inline-flex;flex-direction:column;align-items:center;margin:0 .04rem"><span style="font-size:.95rem">'+(c==='y'?'':'')+'</span>'+(pn?'<span style="font-size:.38rem;color:'+(c==='y'?'#4ade80':'#f87171')+';max-width:24px;overflow:hidden;white-space:nowrap">'+pn+'</span>':'')+'</div>';});var empty=shots.length<5?'<span style="font-size:.95rem;opacity:.2">'+(''.repeat(5-shots.length))+'</span>':'';return o+empty;}
-
-  function checkWin(){var hl=hs.length,al=as_.length;if(hl<5||al<5){var rh=5-hl,ra=5-al;if(hSc+rh<aSc)return 'away';if(aSc+ra<hSc)return 'home';if(hl===5&&al===5){if(hSc>aSc)return 'home';if(aSc>hSc)return 'away';}return null;}if(hl===al){if(hSc>aSc)return 'home';if(aSc>hSc)return 'away';}return null;}
-  var winner=checkWin();
-
-  var teamId=_penTeam==='home'?live.homeId:live.awayId;
-  var sq=(S.teams[teamId]||{}).squad||{};
-  var players=[].concat(sq.starting||[],sq.bench||[]).filter(function(p2){return p2&&p2.name;});
-  var plHtml='';
-  if(players.length){
-    plHtml='<div style="display:flex;flex-wrap:wrap;gap:.18rem;max-height:80px;overflow-y:auto;margin-bottom:.4rem">';
-    plHtml+='<button class="pp-b" data-pn="" style="background:rgba(124,58,237,.18);border:1.5px solid var(--ac);border-radius:20px;padding:.14rem .4rem;font-size:.62rem;font-weight:700;color:#c084fc;cursor:pointer">— Seç —</button>';
-    players.forEach(function(pl){var c=PC[pl.position]||'var(--br)';plHtml+='<button class="pp-b" data-pn="'+pl.name+'" style="background:var(--s3);border:1.5px solid '+c+';border-radius:20px;padding:.14rem .4rem;font-size:.62rem;font-weight:700;color:var(--tx);cursor:pointer">'+(pl.position?'<span style="font-size:.5rem;color:'+c+'">'+pl.position+'</span> ':'')+pl.name.split(' ').pop()+'</button>';});
-    plHtml+='</div>';
-  }else{plHtml='<input id="penFree" placeholder="Oyuncu adı..." style="width:100%;font-size:.78rem;margin-bottom:.4rem"/>';}
-
-  var tBtns=['home','away'].map(function(side){
-    var isA=_penTeam===side; var tn=side==='home'?h.name:a.name; var sh2=side==='home'?hs:as_; var sc=sh2.split('').filter(function(c){return c==='y';}).length;
-    return '<button onclick="setPenTeam(\''+side+'\')" style="background:'+(isA?'linear-gradient(135deg,rgba(16,185,129,.2),rgba(16,185,129,.08))':'rgba(255,255,255,.04)')+';border:'+(isA?'2px solid #10b981':'1.5px solid var(--br)')+';border-radius:11px;padding:.5rem .4rem;cursor:pointer;font-family:Outfit,sans-serif"><div style="font-size:.7rem;font-weight:900;color:'+(isA?'#4ade80':'var(--tx)')+';overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(side==='home'?'':'')+' '+tn+'</div><div style="font-size:.54rem;color:rgba(255,255,255,.4);margin-top:.1rem">'+sh2.length+' atış · '+sc+' gol</div>'+(isA?'<div style="font-size:.52rem;color:#15803d;font-weight:800;margin-top:.1rem"> ATACAK</div>':'')+'</button>';
-  }).join('');
-
-  qs('penBox').innerHTML=
-    '<div style="background:linear-gradient(135deg,#1e1033,#2d1b69);padding:.8rem .95rem;border-radius:18px 18px 0 0;display:flex;align-items:center;justify-content:space-between"><div><div style="font-size:.88rem;font-weight:900;color:#fff"> Penaltı Atışları</div><div style="font-size:.6rem;color:#a5b4fc;margin-top:.05rem">'+(hs.length+as_.length)+'/10 atış</div></div><button onclick="closePenPanel()" style="background:rgba(255,255,255,.08);border:none;border-radius:50%;width:25px;height:25px;color:rgba(255,255,255,.7);font-size:.88rem;cursor:pointer">✕</button></div>'
-    +'<div style="padding:.82rem .95rem">'
-    +'<div style="display:grid;grid-template-columns:1fr auto 1fr;gap:.4rem;margin-bottom:.75rem">'
-    +'<div style="text-align:center"><div style="font-size:.67rem;font-weight:800;color:#fff;margin-bottom:.25rem">'+h.name+'</div><div style="display:flex;justify-content:center;flex-wrap:wrap;gap:.04rem;min-height:32px">'+dots(hs,hN)+'</div><div style="font-size:1.6rem;font-weight:900;color:#15803d;margin-top:.12rem">'+hSc+'</div></div>'
-    +'<div style="text-align:center;padding-top:.15rem;font-size:.6rem;color:rgba(255,255,255,.2);font-weight:700">P</div>'
-    +'<div style="text-align:center"><div style="font-size:.67rem;font-weight:800;color:#fff;margin-bottom:.25rem">'+a.name+'</div><div style="display:flex;justify-content:center;flex-wrap:wrap;gap:.04rem;min-height:32px">'+dots(as_,aN)+'</div><div style="font-size:1.6rem;font-weight:900;color:#15803d;margin-top:.12rem">'+aSc+'</div></div>'
-    +'</div>'
-    +(winner
-      ?'<div style="background:rgba(16,185,129,.1);border:1.5px solid rgba(16,185,129,.3);border-radius:12px;padding:.7rem;text-align:center;margin-bottom:.6rem"><div style="font-size:1rem;font-weight:900;color:#15803d"> '+(winner==='home'?h.name:a.name)+'</div><div style="font-size:.62rem;color:rgba(255,255,255,.45);margin-top:.1rem">Penaltıları kazandı · '+hSc+'-'+aSc+'</div></div><button onclick="finishPen()" style="width:100%;background:linear-gradient(135deg,#059669,#10b981);border:none;border-radius:11px;padding:.62rem;color:#fff;font-size:.82rem;font-weight:900;cursor:pointer;font-family:Outfit,sans-serif"> Maçı Bitir</button>'
-      :'<div style="font-size:.57rem;color:var(--mu);font-weight:700;text-transform:uppercase;margin-bottom:.28rem">Kim Atacak?</div>'
-      +'<div class="g2" style="margin-bottom:.5rem">'+tBtns+'</div>'
-      +'<div style="font-size:.57rem;color:var(--mu);font-weight:700;text-transform:uppercase;margin-bottom:.2rem">Kullanan Oyuncu (isteğe bağlı)</div>'
-      +plHtml
-      +'<div class="g2" style="margin-bottom:.35rem"><button onclick="penShot(true)" style="background:linear-gradient(135deg,rgba(16,185,129,.18),rgba(16,185,129,.08));border:1.5px solid rgba(16,185,129,.45);border-radius:13px;padding:.65rem .4rem;cursor:pointer;font-family:Outfit,sans-serif"><div style="font-size:1.25rem;margin-bottom:.12rem"></div><div style="font-size:.8rem;font-weight:900;color:#15803d">GOL</div></button><button onclick="penShot(false)" style="background:linear-gradient(135deg,rgba(239,68,68,.18),rgba(239,68,68,.08));border:1.5px solid rgba(239,68,68,.45);border-radius:13px;padding:.65rem .4rem;cursor:pointer;font-family:Outfit,sans-serif"><div style="font-size:1.25rem;margin-bottom:.12rem"></div><div style="font-size:.8rem;font-weight:900;color:#f87171">KAÇTI</div></button></div>'
-      +'<button onclick="penUndo()" style="width:100%;background:transparent;border:1px solid var(--br);border-radius:9px;padding:.32rem;color:var(--mu);font-size:.7rem;font-weight:700;cursor:pointer;font-family:Outfit,sans-serif"> Son Atışı Geri Al</button>'
-    )+'</div>';
-
-  _penPlayer='';
-  var ppBtns=qs('penBox').querySelectorAll('.pp-b');
-  ppBtns.forEach(function(btn){
-    btn.onclick=function(){
-      ppBtns.forEach(function(b){b.style.background='var(--s3)';b.style.borderColor='var(--br)';b.style.color='var(--tx)';});
-      btn.style.background='rgba(124,58,237,.2)';btn.style.borderColor='var(--ac)';btn.style.color='#c084fc';
-      _penPlayer=btn.dataset.pn||'';
-    };
-  });
-}
-
-function setPenTeam(t){_penTeam=t;var live=getManagedLiveOrPenaltyMatch();if(live)buildPenPanel(live);}
-function penShot(isGoal){
-  var live=getManagedLiveOrPenaltyMatch();if(!live)return;
-  if(!live.penalties)live.penalties={homeShots:'',awayShots:'',homeNames:'',awayNames:''};
-  var sk=_penTeam==='home'?'homeShots':'awayShots', nk=_penTeam==='home'?'homeNames':'awayNames';
-  var free=qs('penFree'); var pn=_penPlayer||(free?free.value.trim():'');
-  live.penalties[sk]=(live.penalties[sk]||'')+(isGoal?'y':'n');
-  live.penalties[nk]=(live.penalties[nk]||'')+pn+'|';
-  save().then(function(){buildPenPanel(live);});
-}
-function penUndo(){
-  var live=getManagedLiveOrPenaltyMatch();if(!live)return;
-  var p=live.penalties||{}, sk=_penTeam==='home'?'homeShots':'awayShots', nk=_penTeam==='home'?'homeNames':'awayNames';
-  if((p[sk]||'').length>0){p[sk]=p[sk].slice(0,-1);var ns=(p[nk]||'').split('|').filter(Boolean);ns.pop();p[nk]=ns.join('|')+(ns.length?'|':'');}
-  save().then(function(){buildPenPanel(live);});
-}
-function finishPen(){
-  var live=getManagedLiveOrPenaltyMatch();if(!live)return;
-  var p=live.penalties||{};
-  var hs=(p.homeShots||'').split('').filter(function(c){return c==='y';}).length;
-  var as_=(p.awayShots||'').split('').filter(function(c){return c==='y';}).length;
-  live.penaltyWinner=hs>as_?'home':'away'; live.penaltyScore=hs+'-'+as_;
-  live.isLive=false; live.inPenalties=false; live.played=true;
-  live.events=live.events||[];live.events.push({type:'match_end',team:'',player:'',player2:'',min:live.minute||120,id:uid()});
-  live._needsPredictionScoring=true;
-  save().then(function(){closePenPanel();renderLive();renderScores();var wn=((S.teams||{})[live[live.penaltyWinner+'Id']]||{}).name||live.penaltyWinner;toast(' '+wn+' penaltıları kazandı! ('+hs+'-'+as_+')');});
-}
+// (2026-11-03-E) Penaltı atışı paneli (openPenPanel/buildPenPanel/penShot/penUndo/finishPen) kupa ağacı kalıntısıydı; kaldırıldı.
 
 // ── KADRO ──
 // Pozisyon yakınlık haritası - değişiklik önerisi için
@@ -15405,7 +15284,7 @@ function loadLeague(){
   if(S.logoUrl&&!S.logoUrl.startsWith('data:'))qs('lgLogoUrl').value=S.logoUrl;
   updateLgLogo();updateTheme();
   var cfg=S.lgConfig||{};
-  if(qs('lgFormat'))qs('lgFormat').value=cfg.format||'league';
+  if(qs('lgFormat'))qs('lgFormat').value='league';   // (2026-11-03-E) kupa/grup formatı kaldırıldı; kayıtlı eski 'cup' değeri lig sayılır
   if(qs('lgWinPts'))qs('lgWinPts').value=cfg.winPts||3;
   if(qs('lgDrawPts'))qs('lgDrawPts').value=cfg.drawPts||1;
   renderRankNoteList();
@@ -15456,14 +15335,11 @@ function loadLeague(){
   if(psel){psel.innerHTML='<option value="">Seç...</option>'+Object.values(S.teams||{}).map(function(t){return '<option value="'+t.id+'">'+t.name+'</option>';}).join('');}
   renderPenaltyList();
   onFormatChange();
-  renderGroupList();
 }
 
 // ── FORMAT DEĞİŞİMİ ──
 var FORMAT_DESC={
-  league:'Takımlar sezon boyunca birbirleriyle oynar, en çok puan toplayan şampiyon olur.',
-  cup:'Seçilen takımlar tek/çift maç usulü eşleşir, kazananlar turnuva ağacında ilerler. Eşitlikte uzatma (15+15 dk) ve gerekirse penaltı oynanır.',
-  group:'Takımlar gruplara ayrılır (A, B, C...). Grup maçları bitince sıralama belirlenir, en az 2 grup olur. Sonrasında eleme aşamasına geçilir; uzatma ve penaltı gerekebilir.'
+  league:'Takımlar sezon boyunca birbirleriyle oynar, en çok puan toplayan şampiyon olur. Berabere biten maçta iki takım da 1 puan alır; uzatma ve penaltı yoktur.'
 };
 // NOT: Kupa Ağacı/Grup Tabloları yapısı (quickStartCup/quickStartGroups dahil) kullanıcı
 // talebi üzerine TAMAMEN kaldırıldı - ileride sıfırdan yeniden inşa edilecek.
@@ -16467,9 +16343,6 @@ function toggleVoiceAnnounceType(cat){
 function onFormatChange(){
   var fmt=qs('lgFormat')?qs('lgFormat').value:'league';
   var desc=qs('formatDesc');if(desc)desc.textContent=FORMAT_DESC[fmt]||'';
-  var cupCard=qs('cupCard'),groupCard=qs('groupCard');
-  if(cupCard)cupCard.style.display=fmt==='cup'?'block':'none';
-  if(groupCard)groupCard.style.display=fmt==='group'?'block':'none';
 }
 async function updateLgLogoPreview(){
   const prev=document.getElementById('lgLogoBox');
@@ -16536,66 +16409,13 @@ window.setTheme=async function(theme){
 // ═══════════════════════════════════════════
 // GRUP + ELEME MOTORU
 // ═══════════════════════════════════════════
-function openGroupSetup(){
-  var teams=Object.values(S.teams||{});
-  var gCount=Number(qs('groupCount')?qs('groupCount').value:2);
-  if(gCount<2){toast('En az 2 grup gerekli','er');return;}
-  if(teams.length<gCount*2){toast('Her grupta en az 2 takım olmalı','er');return;}
-  var letters='ABCDEFGH';
-  var groupHtml=teams.map(function(t,i){
-    return '<div style="display:flex;align-items:center;gap:.5rem;padding:.3rem 0"><span style="flex:1;font-size:.76rem;font-weight:700">'+t.name+'</span><select data-tid="'+t.id+'" class="grp-sel" style="width:80px;font-size:.74rem">'+Array.from({length:gCount},function(_,g){return '<option value="'+letters[g]+'">'+letters[g]+' Grubu</option>';}).join('')+'</select></div>';
-  }).join('');
-  openSheet(' Grupları Oluştur',
-    '<div style="font-size:.7rem;color:var(--mu);margin-bottom:.6rem">Her takıma bir grup atayın</div>'
-    +groupHtml
-    +'<button class="btn bp" onclick="saveGroups()" style="width:100%;margin-top:.6rem"> Grupları Kaydet</button>'
-  , 'openGroupSetup');
-}
 
-function saveGroups(){
-  var groups={};
-  document.querySelectorAll('.grp-sel').forEach(function(sel){
-    var g=sel.value;
-    if(!groups[g])groups[g]=[];
-    groups[g].push(sel.dataset.tid);
-  });
-  S.groups=groups;
-  S.groupStage='active'; // active | advancing | done
-  logAction(' Gruplar oluşturuldu ('+Object.keys(groups).length+' grup)');
-  save().then(function(){closeSheet();renderGroupList();toast(' Gruplar kaydedildi');});
-}
 
-function renderGroupList(){
-  var el=qs('groupList');if(!el)return;
-  if(!S.groups||!Object.keys(S.groups).length){el.innerHTML='<div style="font-size:.72rem;color:var(--mu);padding:.5rem 0">Henüz grup oluşturulmadı</div>';return;}
-  var teams=S.teams||{};
-  el.innerHTML=Object.keys(S.groups).sort().map(function(g){
-    var tids=S.groups[g];
-    return '<div style="margin-bottom:.5rem"><div style="font-size:.66rem;font-weight:800;color:var(--mu2);margin-bottom:.25rem">'+g+' Grubu ('+tids.length+' takım)</div>'
-      +tids.map(function(tid){return '<div style="font-size:.72rem;padding:.15rem 0">• '+((teams[tid]||{}).name||'?')+'</div>';}).join('')
-      +'</div>';
-  }).join('');
-}
 
-function openGroupAdvance(){
-  if(!S.groups||!Object.keys(S.groups).length){toast('Önce grupları oluşturun','er');return;}
-  var teams=S.teams||{};
-  var html='<div style="font-size:.72rem;color:var(--mu);margin-bottom:.6rem;line-height:1.5">Her gruptan eleme aşamasına geçecek takımları işaretleyin.</div>';
-  Object.keys(S.groups).sort().forEach(function(g){
-    var tids=S.groups[g];
-    // Bu gruptaki takımları puan tablosuna göre sırala
-    var groupMatches={};
-    Object.values(S.matches||{}).forEach(function(m){if(tids.indexOf(m.homeId)>=0&&tids.indexOf(m.awayId)>=0)groupMatches[m.id]=m;});
-    var standings=calcGroupStandings(tids,groupMatches);
-    html+='<div style="margin-bottom:.6rem"><div style="font-size:.68rem;font-weight:800;margin-bottom:.3rem">'+g+' Grubu</div>';
-    standings.forEach(function(s,i){
-      html+='<label style="display:flex;align-items:center;gap:.5rem;padding:.25rem 0;font-size:.74rem"><input type="checkbox" class="adv-chk" data-tid="'+s.id+'" '+(i<2?'checked':'')+'/> '+(i+1)+'. '+s.name+' ('+s.P+'P)</label>';
-    });
-    html+='</div>';
-  });
-  html+='<button class="btn by" onclick="doGroupAdvance()" style="width:100%;margin-top:.5rem"> Seçilenleri Eleme Aşamasına Geçir</button>';
-  openSheet(' Eleme Aşamasına Geçiş', html, 'openGroupAdvance');
-}
+
+
+
+
 
 function calcGroupStandings(tids,matchesObj){
   var m={};
@@ -16609,20 +16429,7 @@ function calcGroupStandings(tids,matchesObj){
   return Object.values(m).sort(function(a,b){return b.P-a.P||b.AV-a.AV||b.AG-a.AG;});
 }
 
-function doGroupAdvance(){
-  var advancing=[];
-  document.querySelectorAll('.adv-chk:checked').forEach(function(chk){advancing.push({id:chk.dataset.tid});});
-  if(advancing.length<2){toast('En az 2 takım seçmelisiniz','er');return;}
-  dlg('','Eleme Aşamasına Geç','Seçilen '+advancing.length+' takım ile turnuva ağacı oluşturulacak.','Geç','dop').then(function(ok){
-    if(!ok)return;
-    // NOT: Kupa Ağacı altyapısı kaldırıldığı için grup aşamasından sonraki eleme turu
-    // artık otomatik oluşturulmuyor - admin, ilerleyen takımlar için maçları manuel ekler.
-    var savedTeams=S.teams;
-    S.groupStage='done';
-    logAction(' Grup aşaması tamamlandı, eleme başladı ('+advancing.length+' takım)');
-    save().then(function(){closeSheet();renderGroupList();toast(' Grup aşaması tamamlandı');});
-  });
-}
+
 
 function saveLgSettings(){
   if(!S.lgConfig)S.lgConfig={};
@@ -28894,7 +28701,7 @@ window.saveBulkScores = async function(wrap) {
 
   var APP='adm';                 // 'pt' (Puan Tablosu) | 'adm' (Admin Paneli)
   var APP_LABEL='Admin Paneli';
-  var MODULES=[{"id": "adm_nav", "label": " Gezinme & Yetki", "desc": "Sekme geçişleri, rol kısıtlamaları, sayfa açma/kapama", "fns": ["showTab", "openSheet", "closeSheet", "sheetGoBack", "applyRoleRestrictions", "myAllowedTabs", "myAllowedSubperms", "hasSubperm", "redirectToFirstAllowedTabIfNeeded", "_safeRender", "_updateSheetBackBtn"]}, {"id": "adm_league", "label": " Lig & Sezon", "desc": "Lig ekleme/silme, sezon geçişi, arşiv, yedekleme, şablonlar", "fns": ["loadLeague", "addLeague", "doAddLeagueConfirmed", "deleteLeague", "switchLeague", "saveLeague", "saveLgSettings", "saveEditLeagueName", "openArchive", "doArchiveSeason", "doRestoreArchive", "shrinkArchive", "openNewSeasonFlow", "doNewSeasonTransition", "doNewSeasonTransitionConfirmed", "finishLeague", "reactivateLeague", "exportBackup", "downloadLeagueBackup", "handleRestoreBackup", "openSeasonTemplates", "saveSeasonTemplate", "deleteSeasonTemplate", "applyRulesTemplate", "saveLeagueRules", "fillLeagueRulesTemplate", "buildCarriedLeagueSettings", "carryVisitorsAndChat", "checkBackupReminder", "openLeagueQrCode", "updateLeagueQr"]}, {"id": "adm_teams", "label": " Takımlar & Oyuncular", "desc": "Takım/oyuncu ekleme-düzenleme, kalıcı takım havuzu, kadro", "fns": ["renderTeams", "addTeam", "deleteTeam", "openEditTeam", "saveEditTeam", "_renderTeamEditSheet", "addPlayer", "delPlayer", "openKadro", "bindKadroInputs", "setTeamFormation", "openPermanentTeams", "renderPermanentTeamsSheet", "addPermanentTeamToCurrentLeague", "deletePermanentTeam", "openEditPermanentTeam", "openEditPermanentTeamFull", "savePermanentTeam", "openAddTeamFromPermanent", "openCopyToPermanent", "doCopyToPermanent", "loadTeamLogo", "confirmBulkDeleteTeams", "toggleAllTeamCheckboxes", "extractTeamSyncFields", "setSyncBadge", "removeMascot"]}, {"id": "adm_fixture", "label": " Fikstür", "desc": "Maç ekleme/düzenleme/silme, otomatik fikstür, tarih doldurma, gruplar", "fns": ["renderMatches", "addMatch", "deleteMatch", "openEditMatch", "saveEditMatch", "autoFixture", "autoFillFixtureDates", "autoFillStadium", "openBulkDeleteFixture", "confirmBulkDeleteFixture", "bulkDeleteWeek", "doBulkDeleteWeek", "toggleAllFixtureCheckboxes", "postponeMatch", "doPostpone", "openGroupSetup", "saveGroups", "renderGroupList", "calcGroupStandings", "openGroupAdvance", "doGroupAdvance", "openSwapPicker", "doSwap", "openPoolSwapPicker", "doPoolSwap", "sortWeekKeys", "safeSetMatch", "addRefereeToPool", "deleteReferee", "openRefereePool", "renderRefereePoolSheet", "renderRefStats"]}, {"id": "adm_scores", "label": " Skorlar", "desc": "Skor girişi, toplu skor, sıfırlama, uzatma/penaltı, sıralama notları", "fns": ["renderScores", "saveScore", "openScoreEdit", "openBulkScore", "saveBulk", "resetMatchScore", "confirmBulkResetScores", "toggleAllResetCheckboxes", "openManualExtraTime", "saveManualExtraTime", "promptExtraTimeMinutes", "confirmExtraTime", "skipExtraTime", "proceedWithExtraTimeCheck", "openManualRank", "saveManualRank", "addRankNote", "removeRankNote", "openEditRankNote", "saveEditRankNote", "renderRankNoteList", "computeSimpleStandingsOrder", "awardPredictionPointsUsingFreshData"]}, {"id": "adm_live", "label": " Canlı Yönetimi", "desc": "Canlı maç paneli, olaylar, penaltı, kutlama videosu", "fns": ["renderLive", "buildLivePanel", "openLivePanel", "closeLivePanel", "startLive", "endMatch", "halfTime", "resumeMatch", "forceStopLive", "quickStartLive", "selectMatchForLive", "switchActiveLiveMatch", "addEvent", "deleteEvent", "sortLiveEvents", "qGoal", "cancelGoal", "applyPenalty", "removePenalty", "reducePenalty", "buildPenPanel", "openPenPanel", "closePenPanel", "penShot", "penUndo", "finishPen", "setPenTeam", "renderLivePicker", "showLiveStartBtn", "getManagedLiveMatch", "getManagedLiveOrPenaltyMatch", "generateCelebrationVideo", "generateCelebrationContent", "drawCelebrationFrame", "shareCelebrationToChat", "makeConfetti", "setEvType", "setEvTeam", "pickEvPlayer", "pickEvPlayer2", "renderEvPlPicker"]}, {"id": "adm_chat", "label": " Sohbet Yönetimi", "desc": "Geliştirici sohbeti, mesaj gönderme, moderasyon, tepkiler", "fns": ["openAdminChatScreen", "closeAdminChatScreen", "renderDevReplyMatchComments", "renderAdminChatBubble", "highlightMatch", "sendDevReply", "adminToggleReaction", "adminToggleGenericPin", "adminDeleteGenericComment", "saveAdminEditedComment", "startAdminEditComment", "devReplyToMessage", "cancelDevReplyTo", "jumpToAdminChatMessage", "jumpToNextPinnedMessageAdmin", "resolveAdminReplyTargetId", "getAllAdminChatFlat", "loadPastSeasonCommentsAdmin", "openDevReplyMatchPicker", "selectDevReplyMatchTag", "cleanupAllUnpinnedMessages", "deleteGeneralChatMessage", "renderGeneralChatModList", "handleDevReplyPhoto", "handleDevReplyVideo", "uploadDevReplyVideoFile", "openAdminVideoTrimmer", "confirmAdminVideoTrim", "cancelAdminVideoTrim", "trimAdminVideoClientSide", "requestAdmTrimWakeLock", "releaseAdmTrimWakeLock", "admFormatSecondsHuman", "updateAdminTrimRangeHint", "renderDevReplyMediaPreview", "adminShowReactorListPopup", "showSeenByPopupAdmin", "broadcastAdminTyping", "startAdminTypingListener"]}, {"id": "adm_moderation", "label": " Moderasyon & Şikayetler", "desc": "Şikayet çözümü, kullanıcı susturma, taraftar duvarı moderasyonu", "fns": ["renderReportsList", "resolveReport", "bulkRejectAllReports", "quickMuteReportedUser", "toggleMuteVisitor", "renderFanWallModList", "deleteFanWallMsgAdmin", "renderFeedbackList", "markFeedbackReviewed", "bulkMarkAllFeedbackReviewed", "openReplyToFeedback", "saveFeedbackReply", "devReplyApplyPenalty", "adminDownloadDataUrl"]}, {"id": "adm_users", "label": " Kullanıcılar & Yetkiler", "desc": "Ziyaretçi yönetimi, admin hesapları, izinler, şifre sıfırlama", "fns": ["renderVisitorList", "filterVisitorList", "openVisitorDetail", "openVisitorDetailByKey", "renderVisitorDetailContent", "deleteVisitorAccount", "startVisitorLiveTimers", "renderAdminAccounts", "addAdminAccount", "delAdminAccount", "openEditAdminPerms", "saveEditedAdminPerms", "renderNewAdmPermGrid", "changeMasterPassword", "loadMasterPasswordConfig", "getEffectiveMasterPassword", "renderPasswordResetList", "sendTempPassword", "adminForgotPassword", "doLogin", "doLogout", "openUserPointsViewer"]}, {"id": "adm_premium", "label": " Premium Yönetimi", "desc": "Premium istekleri, kodlar, fiyatlar, yazı tipi/emoji paketleri", "fns": ["renderPremiumRequestList", "openApprovePremiumRequest", "denyPremiumRequest", "updatePremiumReqBadges", "dismissPendingReqBanner", "generatePremiumCode", "revokePremiumCode", "renderPremiumCodeList", "cleanupExpiredPremiumCodes", "openPremiumPricesManager", "setPremiumPrice", "setPremiumDurMode", "setPremiumRealUnit", "setPremiumRedeemUnit", "cleanOrphanPremiumPrices", "restartPremiumSale", "startAdminSaleCountdown", "openPremiumFontManager", "toggleCustomFontPremiumStatus", "openReactionPacksManager", "openReactionPackEditor", "saveReactionPackDraft", "deleteReactionPack", "addEmojiToReactionPackDraft", "removeEmojiFromReactionPackDraft", "openPointsSystemManager", "savePointsConfigDefault", "togglePointsSystemEnabled"]}, {"id": "adm_theme", "label": " Tema & Tasarım", "desc": "Tema editörü, renk üretici, giriş ekranı teması, arka planlar", "fns": ["openThemeManager", "openThemeEditor", "saveThemeDraft", "updateTheme", "updateThemePreview", "deleteCustomTheme", "autoGenerateThemes", "autoGenerateThemesFromColors", "openColorBasedThemeGenerator", "runColorSearch", "searchColor", "openColorSearch", "applyColorSearchResult", "extractPaletteFromImage", "openBgThemeSheet", "handleBgThemeUpload", "removeBgTheme", "saveBgThemeFilters", "resetBgThemeFilters", "openLoginThemeSheet", "handleLoginThemeUpload", "removeLoginTheme", "applyLoginThemeToPreview", "renderLoginThemePreview", "setLoginThemeFocus", "syncLoginThemeFocusUI", "handleLoginThemeUploadLight", "removeLoginThemeUrlLight", "saveLoginThemeUrlLight", "openCardStyleSheet", "selectCardStyle", "toggleSplitCard", "openStandingsBgTemplateSheet", "selectStandingsBgTemplateStyle", "toggleStandingsBgTemplate", "debouncedSaveStandingsBgTemplate", "openAddCustomFontEditor", "saveCustomFont", "deleteCustomFont", "previewUrlFont"]}, {"id": "adm_layout", "label": " Düzen & Sıralama", "desc": "Sayfa düzeni editörü, menü sıralaması, sekme yönetimi", "fns": ["openPageLayoutEditor", "renderPageLayoutEditor", "savePageLayout", "resetPageLayout", "movePageLayoutCard", "movePageLayoutCardToTab", "addCustomPageTab", "renameCustomPageTab", "deleteCustomPageTab", "ensureCustomTabDom", "ensureAllCustomTabsDom", "initPageLayoutSystem", "openAdminMenuOrderEditor", "renderAdminMenuOrderList", "saveAdminMenuGroups", "addAdminMenuGroup", "deleteAdminMenuGroup", "renameAdminMenuGroup", "moveAdminMenuGroup", "moveAdminMenuItemInGroup", "moveAdminMenuItemToGroup", "openPtSettingsOrderEditor", "renderPtSettingsOrderList", "movePtSettingsSection", "renderNavOrderList", "moveNavTab", "resetNavOrder", "renderAdminMenuButtons"]}, {"id": "adm_notify", "label": " Bildirim Gönderimi", "desc": "Kullanıcıya bildirim, duyuru, kilometre taşı, anket yayını", "fns": ["openSendUserNotification", "sendUserNotification", "openNotifyUserPicker", "renderNotifyUserPickerList", "toggleNotifyUserSelection", "publishAnnouncement", "previewAnnouncement", "clearAnnouncement", "sendMilestone", "fillMilestone", "setMilestoneChannel", "createPoll", "closePoll", "broadcastPollResult", "removePollVote", "renderPollAdmin"]}, {"id": "adm_ticker", "label": " Canlı Şerit Yönetimi", "desc": "Şerit duyuruları, akış hızı/sırası, şerit logosu, skor animasyonu ayarları", "fns": ["insertTickerPlaceholder", "updateTickerCustomLogoPreview", "clearTickerCustomLogo", "onTickerLogoSizeInput", "setTickerLogoSize", "updateTickerLogoSize", "addTickerAnnouncement", "deleteTickerAnnouncement", "setTickerOrder", "onTickerSpeedInput", "setTickerSpeed", "updateTickerSpeedButtons", "updateTickerOrderButtons", "renderTickerScoreAnimGrid", "setTickerScoreAnim", "renderTickerAnnList"]}, {"id": "adm_settings", "label": " Ayarlar & Sistem", "desc": "Genel ayarlar, bakım modu, sponsor, GIF kataloğu, sürüm geçmişi", "fns": ["saveGlobalAdminSetting", "renderMaintenanceSettings", "saveMaintenanceSettings", "toggleMaintenanceMode", "writeMaintenanceToDb", "isMaintenanceActiveNow", "openMaintenanceUserPicker", "addMaintenanceAllowedUserFromPicker", "removeMaintenanceAllowedUser", "scheduleAdminMaintenanceBoundary", "renderSponsorAdmin", "addSponsorEntry", "removeSponsor", "saveSponsorSettings", "setSponsorField", "toggleSponsorPlacement", "renderVideoLinkAdmin", "promptNewVideoCategory", "closeCatPrompt", "confirmCatPrompt", "openAdminTvScreen", "closeAdminTvScreen", "setAdminTvTab", "addVideoLinkEntry", "removeVideoLink", "saveVideoLinkSettings", "setVideoLinkField", "triggerVideoLinkFileUpload", "uploadVideoLinkFile", "triggerVideoLinkLogoUpload", "uploadVideoLinkLogo", "compressLogoImage", "removeVideoLinkLogo", "openChannelPool", "renderChannelPoolSheet", "openCreateChannelPoolEntry", "openEditChannelPoolEntry", "triggerChannelPoolLogoUpload", "saveChannelPoolEntry", "deleteChannelPoolEntry", "sendChannelPoolEntryToTv", "extractOwnSupabasePath", "deleteOwnSupabaseFileIfAny", "openGifCatalogManager", "addGifToCatalog", "deleteGifFromCatalog", "searchGifsForCatalog", "handleGifCatalogUpload", "toggleGifCatalogEnabled", "renderGifCatalogList", "openAddVersionForm", "saveNewVersion", "openEditVersionForm", "saveEditVersion", "deleteVersionEntry", "renderVersionMgmtList", "saveVersionHistory", "exportVersionHistory", "saveAppBranding", "loadAppBranding", "openEventEmojiSettings", "saveEventEmojiSettings", "resetEventEmojiSettings", "openStatCardEmojiSettings", "resetStatCardEmojiSettings", "openMinNameCharsSheet", "openMatchPredictionSettings", "setMatchPredictionPoints", "toggleMatchPredictionsDisabled"]}, {"id": "adm_data", "label": " Veri & Bağlantı", "desc": "Firebase dinleyicileri, kayıt (log), veri yazma güvenliği", "fns": ["listenToLeague", "startMatchesDirectListener", "stopMatchesDirectListener", "save", "sanitizeForFirebase", "stripHeavyMediaFromMatches", "logAction", "renderActionLog", "clearLog", "generateSeasonReport", "downloadSeasonReportImg", "cleanupVisitorActionLogs", "init"]}, {"id": "adm_saha", "label": " Saha Sekmesi", "desc": "Takım ataması ve seçimi, kullanıcı onayı, saha maç süresi, reklam panoları, bakım izinleri, fikstür sıfırlama", "fns": ["renderSaha", "renderSahaAtama", "sahaTakimAta", "takimKilitleriniTamamla", "sahaTakimSecimiDegistir", "sahaTakimSecimiCiz", "sahaSecimSifirla", "sahaTumSecimleriSifirla", "kullaniciOnayDegistir", "onayCiz", "bakimSahaIzinDegistir", "sahaSureKaydet", "sahaSureKaldir", "sahaSureDurumYaz", "reklamEkle", "reklamYaziEkle", "reklamDosya", "reklamSil", "reklamTemizle", "reklamListeCiz", "sahaFiksturSifirlaVeOlustur"]}, {"id": "adm_ui", "label": " Yerleşim, Sıkışma & Titreme", "desc": "Yazı kesilmesi/sıkışması, okunamayacak küçük yazı, sayfa yatay taşması, küçük dokunma hedefi, ekran titremesi ve içerik zıplaması", "fns": []}, {"id": "adm_silent", "label": " Sessizce Yutulan Hatalar", "desc": "Kodun görmezden geldiği (boş yakalama bloğuna düşen) hataların tamamı - hangi fonksiyonda, hangi sebeple", "fns": []}];
+  var MODULES=[{"id": "adm_nav", "label": " Gezinme & Yetki", "desc": "Sekme geçişleri, rol kısıtlamaları, sayfa açma/kapama", "fns": ["showTab", "openSheet", "closeSheet", "sheetGoBack", "applyRoleRestrictions", "myAllowedTabs", "myAllowedSubperms", "hasSubperm", "redirectToFirstAllowedTabIfNeeded", "_safeRender", "_updateSheetBackBtn"]}, {"id": "adm_league", "label": " Lig & Sezon", "desc": "Lig ekleme/silme, sezon geçişi, arşiv, yedekleme, şablonlar", "fns": ["loadLeague", "addLeague", "doAddLeagueConfirmed", "deleteLeague", "switchLeague", "saveLeague", "saveLgSettings", "saveEditLeagueName", "openArchive", "doArchiveSeason", "doRestoreArchive", "shrinkArchive", "openNewSeasonFlow", "doNewSeasonTransition", "doNewSeasonTransitionConfirmed", "finishLeague", "reactivateLeague", "exportBackup", "downloadLeagueBackup", "handleRestoreBackup", "openSeasonTemplates", "saveSeasonTemplate", "deleteSeasonTemplate", "applyRulesTemplate", "saveLeagueRules", "fillLeagueRulesTemplate", "buildCarriedLeagueSettings", "carryVisitorsAndChat", "checkBackupReminder", "openLeagueQrCode", "updateLeagueQr"]}, {"id": "adm_teams", "label": " Takımlar & Oyuncular", "desc": "Takım/oyuncu ekleme-düzenleme, kalıcı takım havuzu, kadro", "fns": ["renderTeams", "addTeam", "deleteTeam", "openEditTeam", "saveEditTeam", "_renderTeamEditSheet", "addPlayer", "delPlayer", "openKadro", "bindKadroInputs", "setTeamFormation", "openPermanentTeams", "renderPermanentTeamsSheet", "addPermanentTeamToCurrentLeague", "deletePermanentTeam", "openEditPermanentTeam", "openEditPermanentTeamFull", "savePermanentTeam", "openAddTeamFromPermanent", "openCopyToPermanent", "doCopyToPermanent", "loadTeamLogo", "confirmBulkDeleteTeams", "toggleAllTeamCheckboxes", "extractTeamSyncFields", "setSyncBadge", "removeMascot"]}, {"id": "adm_fixture", "label": " Fikstür", "desc": "Maç ekleme/düzenleme/silme, otomatik fikstür, tarih doldurma, gruplar", "fns": ["renderMatches", "addMatch", "deleteMatch", "openEditMatch", "saveEditMatch", "autoFixture", "autoFillFixtureDates", "autoFillStadium", "openBulkDeleteFixture", "confirmBulkDeleteFixture", "bulkDeleteWeek", "doBulkDeleteWeek", "toggleAllFixtureCheckboxes", "postponeMatch", "doPostpone", "calcGroupStandings", "openSwapPicker", "doSwap", "openPoolSwapPicker", "doPoolSwap", "sortWeekKeys", "safeSetMatch", "addRefereeToPool", "deleteReferee", "openRefereePool", "renderRefereePoolSheet", "renderRefStats"]}, {"id": "adm_scores", "label": " Skorlar", "desc": "Skor girişi, toplu skor, sıfırlama, uzatma/penaltı, sıralama notları", "fns": ["renderScores", "saveScore", "openScoreEdit", "openBulkScore", "saveBulk", "resetMatchScore", "confirmBulkResetScores", "toggleAllResetCheckboxes", "openManualExtraTime", "saveManualExtraTime", "promptExtraTimeMinutes", "confirmExtraTime", "skipExtraTime", "proceedWithExtraTimeCheck", "openManualRank", "saveManualRank", "addRankNote", "removeRankNote", "openEditRankNote", "saveEditRankNote", "renderRankNoteList", "computeSimpleStandingsOrder", "awardPredictionPointsUsingFreshData"]}, {"id": "adm_live", "label": " Canlı Yönetimi", "desc": "Canlı maç paneli, olaylar, penaltı, kutlama videosu", "fns": ["renderLive", "buildLivePanel", "openLivePanel", "closeLivePanel", "startLive", "endMatch", "halfTime", "resumeMatch", "forceStopLive", "quickStartLive", "selectMatchForLive", "switchActiveLiveMatch", "addEvent", "deleteEvent", "sortLiveEvents", "qGoal", "cancelGoal", "applyPenalty", "removePenalty", "reducePenalty", "renderLivePicker", "showLiveStartBtn", "getManagedLiveMatch", "getManagedLiveOrPenaltyMatch", "generateCelebrationVideo", "generateCelebrationContent", "drawCelebrationFrame", "shareCelebrationToChat", "makeConfetti", "setEvType", "setEvTeam", "pickEvPlayer", "pickEvPlayer2", "renderEvPlPicker"]}, {"id": "adm_chat", "label": " Sohbet Yönetimi", "desc": "Geliştirici sohbeti, mesaj gönderme, moderasyon, tepkiler", "fns": ["openAdminChatScreen", "closeAdminChatScreen", "renderDevReplyMatchComments", "renderAdminChatBubble", "highlightMatch", "sendDevReply", "adminToggleReaction", "adminToggleGenericPin", "adminDeleteGenericComment", "saveAdminEditedComment", "startAdminEditComment", "devReplyToMessage", "cancelDevReplyTo", "jumpToAdminChatMessage", "jumpToNextPinnedMessageAdmin", "resolveAdminReplyTargetId", "getAllAdminChatFlat", "loadPastSeasonCommentsAdmin", "openDevReplyMatchPicker", "selectDevReplyMatchTag", "cleanupAllUnpinnedMessages", "deleteGeneralChatMessage", "renderGeneralChatModList", "handleDevReplyPhoto", "handleDevReplyVideo", "uploadDevReplyVideoFile", "openAdminVideoTrimmer", "confirmAdminVideoTrim", "cancelAdminVideoTrim", "trimAdminVideoClientSide", "requestAdmTrimWakeLock", "releaseAdmTrimWakeLock", "admFormatSecondsHuman", "updateAdminTrimRangeHint", "renderDevReplyMediaPreview", "adminShowReactorListPopup", "showSeenByPopupAdmin", "broadcastAdminTyping", "startAdminTypingListener"]}, {"id": "adm_moderation", "label": " Moderasyon & Şikayetler", "desc": "Şikayet çözümü, kullanıcı susturma, taraftar duvarı moderasyonu", "fns": ["renderReportsList", "resolveReport", "bulkRejectAllReports", "quickMuteReportedUser", "toggleMuteVisitor", "renderFanWallModList", "deleteFanWallMsgAdmin", "renderFeedbackList", "markFeedbackReviewed", "bulkMarkAllFeedbackReviewed", "openReplyToFeedback", "saveFeedbackReply", "devReplyApplyPenalty", "adminDownloadDataUrl"]}, {"id": "adm_users", "label": " Kullanıcılar & Yetkiler", "desc": "Ziyaretçi yönetimi, admin hesapları, izinler, şifre sıfırlama", "fns": ["renderVisitorList", "filterVisitorList", "openVisitorDetail", "openVisitorDetailByKey", "renderVisitorDetailContent", "deleteVisitorAccount", "startVisitorLiveTimers", "renderAdminAccounts", "addAdminAccount", "delAdminAccount", "openEditAdminPerms", "saveEditedAdminPerms", "renderNewAdmPermGrid", "changeMasterPassword", "loadMasterPasswordConfig", "getEffectiveMasterPassword", "renderPasswordResetList", "sendTempPassword", "adminForgotPassword", "doLogin", "doLogout", "openUserPointsViewer"]}, {"id": "adm_premium", "label": " Premium Yönetimi", "desc": "Premium istekleri, kodlar, fiyatlar, yazı tipi/emoji paketleri", "fns": ["renderPremiumRequestList", "openApprovePremiumRequest", "denyPremiumRequest", "updatePremiumReqBadges", "dismissPendingReqBanner", "generatePremiumCode", "revokePremiumCode", "renderPremiumCodeList", "cleanupExpiredPremiumCodes", "openPremiumPricesManager", "setPremiumPrice", "setPremiumDurMode", "setPremiumRealUnit", "setPremiumRedeemUnit", "cleanOrphanPremiumPrices", "restartPremiumSale", "startAdminSaleCountdown", "openPremiumFontManager", "toggleCustomFontPremiumStatus", "openReactionPacksManager", "openReactionPackEditor", "saveReactionPackDraft", "deleteReactionPack", "addEmojiToReactionPackDraft", "removeEmojiFromReactionPackDraft", "openPointsSystemManager", "savePointsConfigDefault", "togglePointsSystemEnabled"]}, {"id": "adm_theme", "label": " Tema & Tasarım", "desc": "Tema editörü, renk üretici, giriş ekranı teması, arka planlar", "fns": ["openThemeManager", "openThemeEditor", "saveThemeDraft", "updateTheme", "updateThemePreview", "deleteCustomTheme", "autoGenerateThemes", "autoGenerateThemesFromColors", "openColorBasedThemeGenerator", "runColorSearch", "searchColor", "openColorSearch", "applyColorSearchResult", "extractPaletteFromImage", "openBgThemeSheet", "handleBgThemeUpload", "removeBgTheme", "saveBgThemeFilters", "resetBgThemeFilters", "openLoginThemeSheet", "handleLoginThemeUpload", "removeLoginTheme", "applyLoginThemeToPreview", "renderLoginThemePreview", "setLoginThemeFocus", "syncLoginThemeFocusUI", "handleLoginThemeUploadLight", "removeLoginThemeUrlLight", "saveLoginThemeUrlLight", "openCardStyleSheet", "selectCardStyle", "toggleSplitCard", "openStandingsBgTemplateSheet", "selectStandingsBgTemplateStyle", "toggleStandingsBgTemplate", "debouncedSaveStandingsBgTemplate", "openAddCustomFontEditor", "saveCustomFont", "deleteCustomFont", "previewUrlFont"]}, {"id": "adm_layout", "label": " Düzen & Sıralama", "desc": "Sayfa düzeni editörü, menü sıralaması, sekme yönetimi", "fns": ["openPageLayoutEditor", "renderPageLayoutEditor", "savePageLayout", "resetPageLayout", "movePageLayoutCard", "movePageLayoutCardToTab", "addCustomPageTab", "renameCustomPageTab", "deleteCustomPageTab", "ensureCustomTabDom", "ensureAllCustomTabsDom", "initPageLayoutSystem", "openAdminMenuOrderEditor", "renderAdminMenuOrderList", "saveAdminMenuGroups", "addAdminMenuGroup", "deleteAdminMenuGroup", "renameAdminMenuGroup", "moveAdminMenuGroup", "moveAdminMenuItemInGroup", "moveAdminMenuItemToGroup", "openPtSettingsOrderEditor", "renderPtSettingsOrderList", "movePtSettingsSection", "renderNavOrderList", "moveNavTab", "resetNavOrder", "renderAdminMenuButtons"]}, {"id": "adm_notify", "label": " Bildirim Gönderimi", "desc": "Kullanıcıya bildirim, duyuru, kilometre taşı, anket yayını", "fns": ["openSendUserNotification", "sendUserNotification", "openNotifyUserPicker", "renderNotifyUserPickerList", "toggleNotifyUserSelection", "publishAnnouncement", "previewAnnouncement", "clearAnnouncement", "sendMilestone", "fillMilestone", "setMilestoneChannel", "createPoll", "closePoll", "broadcastPollResult", "removePollVote", "renderPollAdmin"]}, {"id": "adm_ticker", "label": " Canlı Şerit Yönetimi", "desc": "Şerit duyuruları, akış hızı/sırası, şerit logosu, skor animasyonu ayarları", "fns": ["insertTickerPlaceholder", "updateTickerCustomLogoPreview", "clearTickerCustomLogo", "onTickerLogoSizeInput", "setTickerLogoSize", "updateTickerLogoSize", "addTickerAnnouncement", "deleteTickerAnnouncement", "setTickerOrder", "onTickerSpeedInput", "setTickerSpeed", "updateTickerSpeedButtons", "updateTickerOrderButtons", "renderTickerScoreAnimGrid", "setTickerScoreAnim", "renderTickerAnnList"]}, {"id": "adm_settings", "label": " Ayarlar & Sistem", "desc": "Genel ayarlar, bakım modu, sponsor, GIF kataloğu, sürüm geçmişi", "fns": ["saveGlobalAdminSetting", "renderMaintenanceSettings", "saveMaintenanceSettings", "toggleMaintenanceMode", "writeMaintenanceToDb", "isMaintenanceActiveNow", "openMaintenanceUserPicker", "addMaintenanceAllowedUserFromPicker", "removeMaintenanceAllowedUser", "scheduleAdminMaintenanceBoundary", "renderSponsorAdmin", "addSponsorEntry", "removeSponsor", "saveSponsorSettings", "setSponsorField", "toggleSponsorPlacement", "renderVideoLinkAdmin", "promptNewVideoCategory", "closeCatPrompt", "confirmCatPrompt", "openAdminTvScreen", "closeAdminTvScreen", "setAdminTvTab", "addVideoLinkEntry", "removeVideoLink", "saveVideoLinkSettings", "setVideoLinkField", "triggerVideoLinkFileUpload", "uploadVideoLinkFile", "triggerVideoLinkLogoUpload", "uploadVideoLinkLogo", "compressLogoImage", "removeVideoLinkLogo", "openChannelPool", "renderChannelPoolSheet", "openCreateChannelPoolEntry", "openEditChannelPoolEntry", "triggerChannelPoolLogoUpload", "saveChannelPoolEntry", "deleteChannelPoolEntry", "sendChannelPoolEntryToTv", "extractOwnSupabasePath", "deleteOwnSupabaseFileIfAny", "openGifCatalogManager", "addGifToCatalog", "deleteGifFromCatalog", "searchGifsForCatalog", "handleGifCatalogUpload", "toggleGifCatalogEnabled", "renderGifCatalogList", "openAddVersionForm", "saveNewVersion", "openEditVersionForm", "saveEditVersion", "deleteVersionEntry", "renderVersionMgmtList", "saveVersionHistory", "exportVersionHistory", "saveAppBranding", "loadAppBranding", "openEventEmojiSettings", "saveEventEmojiSettings", "resetEventEmojiSettings", "openStatCardEmojiSettings", "resetStatCardEmojiSettings", "openMinNameCharsSheet", "openMatchPredictionSettings", "setMatchPredictionPoints", "toggleMatchPredictionsDisabled"]}, {"id": "adm_data", "label": " Veri & Bağlantı", "desc": "Firebase dinleyicileri, kayıt (log), veri yazma güvenliği", "fns": ["listenToLeague", "startMatchesDirectListener", "stopMatchesDirectListener", "save", "sanitizeForFirebase", "stripHeavyMediaFromMatches", "logAction", "renderActionLog", "clearLog", "generateSeasonReport", "downloadSeasonReportImg", "cleanupVisitorActionLogs", "init"]}, {"id": "adm_saha", "label": " Saha Sekmesi", "desc": "Takım ataması ve seçimi, kullanıcı onayı, saha maç süresi, reklam panoları, bakım izinleri, fikstür sıfırlama", "fns": ["renderSaha", "renderSahaAtama", "sahaTakimAta", "takimKilitleriniTamamla", "sahaTakimSecimiDegistir", "sahaTakimSecimiCiz", "sahaSecimSifirla", "sahaTumSecimleriSifirla", "kullaniciOnayDegistir", "onayCiz", "bakimSahaIzinDegistir", "sahaSureKaydet", "sahaSureKaldir", "sahaSureDurumYaz", "reklamEkle", "reklamYaziEkle", "reklamDosya", "reklamSil", "reklamTemizle", "reklamListeCiz", "sahaFiksturSifirlaVeOlustur"]}, {"id": "adm_ui", "label": " Yerleşim, Sıkışma & Titreme", "desc": "Yazı kesilmesi/sıkışması, okunamayacak küçük yazı, sayfa yatay taşması, küçük dokunma hedefi, ekran titremesi ve içerik zıplaması", "fns": []}, {"id": "adm_silent", "label": " Sessizce Yutulan Hatalar", "desc": "Kodun görmezden geldiği (boş yakalama bloğuna düşen) hataların tamamı - hangi fonksiyonda, hangi sebeple", "fns": []}];
 
   var SLOW_MS=250;                   // bir fonksiyon bu süreyi aşarsa "yavaş" kaydı
   var MAX_LOCAL=200;                 // cihazda tutulan en fazla kayıt
