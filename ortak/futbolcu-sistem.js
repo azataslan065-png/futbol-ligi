@@ -57,9 +57,9 @@ function kart(p,p0,st,L,Vv,Ri,hx,hy,hz,po){var o=[0,0,0],off=0;for(var s=0;s<st.
  for(var j=i;j<i+w;j++){var q=j*3,x=rx+(p0[q]-rx)*L,y=ry+(p0[q+1]-ry)*L,z=rz+(p0[q+2]-rz)*L;if(Vv!==1){var v=Vv-1;x+=x*v*.14;y+=(y-1.68)*v*.24;z+=(z+.01)*v*.14}deform(p,x,y,z,o);var dx=o[0]-hx,dy=o[1]-hy,dz=o[2]-hz;po[q]=Ri[0]*dx+Ri[1]*dy+Ri[2]*dz;po[q+1]=Ri[3]*dx+Ri[4]*dy+Ri[5]*dz;po[q+2]=Ri[6]*dx+Ri[7]*dy+Ri[8]*dz}}off+=cnt}}
 /* ten dokusu: taban × ten rengi, varsa yüz fotoğrafı, sonra sakal/saç/kaş maskeleri */
 function ten(p,sak,W,base,m1,m2,har,fo,D){function h(c){return[parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)]}
- var R=h(p.ten),H=h(p.sac),d=p.beardD,bd=p.browD,sd=p.scalp,tr=R[0]/201,tg=R[1]/155,tb=R[2]/120,n=W*W*4,yg=p.yuzG==null?1:p.yuzG,fw=fo?fo.w:0,fh=fo?fo.h:0,fd=fo?fo.d:null,i;
+ var R=h(p.ten),H=h(p.sac),d=p.beardD,bd=p.browD,sd=p.scalp,tr=R[0]/201,tg=R[1]/155,tb=R[2]/120,n=W*W*4,yg=p.yuzG==null?1:p.yuzG,fw=fo?fo.w:0,fh=fo?fo.h:0,fd=fo?fo.d:null,i,yX=(p.yuzX||0)*.012,yY=(p.yuzY||0)*.012,yS=1+(p.yuzS||0)*.12,yR=(p.yuzR||0)*.14,yc=Math.cos(yR),ys=Math.sin(yR);
  for(i=0;i<n;i+=4){var a=base[i]*tr,g=base[i+1]*tg,b=base[i+2]*tb;
-  if(fd){var w0=har[i+2]/255*yg;if(w0>.01){if(w0>1)w0=1;var fx=(har[i]/255*.2-.1+.075)/.15,fy=(.065-(har[i+1]/255*.24-.14))/.19;if(fx>=0&&fx<1&&fy>=0&&fy<1){var k=((fy*fh|0)*fw+(fx*fw|0))*4,L=(base[i]*.3+base[i+1]*.59+base[i+2]*.11)/164,sh=L<.6?.6:L>1.05?1.05:L;a+=(fd[k]*sh-a)*w0;g+=(fd[k+1]*sh-g)*w0;b+=(fd[k+2]*sh-b)*w0}}}
+  if(fd){var w0=har[i+2]/255*yg;if(w0>.01){if(w0>1)w0=1;var hx=har[i]/255*.2-.1-yX,hy=har[i+1]/255*.24-.14+.03-yY,qx=(hx*yc+hy*ys)/yS,qy=(-hx*ys+hy*yc)/yS-.03,fx=(qx+.075)/.15,fy=(.065-qy)/.19;if(fx>=0&&fx<1&&fy>=0&&fy<1){var k=((fy*fh|0)*fw+(fx*fw|0))*4,L=(base[i]*.3+base[i+1]*.59+base[i+2]*.11)/164,sh=L<.6?.6:L>1.05?1.05:L;a+=(fd[k]*sh-a)*w0;g+=(fd[k+1]*sh-g)*w0;b+=(fd[k+2]*sh-b)*w0}}}
   var be=(m1[i]*sak[1]+m1[i+1]*sak[2]+m1[i+2]*sak[3])*d/255;if(be>.004){var k1=be>1?1:be;a+=(H[0]*.8-a)*k1;g+=(H[1]*.8-g)*k1;b+=(H[2]*.8-b)*k1}
   var f=m2[i+1]*sd/255;if(f>.004){var k2=f>1?1:f;a+=(H[0]*.85-a)*k2;g+=(H[1]*.85-g)*k2;b+=(H[2]*.85-b)*k2}
   var br=m2[i]*bd/255;if(br>.004){var k3=br>1?1:br;a+=(H[0]*.7-a)*k3;g+=(H[1]*.7-g)*k3;b+=(H[2]*.7-b)*k3}
@@ -91,7 +91,7 @@ const KLIP={Atak_Bekleme:'Bekleme',Kosu:'Koşu',Kosu_Geri:'Geri koşu',Top_Surme
 const TIP={İnce:{chest:-.5,waist:-.6,hips:-.3,armU:-.5,armF:-.4,thigh:-.5,calf:-.4,shoulder:-.3,neckT:-.4},Atletik:{},Güçlü:{chest:.7,waist:.2,shoulder:.6,armU:.7,armF:.5,thigh:.7,calf:.6,neckT:.6,hips:.2},Kısa_Tıknaz:{boy:170,legL:-.4,chest:.4,waist:.5,thigh:.5,neckT:.4,neckL:-.5}};
 
 var FS={C:C,AYAR:AYAR,VAR:VAR,SACLAR:SACLAR,SAKALLAR:SAKALLAR,TENLER:TENLER,SACR:SACR,GOZR:GOZR,KLIP:KLIP,TIP:TIP,TAB:'ortak/'};
-FS.varsayilan=function(){var p={},t,i;for(var k in VAR)p[k]=VAR[k];for(t in AYAR)for(i=0;i<AYAR[t].length;i++)p[AYAR[t][i].k]=AYAR[t][i].d;delete p.klip;p.yuzG=1;return p};
+FS.varsayilan=function(){var p={},t,i;for(var k in VAR)p[k]=VAR[k];for(t in AYAR)for(i=0;i<AYAR[t].length;i++)p[AYAR[t][i].k]=AYAR[t][i].d;delete p.klip;p.yuzG=1;p.yuzX=0;p.yuzY=0;p.yuzS=0;p.yuzR=0;return p};
 FS.farki=function(p){var d=FS.varsayilan(),o={};for(var k in d)if(k!=='klip'&&p[k]!==d[k]&&p[k]!==undefined)o[k]=p[k];if(p.yuzUrl)o.yuzUrl=p.yuzUrl;return o};
 FS.ac=function(g){var p=FS.varsayilan();if(g)for(var k in g)p[k]=g[k];return p};
 /* ---- veri ---- */
