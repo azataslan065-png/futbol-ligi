@@ -34,6 +34,9 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.Toast;
+import android.webkit.ConsoleMessage;
+import android.webkit.RenderProcessGoneDetail;
+import android.webkit.WebResourceResponse;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -64,11 +67,20 @@ public class Ana extends Activity {
         }
         kok = new FrameLayout(this);
         kok.setBackgroundColor(Color.parseColor("#0b0b14"));
-        w = new WebView(this);
-        w.setBackgroundColor(Color.parseColor("#0b0b14"));
-        kok.addView(w, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         setContentView(kok);
         if (BuildConfig.YATAY) gizle();
+        Teshis.baslat(this);
+        Teshis.yaz("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
+        kur();
+        w.loadUrl(BuildConfig.ADRES);      // (2026-11-06) restoreState kaldırıldı: sayfa her açılışta baştan yüklenir
+    }
+
+    private long yuklemeBas;
+    private int bosDeneme;
+    private void kur() {
+        w = new WebView(this);
+        w.setBackgroundColor(Color.parseColor("#0b0b14"));
+        kok.addView(w, 0, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         WebSettings s = w.getSettings();
         s.setJavaScriptEnabled(true);
@@ -88,12 +100,31 @@ public class Ana extends Activity {
 
         w.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return disari(r.getUrl()); }
-            @Override public void onPageFinished(WebView v, String u) { v.evaluateJavascript(YAMA, null); }
+            @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); Teshis.yaz("sayfa", "başladı", u); }
+            @Override public void onPageFinished(WebView v, String u) {
+                v.evaluateJavascript(YAMA, null);
+                Teshis.yaz("sayfa", "bitti " + (System.currentTimeMillis() - yuklemeBas) + " ms", u);
+                if (u != null && u.startsWith("http")) bosDenetle(v, 12000);
+            }
             @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
+                Teshis.yaz("ag-hata", e.getErrorCode() + " " + e.getDescription(), (r.isForMainFrame() ? "ANA " : "") + r.getUrl());
                 if (r.isForMainFrame()) v.loadDataWithBaseURL(BuildConfig.ADRES, HATA, "text/html", "utf-8", null);
+            }
+            @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse e) {
+                if (r.isForMainFrame() || e.getStatusCode() >= 500) Teshis.yaz("http", String.valueOf(e.getStatusCode()), r.getUrl().toString());
+            }
+            @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail d) {
+                // Sayfa motoru çökerse (ya da arka planda sistem kapatırsa) uygulama kapanmaz, sayfa yeniden kurulur.
+                Teshis.yaz("motor", d.didCrash() ? "çöktü" : "sistem kapattı", "");
+                if (v == w) { kok.removeView(w); w.destroy(); w = null; kur(); w.loadUrl(BuildConfig.ADRES); }
+                return true;
             }
         });
         w.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onConsoleMessage(ConsoleMessage m) {
+                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) Teshis.yaz("konsol", m.message(), m.sourceId() + ":" + m.lineNumber());
+                return false;
+            }
             @Override public void onShowCustomView(View v, CustomViewCallback g) {
                 if (tamEkran != null) { g.onCustomViewHidden(); return; }
                 tamEkran = v; tamEkranGeri = g;
@@ -144,7 +175,18 @@ public class Ana extends Activity {
                 Toast.makeText(this, "İndiriliyor: " + ad, Toast.LENGTH_SHORT).show();
             } catch (Exception e) { ac(Uri.parse(url)); }
         });
-        if (b != null) w.restoreState(b); else w.loadUrl(BuildConfig.ADRES);
+    }
+
+    // Sayfa yüklendiği halde ekranda hiçbir şey yoksa kaydedilir ve bir kez yeniden yüklenir.
+    private void bosDenetle(WebView v, long ms) {
+        h.postDelayed(() -> {
+            if (v != w || w == null) return;
+            w.evaluateJavascript("(function(){try{var b=document.body;if(!b)return 'govde-yok';var n=0;document.querySelectorAll('body *').forEach(function(e){var r=e.getBoundingClientRect();if(r.width>40&&r.height>20&&getComputedStyle(e).visibility!=='hidden'&&+getComputedStyle(e).opacity>0.05&&r.bottom>0&&r.top<innerHeight)n++});return n+'|'+(b.innerText||'').trim().length+'|'+document.readyState+'|'+innerWidth+'x'+innerHeight}catch(e){return 'hata '+e}})()", r -> {
+                Teshis.yaz("ekran", r, w == null ? "" : w.getUrl()); Teshis.gonder();
+                String x = r == null ? "" : r.replace("\"", "");
+                if ((x.startsWith("0|") || x.startsWith("govde")) && bosDeneme++ < 1) { Teshis.yaz("ekran", "boş: yeniden yükleniyor", ""); w.reload(); }
+            });
+        }, ms);
     }
 
     // true: uygulama dışında açılır (ya da hiç açılmaz)
@@ -173,7 +215,14 @@ public class Ana extends Activity {
     @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f && (BuildConfig.YATAY || tamEkran != null)) gizle(); }
     @Override public void onBackPressed() {
         if (tamEkran != null) { tamEkranKapat(); return; }
-        if (w.canGoBack()) w.goBack(); else super.onBackPressed();
+        // En başta geri: uygulama kapanmaz, arka plana alınır (tekrar açınca kaldığı yerden devam eder).
+        if (w.canGoBack()) w.goBack(); else moveTaskToBack(true);
+    }
+    @Override protected void onResume() { super.onResume(); if (w != null) w.onResume(); Teshis.yaz("on-plan", "", w == null ? "" : w.getUrl()); if (w != null && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
+    @Override protected void onDestroy() {
+        Teshis.yaz("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder();
+        if (w != null) { kok.removeView(w); w.destroy(); w = null; }   // eski sayfa arka planda açık kalmasın (iki oturum çakışırdı)
+        super.onDestroy();
     }
     @Override protected void onActivityResult(int k, int s, Intent d) {
         if (k == DOSYA && dosyaGeri != null) {
@@ -194,8 +243,7 @@ public class Ana extends Activity {
             bekleyenIzin = null;
         }
     }
-    @Override protected void onSaveInstanceState(Bundle b) { super.onSaveInstanceState(b); w.saveState(b); }
-    @Override protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); }
+    @Override protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); Teshis.gonder(); }
 
     private class Kopru {
         @JavascriptInterface public void kaydet(String ad, String tip, String b64) {
