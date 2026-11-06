@@ -37,5 +37,15 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     const cihaz = Object.values(D).filter(x => x && (x.sonGorulme || 0) > sinir);
     console.log('son 12 saatte görülen cihaz:', cihaz.length); cihaz.slice(0, 10).forEach(x => console.log('  ', x.sahaSurum || x.surum || '', x.marka || '', x.model || '', String(x.ua || '').slice(0, 110)));
   }
+
+  // (2026-11-06) APK kabuğundan gelen kayıtlar
+  for(const kok of ['test/', '']){
+    const L = await al(kok + 'diagnostics/logs', '?orderBy="$key"&limitToLast=1500') || {};
+    const A = Object.values(L).filter(x => x && /SahaApp|; wv\)/.test(String(x.ua || '')) && x.ts > Date.now() - 3 * 3600e3).sort((a, b) => a.ts - b.ts);
+    console.log('\n===== APK ' + (kok || 'KÖK') + ' kayıt: ' + A.length);
+    A.slice(-80).forEach(x => console.log(saat(x.ts), x.app, x.mod, x.kind, x.title, String(x.detail || '').slice(0, 300), '|', String(x.ua || '').slice(-60)));
+    const D = await al(kok + 'diagnostics/devices') || {};
+    Object.values(D).filter(x => x && /SahaApp|; wv\)/.test(String(x.ua || ''))).forEach(x => console.log('CIHAZ', saat(x.sonGorulme || 0), x.sahaSurum || x.surum || '', String(x.ua || '').slice(-90)));
+  }
 })().catch(e => { console.log('HATA ' + e.message); });
 // 1793481479
