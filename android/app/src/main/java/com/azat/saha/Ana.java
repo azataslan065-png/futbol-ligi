@@ -103,8 +103,8 @@ public class Ana extends Activity {
             @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); Teshis.yaz("sayfa", "başladı", u); }
             @Override public void onPageFinished(WebView v, String u) {
                 v.evaluateJavascript(YAMA, null);
-                Teshis.yaz("sayfa", "bitti " + (System.currentTimeMillis() - yuklemeBas) + " ms", u);
-                if (u != null && u.startsWith("http")) bosDenetle(v, 12000);
+                if (yuklemeBas > 0) { Teshis.yaz("sayfa", "bitti " + (System.currentTimeMillis() - yuklemeBas) + " ms", u);
+                    yuklemeBas = 0; if (u != null && u.startsWith("http")) bosDenetle(v, 12000); }
             }
             @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
                 Teshis.yaz("ag-hata", e.getErrorCode() + " " + e.getDescription(), (r.isForMainFrame() ? "ANA " : "") + r.getUrl());
@@ -178,8 +178,10 @@ public class Ana extends Activity {
     }
 
     // Sayfa yüklendiği halde ekranda hiçbir şey yoksa kaydedilir ve bir kez yeniden yüklenir.
+    private Runnable bekleyenDenetim;
     private void bosDenetle(WebView v, long ms) {
-        h.postDelayed(() -> {
+        if (bekleyenDenetim != null) h.removeCallbacks(bekleyenDenetim);
+        h.postDelayed(bekleyenDenetim = () -> { bekleyenDenetim = null;
             if (v != w || w == null) return;
             w.evaluateJavascript("(function(){try{var b=document.body;if(!b)return 'govde-yok';var n=0;document.querySelectorAll('body *').forEach(function(e){var r=e.getBoundingClientRect();if(r.width>40&&r.height>20&&getComputedStyle(e).visibility!=='hidden'&&+getComputedStyle(e).opacity>0.05&&r.bottom>0&&r.top<innerHeight)n++});return n+'|'+(b.innerText||'').trim().length+'|'+document.readyState+'|'+innerWidth+'x'+innerHeight}catch(e){return 'hata '+e}})()", r -> {
                 Teshis.yaz("ekran", r, w == null ? "" : w.getUrl()); Teshis.gonder();
