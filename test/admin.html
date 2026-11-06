@@ -3385,7 +3385,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-03-E';
+window.APP_BUILD='2026-11-06-A';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true, dosya:'admin', kap:function(){ return document.getElementById('loginWrap'); }, giris:function(){ var e = document.getElementById('loginWrap'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // yönetici geçebilir
@@ -11141,6 +11141,7 @@ function _havuzSatirHtml(id, o){
   }
   if(o.sahip) alt += '<button class="hv-dug satista" onclick="havuzKopyaSatisa(\''+id+'\')" title="Sahibinin kartına dokunulmaz">+ Yeni kart satışa</button>';
   alt += '<button class="hv-dug art" onclick="havuzArtirma(\''+id+'\')">⚖ '+(artAktif?'Artırmayı yönet':(o.sahip?'Yeni kart artırmaya':'Açık artırma'))+'</button>'
+    + '<button class="hv-dug '+(o.gorunum?'satista':'pasif')+'" onclick="gorunumAc(\''+id+'\')" title="Yüz, saç, sakal ve vücut">'+(o.gorunum?'● Görünüm':'○ Görünüm')+'</button>'
     + '<button class="hv-dug sil" onclick="havuzSil(\''+id+'\')" title="Havuzdan sil">Sil</button>';
   return '<div class="hv-s'+(artAktif?' art':'')+'"><div class="hv-ust">'+foto+'<div class="hv-ad"><b>'+escHtml(o.ad||'')+'</b><small>'+bilgi+'</small></div></div>'
     + '<div class="hv-alt">'+alt+'</div>'
@@ -11270,7 +11271,7 @@ function havuzArtirma(id){
    satışa çıkarılırken sahibi siliniyordu. Artık sahibinin kartına DOKUNULMAZ; aynı oyuncunun (ad, mevki, güç, fotoğraf) YENİ bir kartı
    oluşturulup satışa / açık artırmaya çıkar (bkz. BİRDEN FAZLA KEZ SATIŞA ÇIKARMA). */
 function _havuzKartKopya(o, fiyat){
-  return { ad:o.ad, mevki:o.mevki || 'SF', guc:o.guc || 50, hiz:o.hiz || null, sut:o.sut || null, pas:o.pas || null, foto:o.foto || null, ligTakimId:o.ligTakimId || null,
+  return { ad:o.ad, mevki:o.mevki || 'SF', guc:o.guc || 50, hiz:o.hiz || null, sut:o.sut || null, pas:o.pas || null, foto:o.foto || null, gorunum:o.gorunum || null, ligTakimId:o.ligTakimId || null,
     sahip:null, baslangic:false, alisFiyat:0, satista:true, fiyat:Math.max(0, Math.round(fiyat || o.fiyat || 0)), macSayisi:0, puanToplam:0, eklenmeTs:Date.now() };
 }
 /* ONARIM (2026-10-25-J): 2026-10-25-G/H/I sürümlerinde sahibi olan oyuncu açık artırmaya çıkarılınca kart sahibinden alınıyordu
@@ -11324,6 +11325,38 @@ function havuzSatisAcKapa(id){
   firebase.database().ref('oyuncuHavuzu/'+id+'/satista').set(!o.satista)
     .catch(function(){ toast(' Degistirilemedi','er'); });
 }
+/* FUTBOLCU GÖRÜNÜMÜ (2026-11-06, kullanıcı: "editör admin'e eklenecek, oyuncu satın alınınca sahada görünsün, yüz fotoğrafı düzenlenip
+   silinebilsin; bütün değişiklikleri yalnızca admin yapar"). Ayarlar oyuncuHavuzu/{id}/gorunum altında durur (yalnızca varsayılandan
+   farklı değerler). Oyuncu kadroya satın alınarak girer; saha.html kadrodaki oyuncuyu bu ayarlarla çizer. Yüz fotoğrafının tamamı
+   saklanmaz: hizalanmış küçük yüz kesiti Supabase'de oyuncu-yuz/ altında durur; silinince depodan da kaldırılır. Aynı oyuncunun
+   ikinci kartı aynı dosyayı kullanabilir: dosya ancak son kart bıraktığında silinir. Kod ortak/ içinde, panel açılınca yüklenir. */
+function _yuzBaskaKartta(url, id){ return Object.keys(_havuz || {}).some(function(k){ return k !== id && _havuz[k] && _havuz[k].gorunum && _havuz[k].gorunum.yuzUrl === url; }); }
+function _gorunumBetik(u){ return new Promise(function(ok, no){ var s = document.createElement('script'); s.src = u; s.onload = ok; s.onerror = function(){ no(new Error('dosya indirilemedi')); }; document.head.appendChild(s); }); }
+function gorunumAc(id){
+  var o = _havuz[id]; if(!o) return;
+  var hazir = window.FutbolcuEditor ? Promise.resolve() : _gorunumBetik('ortak/futbolcu-sistem.js?v=c7fe52d7').then(function(){ return _gorunumBetik('ortak/futbolcu-editor.js?v=59ee0e30'); });
+  hazir.then(function(){
+    FutbolcuEditor.ac({ ad:o.ad || 'Oyuncu', gorunum:o.gorunum || null, kaydet:function(d, blob, sil){ return _gorunumKaydet(id, d, blob, sil); } });
+  }).catch(function(e){ toast(' Editör açılamadı: ' + ((e && e.message) || ''), 'er'); });
+}
+function _gorunumKaydet(id, d, blob, sil){
+  var eski = ((_havuz[id] || {}).gorunum || {}).yuzUrl || null, once = Promise.resolve(eski);
+  if(blob){
+    if(!supabaseClient) return Promise.reject(new Error('dosya deposuna bağlanılamadı'));
+    var yol = 'oyuncu-yuz/' + (/\/test\//.test(location.pathname) ? 'test/' : '') + id + '-' + Date.now() + '.jpg';
+    once = supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET).upload(yol, blob, { contentType:'image/jpeg', cacheControl:'31536000', upsert:false }).then(function(r){
+      if(r.error) throw r.error;
+      return supabaseClient.storage.from(SUPABASE_VIDEO_BUCKET).getPublicUrl(yol).data.publicUrl;
+    });
+  } else if(sil) once = Promise.resolve(null);
+  return once.then(function(url){
+    if(url) d.yuzUrl = url; else delete d.yuzUrl;
+    return firebase.database().ref('oyuncuHavuzu/' + id + '/gorunum').set(Object.keys(d).length ? d : null).then(function(){
+      if(eski && eski !== url && !_yuzBaskaKartta(eski, id)) deleteOwnSupabaseFileIfAny(eski);
+      toast(' ' + ((_havuz[id] || {}).ad || '') + ' görünümü kaydedildi');
+    });
+  });
+}
 function havuzSil(id){
   var o = _havuz[id] || {};
   // Sahipli oyuncu silinirse kullanicinin kadrosunda bosluk kalir - once uyarilir.
@@ -11332,8 +11365,9 @@ function havuzSil(id){
     {baslik:'Oyuncuyu Sil', ikon:'', tehlikeli:true, tamamYazi:'Sil'})
     .then(function(ok){
       if(!ok) return;
+      var _yuz = o.gorunum && o.gorunum.yuzUrl;
       firebase.database().ref('oyuncuHavuzu/'+id).remove()
-        .then(function(){ toast(' Silindi'); })
+        .then(function(){ toast(' Silindi'); if(_yuz && !_yuzBaskaKartta(_yuz, id)) deleteOwnSupabaseFileIfAny(_yuz); })
         .catch(function(){ toast(' Silinemedi','er'); });
     });
 }

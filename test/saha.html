@@ -9614,6 +9614,7 @@ function lodGuncelle(kam, pencereH){
   }catch(e){ _sessiz(e, 'lodGuncelle', 'saha_grafik'); }
 }
 function _aktifModel(){
+  if(window._ozelZorla) return window._ozelZorla;                 // bkz. ÖZEL GÖRÜNÜM
   var R = window._sahaModeller || {};
   // 2026-09-28-Z: KÖK SEBEP (kullanıcı: "glb yüklememişsin" - telefonda hâlâ basit model):
   // detaylı model grafik ayarına bağlıydı; kayıtlı ayar "Düşük" (ya da eski 0 değeri) olan
@@ -9821,9 +9822,9 @@ function _lodGeo(g, sv, ix){
   if(g.boundingSphere) n.boundingSphere = g.boundingSphere.clone(); if(g.boundingBox) n.boundingBox = g.boundingBox.clone();
   return (_LOD_GEO[an] = n);
 }
-function _lodEkle(kopya, M){
+function _lodEkle(kopya, M, V2){
   try{
-    var V = window._LODV; if(!V || !M || M.ad !== 'detayli' || window.SAHA_COK_ZAYIF) return;
+    var V = V2 || window._LODV; if(!V || !M || (M.ad !== 'detayli' && !V2) || window.SAHA_COK_ZAYIF) return;
     var hedef = [];
     kopya.traverse(function(o){ if(o.isSkinnedMesh && !o.userData.lodSv && V.parca[o.name] && o.geometry && o.geometry.index) hedef.push(o); });
     if(!hedef.length) return;
@@ -9868,6 +9869,99 @@ function _lodSec(camera, eh, pxEsik){
     else if(L.aktif && px > pxEsik * 1.08) _lodUygula(L, false);
   }
 }
+/* ÖZEL GÖRÜNÜM (2026-11-06, kullanıcı: "admin şekillendirsin, oyuncu satın alınınca sahada görünsün"). Kadrodaki oyuncunun havuz kaydında
+   gorunum varsa oyuncu yeni modelle (ortak/saha_ozel.glb) çizilir; yoksa mevcut model aynen kalır. Kadroya oyuncu yalnızca satın alınarak
+   girdiği için ek satış kontrolü gerekmez. Hesap bir Web Worker'da yapılır (oyun donmaz), sonuç hazır olunca oyuncu yerinde değişir;
+   model veya hesap gelmezse oyuncu saha modeliyle oynamaya devam eder. Çok zayıf cihazda (SAHA_COK_ZAYIF) kullanılmaz: orada figürler
+   tek çizim çağrısına birleştirilir ve bellek sınırlıdır. Uzak ve gölge seviyeleri ortak/saha_ozel_lod.bin'den gelir. */
+var _OZEL = { soz:null, M:null, V:null, LOD:null, B0:null, FS:null };
+function _ozelHazir(){
+  if(_OZEL.soz) return _OZEL.soz;
+  _OZEL.soz = new Promise(function(ok, no){ var s = document.createElement('script'); s.src = 'ortak/futbolcu-sistem.js?v=c7fe52d7'; s.onload = ok; s.onerror = function(){ no(new Error('futbolcu-sistem.js indirilemedi')); }; document.head.appendChild(s); })
+  .then(function(){
+    var FS = _OZEL.FS = window.FutbolcuSistem;
+    return Promise.all([FS.veri(), new Promise(function(ok, no){ new THREE.GLTFLoader().load('ortak/saha_ozel.glb?v=' + FS.GLBV, ok, undefined, no); }),
+      fetch('ortak/saha_ozel_lod.bin?v=' + FS.LODV).then(function(r){ return r.ok ? r.arrayBuffer() : null; }).catch(function(){ return null; })]);
+  }).then(function(r){
+    _OZEL.V = r[0];
+    var M = _OZEL.M = _modelHazirla(r[1], 'ozel');
+    if(window._sahaModeller) delete window._sahaModeller.ozel;   // yalnızca özel oyuncular kullanır, _aktifModel'e girmez
+    var b = r[2];
+    if(b){ var n = new DataView(b).getUint32(0, true), bas = JSON.parse(new TextDecoder().decode(new Uint8Array(b, 4, n))), ix = new Uint16Array(b, 4 + n), parca = {};
+      Object.keys(bas.parca || {}).forEach(function(ad){ var P = bas.parca[ad], o = {}; Object.keys(P).forEach(function(sv){ o[sv] = ix.subarray(P[sv][0], P[sv][0] + P[sv][1]); }); parca[ad] = o; });
+      _OZEL.LOD = { parca:parca }; }
+    var B0 = {};
+    M.kok.traverse(function(o){ if(o.isSkinnedMesh) o.skeleton.bones.forEach(function(k, i){ if(!B0[k.name]){ var B = o.skeleton.boneInverses[i].clone().invert(); B0[k.name] = { B:B, p:new THREE.Vector3().setFromMatrixPosition(B), Rinv:B.clone().setPosition(0, 0, 0).invert(), pos0:k.position.clone() }; } }); });
+    _OZEL.B0 = B0;
+    var sg = new THREE.Texture(_OZEL.V.img.sacg); sg.flipY = false; sg.encoding = THREE.sRGBEncoding; sg.needsUpdate = true; _OZEL.sacDoku = sg;
+    var tl = new THREE.Texture(_OZEL.V.img.tel); tl.flipY = false; tl.encoding = THREE.sRGBEncoding; tl.needsUpdate = true; _OZEL.telDoku = tl;
+    return true;
+  }).catch(function(e){ _OZEL.soz = null; try{ DiagSaha('ozelModel', e instanceof Error ? e : new Error(String(e)), { tur:'uyari', anlami:'Özel oyuncu görünümü yüklenemedi; oyuncular saha modeliyle oynuyor.' }); }catch(x){} throw e; });
+  return _OZEL.soz;
+}
+function _ozelKayit(p){ var o = p && p.havuzId && typeof magazaHavuz !== 'undefined' && magazaHavuz[p.havuzId]; return (o && o.gorunum) || null; }
+function ozelGorunumUygula(){
+  try{
+    if(window.SAHA_COK_ZAYIF || typeof players === 'undefined' || !players.some(_ozelKayit)) return;
+    players.forEach(function(p){ ozelOyuncuGecir(p); });
+  }catch(e){ _sessiz(e, 'ozelGorunumUygula', 'saha_oyun'); }
+}
+function ozelOyuncuGecir(p){
+  try{
+    if(window.SAHA_COK_ZAYIF) return;
+    var g = _ozelKayit(p); if(!g) return;
+    var id = p.havuzId, an = id + '|' + JSON.stringify(g);
+    if(p.obj && p.obj.userData && p.obj.userData.ozelAnahtar === an) return;
+    _ozelHazir().then(function(){ return _OZEL.FS.hesapla(_OZEL.M, _OZEL.V, g); }).then(function(s){
+      if(p.havuzId !== id || !p.obj || p.degAnim) return;        // bu arada oyuncu değişti
+      _ozelGec(p, s, an);
+    }).catch(function(e){ _sessiz(e, 'ozelOyuncuGecir', 'saha_oyun'); });
+  }catch(e){ _sessiz(e, 'ozelOyuncuGecir2', 'saha_oyun'); }
+}
+function _ozelGec(p, s, an){
+  var M = _OZEL.M, mat = p.gk ? (p.team === 0 ? MATS.ka : MATS.kb) : (p.team === 0 ? MATS.a : MATS.b), yeni, P = s.p;
+  window._ozelZorla = M;
+  try{ yeni = makePlayer(mat); } finally { window._ozelZorla = null; }
+  if(!yeni.userData || !yeni.userData.hazirModel) return;
+  var kopya = yeni.children[0], B0 = _OZEL.B0, kemik = {}, parca = [], sil = [];
+  kopya.traverse(function(o){ if(o.isBone) kemik[o.name] = o; if(o.isSkinnedMesh){ if(o.material.alphaTest > 0) sil.push(o); else parca.push(o); } });
+  sil.forEach(function(o){ if(o.parent) o.parent.remove(o); });
+  var yy = {}; Object.keys(s.j).forEach(function(n){ yy[n] = new THREE.Vector3(s.j[n][0], s.j[n][1], s.j[n][2]); });
+  var v = new THREE.Vector3(), q = new THREE.Vector3();
+  Object.keys(B0).forEach(function(n){ var k = kemik[n], b = B0[n]; if(!k || !k.parent || !k.parent.isBone || !B0[k.parent.name] || !yy[n]) return;
+    var pb = B0[k.parent.name]; v.copy(yy[n]).sub(yy[k.parent.name]).sub(q.copy(b.p).sub(pb.p)).applyMatrix4(pb.Rinv); k.position.copy(b.pos0).add(v); });
+  var ten = new THREE.DataTexture(new Uint8Array(s.ten.buffer), 512, 512, THREE.RGBAFormat); ten.flipY = false; ten.encoding = THREE.sRGBEncoding; ten.generateMipmaps = true; ten.minFilter = THREE.LinearMipmapLinearFilter; ten.magFilter = THREE.LinearFilter; ten.needsUpdate = true;
+  var goz = new THREE.DataTexture(_OZEL.FS.goz(64, P.goz), 64, 64, THREE.RGBAFormat); goz.flipY = false; goz.encoding = THREE.sRGBEncoding; goz.needsUpdate = true;
+  var sacR = new THREE.Color(P.sac).convertSRGBToLinear();
+  parca.forEach(function(o){
+    var e = o.geometry, g = new THREE.BufferGeometry();
+    Object.keys(e.attributes).forEach(function(k){ g.setAttribute(k, e.attributes[k]); }); g.setIndex(e.index);
+    if(s.pos[o.name]){ g.setAttribute('position', new THREE.BufferAttribute(s.pos[o.name], 3)); g.setAttribute('normal', new THREE.BufferAttribute(s.nor[o.name], 3)); }
+    o.geometry = g;
+    o.skeleton.boneInverses = o.skeleton.bones.map(function(k){ var b = B0[k.name]; return b.B.clone().setPosition(yy[k.name]).invert(); });
+    var m = o.material, ad = String(m.name || '').toLowerCase();
+    if(ad === 'ten'){ m.map = ten; m.color.setRGB(1, 1, 1); m.needsUpdate = true; }
+    else if(ad === 'goz'){ m.map = goz; m.needsUpdate = true; }
+    else if(ad === 'sac'){ m.map = _OZEL.sacDoku; m.color.copy(sacR); m.needsUpdate = true; o.visible = P['saçStil'] !== 'kazima'; }
+    else if(ad === 'krampon' && P.krampon !== _OZEL.FS.VAR.krampon){ m.color.set(P.krampon).convertSRGBToLinear(); }
+  });
+  var hd = kemik.Head, telM = [];
+  if(hd){
+    var tm = new THREE.MeshStandardMaterial({ map:_OZEL.telDoku, alphaTest:.42, side:THREE.DoubleSide, roughness:.9, metalness:0 }); tm.color.copy(sacR).multiplyScalar(1.7);
+    if(s.sac) telM.push(_OZEL.FS.sacMesh(_OZEL.V.sac[P['saçStil']], tm, hd, s.sac));
+    if(s.sakal){ var bm = _OZEL.FS.sacMesh(_OZEL.V.sac._sakal, tm, hd, s.sakal), B = _OZEL.FS.SAKALLAR[P.sakal] || _OZEL.FS.SAKALLAR.yok, reg = _ozelReg(), ix = bm.geometry.index.array, tut = [];
+      for(var c = 0; c < reg.length; c++) if(B[reg[c] + 1] > .2) for(var k = 0; k < 12; k++) tut.push(ix[c * 12 + k]);
+      bm.geometry.setIndex(tut); telM.push(bm); }
+  }
+  var sk = (P.boy / 100) / s.ust; kopya.scale.setScalar(sk); kopya.position.y = (yy.Hips.y - B0.Hips.p.y) * sk;
+  _lodEkle(kopya, M, _OZEL.LOD);
+  if(kopya.userData.lod2) telM.forEach(function(m){ kopya.userData.lod2.gizle.push(m); });
+  yeni.userData.modelAd = (_aktifModel() || {}).ad; yeni.userData.ozelAnahtar = an;
+  yeni.position.copy(p.obj.position); yeni.rotation.copy(p.obj.rotation); yeni.visible = p.obj.visible;
+  scene.remove(p.obj); scene.add(yeni); p.obj = yeni;
+  try{ etiketYaz(p); sahaNoKaptanUygula(p); }catch(e){ _sessiz(e, 'ozelEtiket', 'saha_oyun'); }
+}
+function _ozelReg(){ if(_OZEL.reg) return _OZEL.reg; var b = atob(_OZEL.V.sac._sakal.r), u = new Uint8Array(b.length); for(var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i); return (_OZEL.reg = u); }
 function insanModelKopyala(m, M, renk){
   try{
     M = M || _aktifModel();
@@ -20641,7 +20735,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-03-E';
+window.APP_BUILD='2026-11-06-A';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -21480,6 +21574,7 @@ function kadrolariUygula(){
       liste.forEach(function(p){ p._girdi = false; sahaNoKaptanUygula(p); etiketYaz(p); });
     });
     sahaKaptanMorali();
+    ozelGorunumUygula();
   }catch(e){_sessiz(e,'kadrolariUygula:2922','saha_oyun');}
 }
 /* Seçilmiş forma numarası ve kaptan bandı (B13, B14): havuz kimliği olan oyuncuda kayıttaki numara sırtta görünür,
@@ -21661,6 +21756,7 @@ function oyuncuDegistir(t, sahadaki, yedekIdx){
     sahadaki._girdi = true;                           // maç kadrosunda "oyuna sonradan girdi" (bkz. sahaMacKadrosu)
     sahadaki.ad = yedek.ad; if(yedek.no !== '' && yedek.no != null) sahadaki.no = yedek.no;
     sahadaki.havuzId = yedek.id || null;              // giren oyuncunun kendi gücü (bkz. GÜÇ KİMLİKLE)
+    ozelOyuncuGecir(sahadaki);                        // giren oyuncunun görünümü (bkz. ÖZEL GÖRÜNÜM); yoksa saha modeli kalır
     sahadaki.sakat = false; sahadaki.kond = 100;       // giren oyuncu dinç ve sağlam
     // NITELIK GUNCELLEMESI: Degisiklik sistemini kurarken "nitelik eklenirse burasi da
     // genisletilmeli" notu dusmustum - eklendi. Yedek, CIKTIGI oyuncunun mevkisini alir
