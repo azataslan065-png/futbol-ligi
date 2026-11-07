@@ -58,7 +58,7 @@ final class Cikis {
         kart.addView(bas);
 
         TextView alt = new TextView(a);
-        alt.setText(a.getString(R.string.app_name) + " kapanacak. Girişin ve ayarların korunur; tekrar açtığında kaldığın yerden devam edersin.");
+        alt.setText(a.getString(R.string.app_name) + " kapanacak. Girişin ve ayarların korunur.");
         alt.setTextColor(Color.parseColor("#9AA3B8")); alt.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14); alt.setGravity(Gravity.CENTER);
         alt.setLineSpacing(0, 1.2f); alt.setPadding(0, 0, 0, dp(a, 18));
         kart.addView(alt);
