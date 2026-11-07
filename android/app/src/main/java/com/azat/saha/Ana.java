@@ -278,6 +278,9 @@ public class Ana extends Activity {
     @Override protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); Teshis.gonder(); }
 
     private class Kopru {
+        /* (2026-11-07) Sayfanın "Uygulamadan çık → Evet" düğmesi window.close() çağırır; WebView'da bu hiçbir şey yapmıyor, sayfa
+           "Tarayıcıdan çıkılamıyor" uyarısı gösteriyordu (kök sürümdeki sayfalar). window.close artık uygulamayı kapatır. */
+        @JavascriptInterface public void cik() { h.post(new Runnable() { public void run() { finish(); } }); }
         @JavascriptInterface public void kaydet(String ad, String tip, String b64) {
             h.post(() -> {
                 try {
@@ -334,6 +337,7 @@ public class Ana extends Activity {
         + "navigator.share=function(d){d=d||{};A.paylas(d.title||'',d.text||'',d.url||'');return Promise.resolve()};"
         + "navigator.canShare=function(d){return !(d&&d.files&&d.files.length)};"
         + "try{if(screen.orientation){screen.orientation.lock=function(y){A.yon(String(y||''));return Promise.resolve()};screen.orientation.unlock=function(){A.yon('')}}}catch(e){}"
+        + "window.close=function(){try{A.cik()}catch(e){}};"
         + "navigator.vibrate=function(p){var m=Array.isArray(p)?p.reduce(function(s,x,i){return i%2?s:s+x},0):+p||0;if(m>0)A.titresim(m);return true};"
         + "})();";
 
