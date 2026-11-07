@@ -1396,6 +1396,9 @@ div.md-logo{background:rgba(255,255,255,.06);border-radius:8px;display:flex;alig
 */
 .ptp.ptp-fs{position:fixed;inset:0;z-index:2147483647;width:100vw;height:100vh;width:100dvw;height:100dvh;border-radius:0;padding:env(safe-area-inset-top,0) env(safe-area-inset-right,0) env(safe-area-inset-bottom,0) env(safe-area-inset-left,0);box-sizing:border-box}
 body.ptp-fs-active{overflow:hidden}
+/* (2026-11-07) Uygulamanın küçük penceresinde yalnızca yayın görünür (bkz. UYGULAMADA PENCERE İÇİNDE PENCERE) */
+body.app-pip #ptpOv,body.app-pip .ptp-lockbar,body.app-pip .ptp-bitis,body.app-pip .toast,body.app-pip #toast{display:none!important}
+body.app-pip .ptp.ptp-fs{padding:0!important}
 /* (2026-10-16-D, kullanıcı: "ekran yatay konuma getirildiğinde tam ekran olmalı ve bilgi açılır penceresi açılmamalı"):
    tam ekranda test şeridi ve sayfanın sabit üst öğeleri yayının üstünde kalmasın - yayın ekranı tek başına kaplar. */
 body.ptp-fs-active #testOrtamBandi{display:none!important}
@@ -3331,7 +3334,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-07-I';
+window.APP_BUILD='2026-11-07-J';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return firebase.database().ref(y); }, { dosya:'index', kap:function(){ return document.getElementById('loginScreen'); }, giris:function(){ var e = document.getElementById('loginScreen'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // zorunlu güncelleme (ortak/ortak.js)
@@ -32267,8 +32270,29 @@ function ptpUstBarParcalari(){
     S.orientMq=null;S.orientHandler=null;
     try{ if(S.motionHandler){ window.removeEventListener('devicemotion',S.motionHandler); S.motionHandler=null; } }catch(e){}
   }
+  /* UYGULAMADA PENCERE İÇİNDE PENCERE (2026-11-07, kullanıcı: "TV sekmesinde APK için pencere içinde pencere modu çalışmıyor"). KÖK SEBEP:
+     düğme tarayıcının video PiP'ini çağırıyordu; uygulamanın sayfa motoru bunu desteklemez, gömülü YouTube oynatıcısında ise hiç yoktur.
+     Uygulamada artık uygulamanın kendisi küçük pencereye geçer (SahaApp.pip); geçerken yayın tam ekran düzenine alınır ve düğmeler gizlenir,
+     pencere büyütülünce önceki düzene dönülür. Yayın oynarken uygulamadan çıkılırsa kendiliğinden küçük pencereye geçilebilsin diye
+     oynatma durumu uygulamaya bildirilir; küçük pencere kapatılınca yayın duraklatılır. */
+  function _appPipVar(){ try{ return !!(window.SahaApp&&typeof SahaApp.pip==='function'); }catch(e){ return false; } }
+  window.__appPipDurum=function(ac){
+    try{
+      document.body.classList.toggle('app-pip',!!ac);
+      if(!S||!S.root)return;
+      if(ac){ if(!S.root.classList.contains('ptp-fs')){ S.root.classList.add('ptp-fs'); document.body.classList.add('ptp-fs-active'); S._pipFs=true; }
+        S._pipRot=S.rotate; if(S.rotate){ S.rotate=0; try{applyVisual();}catch(e){} } }
+      else{ if(S._pipFs){ S._pipFs=false; S.root.classList.remove('ptp-fs'); document.body.classList.remove('ptp-fs-active'); }
+        if(S._pipRot){ S.rotate=S._pipRot; S._pipRot=0; } try{applyVisual();}catch(e){} }
+    }catch(e){}
+  };
+  window.__appPipKapandi=function(){ try{ document.body.classList.remove('app-pip'); if(S&&S.video&&!S.video.paused)S.video.pause(); window.__appPipDurum(false); }catch(e){} };
+  if(_appPipVar()){ var _pipSon=null; setInterval(function(){ try{
+    var u=!!(S&&S.root&&document.body.contains(S.root)&&S.video&&!S.video.paused);
+    if(u!==_pipSon){ _pipSon=u; if(SahaApp.pipHazir)SahaApp.pipHazir(u); } }catch(e){} },1000); }
   function togglePip(){
     if(!S)return;
+    if(_appPipVar()){ try{ if(SahaApp.pip())return; }catch(e){} showToastMsg('Bu cihaz küçük pencereyi desteklemiyor'); return; }
     try{
       if(document.pictureInPictureElement)document.exitPictureInPicture();
       else if(S.video.requestPictureInPicture)S.video.requestPictureInPicture();

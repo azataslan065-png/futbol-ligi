@@ -115,13 +115,13 @@ public class Ana extends Activity {
         if (Build.VERSION.SDK_INT >= 26) w.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         try {
             android.webkit.ServiceWorkerController.getInstance().setServiceWorkerClient(new android.webkit.ServiceWorkerClient() {
-                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest r) { return Onbellek.ver(r); }
+                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest r) { WebResourceResponse x = Reklam.ver(r); return x != null ? x : Onbellek.ver(r); }
             });
         } catch (Exception e) { Teshis.yaz("onbellek", "servis çalışanı bağlanamadı", String.valueOf(e.getMessage())); }
 
         w.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return disari(r.getUrl()); }
-            @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { return Onbellek.ver(r); }
+            @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { WebResourceResponse x = Reklam.ver(r); return x != null ? x : Onbellek.ver(r); }
             @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); sayfaHazir = false; Teshis.olay("sayfa", "başladı", u); }
             @Override public void onPageFinished(WebView v, String u) {
                 v.evaluateJavascript(YAMA, null);
@@ -269,7 +269,7 @@ public class Ana extends Activity {
         });
     }
     private void cikisSor() { Cikis.goster(this); }   // (2026-11-07) uygulamanın kendi görünümünde çıkış penceresi (bkz. Cikis)
-    @Override protected void onResume() { super.onResume(); if (w != null) w.onResume(); Teshis.olay("on-plan", "", w == null ? "" : w.getUrl());
+    @Override protected void onResume() { super.onResume(); if (Build.VERSION.SDK_INT < 24 || !isInPictureInPictureMode()) pipIdi = false; if (w != null) w.onResume(); Teshis.olay("on-plan", "", w == null ? "" : w.getUrl());
         // (2026-11-07) KÖK SEBEP ("ekran boş: yeniden yükleniyor" yanlış alarmı): uygulama yeni açılırken de bu denetim 2,5 sn sonra çalışıyordu;
         // sayfa o an henüz yüklenmeye başlamamıştı (boş ölçüldü) ve sayfa gereksiz yere baştan yükleniyordu. Artık yalnızca yüklenmiş sayfaya bakılır.
         if (w != null && sayfaHazir && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
@@ -299,6 +299,36 @@ public class Ana extends Activity {
     }
     @Override protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); Teshis.gonder(); }
 
+    /* PENCERE İÇİNDE PENCERE (2026-11-07, kullanıcı: "TV sekmesinde APK için pencere içinde pencere modu çalışmıyor"). KÖK SEBEP: TV oynatıcısının
+       PiP düğmesi tarayıcının video PiP'ini (requestPictureInPicture) çağırıyordu; uygulamanın sayfa motoru (WebView) bunu desteklemez, YouTube
+       gibi gömülü oynatıcılarda ise tarayıcıda da hiç çalışmaz. Artık uygulamanın KENDİSİ küçük pencereye geçer (Android PiP): sayfa yayını
+       pencereyi kaplayacak şekilde düzenler, düğmeler gizlenir; pencere büyütülünce her şey eski hâline döner. Yayın oynarken ana ekrana
+       çıkılırsa da kendiliğinden küçük pencereye geçer. Küçük pencere kapatılınca yayın durur (arka planda ses çalmaya devam etmez). */
+    private volatile boolean pipHazir;
+    private boolean pipIdi;
+    private boolean pipDestek() { return Build.VERSION.SDK_INT >= 26 && getPackageManager().hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE); }
+    private android.app.PictureInPictureParams pipAyar() {
+        android.app.PictureInPictureParams.Builder b = new android.app.PictureInPictureParams.Builder().setAspectRatio(new android.util.Rational(16, 9));
+        if (Build.VERSION.SDK_INT >= 31) b.setAutoEnterEnabled(pipHazir).setSeamlessResizeEnabled(false);
+        return b.build();
+    }
+    private boolean pipGir() {
+        try { if (!pipDestek() || isFinishing()) return false; pipIdi = true; return enterPictureInPictureMode(pipAyar()); }
+        catch (Exception e) { Teshis.yaz("pip", "açılamadı", String.valueOf(e.getMessage())); return false; }
+    }
+    @Override protected void onUserLeaveHint() { super.onUserLeaveHint(); if (pipHazir && Build.VERSION.SDK_INT >= 26 && Build.VERSION.SDK_INT < 31) pipGir(); }
+    @Override public void onPictureInPictureModeChanged(boolean acik, android.content.res.Configuration c) {
+        super.onPictureInPictureModeChanged(acik, c);
+        if (acik) pipIdi = true;
+        if (w != null) w.evaluateJavascript("try{window.__appPipDurum&&window.__appPipDurum(" + acik + ")}catch(e){}", null);
+        if (!acik && BuildConfig.YATAY) gizle();
+    }
+    @Override protected void onStop() {
+        super.onStop();
+        // Küçük pencere kapatıldı (X ya da aşağı kaydırma): etkinlik görünmez oldu - yayın durdurulur.
+        if (pipIdi && w != null) { pipIdi = false; w.evaluateJavascript("try{window.__appPipKapandi&&window.__appPipKapandi()}catch(e){}", null); }
+    }
+
     private class Kopru {
         /* (2026-11-07) Sayfanın "Uygulamadan çık → Evet" düğmesi window.close() çağırır; WebView'da bu hiçbir şey yapmıyor, sayfa
            "Tarayıcıdan çıkılamıyor" uyarısı gösteriyordu (kök sürümdeki sayfalar). window.close artık uygulamayı kapatır. */
@@ -306,6 +336,8 @@ public class Ana extends Activity {
         @JavascriptInterface public void guncellemeDenetle() { h.post(new Runnable() { public void run() { Guncelle.denetle(Ana.this, true); } }); }
         @JavascriptInterface public String surum() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
         @JavascriptInterface public void teshis(String tur, String ayrinti) { String t = String.valueOf(tur); if (t.contains("hata")) Teshis.yaz(t, String.valueOf(ayrinti), BuildConfig.ADRES); else Teshis.olay(t, String.valueOf(ayrinti), BuildConfig.ADRES); }
+        @JavascriptInterface public boolean pip() { if (!pipDestek()) return false; h.post(new Runnable() { public void run() { pipGir(); } }); return true; }
+        @JavascriptInterface public void pipHazir(boolean v) { pipHazir = v; if (Build.VERSION.SDK_INT >= 31 && pipDestek()) h.post(new Runnable() { public void run() { try { setPictureInPictureParams(pipAyar()); } catch (Exception e) { } } }); }
         @JavascriptInterface public void cik() { h.post(new Runnable() { public void run() { finish(); } }); }
         @JavascriptInterface public void kaydet(String ad, String tip, String b64) {
             h.post(() -> {
