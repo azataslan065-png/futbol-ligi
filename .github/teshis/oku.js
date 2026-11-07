@@ -53,6 +53,8 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     const P = Object.values(L).filter(x => x && x.mod === 'saha_perf').sort((a, b) => a.ts - b.ts);
     console.log('\n===== MAÇ PERFORMANS ' + (kok || 'KÖK') + ': ' + P.length);
     P.slice(-20).forEach(x => console.log(saat(x.ts), x.title, x.detail, '|', String(x.ua || '').slice(-80)));
+    const U = Object.values(L).filter(x => x && x.mod === 'saha_perf_uzun').sort((a, b) => a.ts - b.ts);
+    U.slice(-3).forEach(x => { console.log('-- UZUN KARELER ' + saat(x.ts) + ' [sn, aralık ms, js, çizim, yeni gölgelendirici, yeni geometri, yeni doku, gc MB, koşuyor, adım, tekrar]'); try{ const j = JSON.parse(x.detail); console.log('   sürüm', j.surum); (j.L || []).forEach(r => console.log('   ' + JSON.stringify(r))); }catch(e){ console.log(x.detail); } });
     const S = Object.values(L).filter(x => x && x.app === 'saha' && x.ts > Date.now() - 2 * 3600e3 && x.mod !== 'saha_perf').sort((a, b) => a.ts - b.ts);
     console.log('-- SAHA son 2 saat: ' + S.length);
     S.slice(-60).forEach(x => console.log(saat(x.ts), x.mod, x.kind, String(x.title || '').slice(0, 120), String(x.detail || '').slice(0, 220), '|', String(x.ua || '').slice(-50)));

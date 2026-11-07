@@ -20807,6 +20807,7 @@ var _mPerf = null;
 function _mPerfKare(dt){
   try{
     if(typeof running === 'undefined' || !running || bitti || duraklat || document.hidden || window._sahaIzleModu) return;
+    if(!_mPerf) try{ _PF.L = []; }catch(e){}
     var P = _mPerf || (_mPerf = { n:0, t:0, k34:0, k50:0, k100:0, enUzun:0, kalite0:window._otoKalite || 0, kaliteDeg:0, sonKalite:window._otoKalite || 0 });
     P.n++; P.t += dt; if(dt > 0.034) P.k34++; if(dt > 0.05) P.k50++; if(dt > 0.1) P.k100++; if(dt > P.enUzun) P.enUzun = dt;
     if((window._otoKalite || 0) !== P.sonKalite){ P.kaliteDeg++; P.sonKalite = window._otoKalite || 0; }
@@ -20833,6 +20834,10 @@ function _mPerfYaz(yarim){
           hz:Math.round(1 / _vsAra), hedefFps:_kareHedefFps(), kalite:[P.kalite0, P.sonKalite, P.kaliteDeg], pr:(function(){ try{ return renderer.getPixelRatio(); }catch(e){ return 0; } })(),
           gpu:String(window.SAHA_GPU || '').slice(0, 50), apk:!!window.SahaApp, yarim:!!P.yarim }).slice(0, 900),
         ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140) }).catch(function(){}); }catch(e){}
+    try{ var _uz = _PF.L.slice(), _ad = Math.max(1, _uz.length / 45); _PF.L = []; _uz = _uz.filter(function(o, i){ return Math.floor(i % _ad) === 0; }).slice(0, 45); if(_uz.length){ var _db2 = (typeof fbDb !== 'undefined' && fbDb) ? fbDb : firebase.database();
+      _db2.ref('diagnostics/logs').push({ app:'saha', appLabel:' SAHA', mod:'saha_perf_uzun', modLabel:'Uzun kareler', kind:'bilgi', title:'uzunKare: ' + _uz.length + ' kare',
+        detail:JSON.stringify({ surum:window.APP_BUILD || '?', L:_uz.map(function(o){ return [o.sn, o.ms, o.js, o.rn, o.p, o.g, o.x, o.gc, o.kos, o.n, o.tk]; }) }).slice(0, 4000),
+        ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140) }).catch(function(){}); } }catch(e){}
   }catch(e){}
 }
 function sahaKareOlc(dt){
@@ -20998,7 +21003,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-07-E';
+window.APP_BUILD='2026-11-07-F';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -32493,10 +32498,28 @@ function _kareAtla(ts){
   }
   return false;
 }
+/* UZUN KARE AYRINTISI (2026-11-07, kullanıcı: "oyuncu koşarken takılma hissediliyor"). Maç özeti kaç takılma olduğunu söylüyor ama NEDENİNİ
+   söylemiyor. 50 ms'yi aşan her aralık için (en çok 40) bir önceki karenin dökümü tutulur: oyun mantığı (js), çizim komutları (rn), o karede ilk kez
+   derlenen gölgelendirici (p), ekran kartına ilk kez yüklenen geometri (g) ve doku (x), bellek temizliği izi (gc: yığın küçüldüyse MB), kontrol
+   edilen oyuncu koşuyor mu (kos), fizik adımı (n), tekrar oynuyor mu (tk), maç saniyesi (sn). js+rn küçük ama aralık büyükse bekleme ekran
+   kartında ya da sistemdedir. Özetle birlikte maç sonunda yazılır. */
+var _PF = { L:[], son:null, ts:0, n:0, hp:0 };
+function _pfBas(){ try{ var i = renderer.info; return [i.programs ? i.programs.length : 0, i.memory.geometries, i.memory.textures]; }catch(e){ return [0, 0, 0]; } }
+function _pfSon(t0, tU, i0, n){
+  try{ var i1 = _pfBas(), m = performance.memory, hp = m ? m.usedJSHeapSize : 0;
+    _PF.son = { js:Math.round(tU - t0), rn:Math.round(performance.now() - tU), p:i1[0] - i0[0], g:i1[1] - i0[1], x:i1[2] - i0[2],
+      gc:(_PF.hp && hp && hp < _PF.hp - 2e6) ? Math.round((_PF.hp - hp) / 1e6) : 0, kos:(typeof ctrl !== 'undefined' && ctrl && ctrl.kos) ? 1 : 0, n:n || 0, tk:tekrar ? 1 : 0,
+      sn:Math.round(typeof saat !== 'undefined' ? saat : 0) }; _PF.hp = hp; }catch(e){}
+}
+function _pfAra(ts){
+  try{ var d = _PF.ts ? ts - _PF.ts : 0; _PF.ts = ts;
+    if(d > 50 && d < 2000 && _PF.son && running && !bitti && _PF.L.length < 200){ var o = Object.assign({ ms:Math.round(d) }, _PF.son); _PF.L.push(o); } }catch(e){}
+}
 function _kareHedefFps(){ return Math.round(1 / (Math.max(1, _ksK) * _ksVs)); }
 function loop(_ts){
   requestAnimationFrame(loop);
   if(_kareAtla(_ts)) return;
+  var _pf0 = performance.now(), _pfN = 0; try{ _pfAra(_ts); }catch(e){}
   try{ _ivGeri(); }catch(e){}
   if(window._klipOffline){ try{ clock.getDelta(); }catch(e){} return; }   // (2026-10-18-K) kare kare kayıt sürüyor: sahneyi kayıt sürücüsü çizer
   var _kapak = _sahneKapaliMi(), _cv0 = renderer.domElement;
@@ -32544,6 +32567,7 @@ function loop(_ts){
       while (birikim >= STEP && n < 5){ _GORSEL.son = (n >= _nTop - 1); _GORSEL.dt = _nTop * STEP; _ivOnce(); update(STEP); birikim -= STEP; n++; if (tekrar) break; }
       _GORSEL.son = true; _GORSEL.dt = STEP; _GORSEL.kare++;
       if (n >= 5) birikim = 0;
+      _pfN = n;
       if (!tekrar) _ivUygula(birikim / STEP);
       if (window._sutBekleyen) sutHaritaIzle();
       oyIstAdim(n * STEP);
@@ -32573,8 +32597,10 @@ function loop(_ts){
      haritasına) çiziliyordu - ekran kartının en büyük ikinci yükü. Gölge haritası artık iki karede bir yenilenir (saniyede 30 kez); yayın
      kamerası uzaklığında aradaki fark gözle seçilmez. */
   try{ if (renderer.shadowMap.enabled){ renderer.shadowMap.autoUpdate = false; if (((++_golgeKare) & 1) === 0 || window._golgeHerKare) renderer.shadowMap.needsUpdate = true; } }catch(e){}
+  var _pfU = performance.now(), _pfI = _pfBas();
   if (window._varEkranAktif && (VAR.aktif || window._knVarEkran)) varEkranCiz(); else renderer.render(scene, camera);   // (2026-10-17-G) konukta da VAR ekranı
   if (!window._varEkranAktif || !(VAR.aktif || window._knVarEkran)) _stadEkran.kopyala();   // (2026-10-31-G) dev ekran: ana karenin kopyası (bkz. KOPYA YAYIN)
+  try{ _pfSon(_pf0, _pfU, _pfI, _pfN); }catch(e){}
   if (!window._macOncesi && MO_FIG.gorunur) _moFigurGizle();
   if (window._klipCiz) { try{ window._klipCiz(); window._klipHata = 0; }catch(e){   // gol klibi kaydı (bkz. golKlibiKaydet)
     // (2026-10-17-J) Hata artık sessizce kaydı dondurmaz: teşhise yazılır, ancak art arda 5 karede tekrarlarsa kayıt bırakılır.
