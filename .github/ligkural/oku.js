@@ -30,4 +30,7 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     console.log((kok || 'KÖK/') + 'oyuncuHavuzu: toplam ' + v.length + ', başlangıç ' + bas + ', transfer ' + tr.length + ', adı olan transfer ' + tr.filter(x => String(x.ad || '').trim()).length + ', satışta ' + tr.filter(x => x.satista).length);
     console.log('  baslangic değerleri: ' + JSON.stringify(v.reduce((o, x) => { const k = String(x.baslangic); o[k] = (o[k] || 0) + 1; return o; }, {})));
     console.log('  transfer örnek adlar: ' + tr.slice(0, 8).map(x => x.ad).join(', ')); }
+  // (2026-11-07) admins değer türleri (uid yazılmaz): kural "=== true" ister
+  { const A = await al('admins') || {}; console.log('admins: ' + JSON.stringify(Object.values(A).map(v => typeof v + ':' + (typeof v === 'object' ? Object.keys(v || {}).join('|') : String(v)))));
+    const T = await al('test/admins') || {}; console.log('test/admins: ' + JSON.stringify(Object.values(T).map(v => typeof v + ':' + (typeof v === 'object' ? Object.keys(v || {}).join('|') : String(v))))); }
 })().catch(e => { console.log('HATA ' + e.message); });
