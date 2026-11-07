@@ -47,5 +47,15 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     const D = await al(kok + 'diagnostics/devices') || {};
     Object.values(D).filter(x => x && /SahaApp|; wv\)/.test(String(x.ua || ''))).forEach(x => console.log('CIHAZ', saat(x.sonGorulme || 0), x.sahaSurum || x.surum || '', String(x.ua || '').slice(-90)));
   }
+  // (2026-11-07) Maç performans özetleri (saha_perf) ve SAHA'nın son 2 saatteki kasma/hata kayıtları
+  for(const kok of ['test/', '']){
+    const L = await al(kok + 'diagnostics/logs', '?orderBy="$key"&limitToLast=2500') || {};
+    const P = Object.values(L).filter(x => x && x.mod === 'saha_perf').sort((a, b) => a.ts - b.ts);
+    console.log('\n===== MAÇ PERFORMANS ' + (kok || 'KÖK') + ': ' + P.length);
+    P.slice(-20).forEach(x => console.log(saat(x.ts), x.title, x.detail, '|', String(x.ua || '').slice(-80)));
+    const S = Object.values(L).filter(x => x && x.app === 'saha' && x.ts > Date.now() - 2 * 3600e3 && x.mod !== 'saha_perf').sort((a, b) => a.ts - b.ts);
+    console.log('-- SAHA son 2 saat: ' + S.length);
+    S.slice(-60).forEach(x => console.log(saat(x.ts), x.mod, x.kind, String(x.title || '').slice(0, 120), String(x.detail || '').slice(0, 220), '|', String(x.ua || '').slice(-50)));
+  }
 })().catch(e => { console.log('HATA ' + e.message); });
 // 1793481479
