@@ -75,8 +75,8 @@ public class Ana extends Activity {
         etkinAna = this;
         Teshis.olay("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
         kur();
-        w.loadUrl(BuildConfig.ADRES);      // (2026-11-06) restoreState kaldırıldı: sayfa her açılışta baştan yüklenir
-        bekciKur();
+        // (2026-11-07) Sayfa, etkinlik penceresi kurulduktan sonra yüklenir (bkz. SAYFA BEKÇİSİ).
+        h.post(() -> { if (w != null) { basladi = false; w.loadUrl(BuildConfig.ADRES); bekciKur(); } });   // (2026-11-06) sayfa her açılışta baştan yüklenir
         Guncelle.acilis(this);   // (2026-11-07) her açılışta, sayfa kullanılmadan önce zorunlu güncelleme denetimi (bkz. Guncelle)
     }
 
@@ -84,15 +84,22 @@ public class Ana extends Activity {
     /* SAYFA BEKÇİSİ (2026-11-07, kullanıcı: "üç uygulamada güncelleme sonrası girişte bu ekranda [boş, koyu] takılı kalıyor"). Teşhiste sayfa
        yüklenmeye hiç başlamamıştı. Sayfa 12 sn içinde yüklenmezse durum ayrıntısıyla kaydedilir ve sayfa uygulamanın içindeki kopyası
        yerine siteden açılır (kullanıcı boş ekranda kalmaz). Kayıtlar beklemeden gönderilir: uygulama takılıp kapatılsa da kaybolmaz. */
-    private final Runnable bekci = this::bekciCalis, bekci2 = this::bekci2Calis;
+    /* (2026-11-07, 2. düzeltme) Teşhis: telefonda (Android 17, WebView 158) açılıştaki İLK yükleme isteği, sayfa siteden istendiğinde de
+       hiç başlamıyordu (ilerleme %10, "başladı" yok); aynı istek birkaç saniye sonra yeniden verilince hemen açılıyordu. Bu yüzden sayfa
+       3 sn içinde yüklenmeye başlamazsa istek yenilenir (en çok 3 kez); ikinci denemede de olmazsa uygulamanın içindeki kopya yerine site kullanılır. */
+    private volatile boolean basladi;
+    private int bekciDeneme;
+    private final Runnable bekci = this::bekciCalis;
     private void bekciCalis() {
-        if (w == null || sayfaHazir || isFinishing()) return;
-        Teshis.yaz("sayfa", "zamanında açılmadı (ilerleme %" + w.getProgress() + ", başladı=" + (yuklemeBas > 0) + ", gömülü=" + Sayfa.acik() + ", adres=" + w.getUrl() + ")", BuildConfig.ADRES);
+        if (w == null || basladi || sayfaHazir || isFinishing()) return;
+        bekciDeneme++;
+        Teshis.yaz("sayfa", "3 sn'de başlamadı, yeniden isteniyor (deneme " + bekciDeneme + ", ilerleme %" + w.getProgress() + ", gömülü=" + Sayfa.acik() + ")", BuildConfig.ADRES);
         Teshis.gonder();
-        if (Sayfa.acik()) { Sayfa.kapat(); w.stopLoading(); w.loadUrl(BuildConfig.ADRES); h.postDelayed(bekci2, 15000); }
+        if (bekciDeneme >= 2 && Sayfa.acik()) Sayfa.kapat();
+        if (bekciDeneme > 3) return;
+        w.stopLoading(); w.loadUrl(BuildConfig.ADRES); h.postDelayed(bekci, 3000);
     }
-    private void bekci2Calis() { if (w != null && !sayfaHazir) { Teshis.yaz("sayfa", "siteden de açılmadı (ilerleme %" + w.getProgress() + ")", BuildConfig.ADRES); Teshis.gonder(); } }
-    private void bekciKur() { h.removeCallbacks(bekci); h.postDelayed(bekci, Sayfa.acik() ? 6000 : 20000); }
+    private void bekciKur() { h.removeCallbacks(bekci); bekciDeneme = 0; h.postDelayed(bekci, 3000); }
     private boolean sayfaHazir;
     // Uygulamanın kendi kaynakları: site, veritabanı/giriş, kitaplık sunucuları, ses/müzik deposu.
     private static boolean bizim(Uri u) {
@@ -140,7 +147,7 @@ public class Ana extends Activity {
         w.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return disari(r.getUrl()); }
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { WebResourceResponse x = Sayfa.ver(r); if (x == null) x = Reklam.ver(r); return x != null ? x : Onbellek.ver(r); }
-            @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); sayfaHazir = false; Teshis.olay("sayfa", "başladı" + (Sayfa.acik() ? " (gömülü)" : ""), u); Teshis.gonder(); }
+            @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); sayfaHazir = false; basladi = true; Teshis.olay("sayfa", "başladı" + (Sayfa.acik() ? " (gömülü)" : ""), u); Teshis.gonder(); }
             @Override public void onPageFinished(WebView v, String u) {
                 v.evaluateJavascript(YAMA, null);
                 sayfaHazir = true;
@@ -292,7 +299,7 @@ public class Ana extends Activity {
         // sayfa o an henüz yüklenmeye başlamamıştı (boş ölçüldü) ve sayfa gereksiz yere baştan yükleniyordu. Artık yalnızca yüklenmiş sayfaya bakılır.
         if (w != null && sayfaHazir && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
     @Override protected void onDestroy() {
-        Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder(); h.removeCallbacks(bekci); h.removeCallbacks(bekci2); Guncelle.sifirla(this); if (etkinAna == this) { etkinAna = null; arkaOynat = false; Arka.durdur(this); }
+        Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder(); h.removeCallbacks(bekci); Guncelle.sifirla(this); if (etkinAna == this) { etkinAna = null; arkaOynat = false; Arka.durdur(this); }
         if (w != null) { kok.removeView(w); w.destroy(); w = null; }   // eski sayfa arka planda açık kalmasın (iki oturum çakışırdı)
         super.onDestroy();
     }
