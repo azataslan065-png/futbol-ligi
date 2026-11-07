@@ -24,4 +24,10 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     }
   }
   for(const kok of ['test/', 'test/sahaVeri/', '', 'sahaVeri/']) for(const k of ['sahaSariSinir', 'sahaMacSuresiDk', 'sahaArkadasSuresiDk', 'sahaRastgeleSuresiDk']) console.log((kok || 'KÖK/') + 'globalAdminSettings/' + k + ' = ' + JSON.stringify(await al(kok + 'globalAdminSettings/' + k)));
+  // (2026-11-07) Oyuncu havuzu özeti (ses kayıt isim listesi için): toplam, başlangıç oyuncusu, transfer oyuncusu, alan adları
+  for(const kok of ['test/', '']){ const H = await al(kok + 'oyuncuHavuzu') || {}; const v = Object.values(H).filter(x => x && typeof x === 'object');
+    const bas = v.filter(x => x.baslangic === true).length, tr = v.filter(x => x.baslangic !== true);
+    console.log((kok || 'KÖK/') + 'oyuncuHavuzu: toplam ' + v.length + ', başlangıç ' + bas + ', transfer ' + tr.length + ', adı olan transfer ' + tr.filter(x => String(x.ad || '').trim()).length + ', satışta ' + tr.filter(x => x.satista).length);
+    console.log('  baslangic değerleri: ' + JSON.stringify(v.reduce((o, x) => { const k = String(x.baslangic); o[k] = (o[k] || 0) + 1; return o; }, {})));
+    console.log('  transfer örnek adlar: ' + tr.slice(0, 8).map(x => x.ad).join(', ')); }
 })().catch(e => { console.log('HATA ' + e.message); });
