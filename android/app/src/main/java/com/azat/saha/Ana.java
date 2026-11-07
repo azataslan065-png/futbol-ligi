@@ -76,10 +76,22 @@ public class Ana extends Activity {
         Teshis.olay("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
         kur();
         w.loadUrl(BuildConfig.ADRES);      // (2026-11-06) restoreState kaldırıldı: sayfa her açılışta baştan yüklenir
+        bekciKur();
         Guncelle.acilis(this);   // (2026-11-07) her açılışta, sayfa kullanılmadan önce zorunlu güncelleme denetimi (bkz. Guncelle)
     }
 
     private long yuklemeBas;
+    /* SAYFA BEKÇİSİ (2026-11-07, kullanıcı: "üç uygulamada güncelleme sonrası girişte bu ekranda [boş, koyu] takılı kalıyor"). Teşhiste sayfa
+       yüklenmeye hiç başlamamıştı. Sayfa 12 sn içinde yüklenmezse durum ayrıntısıyla kaydedilir ve sayfa uygulamanın içindeki kopyası
+       yerine siteden açılır (kullanıcı boş ekranda kalmaz). Kayıtlar beklemeden gönderilir: uygulama takılıp kapatılsa da kaybolmaz. */
+    private final Runnable bekci = () -> {
+        if (w == null || sayfaHazir || isFinishing()) return;
+        Teshis.yaz("sayfa", "12 sn'de açılmadı (ilerleme %" + w.getProgress() + ", başladı=" + (yuklemeBas > 0) + ", gömülü=" + Sayfa.acik() + ", adres=" + w.getUrl() + ")", BuildConfig.ADRES);
+        Teshis.gonder();
+        if (Sayfa.acik()) { Sayfa.kapat(); w.stopLoading(); w.loadUrl(BuildConfig.ADRES); h.postDelayed(this.bekci2, 15000); }
+    };
+    private final Runnable bekci2 = () -> { if (w != null && !sayfaHazir) { Teshis.yaz("sayfa", "siteden de açılmadı (ilerleme %" + w.getProgress() + ")", BuildConfig.ADRES); Teshis.gonder(); } };
+    private void bekciKur() { h.removeCallbacks(bekci); h.postDelayed(bekci, 12000); }
     private boolean sayfaHazir;
     // Uygulamanın kendi kaynakları: site, veritabanı/giriş, kitaplık sunucuları, ses/müzik deposu.
     private static boolean bizim(Uri u) {
@@ -127,7 +139,7 @@ public class Ana extends Activity {
         w.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return disari(r.getUrl()); }
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { WebResourceResponse x = Sayfa.ver(r); if (x == null) x = Reklam.ver(r); return x != null ? x : Onbellek.ver(r); }
-            @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); sayfaHazir = false; Teshis.olay("sayfa", "başladı", u); }
+            @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); sayfaHazir = false; Teshis.olay("sayfa", "başladı" + (Sayfa.acik() ? " (gömülü)" : ""), u); Teshis.gonder(); }
             @Override public void onPageFinished(WebView v, String u) {
                 v.evaluateJavascript(YAMA, null);
                 sayfaHazir = true;
@@ -146,7 +158,7 @@ public class Ana extends Activity {
             @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail d) {
                 // Sayfa motoru çökerse (ya da arka planda sistem kapatırsa) uygulama kapanmaz, sayfa yeniden kurulur.
                 Teshis.yaz("motor", d.didCrash() ? "çöktü" : "sistem kapattı", "");
-                if (v == w) { kok.removeView(w); w.destroy(); w = null; kur(); w.loadUrl(BuildConfig.ADRES); }
+                if (v == w) { kok.removeView(w); w.destroy(); w = null; kur(); w.loadUrl(BuildConfig.ADRES); bekciKur(); }
                 return true;
             }
         });
@@ -279,7 +291,7 @@ public class Ana extends Activity {
         // sayfa o an henüz yüklenmeye başlamamıştı (boş ölçüldü) ve sayfa gereksiz yere baştan yükleniyordu. Artık yalnızca yüklenmiş sayfaya bakılır.
         if (w != null && sayfaHazir && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
     @Override protected void onDestroy() {
-        Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder(); Guncelle.sifirla(this); if (etkinAna == this) { etkinAna = null; arkaOynat = false; Arka.durdur(this); }
+        Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder(); h.removeCallbacks(bekci); h.removeCallbacks(bekci2); Guncelle.sifirla(this); if (etkinAna == this) { etkinAna = null; arkaOynat = false; Arka.durdur(this); }
         if (w != null) { kok.removeView(w); w.destroy(); w = null; }   // eski sayfa arka planda açık kalmasın (iki oturum çakışırdı)
         super.onDestroy();
     }

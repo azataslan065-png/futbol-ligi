@@ -17,17 +17,22 @@ import java.util.Map;
 final class Sayfa {
     private static Context baglam;
     private static String ev, yol;
+    private static volatile boolean kapali, ilk = true;
+    static boolean acik() { return BuildConfig.GOMULU && !kapali; }
+    static void kapat() { kapali = true; }
     static void baslat(Context c) {
         baglam = c.getApplicationContext();
         try { Uri a = Uri.parse(BuildConfig.ADRES); ev = a.getHost(); yol = a.getPath(); } catch (Exception e) { }
     }
     static WebResourceResponse ver(WebResourceRequest r) {
         try {
-            if (!BuildConfig.GOMULU || baglam == null || ev == null || !"GET".equalsIgnoreCase(r.getMethod())) return null;
+            if (!acik() || baglam == null || ev == null || !"GET".equalsIgnoreCase(r.getMethod())) return null;
             Uri u = r.getUrl();
             if (!ev.equals(u.getHost()) || yol == null || !yol.equals(u.getPath())) return null;
             Map<String, String> b = new HashMap<>(); b.put("Cache-Control", "no-store");
-            return new WebResourceResponse("text/html", "utf-8", 200, "OK", b, baglam.getAssets().open("sayfa.html"));
+            WebResourceResponse x = new WebResourceResponse("text/html", "utf-8", 200, "OK", b, baglam.getAssets().open("sayfa.html"));
+            if (ilk) { ilk = false; Teshis.olay("sayfa", "gömülü kopya verildi (" + Thread.currentThread().getName() + ")", u.toString()); }
+            return x;
         } catch (Exception e) { Teshis.yaz("sayfa", "gömülü sayfa açılamadı", String.valueOf(e.getMessage())); return null; }
     }
 }
