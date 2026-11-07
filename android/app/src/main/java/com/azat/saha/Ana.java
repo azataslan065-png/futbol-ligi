@@ -73,6 +73,7 @@ public class Ana extends Activity {
         Teshis.yaz("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
         kur();
         w.loadUrl(BuildConfig.ADRES);      // (2026-11-06) restoreState kaldırıldı: sayfa her açılışta baştan yüklenir
+        h.postDelayed(new Runnable() { public void run() { if (!isFinishing()) Guncelle.denetle(Ana.this, false); } }, 5000);   // (2026-11-07) bkz. Guncelle
     }
 
     private long yuklemeBas;
@@ -280,6 +281,9 @@ public class Ana extends Activity {
     private class Kopru {
         /* (2026-11-07) Sayfanın "Uygulamadan çık → Evet" düğmesi window.close() çağırır; WebView'da bu hiçbir şey yapmıyor, sayfa
            "Tarayıcıdan çıkılamıyor" uyarısı gösteriyordu (kök sürümdeki sayfalar). window.close artık uygulamayı kapatır. */
+        // (2026-11-07) Sayfadan elle güncelleme denetimi ve yüklü uygulama sürümü (bkz. Guncelle).
+        @JavascriptInterface public void guncellemeDenetle() { h.post(new Runnable() { public void run() { Guncelle.denetle(Ana.this, true); } }); }
+        @JavascriptInterface public String surum() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
         @JavascriptInterface public void cik() { h.post(new Runnable() { public void run() { finish(); } }); }
         @JavascriptInterface public void kaydet(String ad, String tip, String b64) {
             h.post(() -> {
