@@ -33,4 +33,5 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
   // (2026-11-07) admins değer türleri (uid yazılmaz): kural "=== true" ister
   { const A = await al('admins') || {}; console.log('admins: ' + JSON.stringify(Object.values(A).map(v => typeof v + ':' + (typeof v === 'object' ? Object.keys(v || {}).join('|') : String(v)))));
     const T = await al('test/admins') || {}; console.log('test/admins: ' + JSON.stringify(Object.values(T).map(v => typeof v + ':' + (typeof v === 'object' ? Object.keys(v || {}).join('|') : String(v))))); }
+  for(const y of ['sahaGorunum/anonsSes', 'test/sahaGorunum/anonsSes', 'sahaGorunum/isimSes', 'test/sahaGorunum/isimSes', 'sahaGorunum/taraftarSes']){ const v = await al(y, '?shallow=true'); console.log(y + ': ' + JSON.stringify(v).slice(0, 300)); }
 })().catch(e => { console.log('HATA ' + e.message); });
