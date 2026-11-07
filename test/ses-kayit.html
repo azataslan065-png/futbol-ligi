@@ -663,7 +663,14 @@ function stadYukle(){
     var ligBul = function(o){ return oku(o + 'sahaVeri/activeDisplayLeague').then(function(id){ if(id) return id;
       return oku(o + 'sahaVeri/leaguesMeta').then(function(m){ m = m || {}; var ids = Object.keys(m), ac = ids.filter(function(k){ return (m[k] || {}).status !== 'finished'; });
         var h = ac.length ? ac : ids; h.sort(function(a, b){ return ((m[b] || {}).createdAt || 0) - ((m[a] || {}).createdAt || 0); }); return h[0] || null; }); }); };
-    return (au.currentUser ? Promise.resolve() : au.signInAnonymously()).then(function(){
+    /* (2026-11-07, kullanıcı: Stadyum > İsimler'de yüklerken "Bu hesabın yazma yetkisi yok"). KÖK SEBEP: sayfa açılır açılmaz
+       currentUser'a bakılıyordu; Firebase kayıtlı (yönetici) oturumu birkaç yüz ms sonra geri yükler. O anda oturum boş göründüğü için
+       anonim giriş yapılıyor ve yöneticinin oturumu anonim oturumla DEĞİŞİYORDU. Stadyum ekranı o arada yönetici diye açıldığından
+       sayfa açık görünüyor ama yükleme anonim kimlikle yapılıp kurallarca reddediliyordu. Artık önce kayıtlı oturumun geri yüklenmesi
+       beklenir (ilk onAuthStateChanged); yalnızca gerçekten oturum yoksa anonim giriş yapılır. */
+    return new Promise(function(ok){ var bitti = false, un = au.onAuthStateChanged(function(u){ if(bitti) return; bitti = true; try{ un(); }catch(e){} ok(u); });
+      setTimeout(function(){ if(!bitti){ bitti = true; try{ un(); }catch(e){} ok(au.currentUser); } }, 5000); })
+    .then(function(u){ return u ? null : au.signInAnonymously(); }).then(function(){
       silinenDinle(d);
       return Promise.all(['test/', ''].map(function(o){ return ligBul(o).then(function(id){ return id ? oku(o + 'sahaVeri/leagues/' + id + '/teams') : null; }); }));
     }).then(function(R){
@@ -819,7 +826,10 @@ function stSil(yol, x){ if(!confirm('Bu kayıt silinsin mi?')) return;
     if(y) try{ fetch(SUP.url + '/storage/v1/object/' + SUP.kova + '/' + y, { method:'DELETE', headers:{ Authorization:'Bearer ' + SUP.anahtar, apikey:SUP.anahtar } }).catch(function(){}); }catch(e){}
     return stVeri(); }).catch(function(e){ stNot(stHata(e), 'h'); }); }
 $('sYukle').onclick = function(){
-  if(!ST.blob) return; var tr = ST.sekme === 'tr', sl = $('sTakim').value;
+  if(!ST.blob) return;
+  // Yönetici oturumu düşmüşse (anonim ya da çıkış yapılmış) yükleme denenmez, giriş formu açılır (bkz. stadYukle notu).
+  var _u = stUygulama().auth().currentUser;
+  if(!_u || _u.isAnonymous){ $('sIc').style.display = 'none'; $('sGiris').style.display = ''; $('sGirNot').textContent = 'Oturum düştü; yeniden giriş yap. Kaydın kaybolmadı, girişten sonra yükleyebilirsin.'; return; } var tr = ST.sekme === 'tr', sl = $('sTakim').value;
   if(tr && !sl){ stNot('Önce takım seç.', 'h'); return; } if(!tr && !ST.hedef) return;
   var ad = tr ? ($('sAd').value.trim() || TUR_AD[ST.tur]) : ST.hedef.m, klasor = 'saha-ses/' + (tr ? 'taraftar/' + sl : (ST.sekme === 'is' ? 'isim/' + ST.rol : 'anons'));
   var uz = /mp4|m4a|aac/.test(ST.tip) ? 'm4a' : (/mpeg|mp3/.test(ST.tip) ? 'mp3' : (/ogg/.test(ST.tip) ? 'ogg' : (/wav/.test(ST.tip) ? 'wav' : 'webm')));
