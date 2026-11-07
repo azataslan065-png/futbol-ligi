@@ -84,13 +84,14 @@ public class Ana extends Activity {
     /* SAYFA BEKÇİSİ (2026-11-07, kullanıcı: "üç uygulamada güncelleme sonrası girişte bu ekranda [boş, koyu] takılı kalıyor"). Teşhiste sayfa
        yüklenmeye hiç başlamamıştı. Sayfa 12 sn içinde yüklenmezse durum ayrıntısıyla kaydedilir ve sayfa uygulamanın içindeki kopyası
        yerine siteden açılır (kullanıcı boş ekranda kalmaz). Kayıtlar beklemeden gönderilir: uygulama takılıp kapatılsa da kaybolmaz. */
-    private final Runnable bekci = () -> {
+    private final Runnable bekci = this::bekciCalis, bekci2 = this::bekci2Calis;
+    private void bekciCalis() {
         if (w == null || sayfaHazir || isFinishing()) return;
         Teshis.yaz("sayfa", "12 sn'de açılmadı (ilerleme %" + w.getProgress() + ", başladı=" + (yuklemeBas > 0) + ", gömülü=" + Sayfa.acik() + ", adres=" + w.getUrl() + ")", BuildConfig.ADRES);
         Teshis.gonder();
-        if (Sayfa.acik()) { Sayfa.kapat(); w.stopLoading(); w.loadUrl(BuildConfig.ADRES); h.postDelayed(this.bekci2, 15000); }
-    };
-    private final Runnable bekci2 = () -> { if (w != null && !sayfaHazir) { Teshis.yaz("sayfa", "siteden de açılmadı (ilerleme %" + w.getProgress() + ")", BuildConfig.ADRES); Teshis.gonder(); } };
+        if (Sayfa.acik()) { Sayfa.kapat(); w.stopLoading(); w.loadUrl(BuildConfig.ADRES); h.postDelayed(bekci2, 15000); }
+    }
+    private void bekci2Calis() { if (w != null && !sayfaHazir) { Teshis.yaz("sayfa", "siteden de açılmadı (ilerleme %" + w.getProgress() + ")", BuildConfig.ADRES); Teshis.gonder(); } }
     private void bekciKur() { h.removeCallbacks(bekci); h.postDelayed(bekci, 12000); }
     private boolean sayfaHazir;
     // Uygulamanın kendi kaynakları: site, veritabanı/giriş, kitaplık sunucuları, ses/müzik deposu.
