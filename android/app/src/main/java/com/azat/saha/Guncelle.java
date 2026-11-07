@@ -63,7 +63,11 @@ final class Guncelle {
     private static FrameLayout ekran;
     private static volatile boolean iniyor, denetiyor;
     /** Etkinlik kapanırken: ekran görünümleri o etkinliğe aittir, yeni açılışta yeniden kurulur. */
-    static void sifirla() { ekran = null; bekle = null; durum = null; cubuk = null; dugmeler = null; }
+    static void sifirla(Activity a) { if (etkin == a) etkin = null; ekran = null; bekle = null; durum = null; cubuk = null; dugmeler = null; }
+    /* Denetim sonucu, denetim süresince etkinlik yeniden kurulduysa (açılışta sistem bunu yapabiliyor; emülatör denemesinde görüldü: kart
+       kapanmış eski etkinliğe ekleniyor, ekranda hiç görünmüyordu) her zaman o anda AÇIK olan etkinliğe gösterilir. */
+    private static Activity etkin;
+    private static Activity etkin() { Activity x = etkin; return (x == null || x.isFinishing() || (Build.VERSION.SDK_INT >= 17 && x.isDestroyed())) ? null : x; }
 
     /** Güncelleme ekranı açıkken geri tuşu: indirme sürüyorsa yutulur; değilse ("Sonra" varsa) ekran kapanır. true = geri tuşu işlendi. */
     static boolean geri(Activity a) {
@@ -74,6 +78,7 @@ final class Guncelle {
 
     /** Açılışta: denetim bitene (ya da 6 sn dolana) kadar sayfanın üstünde "Sürüm denetleniyor" ekranı. */
     static void acilis(final Activity a) {
+        etkin = a;
         if (ekran != null) return;
         bekleGoster(a);
         H.postDelayed(Guncelle::bekleKapat, 6000);
@@ -82,6 +87,7 @@ final class Guncelle {
     /** Arka plandan dönüşte: son denetimden 15 dk geçtiyse. */
     static void donus(Activity a) {
         SharedPreferences sp = a.getSharedPreferences("guncelle", Context.MODE_PRIVATE);
+        etkin = a;
         if (ekran == null && System.currentTimeMillis() - sp.getLong("son", 0) > ARALIK) denetle(a, false, true);
     }
     static void denetle(final Activity a, final boolean elle) { denetle(a, elle, true); }
@@ -102,7 +108,7 @@ final class Guncelle {
                 sp.edit().putLong("son", System.currentTimeMillis()).apply();
                 Teshis.olay("guncelle", (yeni ? "yeni " : "güncel ") + ad, yerelAd + " / " + yerelKod);
                 if (!yeni) { H.post(Guncelle::bekleKapat); if (elle) mesaj(a, "Uygulama güncel (v" + yerelAd + ")"); return; }
-                H.post(new Runnable() { public void run() { goster(a, j, yerelAd); bekleKapat(); } });
+                H.post(new Runnable() { public void run() { Activity x = etkin(); if (x != null) goster(x, j, yerelAd); bekleKapat(); } });
             } catch (Exception e) {
                 H.post(Guncelle::bekleKapat);
                 Teshis.yaz("guncelle", "okunamadı", String.valueOf(e.getMessage()));
