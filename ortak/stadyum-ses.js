@@ -88,6 +88,6 @@ var StadSes = (function(){
       return new Promise(function(ok){ setTimeout(function(){ kisma(c, s, false); ok(); }, Math.max(0, (t - c.currentTime)) * 1000); });
     });
   }
-  return { paGiris:function(c, cikis){ return kur(c, cikis).pa; }, kalabalik:kalabalik, dizi:dizi, kirp:kirp, tampon:tampon, indir:indir, coz:coz,
+  return { paGiris:function(c, cikis){ return kur(c, cikis).pa; }, kalabalik:kalabalik, dizi:dizi, kirp:kirp, tampon:tampon, indir:indir, coz:coz, olcek:olcek,
     kis:function(c, cikis, v){ kisma(c, kur(c, cikis), v); } };
 })();

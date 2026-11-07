@@ -170,7 +170,7 @@
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
 <script src="ortak/ortak.js?v=0538c694"></script>
-<script src="ortak/stadyum-ses.js?v=9ca13d79"></script>
+<script src="ortak/stadyum-ses.js?v=da00c682"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -1757,6 +1757,13 @@ html.kam-pan #kamPan{display:block}
 #kamPan button:active{background:rgba(126,224,138,.35)}
 #kamPan .sol{left:calc(12px + env(safe-area-inset-left,0px))}#kamPan .sag{right:calc(12px + env(safe-area-inset-right,0px))}
 html.tekrar-acik #radar{opacity:0 !important;translate:0 18px;pointer-events:none}
+</style>
+<style id="sahaTabelaGecis20261107">
+/* SKORBORD GİRİŞ/ÇIKIŞ (2026-11-07, kullanıcı: "skorbord santra vuruşundan önce görünmemeli, vuruştan sonra yumuşak ve 2 saniye sürecek bir animasyonla
+   girmeli; tekrarlarda, devre arasında ve maç bitince aynı animasyonla kaybolmalı"). Tek geçiş: 2 sn, yumuşak yavaşlayan eğri, yukarıdan kayarak. */
+#board,#golBant,#penTablo{transition:opacity 2s cubic-bezier(.22,.61,.36,1),translate 2s cubic-bezier(.22,.61,.36,1) !important}
+html.tabela-kapali #board,html.tabela-kapali #golBant,html.tabela-kapali #penTablo{opacity:0 !important;translate:0 -26px;pointer-events:none}
+html.tekrar-acik #board,html.tekrar-acik #golBant,html.tekrar-acik #penTablo{translate:0 -26px}
 </style>
 <style id="sahaUstCubuk2026Y">
 /* 2026-10-24-Y (kullanıcı: "hesap hareketleri ve uygulamayı kapat düğmesi eski yerlerine alınacak"). Yeniden tasarımda dar ekranda
@@ -11296,6 +11303,84 @@ function anonsIlk11(){
     if(say && typeof TOREN !== 'undefined' && TOREN.aktif && TOREN.tur === 'giris') TOREN.anonsBitis = Date.now() + Math.min(45, 3 + say * 1.7) * 1000;
   }catch(e){ _sessiz(e, 'anonsIlk11', 'saha_ses'); } });
 }
+/* ══ OYUNCU İSİM KAYITLARI (2026-11-07, kullanıcı: "spiker ve yorumcu, mevcut ve sonradan eklenecek oyuncuların isimlerini pozisyon bazlı;
+   heyecanlı, normal vb. şekilde sadece isim olarak seslendirmeli; ilgili pozisyonda pas verildiğinde veya şut atıldığında o isim kullanılmalı").
+   Kayıtlar ses-kayit.html > Stadyum > İsimler'den yüklenir: sahaGorunum/isimSes/{spiker|yorumcu}/o_{ad}/{normal|heyecan|bagir} = {m,url}.
+   Anlatım cümle kayıtları adsızdır; ad bu kayıtlardan araya girer: topu alan oyuncunun adı (sakin, yalnızca anlatım boşken), şut/kafa/çalım/
+   kurtarışta adı heyecanlı söylenir ve olay kaydı arkasından gelir, golde "Gol!" kaydının ardından golcünün adı bağırarak. Spiker kaydı yoksa
+   yorumcununki kullanılır; o tonda kayıt yoksa en yakın ton. Maça girerken sahadaki ve yedekteki oyuncuların kayıtları önceden indirilip
+   çözülür; çözülmemiş ad o an atlanır (geç kalan ad pozisyonla uyuşmaz). */
+var _ISIM = { v:null, soz:null, buf:{}, son:{} };
+var _ISIM_TON = { normal:['normal', 'heyecan', 'bagir'], heyecan:['heyecan', 'bagir', 'normal'], bagir:['bagir', 'heyecan', 'normal'] };
+function isimSesYukle(yenile){
+  try{
+    if(yenile) _ISIM.soz = null;
+    if(_ISIM.soz) return _ISIM.soz;
+    if(typeof fbHazir === 'undefined' || !fbHazir || !fbDb) return Promise.resolve();
+    _ISIM.soz = fbDb.ref('sahaGorunum/isimSes').once('value').then(function(sn){ _ISIM.v = sn.val() || {}; _isimOnYukle(); }, function(){ _ISIM.soz = null; });
+    return _ISIM.soz;
+  }catch(e){ return Promise.resolve(); }
+}
+// Maça girişte: kayıt listesi en çok dakikada bir yeniden okunur (yeni yüklenen adlar sayfa yenilenmeden gelsin), kayıtlar önceden çözülür.
+function _isimTazele(){ if(Date.now() - (_ISIM.t || 0) > 60000){ _ISIM.t = Date.now(); isimSesYukle(true); } else _isimOnYukle(); }
+function _isimOnYukle(){
+  try{
+    if(!_ISIM.v || !ac || !window.StadSes) return;
+    var adlar = {}; (players || []).forEach(function(p){ if(p && p.ad) adlar[p.ad] = 1; });
+    [0, 1].forEach(function(t){ ((typeof yedekler !== 'undefined' && yedekler[t]) || []).forEach(function(o){ if(o && o.ad) adlar[o.ad] = 1; }); });
+    Object.keys(adlar).forEach(function(ad){ var k = _oyuncuAnahtar(ad);
+      ['spiker', 'yorumcu'].forEach(function(r){ var T = (_ISIM.v[r] || {})[k] || {};
+        Object.keys(T).forEach(function(o){ var u = T[o] && T[o].url; if(!u || _ISIM.buf[u]) return; _ISIM.buf[u] = 1;
+          StadSes.tampon(ac, u).then(function(b){ _ISIM.buf[u] = b; }, function(){ delete _ISIM.buf[u]; }); }); }); });
+  }catch(e){ _sessiz(e, 'isimOnYukle', 'saha_ses'); }
+}
+function _isimKlip(ad, ton){
+  if(!_ISIM.v || !ad) return null;
+  var k = _oyuncuAnahtar(ad), L = _ISIM_TON[ton] || _ISIM_TON.normal;
+  for(var r = 0; r < 2; r++){ var rol = r ? 'yorumcu' : 'spiker', T = (_ISIM.v[rol] || {})[k]; if(!T) continue;
+    for(var i = 0; i < L.length; i++){ var x = T[L[i]], b = x && _ISIM.buf[x.url]; if(b && b !== 1) return { rol:rol, b:b, ton:L[i] }; } }
+  return null;
+}
+// oncelik: 0 yalnızca anlatım boşken, 1 pozisyon, 2 önemli an (gol). true: sıraya girdi.
+function isimSoyle(p, ton, oncelik){
+  try{
+    if(!p || !p.ad || !_spkKayitModu() || !_spkAcik() || window._sahaOdaKonuk || window._sahaIzleModu || !AYAR.ses || AYAR.spiker === false) return false;
+    var k = _isimKlip(p.ad, ton); if(!k) return false;
+    if(k.rol === 'yorumcu' && AYAR.yorumcu === false) return false;
+    var simdi = Date.now();
+    if(oncelik < 2 && simdi - (_ISIM.son[p.ad] || 0) < 3500) return false;           // aynı ad art arda söylenmez
+    if(oncelik === 0 && (SPK.konusuyor || SPK.sira.length || simdi - (_ISIM.sonPas || 0) < 1800)) return false;
+    var x = { rol:k.rol, metin:p.ad, isim:k, ts:simdi, tur:'isim', oncelik:oncelik, onemli:oncelik >= 2, _kayitli:true };
+    if(!_spkSirayaKoy(x)) return false;
+    _ISIM.son[p.ad] = simdi; if(oncelik === 0) _ISIM.sonPas = simdi;
+    _spkSiradaki(); return true;
+  }catch(e){ _sessiz(e, 'isimSoyle', 'saha_ses'); return false; }
+}
+function _isimOku(x, bitti, gecerli){
+  try{
+    if(gecerli && !gecerli()) return;
+    if(!ac || !x.isim){ setTimeout(bitti, 50); return; }
+    var b = x.isim.b, r = StadSes.kirp(b), k = ac.createBufferSource(), g = ac.createGain(), c = ac.createDynamicsCompressor(), son = false;
+    var dz = Math.max(0, Math.min(1, ((AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100) * ((AYAR.sesSpiker == null ? 100 : AYAR.sesSpiker) / 100) * 1.3));
+    c.threshold.value = -14; c.ratio.value = 6; c.attack.value = 0.003; c.release.value = 0.15;
+    g.gain.value = Math.min(2.2, dz * StadSes.olcek(b, x.isim.ton === 'bagir' ? 0.2 : 0.16));
+    k.buffer = b; k.connect(g); g.connect(c); c.connect(sesCikis());
+    var bit = function(){ if(son) return; son = true; try{ c.disconnect(); }catch(e){} bitti(); };
+    k.onended = bit; setTimeout(bit, r.sure * 1000 + 800);
+    k.start(0, r.bas, r.sure);
+  }catch(e){ setTimeout(bitti, 50); }
+}
+// spk() olayından ad: { tür: [kimin adı, ton, öncelik, sonra] }
+function _isimOlay(tur, v){
+  try{
+    if(!_ISIM.v || !v) return;
+    if(tur === 'pas') isimSoyle(v.q, 'normal', 0);
+    else if(tur === 'kapma') isimSoyle(v.p, 'normal', 0);
+    else if(tur === 'sut' || tur === 'kafa' || tur === 'calim' || tur === 'kurtaris') isimSoyle(v.p, 'heyecan', 1);
+    else if(tur === 'faul' || tur === 'sari' || tur === 'kirmizi') isimSoyle(v.p, 'normal', 1);
+    else if(tur === 'gol' && v.p) setTimeout(function(){ isimSoyle(v.p, v.kk ? 'normal' : 'bagir', 2); }, 0);   // "Gol!" kaydının arkasından
+  }catch(e){}
+}
 /* ══ SPİKER + YORUMCU (2026-10-02, kullanıcı: "oynanan maçlara spiker ve yorumcu ekle") ══════════
    İKİ SES: Spiker anı anlatır (pas, şut, kurtarış, faul, korner, kart, gol). Yorumcu durgun
    anlarda ve önemli olaylardan sonra maçı yorumlar (skor durumu, topa sahip olma, şut sayısı,
@@ -11521,12 +11606,13 @@ function _spkSiradaki(){
     var no = ++SPK.no;
     SPK.konusuyor = true; SPK.sonKonusma = simdi; SPK.calan = x; x.basladi = simdi; SPK._onemliOkunuyor = x.oncelik >= 2;
     if(x.rol === 'yorumcu') SPK.sonYorum = simdi; else SPK.sonAnlati = simdi;
-    if(x.rol !== 'anons'){ try{ yayinAnonsGonder(x.metin, x.rol); }catch(e){self.__ds&&self.__ds(10209,e)}
+    if(x.rol !== 'anons' && !x.isim){ try{ yayinAnonsGonder(x.metin, x.rol); }catch(e){self.__ds&&self.__ds(10209,e)}
       try{ SPK.log.push({ ts:simdi, r:x.rol, m:x.metin }); if(SPK.log.length > 60) SPK.log.shift(); }catch(e){self.__ds&&self.__ds(10210,e)} }
     var _bit = function(){ if(no !== SPK.no) return;                                     // kesilmiş cümlenin geç gelen "bitti"si yok sayılır
       x.bitti0 = Date.now(); SPK.konusuyor = false; SPK.calan = null; SPK._onemliOkunuyor = false; SPK.sonKonusma = x.bitti0; SPK._sonRol = x.rol; setTimeout(_spkSiradaki, 200); };
     var _gec = function(){ return no === SPK.no; };
     if(x.rol === 'anons') _anonsOku(x.metin, _bit, _gec, x.parca);
+    else if(x.isim) _isimOku(x, _bit, _gec);
     else _spkOku(x.metin, x.rol, _bit, x.h, x.oncelik >= 2, x.tur, _gec);
     return;
   }
@@ -12534,6 +12620,7 @@ function spk(tur, v){
   try{
     if(!_spkAcik() || !running || bitti) return;
     v = v || {};
+    try{ if(_spkKayitModu()) _isimOlay(tur, v); }catch(e){}
     var p = v.p, ad = _spkAd(p), tk = p ? _spkTakim(p.team) : '', dk = macDakika();
     try{ window._spkBag = { ad:ad, tk:tk || _spkTakim(v.takim != null ? v.takim : 0), rk:p ? _spkTakim(1 - p.team) : _spkTakim(v.takim != null ? 1 - v.takim : 1),
       q:_spkAd(v.q), s:_spkAd(v.s), takimV:(v.takim != null ? _spkTakim(v.takim) : ''), kk:!!v.kk, skor:'Skor ' + skorA + '-' + skorB + '!' }; }catch(e){ window._spkBag = null; }
@@ -13138,6 +13225,7 @@ function macOnuSesleri(){
     try{ stadyumZil(); }catch(e){self.__ds&&self.__ds(11586,e)}
     setTimeout(function(){ try{ taraftarCal('mars', { zorla:true }); }catch(e){} }, 1800);
     setTimeout(anonsIlk11, 1400);
+    try{ _isimTazele(); }catch(e){}
     setTimeout(function(){ sesAlkisDalga(4, 0.7); }, 1200);
     setTimeout(function(){ sesAlkisDalga(3.5, 0.8); try{ tezahurat(true); }catch(e){self.__ds&&self.__ds(11588,e)} }, 5200);
     if(!_spkAcik()) return;
@@ -13261,7 +13349,7 @@ setInterval(function(){
 }, 2000);
 function sesMacOrtami(ac2, marsKalsin){
   _tribunTaban = ac2 ? 0.035 : 0;
-  if(!ac2){ if(!marsKalsin) taraftarSustur(1.5); } else try{ stadSesYukle(); }catch(e){}
+  if(!ac2){ if(!marsKalsin) taraftarSustur(1.5); } else try{ stadSesYukle(); _isimTazele(); }catch(e){}
   if (!ac || !tribunGain) return;
   try {
     const t = ac.currentTime;
@@ -13893,6 +13981,11 @@ function _sahaSesGenel(){ try{ if(AYAR.ses === false) return 0; var v = AYAR.ses
 function _sahaMacta(){
   try{
     if(window._sahaIzleModu) return true;
+    /* (2026-11-07, kullanıcı: "maç sonu arka plan müziği çalışmıyor"). KÖK SEBEP: maç sonu ekranı açıkken arkada bitiş töreni (13 sn) ve ardından
+       önemli anlar (OZET) oynuyor; ikisi de "maçta" sayıldığı için 6 sn kuralına hiç sıra gelmiyor, müzik ekran kapanana kadar susuyordu.
+       Maç sonu ekranı açıkken (özet izleme modu hariç) yalnızca ekranın ilk 6 sn'sine bakılır. */
+    var _ms0 = document.getElementById('macSonuEkran');
+    if(_ms0 && _ms0.style.display && _ms0.style.display !== 'none' && !window._sahaOzetIzle) return Date.now() - (window._macSonuAcT || 0) < 6000;
     if(typeof OZET !== 'undefined' && OZET.aktif && !OZET.bitti) return true;   // maç özeti oynarken müzik yok (spiker anlatıyor)
     if(typeof running !== 'undefined' && running && !bitti) return true;
     if(typeof TOREN !== 'undefined' && TOREN.aktif) return true;
@@ -14801,7 +14894,18 @@ function cikisYap(){
    kartın içindeydi ve menü büyüdükçe giriş kartı taşıyordu.
    Sürüm damgası ve 'giris-modu' görünümü yalnızca giriş ekranında (MADDE 1.3).
    ══════════════════════════════════════════════════════════════════════════════════════ */
-function menuGoster(){
+/* (2026-11-07, kullanıcı: "maç bitince direkt antrenman ekranına atıyor, 2 saniye sonra maç sonu ekranı geliyor"). KÖK SEBEP: maç bitince kazanç ve
+   yorgunluk kullanıcı kaydına yazılıyor; kaydı dinleyen hesap dinleyicisi menuGoster() çağırıp uygulama kabuğunu (son açık sayfa: maçın açıldığı
+   Antrenman) açıyordu; maç sonu ekranı 3 sn sonra onun üstüne geliyordu. Maç, bitiş töreni ya da maç sonu ekranı sürerken kabuk açılmaz;
+   içeriği yine tazelenir, ekrandan çıkınca ("Ana sayfaya dön") her zamanki gibi açılır. */
+function _oyunEkraniMesgul(){
+  try{
+    if(typeof running !== 'undefined' && running && !bitti) return true;
+    if(window._msBekliyor || (typeof TOREN !== 'undefined' && TOREN.aktif)) return true;
+    var ms = document.getElementById('macSonuEkran'); return !!(ms && ms.style.display && ms.style.display !== 'none');
+  }catch(e){ return false; }
+}
+function menuGoster(zorla){
   try{
     var girisli = !!benimUid;
     var g = document.getElementById('girisBolum');
@@ -14810,7 +14914,7 @@ function menuGoster(){
     var ps = document.getElementById('p-start');
     var sh = document.getElementById('p-shell');
     if(ps){ ps.classList.toggle('on', !girisli); ps.classList.toggle('giris-modu', !girisli); }
-    if(sh) sh.classList.toggle('on', girisli);
+    if(sh && !(girisli && zorla !== true && _oyunEkraniMesgul())) sh.classList.toggle('on', girisli);
     // (2026-10-30-C, kullanıcı: "yeni sürüm mevcutsa ilk girişte uyarı çıkıyor; kullanıcı kendisi kontrol etmeden uyarı
     // çıkmasın"): Yenilikler artık kendiliğinden açılmaz; yalnızca Ayarlar > Destek'teki satırda "Yeni" rozeti görünür.
     var sr = document.getElementById('surumRozet');
@@ -20894,7 +20998,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-07-D';
+window.APP_BUILD='2026-11-07-E';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -28152,6 +28256,21 @@ function _ozetPencere(takim, evTs){
    kaybolduktan SONRA tekrara geçer. Bitişte sınıf kalkar, aynı animasyon tersine oynar. VAR/ofsayt bandı tekrarın kendi
    açıklamasını (ofsayt farkı) taşıdığı için görünür kalır. */
 var TABELA_GECIS_SN = 0.4;
+/* SKORBORD GÖRÜNÜRLÜĞÜ (2026-11-07): her devrenin başında skorbord gizli kalır; santra vuruşuyla saat ilk kez işleyince 2 sn'lik geçişle girer
+   (saat yalnızca santracı topa dokununca başlar - konukta da eşit işler). Devre arası, tören ve maç bitişinde aynı geçişle çıkar. */
+var _TBL = { devre:0, s0:0, bekle:true };
+setInterval(function(){
+  try{
+    var gor = false, h = document.documentElement;
+    if(typeof running !== 'undefined' && running && !bitti && !window._sahaIzleModu){
+      if(devre !== _TBL.devre){ _TBL.devre = devre; _TBL.s0 = saat; _TBL.bekle = true; }
+      if(_TBL.bekle && !(typeof TOREN !== 'undefined' && TOREN.aktif) && !window._sahaDevreFaz && !window._devreMenusu && saat > _TBL.s0 + 0.02) _TBL.bekle = false;
+      gor = !_TBL.bekle;
+    } else _TBL.devre = 0;
+    if(window._sahaIzleModu) gor = true;
+    if(h.classList.contains('tabela-kapali') === gor) h.classList.toggle('tabela-kapali', !gor);
+  }catch(e){}
+}, 150);
 function _tabelaTekrar(gizle){ try{ document.documentElement.classList.toggle('tekrar-acik', !!gizle); }catch(e){} }
 function tekrarBasla(sonra){
   if (!AYAR.tekrar || kayit.length < 20){ sonra(); return; }
@@ -31002,7 +31121,9 @@ function bitir(){
      ardından ~3 sn sonra istatistik penceresi çıksın"). Pencere törenin SONUNU beklemez:
      3 sn sonra açılır, tören arkada sürer; tören bitince arkada önemli anlar oynamaya başlar.
      İki yoldan da (zamanlayıcı / tören sonu) çağrılır; ikinci çağrı pencereyi yeniden kurmaz. */
+  window._msBekliyor = true;
   const _sonEkran = function(){
+    window._msBekliyor = false;
     if(window._msAcildi) { try{ if(!TOREN.aktif) OZET.aktif = true; }catch(e){self.__ds&&self.__ds(27503,e)} return; }
     window._msAcildi = true;
     macSonuEkraniAc();
@@ -32974,7 +33095,8 @@ document.getElementById('b-again').onclick = () => {
   // o işlev yalnızca teşhis panelinin İÇİNDE tanımlı, burada yok. ReferenceError fırlıyor,
   // menuGoster() hiç çalışmıyordu. Açık oyun panelleri doğrudan kapatılır.
   try{ document.querySelectorAll('.panel.on').forEach(function(p){ if(p.id !== 'p-shell') p.classList.remove('on'); }); }catch(e){self.__ds&&self.__ds(29388,e)}
-  menuGoster();
+  window._msBekliyor = false;
+  menuGoster(true);
 };
 document.getElementById('ayarBtn').onclick = ayarAc;
 

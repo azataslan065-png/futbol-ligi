@@ -226,7 +226,7 @@ body.stadMod > :not(header):not(#stad):not(script){ display:none !important; }
     <div id="sGirNot" style="font-size:13px;color:var(--kirmizi);margin-top:8px"></div>
   </div>
   <div id="sIc" style="display:none">
-    <div class="sekme"><button class="b on" id="sTaraftar">Taraftar</button><button class="b" id="sAnons">Stat anonsu</button></div>
+    <div class="sekme"><button class="b on" id="sTaraftar">Taraftar</button><button class="b" id="sAnons">Stat anonsu</button><button class="b" id="sIsim">İsimler</button></div>
     <div class="skart">
       <div id="sTrAlan">
         <h2>Takım</h2>
@@ -244,13 +244,17 @@ body.stadMod > :not(header):not(#stad):not(script){ display:none !important; }
       <div id="sDurum" role="status"></div>
     </div>
     <div class="skart"><h2 id="sListeB">Kayıtlar</h2>
+      <div id="sIsimAra" style="display:none">
+        <p style="margin:0 0 8px;font-size:13px;color:var(--soluk);line-height:1.5">Yalnızca oyuncunun adını söyle. Maçta pas, şut, kurtarış, gol gibi anlarda o tona uygun kayıt çalınır: pas ve top kapma <b>Normal</b>, şut, çalım ve kurtarış <b>Heyecanlı</b>, gol <b>Bağırarak</b>.</p>
+        <div class="turler" id="sRoller"><button class="b on" data-r="spiker">Spiker</button><button class="b" data-r="yorumcu">Yorumcu</button></div>
+        <div class="turler" id="sTonlar"><button class="b on" data-o="normal">Normal</button><button class="b" data-o="heyecan">Heyecanlı</button><button class="b" data-o="bagir">Bağırarak</button></div></div>
       <div id="sAnonsAra" style="display:none"><select id="sGrup" aria-label="Liste"></select>
         <div style="display:flex;gap:8px"><input type="text" id="sYeniAd" placeholder="Listede olmayan oyuncu adı" maxlength="40"><button class="b" id="sYeniEkle" style="height:44px">Ekle</button></div></div>
       <div id="sListe"></div></div>
   </div>
 </section>
 
-<script src="ortak/stadyum-ses.js?v=9ca13d79"></script>
+<script src="ortak/stadyum-ses.js?v=da00c682"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
@@ -704,7 +708,7 @@ function stVeri(){
   var d = ST.d, oku = function(y){ return d.ref(y).once('value').then(function(sn){ return sn.val(); }, function(){ return null; }); };
   var ligBul = function(o){ return oku(o + 'sahaVeri/activeDisplayLeague').then(function(id){ if(id) return id;
     return oku(o + 'sahaVeri/leaguesMeta').then(function(m){ m = m || {}; var ids = Object.keys(m); ids.sort(function(a, b){ return ((m[b] || {}).createdAt || 0) - ((m[a] || {}).createdAt || 0); }); return ids[0] || null; }); }); };
-  return Promise.all(['test/', ''].map(function(o){ return ligBul(o).then(function(id){ return id ? oku(o + 'sahaVeri/leagues/' + id + '/teams') : null; }); }).concat([oku('sahaGorunum/taraftarSes'), oku('sahaGorunum/anonsSes'), oku('test/sahaGorunum/taraftarSes'), oku('test/sahaGorunum/anonsSes')])).then(function(R){
+  return Promise.all(['test/', ''].map(function(o){ return ligBul(o).then(function(id){ return id ? oku(o + 'sahaVeri/leagues/' + id + '/teams') : null; }); }).concat([oku('sahaGorunum/taraftarSes'), oku('sahaGorunum/anonsSes'), oku('test/sahaGorunum/taraftarSes'), oku('test/sahaGorunum/anonsSes'), oku('sahaGorunum/isimSes'), oku('test/sahaGorunum/isimSes'), oku('oyuncuHavuzu'), oku('test/oyuncuHavuzu')])).then(function(R){
     var gor = {}, L = [];
     [R[0], R[1]].forEach(function(T){ Object.keys(T || {}).forEach(function(k){ var t = T[k] || {}, a = String(t.name || '').trim(), sl = stadSlug(a); if(!sl) return;
       var x = gor[sl]; if(!x){ x = gor[sl] = { ad:a, sl:sl, oy:{} }; L.push(x); }
@@ -712,15 +716,30 @@ function stVeri(){
     L.sort(function(a, b){ return a.ad.localeCompare(b.ad, 'tr'); }); ST.takimlar = L;
     ST.klip = Object.assign({}, R[4] || {}); Object.keys(R[2] || {}).forEach(function(k){ ST.klip[k] = Object.assign({}, ST.klip[k], R[2][k]); });
     ST.anons = Object.assign({}, R[5] || {}, R[3] || {});
+    // İsim kayıtları: gerçek ve test birleştirilir (yazarken ikisine birden yazılır).
+    ST.isim = {}; [R[6], R[7]].forEach(function(I){ Object.keys(I || {}).forEach(function(r){ Object.keys(I[r] || {}).forEach(function(k){ Object.keys(I[r][k] || {}).forEach(function(o){
+      ((ST.isim[r] = ST.isim[r] || {})[k] = ST.isim[r][k] || {})[o] = I[r][k][o]; }); }); }); });
+    // Bütün oyuncular: lig kadroları + oyuncu havuzu (satışa yeni eklenenler dahil).
+    var hv = {}; [R[8], R[9]].forEach(function(H){ Object.keys(H || {}).forEach(function(k){ var n = H[k] && String(H[k].ad || '').trim(); if(n) hv[n] = 1; }); });
+    L.forEach(function(t){ Object.keys(t.oy).forEach(function(n){ hv[n] = 1; }); }); ST.tumOy = Object.keys(hv).sort(function(a, b){ return a.localeCompare(b, 'tr'); });
     try{ ST.ekAd = JSON.parse(localStorage.getItem('sesKayitEkAd') || '[]'); }catch(e){}
     var se = $('sTakim'); se.innerHTML = ''; L.forEach(function(t){ var o = document.createElement('option'); o.value = t.sl; o.textContent = t.ad; se.appendChild(o); });
-    var g = $('sGrup'), on = ST.grup; g.innerHTML = '';
-    [['sabit', 'Sabit cümleler'], ['takim', 'Takım adları'], ['ek', 'Eklediğim adlar']].concat(L.map(function(t){ return ['t:' + t.sl, t.ad + ' oyuncuları']; })).forEach(function(c){ var o = document.createElement('option'); o.value = c[0]; o.textContent = c[1]; g.appendChild(o); });
-    g.value = on; stCiz();
+    stGrupCiz(); stCiz();
   });
 }
+function stGrupCiz(){
+  var g = $('sGrup'), is = ST.sekme === 'is', L = ST.takimlar || []; g.innerHTML = '';
+  var G = (is ? [['tum', 'Bütün oyuncular']] : [['sabit', 'Sabit cümleler'], ['takim', 'Takım adları']]).concat([['ek', 'Eklediğim adlar']]).concat(L.map(function(t){ return ['t:' + t.sl, t.ad + ' oyuncuları']; }));
+  G.forEach(function(c){ var o = document.createElement('option'); o.value = c[0]; o.textContent = c[1]; g.appendChild(o); });
+  if(!G.some(function(c){ return c[0] === ST.grup; })) ST.grup = G[0][0];
+  g.value = ST.grup;
+}
+// Seçili sekmenin kayıt haritası ve veritabanı yolu (anons: anonsSes/{anahtar}; isim: isimSes/{rol}/{anahtar}/{ton}).
+function stHarita(){ if(ST.sekme !== 'is') return ST.anons || {}; var I = (ST.isim || {})[ST.rol] || {}, H = {}; Object.keys(I).forEach(function(k){ if(I[k][ST.ton]) H[k] = I[k][ST.ton]; }); return H; }
+function stYol(k){ return ST.sekme === 'is' ? 'isimSes/' + ST.rol + '/' + k + '/' + ST.ton : 'anonsSes/' + k; }
 function stSatirlar(){
   var g = ST.grup, P = [];
+  if(g === 'tum') (ST.tumOy || []).forEach(function(a){ P.push({ k:'o_' + stadSlug(a), m:a }); });
   if(g === 'sabit') SABIT.forEach(function(c){ P.push({ k:c[0], m:c[1] }); });
   else if(g === 'takim') ST.takimlar.forEach(function(t){ P.push({ k:'t_' + t.sl, m:t.ad }); });
   else if(g === 'ek') ST.ekAd.forEach(function(a){ P.push({ k:'o_' + stadSlug(a), m:a }); });
@@ -730,7 +749,9 @@ function stSatirlar(){
 function stBtn(y, f, ek){ var b = document.createElement('button'); b.className = 'b'; b.textContent = y; if(ek) b.setAttribute('aria-label', ek); b.onclick = f; return b; }
 function stCiz(){
   var tr = ST.sekme === 'tr', K = $('sListe'); K.innerHTML = '';
-  $('sTaraftar').classList.toggle('on', tr); $('sAnons').classList.toggle('on', !tr);
+  $('sTaraftar').classList.toggle('on', tr); $('sAnons').classList.toggle('on', ST.sekme === 'an'); $('sIsim').classList.toggle('on', ST.sekme === 'is');
+  $('sIsimAra').style.display = ST.sekme === 'is' ? '' : 'none';
+  $('sStadDinle').style.display = ST.sekme === 'is' ? 'none' : ''; $('sDinle').textContent = ST.sekme === 'is' ? '▶ Dinle' : '▶ Düz dinle';
   $('sTrAlan').style.display = tr ? '' : 'none'; $('sAnonsAra').style.display = tr ? 'none' : ''; $('sMetin').style.display = tr ? 'none' : ''; $('sDosya').style.display = tr ? '' : 'none';
   $('sListeB').textContent = tr ? 'Bu takımın kayıtları' : 'Okunacaklar'; $('sYukle').textContent = tr ? 'Yükle' : 'Yükle ve sonrakine geç';
   if(tr){
@@ -740,20 +761,22 @@ function stCiz(){
       s.appendChild(stBtn('▶', function(){ stUrlDinle(x.url, true); }, 'Statta dinle')); s.appendChild(stBtn('Sil', function(){ stSil('taraftarSes/' + sl + '/' + id, x); })); K.appendChild(s); });
     return;
   }
-  var L = stSatirlar(), yap = L.filter(function(x){ return ST.anons[x.k]; }).length;
-  $('sListeB').textContent = 'Okunacaklar · ' + yap + ' / ' + L.length;
-  if(!ST.hedef || !L.some(function(x){ return x.k === ST.hedef.k; })) stHedef(L.filter(function(x){ return !ST.anons[x.k]; })[0] || L[0] || null);
+  var H = stHarita(), is = ST.sekme === 'is', L = stSatirlar(), yap = L.filter(function(x){ return H[x.k]; }).length;
+  $('sListeB').textContent = (is ? ({ spiker:'Spiker', yorumcu:'Yorumcu' })[ST.rol] + ' · ' + ({ normal:'Normal', heyecan:'Heyecanlı', bagir:'Bağırarak' })[ST.ton] + ' · ' : 'Okunacaklar · ') + yap + ' / ' + L.length;
+  if(!ST.hedef || !L.some(function(x){ return x.k === ST.hedef.k; })) stHedef(L.filter(function(x){ return !H[x.k]; })[0] || L[0] || null);
+  else $('sMetin').textContent = ST.hedef.m + (is ? ' (' + ({ normal:'normal', heyecan:'heyecanlı', bagir:'bağırarak' })[ST.ton] + ')' : '');
   L.forEach(function(x){ var s = document.createElement('div'); s.className = 'satir'; var y = document.createElement('span'); y.textContent = x.m; s.appendChild(y);
-    if(ST.anons[x.k]){ var t = document.createElement('b'); t.className = 'tamam'; t.textContent = '✓'; s.appendChild(t); s.appendChild(stBtn('▶', function(){ stUrlDinle(ST.anons[x.k].url, true); }, 'Statta dinle')); s.appendChild(stBtn('Sil', function(){ stSil('anonsSes/' + x.k, ST.anons[x.k]); })); }
-    s.appendChild(stBtn(ST.anons[x.k] ? 'Yenile' : 'Oku', function(){ stHedef(x); window.scrollTo({ top:0, behavior:'smooth' }); })); K.appendChild(s); });
+    if(H[x.k]){ var t = document.createElement('b'); t.className = 'tamam'; t.textContent = '✓'; s.appendChild(t); s.appendChild(stBtn('▶', function(){ stUrlDinle(H[x.k].url, !is); }, is ? 'Dinle' : 'Statta dinle')); s.appendChild(stBtn('Sil', function(){ stSil(stYol(x.k), H[x.k]); })); }
+    s.appendChild(stBtn(H[x.k] ? 'Yenile' : 'Oku', function(){ stHedef(x); window.scrollTo({ top:0, behavior:'smooth' }); })); K.appendChild(s); });
 }
-function stHedef(x){ ST.hedef = x; ST.blob = null; stDugme(); $('sMetin').textContent = x ? x.m : 'Liste boş'; stNot(''); }
+function stHedef(x){ ST.hedef = x; ST.blob = null; stDugme(); $('sMetin').textContent = x ? x.m + (ST.sekme === 'is' ? ' (' + ({ normal:'normal', heyecan:'heyecanlı', bagir:'bağırarak' })[ST.ton] + ')' : '') : 'Liste boş'; stNot(''); }
 function stDugme(){ var v = !!ST.blob; $('sDinle').disabled = !v; $('sStadDinle').disabled = !v; $('sYukle').disabled = !v; }
 function stSusturCal(){ if(ST.calan){ try{ ST.calan.dur ? ST.calan.dur(0.2) : ST.calan.stop(); }catch(e){} ST.calan = null; } }
 function stTamponCal(b, stad){
   var c = stKtx(); stSusturCal();
   if(!stad){ var k = c.createBufferSource(); k.buffer = b; k.connect(c.destination); k.start(); ST.calan = k; return; }
   if(ST.sekme === 'tr') ST.calan = StadSes.kalabalik(c, b, c.destination, { ses:0.55 });
+  else if(ST.sekme === 'is'){ var r0 = StadSes.kirp(b), k0 = c.createBufferSource(); k0.buffer = b; k0.connect(c.destination); k0.start(0, r0.bas, r0.sure); ST.calan = k0; }
   else { var r = StadSes.kirp(b), n = c.createBufferSource(); n.buffer = b; n.connect(StadSes.paGiris(c, c.destination)); n.start(0, r.bas, r.sure); ST.calan = n; }
 }
 function stUrlDinle(url, stad){ stNot('Yükleniyor…'); StadSes.tampon(stKtx(), url).then(function(b){ stNot(''); stTamponCal(b, stad); }, function(e){ stNot('Çalınamadı: ' + stHata(e), 'h'); }); }
@@ -793,19 +816,25 @@ function stSil(yol, x){ if(!confirm('Bu kayıt silinsin mi?')) return;
 $('sYukle').onclick = function(){
   if(!ST.blob) return; var tr = ST.sekme === 'tr', sl = $('sTakim').value;
   if(tr && !sl){ stNot('Önce takım seç.', 'h'); return; } if(!tr && !ST.hedef) return;
-  var ad = tr ? ($('sAd').value.trim() || TUR_AD[ST.tur]) : ST.hedef.m, klasor = 'saha-ses/' + (tr ? 'taraftar/' + sl : 'anons');
+  var ad = tr ? ($('sAd').value.trim() || TUR_AD[ST.tur]) : ST.hedef.m, klasor = 'saha-ses/' + (tr ? 'taraftar/' + sl : (ST.sekme === 'is' ? 'isim/' + ST.rol : 'anons'));
   var uz = /mp4|m4a|aac/.test(ST.tip) ? 'm4a' : (/mpeg|mp3/.test(ST.tip) ? 'mp3' : (/ogg/.test(ST.tip) ? 'ogg' : (/wav/.test(ST.tip) ? 'wav' : 'webm')));
   var yol = klasor + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 7) + '.' + uz; this.disabled = true;
   stGonder(ST.blob, yol, ST.tip.split(';')[0] || 'audio/webm', function(o){ stNot('Yükleniyor… %' + Math.round(o * 100)); }).then(function(url){
-    var eski = !tr && ST.anons[ST.hedef.k], dg = tr ? { ad:ad, tur:ST.tur, url:url, t:Date.now() } : { m:ad, url:url, t:Date.now() }, y = tr ? 'taraftarSes/' + sl + '/' + yol.split('/').pop().split('.')[0] : 'anonsSes/' + ST.hedef.k;
+    var eski = !tr && stHarita()[ST.hedef.k], dg = tr ? { ad:ad, tur:ST.tur, url:url, t:Date.now() } : { m:ad, url:url, t:Date.now() }, y = tr ? 'taraftarSes/' + sl + '/' + yol.split('/').pop().split('.')[0] : stYol(ST.hedef.k);
+    // Yeniden okunan kaydın eski dosyası depodan silinir.
+    if(eski && eski.url) try{ var ey = String(eski.url).split('/public/' + SUP.kova + '/')[1]; if(ey) fetch(SUP.url + '/storage/v1/object/' + SUP.kova + '/' + ey, { method:'DELETE', headers:{ Authorization:'Bearer ' + SUP.anahtar, apikey:SUP.anahtar } }).catch(function(){}); }catch(_e){}
     return stYaz(y, dg).then(function(){ ST.blob = null; $('sAd').value = ''; $('sKayit').textContent = 'KAYDET'; stDugme(); if(!tr) ST.hedef = null; return stVeri(); }).then(function(){ stNot('Yüklendi. Bir sonraki maçta çalar.', 'i'); });
   }).catch(function(e){ stNot(stHata(e), 'h'); stDugme(); });
 };
 $('sTaraftar').onclick = function(){ ST.sekme = 'tr'; ST.blob = null; stDugme(); stNot(''); stCiz(); };
-$('sAnons').onclick = function(){ ST.sekme = 'an'; ST.blob = null; stDugme(); stNot(''); stCiz(); };
+$('sAnons').onclick = function(){ ST.sekme = 'an'; ST.blob = null; ST.hedef = null; stDugme(); stNot(''); stGrupCiz(); stCiz(); };
+$('sIsim').onclick = function(){ ST.sekme = 'is'; ST.blob = null; ST.hedef = null; stDugme(); stNot(''); stGrupCiz(); stCiz(); };
+ST.rol = 'spiker'; ST.ton = 'normal';
+$('sRoller').onclick = function(e){ var r = e.target.getAttribute('data-r'); if(!r) return; ST.rol = r; ST.hedef = null; Array.prototype.forEach.call(this.children, function(b){ b.classList.toggle('on', b === e.target); }); stCiz(); };
+$('sTonlar').onclick = function(e){ var o = e.target.getAttribute('data-o'); if(!o) return; ST.ton = o; ST.hedef = null; Array.prototype.forEach.call(this.children, function(b){ b.classList.toggle('on', b === e.target); }); stCiz(); };
 $('sTakim').onchange = stCiz; $('sGrup').onchange = function(){ ST.grup = this.value; ST.hedef = null; stCiz(); };
 $('sTurler').onclick = function(e){ var t = e.target.getAttribute('data-t'); if(!t) return; ST.tur = t; Array.prototype.forEach.call(this.children, function(b){ b.classList.toggle('on', b === e.target); }); };
-$('sYeniEkle').onclick = function(){ var a = $('sYeniAd').value.trim(); if(!stadSlug(a)) return; if(ST.ekAd.indexOf(a) < 0) ST.ekAd.push(a); try{ localStorage.setItem('sesKayitEkAd', JSON.stringify(ST.ekAd)); }catch(e){} $('sYeniAd').value = ''; ST.grup = 'ek'; $('sGrup').value = 'ek'; ST.hedef = null; stCiz(); };
+$('sYeniEkle').onclick = function(){ var a = $('sYeniAd').value.trim(); if(!stadSlug(a)) return; if(ST.ekAd.indexOf(a) < 0) ST.ekAd.push(a); try{ localStorage.setItem('sesKayitEkAd', JSON.stringify(ST.ekAd)); }catch(e){} $('sYeniAd').value = ''; ST.grup = 'ek'; stGrupCiz(); ST.hedef = null; stCiz(); };
 dbAc().then(function(){ var _s = stadYukle(); rolSec(MOD); if(_s && _s.then) _s.then(function(){ if(MOD !== 'diyalog') rolSec(MOD); }); if(Object.keys(kayitlar).length) $('nasil').open = false; })
   .catch(function(e){ hata('Kayıt deposu açılamadı (gizli sekme olabilir): ' + ((e && e.message) || e)); });
 document.addEventListener('visibilitychange', function(){ if(document.hidden && kaydediliyor) kayitBitir(); });
