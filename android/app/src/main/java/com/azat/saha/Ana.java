@@ -235,11 +235,10 @@ public class Ana extends Activity {
        sorulur (window.__appGeri): sayfa en üstteki pencereyi/menüyü kapatır ya da önceki ekrana döner (true); gidecek yer kalmadıysa (false)
        çıkış onayı açılır. Sayfa bu işlevi tanımlamıyorsa (ör. hata sayfası) eski davranış: geçmişte geri, yoksa çıkış onayı. */
     private boolean geriBekliyor;
-    private android.app.AlertDialog cikisPen;
     @Override public void onBackPressed() {
         if (tamEkran != null) { tamEkranKapat(); return; }
         if (Guncelle.geri(this)) return;   // güncelleme ekranı açıkken (indirme sürerken uygulamaya geçilmez)
-        if (cikisPen != null && cikisPen.isShowing()) { cikisPen.dismiss(); return; }
+        if (Cikis.acik()) { Cikis.kapat(); return; }
         if (w == null) { super.onBackPressed(); return; }
         if (geriBekliyor) return;
         geriBekliyor = true;
@@ -255,16 +254,7 @@ public class Ana extends Activity {
             }
         });
     }
-    private void cikisSor() {
-        if (isFinishing()) return;
-        cikisPen = new android.app.AlertDialog.Builder(this)
-            .setTitle(getString(R.string.app_name))
-            .setMessage("Uygulamadan çıkmak istiyor musun?")
-            .setPositiveButton("Çık", new android.content.DialogInterface.OnClickListener() { public void onClick(android.content.DialogInterface d, int i) { finish(); } })
-            .setNegativeButton("Vazgeç", null)
-            .create();
-        cikisPen.show();
-    }
+    private void cikisSor() { Cikis.goster(this); }   // (2026-11-07) uygulamanın kendi görünümünde çıkış penceresi (bkz. Cikis)
     @Override protected void onResume() { super.onResume(); if (w != null) w.onResume(); Teshis.yaz("on-plan", "", w == null ? "" : w.getUrl()); if (w != null && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
     @Override protected void onDestroy() {
         Teshis.yaz("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder();
