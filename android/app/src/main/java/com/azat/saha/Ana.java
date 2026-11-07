@@ -71,6 +71,8 @@ public class Ana extends Activity {
         if (BuildConfig.YATAY) gizle();
         Teshis.baslat(this);
         Onbellek.baslat(this);   // (2026-11-07) bkz. Onbellek
+        Sayfa.baslat(this);      // (2026-11-07) bkz. Sayfa
+        etkinAna = this;
         Teshis.olay("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
         kur();
         w.loadUrl(BuildConfig.ADRES);      // (2026-11-06) restoreState kaldırıldı: sayfa her açılışta baştan yüklenir
@@ -88,7 +90,10 @@ public class Ana extends Activity {
     private static boolean bizimKaynak(String kaynak) { try { return kaynak == null || kaynak.isEmpty() || bizim(Uri.parse(kaynak)); } catch (Exception e) { return true; } }
     private int bosDeneme;
     private void kur() {
-        w = new WebView(this);
+        // Arka planda oynatma sürerken sayfa motoru ekran kapalıyken de pencereyi görünür sayar (bkz. Arka): görünmez sayarsa videoyu durdurur.
+        w = new WebView(this) {
+            @Override protected void onWindowVisibilityChanged(int v) { super.onWindowVisibilityChanged(arkaOynat && v != View.VISIBLE ? View.VISIBLE : v); }
+        };
         w.setBackgroundColor(Color.parseColor("#0b0b14"));
         kok.addView(w, 0, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -115,13 +120,13 @@ public class Ana extends Activity {
         if (Build.VERSION.SDK_INT >= 26) w.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
         try {
             android.webkit.ServiceWorkerController.getInstance().setServiceWorkerClient(new android.webkit.ServiceWorkerClient() {
-                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest r) { WebResourceResponse x = Reklam.ver(r); return x != null ? x : Onbellek.ver(r); }
+                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest r) { WebResourceResponse x = Sayfa.ver(r); if (x == null) x = Reklam.ver(r); return x != null ? x : Onbellek.ver(r); }
             });
         } catch (Exception e) { Teshis.yaz("onbellek", "servis çalışanı bağlanamadı", String.valueOf(e.getMessage())); }
 
         w.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return disari(r.getUrl()); }
-            @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { WebResourceResponse x = Reklam.ver(r); return x != null ? x : Onbellek.ver(r); }
+            @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { WebResourceResponse x = Sayfa.ver(r); if (x == null) x = Reklam.ver(r); return x != null ? x : Onbellek.ver(r); }
             @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); sayfaHazir = false; Teshis.olay("sayfa", "başladı", u); }
             @Override public void onPageFinished(WebView v, String u) {
                 v.evaluateJavascript(YAMA, null);
@@ -274,7 +279,7 @@ public class Ana extends Activity {
         // sayfa o an henüz yüklenmeye başlamamıştı (boş ölçüldü) ve sayfa gereksiz yere baştan yükleniyordu. Artık yalnızca yüklenmiş sayfaya bakılır.
         if (w != null && sayfaHazir && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
     @Override protected void onDestroy() {
-        Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder(); Guncelle.sifirla(this);
+        Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder(); Guncelle.sifirla(this); if (etkinAna == this) { etkinAna = null; arkaOynat = false; Arka.durdur(this); }
         if (w != null) { kok.removeView(w); w.destroy(); w = null; }   // eski sayfa arka planda açık kalmasın (iki oturum çakışırdı)
         super.onDestroy();
     }
@@ -305,6 +310,26 @@ public class Ana extends Activity {
        pencereyi kaplayacak şekilde düzenler, düğmeler gizlenir; pencere büyütülünce her şey eski hâline döner. Yayın oynarken ana ekrana
        çıkılırsa da kendiliğinden küçük pencereye geçer. Küçük pencere kapatılınca yayın durur (arka planda ses çalmaya devam etmez). */
     private volatile boolean pipHazir;
+    // ---- Arka planda oynatma (bkz. Arka) ----
+    static Ana etkinAna;
+    private volatile boolean arkaOynat;
+    private boolean bildirimSoruldu;
+    private final Runnable arkaKapat = () -> { arkaOynat = false; Arka.durdur(this); };
+    /** TV yayını oynuyor/durdu. Durunca hizmet hemen kapanmaz (2 dk): sıradaki videoya geçerken kısa duraklamalarda arka planda yeniden başlatmak gerekmesin. */
+    private void arkaAyarla(boolean oynuyor) {
+        h.removeCallbacks(arkaKapat);
+        if (!oynuyor) { if (arkaOynat) h.postDelayed(arkaKapat, 120000); return; }
+        if (arkaOynat) return;
+        arkaOynat = true;
+        if (Build.VERSION.SDK_INT >= 33 && !bildirimSoruldu && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+            bildirimSoruldu = true; requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 77); }
+        Arka.baslat(this);
+    }
+    /** Bildirimdeki "Durdur". */
+    static void tvDurdur() {
+        final Ana a = etkinAna; if (a == null) return;
+        a.h.post(() -> { if (a.w != null) a.w.evaluateJavascript("try{window.__appTvDurdur&&window.__appTvDurdur()}catch(e){}", null); a.h.removeCallbacks(a.arkaKapat); a.arkaOynat = false; });
+    }
     private boolean pipIdi;
     private boolean pipDestek() { return Build.VERSION.SDK_INT >= 26 && getPackageManager().hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE); }
     private android.app.PictureInPictureParams pipAyar() {
@@ -336,9 +361,9 @@ public class Ana extends Activity {
         @JavascriptInterface public void guncellemeDenetle() { h.post(new Runnable() { public void run() { Guncelle.denetle(Ana.this, true); } }); }
         @JavascriptInterface public String surum() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
         @JavascriptInterface public void teshis(String tur, String ayrinti) { String t = String.valueOf(tur); if (t.contains("hata")) Teshis.yaz(t, String.valueOf(ayrinti), BuildConfig.ADRES); else Teshis.olay(t, String.valueOf(ayrinti), BuildConfig.ADRES); }
-        @JavascriptInterface public int kabuk() { return 2; }   // kabuk kuşağı: 2 = zorunlu güncelleme sistemi (sayfalar eski kabuğu buradan tanır)
+        @JavascriptInterface public int kabuk() { return 3; }   // kabuk kuşağı: 2 = zorunlu güncelleme, 3 = sayfa uygulamaya gömülü (güncelleme yalnızca uygulamadan)
         @JavascriptInterface public boolean pip() { if (!pipDestek()) return false; h.post(new Runnable() { public void run() { pipGir(); } }); return true; }
-        @JavascriptInterface public void pipHazir(boolean v) { pipHazir = v; if (Build.VERSION.SDK_INT >= 31 && pipDestek()) h.post(new Runnable() { public void run() { try { setPictureInPictureParams(pipAyar()); } catch (Exception e) { } } }); }
+        @JavascriptInterface public void pipHazir(boolean v) { pipHazir = v; h.post(() -> arkaAyarla(v)); if (Build.VERSION.SDK_INT >= 31 && pipDestek()) h.post(new Runnable() { public void run() { try { setPictureInPictureParams(pipAyar()); } catch (Exception e) { } } }); }
         @JavascriptInterface public void cik() { h.post(new Runnable() { public void run() { finish(); } }); }
         @JavascriptInterface public void kaydet(String ad, String tip, String b64) {
             h.post(() -> {

@@ -527,8 +527,11 @@ var SahaGuncelleme = (function(){
     var a = _minYonetici, b = _sunucu ? { build:_sunucu, mesaj:'' } : null;
     _min = !a ? b : (!b ? a : (karsilastir(a.build, b.build) >= 0 ? a : b));
   }
+  /* (2026-11-07) Uygulamada (APK) sayfa uygulamanın içinde gelir (bkz. android Sayfa.java): yeni sürüm sayfayı yenileyerek değil, uygulama
+     güncellenerek alınır. Sunucudaki sürüme uygulama kendisi bakar; "Güncelle" uygulamanın güncelleme ekranını açar. */
+  function apkGomulu(){ try{ return !!(window.SahaApp && typeof SahaApp.kabuk === 'function' && SahaApp.kabuk() >= 3); }catch(e){ return false; } }
   function sunucuIzle(dosya){
-    if(!dosya || !window.fetch) return;
+    if(!dosya || !window.fetch || apkGomulu()) return;
     var bak = function(){
       try{
         if(document.hidden) return;
@@ -547,6 +550,8 @@ var SahaGuncelleme = (function(){
   }
   function esc(t){ return String(t == null ? '' : t).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
   function guncelle(){
+    if(apkGomulu()){ try{ SahaApp.guncellemeDenetle(); }catch(e){} setTimeout(function(){ try{ var d = document.getElementById('sgGuncelleDug'), e2 = document.getElementById('sgBantDug');
+      if(d){ d.disabled = false; d.textContent = 'Şimdi güncelle'; } if(e2){ e2.disabled = false; e2.textContent = 'Güncelle'; } }catch(e){} }, 2500); return; }
     try{ var b = document.getElementById('sgGuncelleDug'); if(b){ b.disabled = true; b.textContent = 'Güncelleniyor…'; } }catch(e){}
     try{ if(_min) sessionStorage.setItem('sg-denendi-' + _min.build, String(Date.now())); }catch(e){}
     var isler = [];

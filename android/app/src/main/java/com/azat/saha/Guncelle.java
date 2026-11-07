@@ -104,10 +104,11 @@ final class Guncelle {
                 long yerelKod = Build.VERSION.SDK_INT >= 28 ? pi.getLongVersionCode() : pi.versionCode;
                 final String yerelAd = pi.versionName == null ? "" : pi.versionName;
                 final String ad = j.optString("ad", ""), url = j.optString("url", "");
-                boolean yeni = j.optLong("kod", 0) > yerelKod && ad.length() > 0 && !ad.equals(yerelAd) && url.startsWith("https://");
+                // Test: her yeni derleme (sayfa APK'ya gömülü, bkz. Sayfa). Kök: sürüm adı (kok-surum.txt) değişince.
+                boolean yeni = j.optLong("kod", 0) > yerelKod && ad.length() > 0 && url.startsWith("https://") && (BuildConfig.GOMULU || !ad.equals(yerelAd));
                 sp.edit().putLong("son", System.currentTimeMillis()).apply();
                 Teshis.olay("guncelle", (yeni ? "yeni " : "güncel ") + ad, yerelAd + " / " + yerelKod);
-                if (!yeni) { H.post(Guncelle::bekleKapat); if (elle) mesaj(a, "Uygulama güncel (v" + yerelAd + ")"); return; }
+                if (!yeni) { H.post(Guncelle::bekleKapat); if (elle) mesaj(a, "Uygulama güncel (" + yerelAd + "). Yeni sürüm hazırlanıyorsa birkaç dakika sonra yeniden dene."); return; }
                 H.post(new Runnable() { public void run() { Activity x = etkin(); if (x != null) goster(x, j, yerelAd); bekleKapat(); } });
             } catch (Exception e) {
                 H.post(Guncelle::bekleKapat);
@@ -159,13 +160,12 @@ final class Guncelle {
         TextView alt = yazi(a, a.getString(R.string.app_name), 13, Color.parseColor("#9AA3B8"), false);
         alt.setGravity(Gravity.CENTER); alt.setPadding(0, dp(a, 4), 0, dp(a, 14)); kart.addView(alt);
 
+        // (2026-11-07) Kullanıcının verdiği düzen: Yüklü Sürüm, Gereken Sürüm, Güncelleme Boyutu, Güncellenme Tarihi, Yenilikler.
         String[][] satir = {
-            {"Yüklü sürüm", surumYazi(yerelAd)},
-            {"Yeni sürüm", surumYazi(ad)},
-            {"Güncelleme boyutu", mb(boyut)},
-            {"Yayın tarihi", tarih(zaman)},
-            {"Derleme numarası", kod > 0 ? String.valueOf(kod) : ""},
-            {"Güncelleme türü", zorunlu ? "Zorunlu" : "İsteğe bağlı"}
+            {"Yüklü Sürüm", yerelAd},
+            {"Gereken Sürüm", ad},
+            {"Güncelleme Boyutu", mb(boyut)},
+            {"Güncellenme Tarihi", zaman > 0 ? new SimpleDateFormat("dd/MM/yyyy", new Locale("tr")).format(new Date(zaman)) : ""}
         };
         for (String[] s : satir) {
             if (s[1].length() == 0) continue;
@@ -176,10 +176,9 @@ final class Guncelle {
             r.addView(v, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
             kart.addView(r);
         }
-        if (not.length() > 0) {
-            TextView nb = yazi(a, "Yenilikler", 14, Color.parseColor("#9AA3B8"), false); nb.setPadding(0, dp(a, 12), 0, dp(a, 4)); kart.addView(nb);
-            TextView nt = yazi(a, not, 14, Color.WHITE, false); nt.setLineSpacing(0, 1.25f); kart.addView(nt);
-        }
+        TextView nb = yazi(a, "Yenilikler", 14, Color.parseColor("#9AA3B8"), false); nb.setPadding(0, dp(a, 12), 0, dp(a, 4)); kart.addView(nb);
+        TextView nt = yazi(a, "Güncelleme notları için Ayarlar > Yenilikler > Sürüm Notları adımını takip ederek en son sürümü kontrol edin.", 14, Color.WHITE, false);
+        nt.setLineSpacing(0, 1.25f); kart.addView(nt);
         TextView bilgi = yazi(a, "Uygulamayı kullanmaya devam etmek için güncellemen gerekiyor. Girişin ve ayarların silinmez.", 12, Color.parseColor("#7C8499"), false);
         bilgi.setPadding(0, dp(a, 12), 0, dp(a, 10)); kart.addView(bilgi);
 

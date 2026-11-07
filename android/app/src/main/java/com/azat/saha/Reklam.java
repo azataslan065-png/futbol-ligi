@@ -26,6 +26,9 @@ final class Reklam {
         "adservice.google.com", "googletagservices.com", "pagead2.googlesyndication.com", "ads.youtube.com" };
     private static final String[] YOL = { "/pagead/", "/api/stats/ads", "/ptracking", "/get_midroll_info", "/youtubei/v1/player/ad_break", "/pcs/activeview" };
     private static final String BETIK = "<script>(function(){try{"
+        // (2026-11-07) Arka planda oynatma: oynatıcı sayfanın gizlendiğini görüp videoyu durdurmasın (bkz. Arka)
+        + "try{Object.defineProperty(document,'hidden',{configurable:true,get:function(){return false;}});Object.defineProperty(document,'visibilityState',{configurable:true,get:function(){return 'visible';}});"
+        + "['visibilitychange','webkitvisibilitychange'].forEach(function(t){document.addEventListener(t,function(e){e.stopImmediatePropagation();},true);});}catch(e){}"
         + "var K=['adPlacements','adSlots','playerAds','adBreakHeartbeatParams','adBreakParams','adParams','adInferredBlockingStatus'];"
         + "function t(o){try{if(o&&typeof o==='object'){for(var i=0;i<K.length;i++){if(K[i] in o)delete o[K[i]];}"
         + "if(o.playerResponse)t(o.playerResponse);if(o.response)t(o.response);if(o.embedded_player_response&&typeof o.embedded_player_response==='object')t(o.embedded_player_response);}}catch(e){}return o;}"
