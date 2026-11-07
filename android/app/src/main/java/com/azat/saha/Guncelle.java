@@ -48,26 +48,47 @@ import java.util.Locale;
    yayın tarihi, derleme numarası ve yenilikler. "Güncelle"ye basınca APK uygulamanın içinde indirilir (bildirim yok); ekran ilerleme
    çubuğuyla kalır, indirme bitene kadar geri tuşu ve arkadaki sayfa kapalıdır - uygulamaya girilemez. Bitince Android kurulum ekranı açılır
    (bilinmeyen kaynak izni yoksa önce o ayar). Kurulum iptal edilirse ekranda "Kur" ve "Sonra" kalır. "Sonra" ekranı kapatır, 24 saat sonra
-   yeniden sorar. surum.json'da "zorunlu": true olursa "Sonra" gösterilmez (şimdilik hepsi false). */
+   yeniden sorar. surum.json'da "zorunlu": true olursa "Sonra" gösterilmez (şimdilik hepsi false).
+   ZORUNLU GÜNCELLEME (2026-11-07, kullanıcı: "güncelleme düşmedi; hem kökte hem testte güncelleme mevcutsa uygulama açılınca bu bilgi görünür,
+   zorunlu güncelleme yapılır ve giriş sağlanır; güncelleme indirilmezse yeni özellikler görünmesin ve çalışmasın"). KÖK SEBEP ("düşmedi"):
+   denetim günde en çok bir kez yapılıyordu ve açılıştan 5 sn sonra başlıyordu; aynı gün içinde çıkan sürüm ertesi güne kadar görünmüyordu.
+   ŞİMDİ: her açılışta, sayfa kullanılmadan ÖNCE denetlenir (denetim bitene kadar "Sürüm denetleniyor" ekranı; bağlantı yoksa en çok 6 sn
+   beklenir, sonra uygulama açılır). Uygulama arka plandan dönünce de 15 dk'da bir denetlenir. Güncelleme her zaman zorunludur: "Sonra"
+   yoktur, geri tuşu uygulamayı kapatır; güncelleme kurulmadan uygulamaya girilemez, dolayısıyla eski sürümle yeni özellikler kullanılamaz. */
 final class Guncelle {
     private static final String KAYNAK = "https://github.com/azataslan065-png/futbol-ligi/releases/download/apk/surum.json";
-    private static final long GUN = 24L * 3600 * 1000;
+    private static final long ARALIK = 15L * 60 * 1000;   // arka plandan dönüşte denetim aralığı
+    private static FrameLayout bekle;
     private static final Handler H = new Handler(Looper.getMainLooper());
     private static FrameLayout ekran;
-    private static volatile boolean iniyor;
+    private static volatile boolean iniyor, denetiyor;
+    /** Etkinlik kapanırken: ekran görünümleri o etkinliğe aittir, yeni açılışta yeniden kurulur. */
+    static void sifirla() { ekran = null; bekle = null; durum = null; cubuk = null; dugmeler = null; }
 
     /** Güncelleme ekranı açıkken geri tuşu: indirme sürüyorsa yutulur; değilse ("Sonra" varsa) ekran kapanır. true = geri tuşu işlendi. */
     static boolean geri(Activity a) {
         if (ekran == null) return false;
         if (iniyor) { Toast.makeText(a, "Güncelleme indiriliyor, lütfen bekle", Toast.LENGTH_SHORT).show(); return true; }
-        if (ekran.getTag() == Boolean.TRUE) return true;            // zorunlu güncelleme
-        kapat(); return true;
+        a.finish(); return true;                                      // zorunlu güncelleme: geri tuşu uygulamayı kapatır
     }
 
-    static void denetle(final Activity a, final boolean elle) {
-        final SharedPreferences sp = a.getSharedPreferences("guncelle", Context.MODE_PRIVATE);
-        if (!elle && System.currentTimeMillis() - sp.getLong("son", 0) < GUN) return;
+    /** Açılışta: denetim bitene (ya da 6 sn dolana) kadar sayfanın üstünde "Sürüm denetleniyor" ekranı. */
+    static void acilis(final Activity a) {
         if (ekran != null) return;
+        bekleGoster(a);
+        H.postDelayed(Guncelle::bekleKapat, 6000);
+        denetle(a, false, true);
+    }
+    /** Arka plandan dönüşte: son denetimden 15 dk geçtiyse. */
+    static void donus(Activity a) {
+        SharedPreferences sp = a.getSharedPreferences("guncelle", Context.MODE_PRIVATE);
+        if (ekran == null && System.currentTimeMillis() - sp.getLong("son", 0) > ARALIK) denetle(a, false, true);
+    }
+    static void denetle(final Activity a, final boolean elle) { denetle(a, elle, true); }
+    private static void denetle(final Activity a, final boolean elle, boolean zorla) {
+        final SharedPreferences sp = a.getSharedPreferences("guncelle", Context.MODE_PRIVATE);
+        if (ekran != null) { H.post(Guncelle::bekleKapat); return; }
+        if (denetiyor) return; denetiyor = true;
         new Thread(new Runnable() { public void run() {
             try {
                 JSONObject kok = new JSONObject(oku(KAYNAK));
@@ -80,12 +101,13 @@ final class Guncelle {
                 boolean yeni = j.optLong("kod", 0) > yerelKod && ad.length() > 0 && !ad.equals(yerelAd) && url.startsWith("https://");
                 sp.edit().putLong("son", System.currentTimeMillis()).apply();
                 Teshis.olay("guncelle", (yeni ? "yeni " : "güncel ") + ad, yerelAd + " / " + yerelKod);
-                if (!yeni) { if (elle) mesaj(a, "Uygulama güncel (v" + yerelAd + ")"); return; }
-                H.post(new Runnable() { public void run() { goster(a, j, yerelAd); } });
+                if (!yeni) { H.post(Guncelle::bekleKapat); if (elle) mesaj(a, "Uygulama güncel (v" + yerelAd + ")"); return; }
+                H.post(new Runnable() { public void run() { goster(a, j, yerelAd); bekleKapat(); } });
             } catch (Exception e) {
+                H.post(Guncelle::bekleKapat);
                 Teshis.yaz("guncelle", "okunamadı", String.valueOf(e.getMessage()));
                 if (elle) mesaj(a, "Güncelleme denetlenemedi, bağlantını kontrol et");
-            }
+            } finally { denetiyor = false; }
         }}).start();
     }
 
@@ -107,7 +129,7 @@ final class Guncelle {
     private static void goster(final Activity a, final JSONObject j, String yerelAd) {
         if (a.isFinishing() || ekran != null) return;
         final String ad = j.optString("ad", ""), url = j.optString("url", ""), not = j.optString("not", "");
-        final boolean zorunlu = j.optBoolean("zorunlu", false);
+        final boolean zorunlu = true;                                // (2026-11-07) her güncelleme zorunlu
         final long boyut = j.optLong("boyut", 0), zaman = j.optLong("tarih", 0), kod = j.optLong("kod", 0);
 
         ekran = new FrameLayout(a);
@@ -152,7 +174,7 @@ final class Guncelle {
             TextView nb = yazi(a, "Yenilikler", 14, Color.parseColor("#9AA3B8"), false); nb.setPadding(0, dp(a, 12), 0, dp(a, 4)); kart.addView(nb);
             TextView nt = yazi(a, not, 14, Color.WHITE, false); nt.setLineSpacing(0, 1.25f); kart.addView(nt);
         }
-        TextView bilgi = yazi(a, "Girişin ve ayarların silinmez. Güncelleme inerken uygulama kullanılamaz.", 12, Color.parseColor("#7C8499"), false);
+        TextView bilgi = yazi(a, "Uygulamayı kullanmaya devam etmek için güncellemen gerekiyor. Girişin ve ayarların silinmez.", 12, Color.parseColor("#7C8499"), false);
         bilgi.setPadding(0, dp(a, 12), 0, dp(a, 10)); kart.addView(bilgi);
 
         cubuk = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
@@ -193,6 +215,21 @@ final class Guncelle {
         ekran = null; durum = null; cubuk = null; dugmeler = null;
     }
 
+    // ---- Açılış denetim ekranı ----
+    private static void bekleGoster(Activity a) {
+        if (bekle != null || a.isFinishing()) return;
+        bekle = new FrameLayout(a); bekle.setBackgroundColor(Color.parseColor("#0B0B14")); bekle.setClickable(true);
+        LinearLayout ic = new LinearLayout(a); ic.setOrientation(LinearLayout.VERTICAL); ic.setGravity(Gravity.CENTER_HORIZONTAL);
+        ProgressBar p = new ProgressBar(a); ic.addView(p, new LinearLayout.LayoutParams(dp(a, 40), dp(a, 40)));
+        TextView t = yazi(a, "Sürüm denetleniyor…", 14, Color.parseColor("#9AA3B8"), false); t.setPadding(0, dp(a, 12), 0, 0); ic.addView(t);
+        bekle.addView(ic, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
+        ((FrameLayout) a.findViewById(android.R.id.content)).addView(bekle, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+    private static void bekleKapat() {
+        if (bekle == null) return; final View b = bekle; bekle = null;
+        b.animate().alpha(0f).setDuration(150).withEndAction(() -> { ViewGroup p = (ViewGroup) b.getParent(); if (p != null) p.removeView(b); }).start();
+    }
+
     // ---- İndirme ve kurulum ----
     private static void indir(final Activity a, final String ad, final String url, final long boyut) {
         if (iniyor) return;
@@ -230,9 +267,9 @@ final class Guncelle {
                 iniyor = false;
                 if (ekran == null) return;
                 cubuk.setVisibility(View.GONE); dugmeler.setVisibility(View.VISIBLE);
-                if (!ok) { durum.setText("İndirme tamamlanamadı (" + h2 + "). Bağlantını kontrol edip yeniden dene."); dugmeleriKur(a, "Yeniden dene", url, ad, boyut, false); return; }
+                if (!ok) { durum.setText("İndirme tamamlanamadı (" + h2 + "). Bağlantını kontrol edip yeniden dene."); dugmeleriKur(a, "Yeniden dene", url, ad, boyut, true); return; }
                 durum.setText("İndirme tamamlandı. Kurulum ekranında \"Güncelle\"ye dokun.");
-                dugmeleriKur(a, "Kur", "", ad, boyut, false);
+                dugmeleriKur(a, "Kur", "", ad, boyut, true);
                 ((Button) dugmeler.getChildAt(dugmeler.getChildCount() - 1)).setOnClickListener(v -> kur(a, apk));
                 kur(a, apk);
             });

@@ -74,7 +74,7 @@ public class Ana extends Activity {
         Teshis.olay("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
         kur();
         w.loadUrl(BuildConfig.ADRES);      // (2026-11-06) restoreState kaldırıldı: sayfa her açılışta baştan yüklenir
-        h.postDelayed(new Runnable() { public void run() { if (!isFinishing()) Guncelle.denetle(Ana.this, false); } }, 5000);   // (2026-11-07) bkz. Guncelle
+        Guncelle.acilis(this);   // (2026-11-07) her açılışta, sayfa kullanılmadan önce zorunlu güncelleme denetimi (bkz. Guncelle)
     }
 
     private long yuklemeBas;
@@ -269,12 +269,12 @@ public class Ana extends Activity {
         });
     }
     private void cikisSor() { Cikis.goster(this); }   // (2026-11-07) uygulamanın kendi görünümünde çıkış penceresi (bkz. Cikis)
-    @Override protected void onResume() { super.onResume(); if (Build.VERSION.SDK_INT < 24 || !isInPictureInPictureMode()) pipIdi = false; if (w != null) w.onResume(); Teshis.olay("on-plan", "", w == null ? "" : w.getUrl());
+    @Override protected void onResume() { super.onResume(); if (Build.VERSION.SDK_INT < 24 || !isInPictureInPictureMode()) pipIdi = false; if (w != null) w.onResume(); Teshis.olay("on-plan", "", w == null ? "" : w.getUrl()); Guncelle.donus(this);
         // (2026-11-07) KÖK SEBEP ("ekran boş: yeniden yükleniyor" yanlış alarmı): uygulama yeni açılırken de bu denetim 2,5 sn sonra çalışıyordu;
         // sayfa o an henüz yüklenmeye başlamamıştı (boş ölçüldü) ve sayfa gereksiz yere baştan yükleniyordu. Artık yalnızca yüklenmiş sayfaya bakılır.
         if (w != null && sayfaHazir && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
     @Override protected void onDestroy() {
-        Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder();
+        Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder(); Guncelle.sifirla();
         if (w != null) { kok.removeView(w); w.destroy(); w = null; }   // eski sayfa arka planda açık kalmasın (iki oturum çakışırdı)
         super.onDestroy();
     }
@@ -336,6 +336,7 @@ public class Ana extends Activity {
         @JavascriptInterface public void guncellemeDenetle() { h.post(new Runnable() { public void run() { Guncelle.denetle(Ana.this, true); } }); }
         @JavascriptInterface public String surum() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
         @JavascriptInterface public void teshis(String tur, String ayrinti) { String t = String.valueOf(tur); if (t.contains("hata")) Teshis.yaz(t, String.valueOf(ayrinti), BuildConfig.ADRES); else Teshis.olay(t, String.valueOf(ayrinti), BuildConfig.ADRES); }
+        @JavascriptInterface public int kabuk() { return 2; }   // kabuk kuşağı: 2 = zorunlu güncelleme sistemi (sayfalar eski kabuğu buradan tanır)
         @JavascriptInterface public boolean pip() { if (!pipDestek()) return false; h.post(new Runnable() { public void run() { pipGir(); } }); return true; }
         @JavascriptInterface public void pipHazir(boolean v) { pipHazir = v; if (Build.VERSION.SDK_INT >= 31 && pipDestek()) h.post(new Runnable() { public void run() { try { setPictureInPictureParams(pipAyar()); } catch (Exception e) { } } }); }
         @JavascriptInterface public void cik() { h.post(new Runnable() { public void run() { finish(); } }); }
