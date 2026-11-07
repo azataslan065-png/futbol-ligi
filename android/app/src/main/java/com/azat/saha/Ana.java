@@ -70,6 +70,7 @@ public class Ana extends Activity {
         setContentView(kok);
         if (BuildConfig.YATAY) gizle();
         Teshis.baslat(this);
+        Onbellek.baslat(this);   // (2026-11-07) bkz. Onbellek
         Teshis.yaz("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
         kur();
         w.loadUrl(BuildConfig.ADRES);      // (2026-11-06) restoreState kaldırıldı: sayfa her açılışta baştan yüklenir
@@ -98,9 +99,21 @@ public class Ana extends Activity {
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(w, true);
         w.addJavascriptInterface(new Kopru(), "SahaApp");
+        /* (2026-11-07, kullanıcı: "maç oynanırken ekran sekiyor"). KÖK SEBEP (kabuk tarafı): Android 12+ WebView'da sayfanın kenarına
+           dayanan sürükleme (ör. yön çubuğu kenara itilince) tüm sayfayı "esneterek" geri sektiriyordu (overscroll stretch). Kapatıldı;
+           kaydırma çubukları da gizli. Sayfa motoru "önemli" öncelikte çalışır: sistem bellek sıkışınca önce onu kapatmaz. */
+        w.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        w.setVerticalScrollBarEnabled(false); w.setHorizontalScrollBarEnabled(false);
+        if (Build.VERSION.SDK_INT >= 26) w.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false);
+        try {
+            android.webkit.ServiceWorkerController.getInstance().setServiceWorkerClient(new android.webkit.ServiceWorkerClient() {
+                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest r) { return Onbellek.ver(r); }
+            });
+        } catch (Exception e) { Teshis.yaz("onbellek", "servis çalışanı bağlanamadı", String.valueOf(e.getMessage())); }
 
         w.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return disari(r.getUrl()); }
+            @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { return Onbellek.ver(r); }
             @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); Teshis.yaz("sayfa", "başladı", u); }
             @Override public void onPageFinished(WebView v, String u) {
                 v.evaluateJavascript(YAMA, null);
@@ -225,6 +238,7 @@ public class Ana extends Activity {
     private android.app.AlertDialog cikisPen;
     @Override public void onBackPressed() {
         if (tamEkran != null) { tamEkranKapat(); return; }
+        if (Guncelle.geri(this)) return;   // güncelleme ekranı açıkken (indirme sürerken uygulamaya geçilmez)
         if (cikisPen != null && cikisPen.isShowing()) { cikisPen.dismiss(); return; }
         if (w == null) { super.onBackPressed(); return; }
         if (geriBekliyor) return;
@@ -284,6 +298,7 @@ public class Ana extends Activity {
         // (2026-11-07) Sayfadan elle güncelleme denetimi ve yüklü uygulama sürümü (bkz. Guncelle).
         @JavascriptInterface public void guncellemeDenetle() { h.post(new Runnable() { public void run() { Guncelle.denetle(Ana.this, true); } }); }
         @JavascriptInterface public String surum() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
+        @JavascriptInterface public void teshis(String tur, String ayrinti) { Teshis.yaz(String.valueOf(tur), String.valueOf(ayrinti), BuildConfig.ADRES); }
         @JavascriptInterface public void cik() { h.post(new Runnable() { public void run() { finish(); } }); }
         @JavascriptInterface public void kaydet(String ad, String tip, String b64) {
             h.post(() -> {

@@ -282,7 +282,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-07-A</title>
+<title>SAHA — 3D Futbol v2026-11-07-B</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -20696,9 +20696,35 @@ try{
 // CIZIM DONGUSU SENSORU: Kare suresi surekli yuksekse oyun takiliyor demektir.
 // Tek bir yavas kare normaldir (sekme arka plana alinir); 30 karelik ortalama bakilir.
 var _kareOlcum = [], _kareSonUyari = 0;
+/* MAÇ PERFORMANS ÖZETİ (2026-11-07): "ekran sekiyor / takılıyor" telefonda ölçülsün diye her maçın kare süreleri toplanır; maç bitince
+   teşhis kaydına tek satır yazılır: ortalama kare hızı, takılma sayıları (>34 ms ve >50 ms kare), en uzun kare, kalite kademesi değişimi,
+   cihaz/ekran kartı ve uygulama (APK mı tarayıcı mı). */
+var _mPerf = null;
+function _mPerfKare(dt){
+  try{
+    if(typeof running === 'undefined' || !running || bitti || duraklat || document.hidden || window._sahaIzleModu) return;
+    var P = _mPerf || (_mPerf = { n:0, t:0, k34:0, k50:0, k100:0, enUzun:0, kalite0:window._otoKalite || 0, kaliteDeg:0, sonKalite:window._otoKalite || 0 });
+    P.n++; P.t += dt; if(dt > 0.034) P.k34++; if(dt > 0.05) P.k50++; if(dt > 0.1) P.k100++; if(dt > P.enUzun) P.enUzun = dt;
+    if((window._otoKalite || 0) !== P.sonKalite){ P.kaliteDeg++; P.sonKalite = window._otoKalite || 0; }
+  }catch(e){}
+}
+function _mPerfYaz(){
+  try{
+    var P = _mPerf; _mPerf = null;
+    if(!P || P.n < 300) return;
+    var dk = P.t / 60;
+    DiagSaha('macPerformans', new Error('Maç kare özeti: ' + Math.round(P.n / P.t) + ' fps, dakikada ' + (P.k50 / dk).toFixed(1) + ' takılma'), {
+      tur:'bilgi', fps:Math.round(P.n / P.t), sure_sn:Math.round(P.t), takilma34ms:P.k34, takilma50ms:P.k50, takilma100ms:P.k100, enUzun_ms:Math.round(P.enUzun * 1000),
+      ekranHz:Math.round(1 / _vsAra), kaliteBas:P.kalite0, kaliteSon:P.sonKalite, kaliteDegisim:P.kaliteDeg, gpu:String(window.SAHA_GPU || '').slice(0, 60),
+      pikselOran:(function(){ try{ return renderer.getPixelRatio(); }catch(e){ return 0; } })(), apk:!!window.SahaApp,
+      anlami:'Maç boyunca ölçülen kare süreleri. 50 ms üstü kare gözle takılma olarak görünür.' });
+    try{ if(window.SahaApp && SahaApp.teshis) SahaApp.teshis('mac-perf', JSON.stringify({ fps:Math.round(P.n / P.t), sn:Math.round(P.t), k34:P.k34, k50:P.k50, k100:P.k100, enUzun:Math.round(P.enUzun * 1000), hz:Math.round(1 / _vsAra), kalite:[P.kalite0, P.sonKalite, P.kaliteDeg], pr:(function(){ try{ return renderer.getPixelRatio(); }catch(e){ return 0; } })(), gpu:String(window.SAHA_GPU || '').slice(0, 40) })); }catch(e){}
+  }catch(e){}
+}
 function sahaKareOlc(dt){
   try{
     if(!isFinite(dt) || dt <= 0) return;
+    _mPerfKare(dt);
     if(window.SahaSensor) SahaSensor.kare(dt);
     _kareOlcum.push(dt);
     if(_kareOlcum.length < 30) return;
@@ -20855,7 +20881,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-07-A';
+window.APP_BUILD='2026-11-07-B';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -30881,6 +30907,7 @@ function macOzetiCiz(){
   }catch(e){_sessiz(e,'macOzetiCiz:5235','saha_oyun');}
 }
 function bitir(){
+  try{ _mPerfYaz(); }catch(e){}
   try{ var _pt = document.getElementById('penTablo'); if(_pt) setTimeout(function(){ _pt.style.display = 'none'; }, 400); }catch(e){}
   // Maç sonu ekranı için takım bilgisi ŞİMDİ alınır: fikstür kaydı birazdan _sahaAktifFikstur'u
   // siler; sonra okunursa ev/deplasman ve gerçek takım adları kaybolur.
@@ -32289,20 +32316,35 @@ function _sahneKapaliMi(){
 }
 var _kapakSay = 0;
 var _golgeKare = 0;
-function loop(){
+/* KARE ZAMANLAMASI (2026-11-07, kullanıcı: "maç oynanırken ekran sekiyor veya takılıyor"). KÖK SEBEP: kare süresi her karede
+   clock.getDelta() ile (işlevin ÇAĞRILDIĞI an, performance.now) ölçülüyordu. Tarayıcı karenin ne zaman çağrılacağını ekran tazelemesine
+   göre değil, iş yüküne göre birkaç ms oynatır; 120 Hz ekranda 8,3 ms'lik kareler 6-11 ms ölçülüyor, sabit fizik adımının ara
+   değerlemesi (interpolasyon) ve kameranın yumuşatması bu titrek süreyle çalıştığı için görüntü kare kare ileri-geri "sekiyordu".
+   Artık süre requestAnimationFrame'in verdiği ekran tazeleme zaman damgasından alınır ve tazeleme aralığının katına oturtulur
+   (ölçülen aralık ±%25 içindeyse); büyük boşluklarda (menü, arka plan) eski ölçüme döner. */
+var _vsSon = 0, _vsAra = 1/60;
+function _vsyncDt(ts, yedek){
+  if(!(ts > 0)) return yedek;
+  var d = _vsSon ? (ts - _vsSon) / 1000 : 0; _vsSon = ts;
+  if(!(d > 0) || d > 0.25) return yedek;
+  if(d < _vsAra * 1.5) _vsAra += (d - _vsAra) * 0.05;               // ekran tazeleme aralığı (60/90/120 Hz) yavaşça öğrenilir
+  var n = Math.max(1, Math.round(d / _vsAra));
+  return Math.abs(d - n * _vsAra) < _vsAra * 0.25 ? n * _vsAra : d;
+}
+function loop(_ts){
   requestAnimationFrame(loop);
   try{ _ivGeri(); }catch(e){}
   if(window._klipOffline){ try{ clock.getDelta(); }catch(e){} return; }   // (2026-10-18-K) kare kare kayıt sürüyor: sahneyi kayıt sürücüsü çizer
   var _kapak = _sahneKapaliMi(), _cv0 = renderer.domElement;
   if(_kapak === 2 || (_kapak === 1 && (++_kapakSay % 8))){
-    clock.getDelta();                                            // menüden dönünce büyük bir zaman sıçraması olmasın
+    clock.getDelta(); _vsSon = 0;                                // menüden dönünce büyük bir zaman sıçraması olmasın
     if(_kapak === 2 && _cv0.style.visibility !== 'hidden') _cv0.style.visibility = 'hidden';
     if(!window._sahaIzleModu){ try{ kolOku(); }catch(e){} }
     return;
   }
   if(_cv0.style.visibility === 'hidden') _cv0.style.visibility = '';
   kontrolGorunurlukGuncelle();
-  const ham = Math.min(clock.getDelta(), 0.25);
+  const ham = Math.min(_vsyncDt(_ts, clock.getDelta()), 0.25);
   // Kare hizi sensoru: surekli dusuk hiz kayda gecer (bkz. sahaKareOlc).
   try{ sahaKareOlc(ham); }catch(e){_sessiz(e,'loop:5644','saha_oyun');}
   if (!window._klipCiz){ try{ taraftarHareket(ham); }catch(e){_sessiz(e,'loop:5645','saha_oyun');} }
