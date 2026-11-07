@@ -215,10 +215,40 @@ public class Ana extends Activity {
         if (BuildConfig.YATAY) gizle(); else kok.setSystemUiVisibility(View.SYSTEM_UI_FLAG_VISIBLE);
     }
     @Override public void onWindowFocusChanged(boolean f) { super.onWindowFocusChanged(f); if (f && (BuildConfig.YATAY || tamEkran != null)) gizle(); }
+    /* GERİ TUŞU (2026-11-07, kullanıcı: "telefonun kendi geri tuşları daha stabil çalışsın"). KÖK SEBEP: geri tuşu WebView geçmişine
+       (goBack) gidiyordu; Puan Tablosu ve Admin geri tuşunu geçmişe konan 10'luk "tampon" kayıtlarla yakalıyor, SAHA hiç yakalamıyordu -
+       tampon tükenince ya da SAHA'da tek basışta sayfa geçmişten geri gidiyor / uygulama arka plana atılıyordu. Artık geri tuşu önce sayfaya
+       sorulur (window.__appGeri): sayfa en üstteki pencereyi/menüyü kapatır ya da önceki ekrana döner (true); gidecek yer kalmadıysa (false)
+       çıkış onayı açılır. Sayfa bu işlevi tanımlamıyorsa (ör. hata sayfası) eski davranış: geçmişte geri, yoksa çıkış onayı. */
+    private boolean geriBekliyor;
+    private android.app.AlertDialog cikisPen;
     @Override public void onBackPressed() {
         if (tamEkran != null) { tamEkranKapat(); return; }
-        // En başta geri: uygulama kapanmaz, arka plana alınır (tekrar açınca kaldığı yerden devam eder).
-        if (w.canGoBack()) w.goBack(); else moveTaskToBack(true);
+        if (cikisPen != null && cikisPen.isShowing()) { cikisPen.dismiss(); return; }
+        if (w == null) { super.onBackPressed(); return; }
+        if (geriBekliyor) return;
+        geriBekliyor = true;
+        h.postDelayed(new Runnable() { public void run() { geriBekliyor = false; } }, 1500);
+        w.evaluateJavascript("(function(){try{return window.__appGeri?(window.__appGeri()?'evet':'hayir'):'yok';}catch(e){return 'hata';}})()", new ValueCallback<String>() {
+            @Override public void onReceiveValue(String r) {
+                geriBekliyor = false;
+                String v = r == null ? "" : r.replace("\"", "");
+                Teshis.yaz("geri", v, w == null ? "" : w.getUrl());
+                if ("evet".equals(v)) return;
+                if (!"hayir".equals(v) && w != null && w.canGoBack()) { w.goBack(); return; }
+                cikisSor();
+            }
+        });
+    }
+    private void cikisSor() {
+        if (isFinishing()) return;
+        cikisPen = new android.app.AlertDialog.Builder(this)
+            .setTitle(getString(R.string.app_name))
+            .setMessage("Uygulamadan çıkmak istiyor musun?")
+            .setPositiveButton("Çık", new android.content.DialogInterface.OnClickListener() { public void onClick(android.content.DialogInterface d, int i) { finish(); } })
+            .setNegativeButton("Vazgeç", null)
+            .create();
+        cikisPen.show();
     }
     @Override protected void onResume() { super.onResume(); if (w != null) w.onResume(); Teshis.yaz("on-plan", "", w == null ? "" : w.getUrl()); if (w != null && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
     @Override protected void onDestroy() {
