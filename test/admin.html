@@ -3385,7 +3385,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-07-G';
+window.APP_BUILD='2026-11-07-H';
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true, dosya:'admin', kap:function(){ return document.getElementById('loginWrap'); }, giris:function(){ var e = document.getElementById('loginWrap'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // yönetici geçebilir
@@ -3776,6 +3776,15 @@ var MAX_VIDEO_MB=50;
   // oluşturma yolu olan saveReactionPackDraft() HER ZAMAN 'pack_'+uid() biçiminde bir ID
   // üretir, yani ID'si 'pack_' ile başlamayan her paket geçmişteki gömülü tohumlamadan
   // kalmadır.
+  // (2026-11-07-G) KÖK SEBEP (teşhis: "permission_denied at /test/globalAdminSettings/builtinSystemResiduesPurgedV3"): temizlik sayfa açılır
+  // açılmaz, admin girişi tamamlanmadan çalışıyordu; okuma/yazma yetkisi yalnızca giriş yapmış ADMİN'de. Artık yalnızca admin
+  // oturumu doğrulandıktan sonra ve oturum başına bir kez çalışır.
+  var _kalintiBasladi=false;
+  try{ firebase.auth().onAuthStateChanged(function(u){
+    if(_kalintiBasladi||!u||u.isAnonymous)return;
+    db.ref('admins/'+u.uid).once('value').then(function(as){ if(as.val()!==true||_kalintiBasladi)return; _kalintiBasladi=true; kalintiTemizle(); }).catch(function(){});
+  }); }catch(e){}
+  function kalintiTemizle(){
   db.ref('globalAdminSettings/builtinSystemResiduesPurgedV3').once('value').then(function(flagSnap){
     if(flagSnap.val())return;
     return db.ref('leagues').once('value').then(function(allSnap){
@@ -3796,6 +3805,7 @@ var MAX_VIDEO_MB=50;
       return db.ref().update(updates);
     });
   }).catch(function(e){console.error('Yerleşik sistem kalıntısı temizliği başarısız:',e);});
+  }
 })();
 // KULLANICI TALEBİ: "Admin, 'Admin Panelindeki' menüleri tamamen kendi düzenine göre
 // değiştirebileceği bir sistem geliştir." - Ana yönetim araçları menüsü artık SABİT bir HTML
@@ -30970,6 +30980,9 @@ function diagDeviceName(devKey,ua){
 function diagDeviceHeader(devKey,ua,g){
   var d=_diagDevices[devKey]||{};
   // Marka: kimlik kartından; yoksa platformdan makul bir karşılık üretilir.
+  // (2026-11-07-G) APK kabuğunun kayıtlarında kimlik kartı yok; cihaz bilgisi kaydın kendi tanımından ("SahaApp/saha test.9 samsung SM-S721B Android 17 …") okunur.
+  var _apk=/SahaApp\/(\S+) (\S+) (\S+) (.+?) Android ([\d.]+)/.exec(ua||'');
+  if(_apk&&!d.marka&&!d.model){ var _m=_apk[3]; return (_m.charAt(0).toUpperCase()+_m.slice(1))+' - '+_apk[4]+' · Android '+_apk[5]+' - Uygulama ('+_apk[1]+' '+_apk[2]+') - '+diagDeviceUser(devKey,g); }
   var marka=d.marka;
   if(!marka){
     var pf=(d.platform||'')+' '+(ua||'');

@@ -71,13 +71,21 @@ public class Ana extends Activity {
         if (BuildConfig.YATAY) gizle();
         Teshis.baslat(this);
         Onbellek.baslat(this);   // (2026-11-07) bkz. Onbellek
-        Teshis.yaz("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
+        Teshis.olay("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
         kur();
         w.loadUrl(BuildConfig.ADRES);      // (2026-11-06) restoreState kaldırıldı: sayfa her açılışta baştan yüklenir
         h.postDelayed(new Runnable() { public void run() { if (!isFinishing()) Guncelle.denetle(Ana.this, false); } }, 5000);   // (2026-11-07) bkz. Guncelle
     }
 
     private long yuklemeBas;
+    private boolean sayfaHazir;
+    // Uygulamanın kendi kaynakları: site, veritabanı/giriş, kitaplık sunucuları, ses/müzik deposu.
+    private static boolean bizim(Uri u) {
+        String h = u == null || u.getHost() == null ? "" : u.getHost();
+        return h.equals(EV) || h.endsWith(".firebaseio.com") || h.endsWith(".firebasedatabase.app") || h.endsWith(".googleapis.com") || h.equals("www.gstatic.com")
+            || h.equals("cdnjs.cloudflare.com") || h.equals("cdn.jsdelivr.net") || h.equals("unpkg.com") || h.endsWith(".supabase.co");
+    }
+    private static boolean bizimKaynak(String kaynak) { try { return kaynak == null || kaynak.isEmpty() || bizim(Uri.parse(kaynak)); } catch (Exception e) { return true; } }
     private int bosDeneme;
     private void kur() {
         w = new WebView(this);
@@ -114,18 +122,21 @@ public class Ana extends Activity {
         w.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return disari(r.getUrl()); }
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { return Onbellek.ver(r); }
-            @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); Teshis.yaz("sayfa", "başladı", u); }
+            @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); sayfaHazir = false; Teshis.olay("sayfa", "başladı", u); }
             @Override public void onPageFinished(WebView v, String u) {
                 v.evaluateJavascript(YAMA, null);
-                if (yuklemeBas > 0) { Teshis.yaz("sayfa", "bitti " + (System.currentTimeMillis() - yuklemeBas) + " ms", u);
+                sayfaHazir = true;
+                if (yuklemeBas > 0) { Teshis.olay("sayfa", "bitti " + (System.currentTimeMillis() - yuklemeBas) + " ms", u);
                     yuklemeBas = 0; if (u != null && u.startsWith("http")) bosDenetle(v, 12000); }
             }
             @Override public void onReceivedError(WebView v, WebResourceRequest r, WebResourceError e) {
-                Teshis.yaz("ag-hata", e.getErrorCode() + " " + e.getDescription(), (r.isForMainFrame() ? "ANA " : "") + r.getUrl());
+                // (2026-11-07) Yalnızca ana sayfa ya da uygulamanın kendi kaynakları (site, veritabanı, kitaplıklar, ses dosyaları) kaydedilir.
+                // Reklam/izleme sunucuları (telefonun reklam engelleyicisi ya da özel DNS'i kapatır) ve YouTube video akışı hata değildir.
+                if (r.isForMainFrame() || bizim(r.getUrl())) Teshis.yaz("ag-hata", e.getErrorCode() + " " + e.getDescription(), (r.isForMainFrame() ? "ANA " : "") + r.getUrl());
                 if (r.isForMainFrame()) v.loadDataWithBaseURL(BuildConfig.ADRES, HATA, "text/html", "utf-8", null);
             }
             @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse e) {
-                if (r.isForMainFrame() || e.getStatusCode() >= 500) Teshis.yaz("http", String.valueOf(e.getStatusCode()), r.getUrl().toString());
+                if (r.isForMainFrame() || (e.getStatusCode() >= 500 && bizim(r.getUrl()))) Teshis.yaz("http", String.valueOf(e.getStatusCode()), r.getUrl().toString());
             }
             @Override public boolean onRenderProcessGone(WebView v, RenderProcessGoneDetail d) {
                 // Sayfa motoru çökerse (ya da arka planda sistem kapatırsa) uygulama kapanmaz, sayfa yeniden kurulur.
@@ -136,7 +147,8 @@ public class Ana extends Activity {
         });
         w.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onConsoleMessage(ConsoleMessage m) {
-                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) Teshis.yaz("konsol", m.message(), m.sourceId() + ":" + m.lineNumber());
+                // (2026-11-07) Gömülü YouTube oynatıcısının ve reCAPTCHA'nın kendi iç uyarıları (accelerometer, requestStorageAccess…) bizim hatamız değil.
+                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR && bizimKaynak(m.sourceId())) Teshis.yaz("konsol", m.message(), m.sourceId() + ":" + m.lineNumber());
                 return false;
             }
             @Override public void onShowCustomView(View v, CustomViewCallback g) {
@@ -198,9 +210,11 @@ public class Ana extends Activity {
         h.postDelayed(bekleyenDenetim = () -> { bekleyenDenetim = null;
             if (v != w || w == null) return;
             w.evaluateJavascript("(function(){try{var b=document.body;if(!b)return 'govde-yok';var n=0;document.querySelectorAll('body *').forEach(function(e){var r=e.getBoundingClientRect();if(r.width>40&&r.height>20&&getComputedStyle(e).visibility!=='hidden'&&+getComputedStyle(e).opacity>0.05&&r.bottom>0&&r.top<innerHeight)n++});return n+'|'+(b.innerText||'').trim().length+'|'+document.readyState+'|'+innerWidth+'x'+innerHeight}catch(e){return 'hata '+e}})()", r -> {
-                Teshis.yaz("ekran", r, w == null ? "" : w.getUrl()); Teshis.gonder();
                 String x = r == null ? "" : r.replace("\"", "");
-                if ((x.startsWith("0|") || x.startsWith("govde")) && bosDeneme++ < 1) { Teshis.yaz("ekran", "boş: yeniden yükleniyor", ""); w.reload(); }
+                boolean bos = x.startsWith("0|") || x.startsWith("govde");
+                if (bos) Teshis.yaz("ekran", "boş " + x, w == null ? "" : w.getUrl()); else Teshis.olay("ekran", x, w == null ? "" : w.getUrl());
+                Teshis.gonder();
+                if (bos && bosDeneme++ < 1) w.reload();
             });
         }, ms);
     }
@@ -247,7 +261,7 @@ public class Ana extends Activity {
             @Override public void onReceiveValue(String r) {
                 geriBekliyor = false;
                 String v = r == null ? "" : r.replace("\"", "");
-                Teshis.yaz("geri", v, w == null ? "" : w.getUrl());
+                Teshis.olay("geri", v, w == null ? "" : w.getUrl());
                 if ("evet".equals(v)) return;
                 if (!"hayir".equals(v) && w != null && w.canGoBack()) { w.goBack(); return; }
                 cikisSor();
@@ -255,9 +269,12 @@ public class Ana extends Activity {
         });
     }
     private void cikisSor() { Cikis.goster(this); }   // (2026-11-07) uygulamanın kendi görünümünde çıkış penceresi (bkz. Cikis)
-    @Override protected void onResume() { super.onResume(); if (w != null) w.onResume(); Teshis.yaz("on-plan", "", w == null ? "" : w.getUrl()); if (w != null && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
+    @Override protected void onResume() { super.onResume(); if (w != null) w.onResume(); Teshis.olay("on-plan", "", w == null ? "" : w.getUrl());
+        // (2026-11-07) KÖK SEBEP ("ekran boş: yeniden yükleniyor" yanlış alarmı): uygulama yeni açılırken de bu denetim 2,5 sn sonra çalışıyordu;
+        // sayfa o an henüz yüklenmeye başlamamıştı (boş ölçüldü) ve sayfa gereksiz yere baştan yükleniyordu. Artık yalnızca yüklenmiş sayfaya bakılır.
+        if (w != null && sayfaHazir && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
     @Override protected void onDestroy() {
-        Teshis.yaz("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder();
+        Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder();
         if (w != null) { kok.removeView(w); w.destroy(); w = null; }   // eski sayfa arka planda açık kalmasın (iki oturum çakışırdı)
         super.onDestroy();
     }
@@ -288,7 +305,7 @@ public class Ana extends Activity {
         // (2026-11-07) Sayfadan elle güncelleme denetimi ve yüklü uygulama sürümü (bkz. Guncelle).
         @JavascriptInterface public void guncellemeDenetle() { h.post(new Runnable() { public void run() { Guncelle.denetle(Ana.this, true); } }); }
         @JavascriptInterface public String surum() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
-        @JavascriptInterface public void teshis(String tur, String ayrinti) { Teshis.yaz(String.valueOf(tur), String.valueOf(ayrinti), BuildConfig.ADRES); }
+        @JavascriptInterface public void teshis(String tur, String ayrinti) { String t = String.valueOf(tur); if (t.contains("hata")) Teshis.yaz(t, String.valueOf(ayrinti), BuildConfig.ADRES); else Teshis.olay(t, String.valueOf(ayrinti), BuildConfig.ADRES); }
         @JavascriptInterface public void cik() { h.post(new Runnable() { public void run() { finish(); } }); }
         @JavascriptInterface public void kaydet(String ad, String tip, String b64) {
             h.post(() -> {

@@ -40,7 +40,7 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
 
   // (2026-11-06) APK kabuğundan gelen kayıtlar
   for(const kok of ['test/', '']){
-    const L = await al(kok + 'diagnostics/logs', '?orderBy="$key"&limitToLast=1500') || {};
+    const L = Object.assign({}, await al(kok + 'diagnostics/logs', '?orderBy="$key"&limitToLast=1500') || {}, await al(kok + 'diagnostics/apk', '?orderBy="$key"&limitToLast=1500') || {});   // (2026-11-07) olağan APK olayları ayrı yerde
     const A = Object.values(L).filter(x => x && /SahaApp|; wv\)/.test(String(x.ua || '')) && x.ts > Date.now() - 24 * 3600e3).sort((a, b) => a.ts - b.ts);
     console.log('\n===== APK ' + (kok || 'KÖK') + ' kayıt: ' + A.length);
     A.slice(-150).forEach(x => console.log(saat(x.ts), x.app, x.mod, x.kind, x.title, String(x.detail || '').slice(0, 300), '|', String(x.ua || '').slice(-60)));

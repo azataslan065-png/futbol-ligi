@@ -79,7 +79,7 @@ final class Guncelle {
                 final String ad = j.optString("ad", ""), url = j.optString("url", "");
                 boolean yeni = j.optLong("kod", 0) > yerelKod && ad.length() > 0 && !ad.equals(yerelAd) && url.startsWith("https://");
                 sp.edit().putLong("son", System.currentTimeMillis()).apply();
-                Teshis.yaz("guncelle", (yeni ? "yeni " : "güncel ") + ad, yerelAd + " / " + yerelKod);
+                Teshis.olay("guncelle", (yeni ? "yeni " : "güncel ") + ad, yerelAd + " / " + yerelKod);
                 if (!yeni) { if (elle) mesaj(a, "Uygulama güncel (v" + yerelAd + ")"); return; }
                 H.post(new Runnable() { public void run() { goster(a, j, yerelAd); } });
             } catch (Exception e) {

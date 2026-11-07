@@ -18,6 +18,10 @@ import java.util.List;
 final class Teshis {
     private static final String ANAHTAR = "AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY";
     private static final String DB = "https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/test/diagnostics/logs/";
+    /* (2026-11-07) Olağan olaylar (açılış, sayfa yükleme, ekran ölçümü, geri tuşu, ön plana gelme, kapanış, güncelleme denetimi, maç
+       performansı) artık ayrı yere yazılır: admin panelindeki "Hata yakalama kayıtları" listesini dolduruyor, gerçek hatalar aralarında
+       kayboluyordu. Hata kayıtlarına (logs) yalnızca gerçek sorunlar gider. */
+    private static final String DB_OLAY = "https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/test/diagnostics/apk/";
     private static final List<JSONObject> SIRA = new ArrayList<>();
     private static SharedPreferences sp;
     private static String ua = "", jeton = null, cihaz = "";
@@ -30,12 +34,16 @@ final class Teshis {
         ua = "SahaApp/" + BuildConfig.FLAVOR + " " + BuildConfig.VERSION_NAME + " " + cihaz;
         try { ua += " WebView/" + android.webkit.WebView.getCurrentWebViewPackage().versionName; } catch (Throwable e) { }
     }
-    static synchronized void yaz(String baslik, String ayrinti, String yer) {
+    /** Gerçek sorun: hata kayıtlarına. */
+    static void yaz(String baslik, String ayrinti, String yer) { ekle(baslik, ayrinti, yer, false); }
+    /** Olağan olay: ayrı olay kaydına (hata listesinde görünmez). */
+    static void olay(String baslik, String ayrinti, String yer) { ekle(baslik, ayrinti, yer, true); }
+    private static synchronized void ekle(String baslik, String ayrinti, String yer, boolean olagan) {
         try {
             JSONObject o = new JSONObject();
             o.put("app", "apk-" + BuildConfig.FLAVOR); o.put("mod", "apk"); o.put("kind", "olay"); o.put("title", baslik);
             o.put("detail", (ayrinti == null ? "" : ayrinti) + (yer == null || yer.isEmpty() ? "" : " @ " + yer));
-            o.put("ts", System.currentTimeMillis()); o.put("ua", ua);
+            o.put("ts", System.currentTimeMillis()); o.put("ua", ua); if (olagan) o.put("_olay", true);
             if (SIRA.size() < 200) SIRA.add(o);
         } catch (Exception e) { }
         if (SIRA.size() >= 6) gonder();
@@ -48,7 +56,8 @@ final class Teshis {
                 String j = jeton();
                 for (JSONObject o : L) {
                     String id = "apk_" + o.getLong("ts") + "_" + Integer.toHexString((int) (Math.random() * 0xffffff));
-                    istek("PUT", DB + id + ".json?auth=" + j, o.toString());
+                    boolean olagan = o.optBoolean("_olay"); o.remove("_olay");
+                    istek("PUT", (olagan ? DB_OLAY : DB) + id + ".json?auth=" + j, o.toString());
                 }
             } catch (Exception e) { }
             synchronized (Teshis.class) { gidiyor = false; }
