@@ -87,12 +87,12 @@ public class Ana extends Activity {
     private final Runnable bekci = this::bekciCalis, bekci2 = this::bekci2Calis;
     private void bekciCalis() {
         if (w == null || sayfaHazir || isFinishing()) return;
-        Teshis.yaz("sayfa", "12 sn'de açılmadı (ilerleme %" + w.getProgress() + ", başladı=" + (yuklemeBas > 0) + ", gömülü=" + Sayfa.acik() + ", adres=" + w.getUrl() + ")", BuildConfig.ADRES);
+        Teshis.yaz("sayfa", "zamanında açılmadı (ilerleme %" + w.getProgress() + ", başladı=" + (yuklemeBas > 0) + ", gömülü=" + Sayfa.acik() + ", adres=" + w.getUrl() + ")", BuildConfig.ADRES);
         Teshis.gonder();
         if (Sayfa.acik()) { Sayfa.kapat(); w.stopLoading(); w.loadUrl(BuildConfig.ADRES); h.postDelayed(bekci2, 15000); }
     }
     private void bekci2Calis() { if (w != null && !sayfaHazir) { Teshis.yaz("sayfa", "siteden de açılmadı (ilerleme %" + w.getProgress() + ")", BuildConfig.ADRES); Teshis.gonder(); } }
-    private void bekciKur() { h.removeCallbacks(bekci); h.postDelayed(bekci, 12000); }
+    private void bekciKur() { h.removeCallbacks(bekci); h.postDelayed(bekci, Sayfa.acik() ? 6000 : 20000); }
     private boolean sayfaHazir;
     // Uygulamanın kendi kaynakları: site, veritabanı/giriş, kitaplık sunucuları, ses/müzik deposu.
     private static boolean bizim(Uri u) {
@@ -333,7 +333,7 @@ public class Ana extends Activity {
         h.removeCallbacks(arkaKapat);
         if (!oynuyor) { if (arkaOynat) h.postDelayed(arkaKapat, 120000); return; }
         if (arkaOynat) return;
-        arkaOynat = true;
+        arkaOynat = true; Teshis.olay("arka", "yayın başladı: arka plan hizmeti açılıyor", "");
         if (Build.VERSION.SDK_INT >= 33 && !bildirimSoruldu && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
             bildirimSoruldu = true; requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 77); }
         Arka.baslat(this);
@@ -363,8 +363,10 @@ public class Ana extends Activity {
     }
     @Override protected void onStop() {
         super.onStop();
-        // Küçük pencere kapatıldı (X ya da aşağı kaydırma): etkinlik görünmez oldu - yayın durdurulur.
-        if (pipIdi && w != null) { pipIdi = false; w.evaluateJavascript("try{window.__appPipKapandi&&window.__appPipKapandi()}catch(e){}", null); }
+        Teshis.olay("arka", "görünmez oldu (arka=" + arkaOynat + ", pip=" + pipIdi + ", pipModu=" + (Build.VERSION.SDK_INT >= 24 && isInPictureInPictureMode()) + ")", ""); Teshis.gonder();
+        // Küçük pencere kapatıldı (X ya da aşağı kaydırma): etkinlik görünmez oldu - yayın durdurulur. Küçük pencere AÇIKKEN ekran kapatılırsa da
+        // onStop gelir; o zaman pencere hâlâ açıktır (isInPictureInPictureMode) ve yayın DURDURULMAZ (2026-11-07, "arka plan yine duruyor").
+        if (pipIdi && w != null && !(Build.VERSION.SDK_INT >= 24 && isInPictureInPictureMode())) { pipIdi = false; w.evaluateJavascript("try{window.__appPipKapandi&&window.__appPipKapandi()}catch(e){}", null); }
     }
 
     private class Kopru {

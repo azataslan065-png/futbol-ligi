@@ -47,6 +47,7 @@ public class Arka extends Service {
             if (Build.VERSION.SDK_INT >= 29) startForeground(7, b.build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
             else startForeground(7, b.build());
         } catch (Exception e) { Teshis.yaz("arka", "ön plana alınamadı", String.valueOf(e.getMessage())); stopSelf(); return START_NOT_STICKY; }
+        Teshis.olay("arka", "hizmet ön planda", "");
         try {
             if (kilit == null) { kilit = ((PowerManager) getSystemService(POWER_SERVICE)).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "saha:yayin"); kilit.setReferenceCounted(false); }
             kilit.acquire(4 * 3600 * 1000L);
@@ -56,6 +57,7 @@ public class Arka extends Service {
         return START_NOT_STICKY;
     }
     @Override public void onDestroy() {
+        Teshis.olay("arka", "hizmet kapandı", ""); Teshis.gonder();
         try { if (kilit != null && kilit.isHeld()) kilit.release(); } catch (Exception e) { }
         try { if (ag != null && ag.isHeld()) ag.release(); } catch (Exception e) { }
         super.onDestroy();

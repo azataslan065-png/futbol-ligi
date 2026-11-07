@@ -80,8 +80,8 @@ final class Guncelle {
     static void acilis(final Activity a) {
         etkin = a;
         if (ekran != null) return;
-        bekleGoster(a);
-        H.postDelayed(Guncelle::bekleKapat, 6000);
+        // (2026-11-07) "Sürüm denetleniyor" ekranı kaldırıldı (kullanıcı: "ortalama 10 sn bekleyince geldi; yeni sürüm taramasını eklerken oldu").
+        // Denetim arka planda yapılır, sayfa beklemeden açılır; güncelleme varsa kart ~1 sn içinde sayfanın üstüne gelir ve girişi kapatır.
         denetle(a, false, true);
     }
     /** Arka plandan dönüşte: son denetimden 15 dk geçtiyse. */

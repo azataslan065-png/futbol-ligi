@@ -19,18 +19,33 @@ final class Sayfa {
     private static String ev, yol;
     private static volatile boolean kapali, ilk = true;
     static boolean acik() { return BuildConfig.GOMULU && !kapali; }
-    static void kapat() { kapali = true; }
+    /* (2026-11-07) Telefonda (Android 17, WebView 158) gömülü kopya verildiği halde sayfa motoru yüklemeye başlamadı (teşhis: ilerleme %10,
+       "başladı" yok); emülatörde sorun yok. Gömülü kopya bu cihazda bir kez açılamazsa, bu sürüm için hatırlanır ve sonraki açılışlarda
+       hiç beklemeden siteden açılır - kullanıcı her girişte beklemez. */
+    static void kapat() { kapali = true; try { baglam.getSharedPreferences("sayfa", Context.MODE_PRIVATE).edit().putLong("bozuk", BuildConfig.VERSION_CODE).apply(); } catch (Exception e) { } }
+    private static byte[] veri;
     static void baslat(Context c) {
         baglam = c.getApplicationContext();
+        try { if (baglam.getSharedPreferences("sayfa", Context.MODE_PRIVATE).getLong("bozuk", -1) == BuildConfig.VERSION_CODE) kapali = true; } catch (Exception e) { }
+        // Sayfa önceden belleğe okunur: yanıt tek parça, uzunluğu belli olarak verilir (akış okuma gecikmesi/takılması olmaz).
+        if (BuildConfig.GOMULU && !kapali) new Thread(() -> oku()).start();
         try { Uri a = Uri.parse(BuildConfig.ADRES); ev = a.getHost(); yol = a.getPath(); } catch (Exception e) { }
+    }
+    private static synchronized byte[] oku() {
+        if (veri != null) return veri;
+        try (java.io.InputStream in = baglam.getAssets().open("sayfa.html"); java.io.ByteArrayOutputStream o = new java.io.ByteArrayOutputStream(3 << 20)) {
+            byte[] t = new byte[65536]; int n; while ((n = in.read(t)) > 0) o.write(t, 0, n); veri = o.toByteArray();
+        } catch (Exception e) { Teshis.yaz("sayfa", "gömülü sayfa okunamadı", String.valueOf(e.getMessage())); }
+        return veri;
     }
     static WebResourceResponse ver(WebResourceRequest r) {
         try {
             if (!acik() || baglam == null || ev == null || !"GET".equalsIgnoreCase(r.getMethod())) return null;
             Uri u = r.getUrl();
             if (!ev.equals(u.getHost()) || yol == null || !yol.equals(u.getPath())) return null;
-            Map<String, String> b = new HashMap<>(); b.put("Cache-Control", "no-store");
-            WebResourceResponse x = new WebResourceResponse("text/html", "utf-8", 200, "OK", b, baglam.getAssets().open("sayfa.html"));
+            byte[] d = oku(); if (d == null) return null;
+            Map<String, String> b = new HashMap<>(); b.put("Cache-Control", "no-store"); b.put("Content-Type", "text/html; charset=utf-8"); b.put("Content-Length", String.valueOf(d.length));
+            WebResourceResponse x = new WebResourceResponse("text/html", "utf-8", 200, "OK", b, new java.io.ByteArrayInputStream(d));
             if (ilk) { ilk = false; Teshis.olay("sayfa", "gömülü kopya verildi (" + Thread.currentThread().getName() + ")", u.toString()); }
             return x;
         } catch (Exception e) { Teshis.yaz("sayfa", "gömülü sayfa açılamadı", String.valueOf(e.getMessage())); return null; }
