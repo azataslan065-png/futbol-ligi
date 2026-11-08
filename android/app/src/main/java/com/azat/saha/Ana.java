@@ -425,8 +425,16 @@ public class Ana extends Activity {
             try { AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE); int m = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
                 int i = Math.max(0, Math.min(m, Math.round(Math.max(0, Math.min(100, y)) * m / 100f)));
                 if (y > 0 && i == 0) i = 1;
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, i, 0);
+                if (i > 0 && am.isStreamMute(AudioManager.STREAM_MUSIC)) am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_UNMUTE, 0);
+                if (am.getStreamVolume(AudioManager.STREAM_MUSIC) != i) am.setStreamVolume(AudioManager.STREAM_MUSIC, i, 0);
             } catch (Exception e) { Teshis.yaz("ses", "ayarlanamadı", String.valueOf(e.getMessage())); }
+            int g = sesYuzde(Ana.this); sonSes = g; return g;
+        }
+        /** Ses artır/azalt düğmesi: cihazın kendi ses adımıyla bir adım (ses tuşuyla aynı). Döner: yeni yüzde. */
+        @JavascriptInterface public int sesAdim(int yon) {
+            try { AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, yon > 0 ? AudioManager.ADJUST_RAISE : AudioManager.ADJUST_LOWER, 0);
+            } catch (Exception e) { }
             int g = sesYuzde(Ana.this); sonSes = g; return g;
         }
         @JavascriptInterface public void cik() { h.post(new Runnable() { public void run() { finish(); } }); }
