@@ -9,6 +9,9 @@ import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.database.ContentObserver;
+import android.media.AudioManager;
+import android.provider.Settings;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -73,6 +76,11 @@ public class Ana extends Activity {
         Onbellek.baslat(this);   // (2026-11-07) bkz. Onbellek
         Sayfa.baslat(this);      // (2026-11-07) bkz. Sayfa
         etkinAna = this;
+        /* CİHAZ SESİ (2026-11-08, kullanıcı: "TV izlerken ekran kapatıldığında arka planda oynatmaya devam edecek APK için ses kontrolünün cihazın
+           kendi sesiyle entegre edilmesi gerekiyor"). Ses tuşları uygulamada her zaman MEDYA sesini değiştirir (zil sesini değil); TV oynatıcısının ses
+           çubuğu ve kumandadaki ses düğmeleri cihazın medya sesini ayarlar, cihaz sesi tuşlarla değişince sayfadaki çubuk da güncellenir (bkz. sesGozcu). */
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
+        try { getContentResolver().registerContentObserver(Settings.System.CONTENT_URI, true, sesGozcu); } catch (Exception e) { }
         Teshis.olay("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
         kur();
         // (2026-11-07) Sayfa, etkinlik penceresi kurulduktan sonra yüklenir (bkz. SAYFA BEKÇİSİ).
@@ -300,6 +308,7 @@ public class Ana extends Activity {
         if (w != null && sayfaHazir && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
     @Override protected void onDestroy() {
         Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder(); h.removeCallbacks(bekci); Guncelle.sifirla(this); if (etkinAna == this) { etkinAna = null; arkaOynat = false; Arka.durdur(this); }
+        try { getContentResolver().unregisterContentObserver(sesGozcu); } catch (Exception e) { }
         if (w != null) { kok.removeView(w); w.destroy(); w = null; }   // eski sayfa arka planda açık kalmasın (iki oturum çakışırdı)
         super.onDestroy();
     }
@@ -330,6 +339,19 @@ public class Ana extends Activity {
        pencereyi kaplayacak şekilde düzenler, düğmeler gizlenir; pencere büyütülünce her şey eski hâline döner. Yayın oynarken ana ekrana
        çıkılırsa da kendiliğinden küçük pencereye geçer. Küçük pencere kapatılınca yayın durur (arka planda ses çalmaya devam etmez). */
     private volatile boolean pipHazir;
+    // ---- Cihaz sesi (medya) ----
+    static int sesYuzde(android.content.Context c) {
+        try { AudioManager am = (AudioManager) c.getSystemService(AUDIO_SERVICE); int m = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            return m <= 0 ? 0 : Math.round(am.getStreamVolume(AudioManager.STREAM_MUSIC) * 100f / m); } catch (Exception e) { return -1; }
+    }
+    private int sonSes = -2;
+    private final ContentObserver sesGozcu = new ContentObserver(new Handler(Looper.getMainLooper())) {
+        @Override public void onChange(boolean k) { sesBildir(); }
+    };
+    void sesBildir() {
+        int y = sesYuzde(this); if (y == sonSes || y < 0) return; sonSes = y;
+        if (w != null) w.evaluateJavascript("try{window.__appSesDegisti&&window.__appSesDegisti(" + y + ")}catch(e){}", null);
+    }
     // ---- Arka planda oynatma (bkz. Arka) ----
     static Ana etkinAna;
     private volatile boolean arkaOynat;
@@ -338,12 +360,23 @@ public class Ana extends Activity {
     /** TV yayını oynuyor/durdu. Durunca hizmet hemen kapanmaz (2 dk): sıradaki videoya geçerken kısa duraklamalarda arka planda yeniden başlatmak gerekmesin. */
     private void arkaAyarla(boolean oynuyor) {
         h.removeCallbacks(arkaKapat);
+        Arka.durum(oynuyor);
         if (!oynuyor) { if (arkaOynat) h.postDelayed(arkaKapat, 120000); return; }
         if (arkaOynat) return;
         arkaOynat = true; Teshis.olay("arka", "yayın başladı: arka plan hizmeti açılıyor", "");
         if (Build.VERSION.SDK_INT >= 33 && !bildirimSoruldu && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
             bildirimSoruldu = true; requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 77); }
         Arka.baslat(this);
+    }
+    /** Kilit ekranı / bildirim medya denetimindeki "Oynat". */
+    /** Kilit ekranı / bildirim medya denetimindeki "Duraklat": yayın duraklar, hizmet "Oynat" ile sürdürülebilsin diye bir süre açık kalır (bkz. arkaAyarla). */
+    static void tvDuraklat() {
+        final Ana a = etkinAna; if (a == null) return;
+        a.h.post(() -> { if (a.w != null) a.w.evaluateJavascript("try{window.__appTvDurdur&&window.__appTvDurdur()}catch(e){}", null); });
+    }
+    static void tvOynat() {
+        final Ana a = etkinAna; if (a == null) return;
+        a.h.post(() -> { if (a.w != null) a.w.evaluateJavascript("try{window.__appTvOynat&&window.__appTvOynat()}catch(e){}", null); });
     }
     /** Bildirimdeki "Durdur". */
     static void tvDurdur() {
@@ -386,6 +419,16 @@ public class Ana extends Activity {
         @JavascriptInterface public int kabuk() { return 3; }   // kabuk kuşağı: 2 = zorunlu güncelleme, 3 = sayfa uygulamaya gömülü (güncelleme yalnızca uygulamadan)
         @JavascriptInterface public boolean pip() { if (!pipDestek()) return false; h.post(new Runnable() { public void run() { pipGir(); } }); return true; }
         @JavascriptInterface public void pipHazir(boolean v) { pipHazir = v; h.post(() -> arkaAyarla(v)); if (Build.VERSION.SDK_INT >= 31 && pipDestek()) h.post(new Runnable() { public void run() { try { setPictureInPictureParams(pipAyar()); } catch (Exception e) { } } }); }
+        @JavascriptInterface public int sesAl() { return sesYuzde(Ana.this); }
+        /** Cihazın medya sesini yüzde olarak ayarlar (0-100). Döner: ayarlanan gerçek yüzde (cihazın ses adımlarına yuvarlanır). */
+        @JavascriptInterface public int sesAyarla(int y) {
+            try { AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE); int m = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                int i = Math.max(0, Math.min(m, Math.round(Math.max(0, Math.min(100, y)) * m / 100f)));
+                if (y > 0 && i == 0) i = 1;
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, i, 0);
+            } catch (Exception e) { Teshis.yaz("ses", "ayarlanamadı", String.valueOf(e.getMessage())); }
+            int g = sesYuzde(Ana.this); sonSes = g; return g;
+        }
         @JavascriptInterface public void cik() { h.post(new Runnable() { public void run() { finish(); } }); }
         @JavascriptInterface public void kaydet(String ad, String tip, String b64) {
             h.post(() -> {
