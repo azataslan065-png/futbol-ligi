@@ -364,8 +364,7 @@ public class Ana extends Activity {
         if (!oynuyor) { if (arkaOynat) h.postDelayed(arkaKapat, 120000); return; }
         if (arkaOynat) return;
         arkaOynat = true; Teshis.olay("arka", "yayın başladı: arka plan hizmeti açılıyor", "");
-        if (Build.VERSION.SDK_INT >= 33 && !bildirimSoruldu && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
-            bildirimSoruldu = true; requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 77); }
+        // (2026-11-08-F) bildirim izni artık istenmez: arka plan bildirimi hiç görünmesin (bkz. Arka)
         Arka.baslat(this);
     }
     /** Kilit ekranı / bildirim medya denetimindeki "Oynat". */

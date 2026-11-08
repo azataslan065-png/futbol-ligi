@@ -29,6 +29,12 @@ import android.os.PowerManager;
    sesini değiştiriyordu, kilit ekranında yayın denetimi de yoktu. Artık yayın oynarken etkin bir medya oturumu açılır: ses tuşları ekran kapalıyken
    de MEDYA sesini değiştirir, kilit ekranı ve bildirim alanında medya denetimi (Duraklat/Oynat, Durdur) görünür, Bluetooth kulaklık düğmeleri
    de çalışır. Uygulama içindeki ses çubuğu da cihazın medya sesini ayarlar (bkz. Ana sesAyarla / sesGozcu). */
+/* BİLDİRİM KARTI YOK (2026-11-08-F, kullanıcı: "arka plan oynatmaya devam etsin fakat bildirim kartında hiçbir koşulda çıkmasın"). Android, arka planda
+   çalışmaya devam eden (ön plan) hizmetin bir bildirim kaydı olmasını ZORUNLU tutar; kayıt olmadan hizmet açılamaz ve ekran kapanınca yayın donar.
+   Kaydın görünmemesi için: uygulama bildirim izni İSTEMEZ ve beyan etmez (Android 13+: izin yoksa ön plan hizmetinin bildirimi panelde ve kilit
+   ekranında hiç gösterilmez, yalnızca sistemin "etkin uygulamalar" listesinde durur); medya kartı (MediaStyle) kaldırıldı; Android 12 ve altında
+   bildirim en düşük önemde, kilit ekranında gizli kanaldadır. Medya oturumu sürer: ses tuşları ekran kapalıyken de medya sesini değiştirir,
+   kulaklık düğmeleri çalışır. */
 public class Arka extends Service {
     static final String DURDUR = "com.azat.saha.ARKA_DURDUR";
     static final String DURAKLAT = "com.azat.saha.ARKA_DURAKLAT";
@@ -76,30 +82,25 @@ public class Arka extends Service {
             .setState(oynuyor ? PlaybackState.STATE_PLAYING : PlaybackState.STATE_PAUSED, PlaybackState.PLAYBACK_POSITION_UNKNOWN, oynuyor ? 1f : 0f).build());
     }
     private Notification bildirim() {
-        String kanal = "yayin";
+        String kanal = "yayin_gizli";
         NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(kanal) == null) {
-            NotificationChannel k = new NotificationChannel(kanal, "Arka planda yayın", NotificationManager.IMPORTANCE_LOW);
-            k.setShowBadge(false); nm.createNotificationChannel(k);
+            try { nm.deleteNotificationChannel("yayin"); } catch (Exception e) { }   // eski (görünür) kanal
+            NotificationChannel k = new NotificationChannel(kanal, "Arka planda yayın", NotificationManager.IMPORTANCE_MIN);
+            k.setShowBadge(false); k.setLockscreenVisibility(Notification.VISIBILITY_SECRET); nm.createNotificationChannel(k);
         }
         int bay = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
         PendingIntent ac = PendingIntent.getActivity(this, 1, new Intent(this, Ana.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), bay);
         PendingIntent dur = PendingIntent.getService(this, 2, new Intent(this, Arka.class).setAction(DURDUR), bay);
-        PendingIntent oyn = PendingIntent.getService(this, 3, new Intent(this, Arka.class).setAction(oynuyor ? DURAKLAT : OYNAT), bay);
         Notification.Builder b = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, kanal) : new Notification.Builder(this);
         b.setSmallIcon(oynuyor ? android.R.drawable.ic_media_play : android.R.drawable.ic_media_pause).setContentTitle(getString(R.string.app_name))
          .setContentText(oynuyor ? "TV yayını arka planda oynatılıyor" : "TV yayını duraklatıldı").setContentIntent(ac).setOngoing(true)
-         .setVisibility(Notification.VISIBILITY_PUBLIC)
-         .addAction(oynuyor ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play, oynuyor ? "Duraklat" : "Oynat", oyn)
+         .setVisibility(Notification.VISIBILITY_SECRET).setPriority(Notification.PRIORITY_MIN).setShowWhen(false)
          .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Durdur", dur);
-        Notification.MediaStyle st = new Notification.MediaStyle().setShowActionsInCompactView(0, 1);
-        if (oturum != null) st.setMediaSession(oturum.getSessionToken());
-        b.setStyle(st);
+        // Medya kartı (MediaStyle) YOK: kilit ekranında ve bildirim panelinde kart çıkmaz (2026-11-08-F). Medya oturumu yine etkin - ses tuşları medya sesini değiştirir.
         return b.build();
     }
-    private void bildirimGoster() {
-        try { ((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).notify(7, bildirim()); } catch (Exception e) { }
-    }
+    private void bildirimGoster() { }   // bildirim içeriği oynatma durumuna göre değişmez (görünmeyen bildirim)
 
     @Override public int onStartCommand(Intent i, int f, int id) {
         String a = i == null ? null : i.getAction();
