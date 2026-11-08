@@ -1188,13 +1188,23 @@ var SahaSes = (function(){
   }
   function kyYok(){ var e = new Error('kayıt yok'); e.kayitYok = true; return e; }
   // Oyunun seçtiği tür için kayıt: tur (gol, direk, kurtarisY…), o.dk (maç dakikası, dkMax koşulu), o.haric (son çalınanlar).
+  /* SIRAYLA KULLANIM (2026-11-08, kullanıcı: "sistem ilgili anlar için sürekli aynı kelimeyi söylememeli; aynı pozisyon için birden fazla kayıt
+     varsa onlar da bir sonraki olayda kullanılmalı"). KÖK SEBEP: kayıt rastgele seçiliyordu; yalnızca son 45 sn'de çalınan dışlanıyordu - aynı
+     kayıt art arda maçlarda (hatta aynı maçta birkaç dakika arayla) defalarca gelebiliyor, bazı kayıtlar hiç çalınmıyordu. ŞİMDİ o an için
+     uygun kayıtlar arasından EN UZUN SÜREDİR çalınmamış olan seçilir (hiç çalınmamışlar önce; eşitse rastgele) - bütün kayıtlar sırayla
+     döner. Son çalınma zamanları cihazda saklanır, sıra maçtan maça sürer. Kayıt gerçekten çalındığında kayitKullan(id) ile işaretlenir. */
+  var KSON = (function(){ try{ return JSON.parse(localStorage.getItem('sahaKayitSon') || '{}') || {}; }catch(e){ return {}; } })(), _ksZ = 0;
+  function kayKullan(id){ if(!id) return; KSON[id] = Date.now(); if(_ksZ) return; _ksZ = setTimeout(function(){ _ksZ = 0; try{ var k = Object.keys(KSON);
+    if(k.length > 4000){ k.sort(function(a, b){ return KSON[a] - KSON[b]; }).slice(0, k.length - 3000).forEach(function(x){ delete KSON[x]; }); }
+    localStorage.setItem('sahaKayitSon', JSON.stringify(KSON)); }catch(e){} }, 2000); }
+  function enEski(L, ad){ var en = Infinity; L.forEach(function(k){ var t = KSON[ad(k)] || 0; if(t < en) en = t; }); var A = L.filter(function(k){ return (KSON[ad(k)] || 0) === en; }); return A[Math.floor(Math.random() * A.length)]; }
   function kaySec(rol, tur, o){
     if(!KY || !tur) return null; o = o || {};
     var L = KY.L.filter(function(k){ return !gz(k) && k.rol === rol && k.tur.indexOf(tur) >= 0 && !(k.dkMax && o.dk != null && o.dk > k.dkMax) && !(k.sira && !o.sirali) && !(k.enAz && (o.say || 0) < k.enAz); });
     if(!L.length) return null;
     var yeni = L.filter(function(k){ return !(o.haric && o.haric.indexOf(k.id) >= 0); });
     if(!yeni.length) return null;                                     // az önce çalınan kayıt hemen tekrarlanmaz (o an sessiz geçer)
-    return yeni[Math.floor(Math.random() * yeni.length)];
+    return enEski(yeni, function(k){ return k.id; });                 // bkz. SIRAYLA KULLANIM
   }
   function kayStad(ad){ if(!KY || !ad) return null; var n = kyNorm(ad), L = KY.L.filter(function(k){ return !gz(k) && k.stad && kyNorm(k.stad) === n; });
     return L.length ? L[Math.floor(Math.random() * L.length)] : null; }
@@ -1206,7 +1216,7 @@ var SahaSes = (function(){
       if(!G[g]){ G[g] = []; ad.push(g); } G[g].push(k); });
     var ser = ad.filter(function(g){ return !(o.haric && o.haric.indexOf(g) >= 0); }); if(!ser.length) ser = o.haric ? [] : ad;
     if(!ser.length) return [];
-    var sec = ser[Math.floor(Math.random() * ser.length)];
+    var sec = enEski(ser, function(g){ return 'dlg:' + g; }); kayKullan('dlg:' + sec);   // diyaloglar da sırayla (bkz. SIRAYLA KULLANIM)
     return G[sec].sort(function(a, b){ return a.sira - b.sira; });
   }
   var _bos = function(){ return Promise.resolve(); };
@@ -1221,7 +1231,7 @@ var SahaSes = (function(){
     rolSesi:function(){ return 'kayit'; }, parcala:parcala, yuzde:function(){ return KY ? 100 : 0; }, hata:function(){ return KY ? '' : 'kayıtlı ses yok'; },
     dinle:function(f){ dinleyici.push(f); }, baglam:baglam, birak:function(){}, bankaHazirla:function(){}, baglamVer:function(f){ disBaglam = typeof f === 'function' ? f : null; },
     heyecan:heyecanBul, heyecanAyar:function(h){ return HEY[Math.max(0, Math.min(2, h | 0))]; }, indiriyor:function(){ return false; }, olcum:function(){ return {}; },
-    kayitModu:function(){ return true; }, kayitHazir:function(){ return !!KY; }, kayitSec:kaySec, kayitDizi:kayDizi, kayitStad:kayStad, kayitVar:function(m, r){ return !!kyBul(m, r); },
+    kayitModu:function(){ return true; }, kayitHazir:function(){ return !!KY; }, kayitSec:kaySec, kayitKullan:kayKullan, kayitDizi:kayDizi, kayitStad:kayStad, kayitVar:function(m, r){ return !!kyBul(m, r); },
     kayitListe:function(){ return KY ? KY.L.filter(function(k){ return !gz(k); }) : []; }, kayitYukle:kyYukle,
     kayitTum:function(){ return KY ? KY.L.map(function(k){ return Object.assign({ gizli:gz(k) }, k); }) : []; },
     // (2026-11-01-E) Diyalog: açılış kaydı seçilince kalan parçaları (sira) sırayla - silinmişler hariç.
