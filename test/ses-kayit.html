@@ -232,7 +232,8 @@ body.stadMod > :not(header):not(#stad):not(script){ display:none !important; }
         <h2>Takım</h2>
         <p>Maçta her zaman ev sahibi takımın taraftar sesi çalar; ortak stadyumda da öyle.</p>
         <select id="sTakim" aria-label="Takım"></select>
-        <div class="turler" id="sTurler"><button class="b on" data-t="mars">Marş</button><button class="b" data-t="tez">Tezahürat</button><button class="b" data-t="gol">Gol sevinci</button></div>
+        <div class="turler" id="sTurler"><button class="b on" data-t="mars">Marş</button><button class="b" data-t="tez">Tezahürat</button><button class="b" data-t="gol">Gol sevinci</button><button class="b" data-t="golMuzik">Gol müziği</button></div>
+        <p id="sMuzikNot" style="display:none;margin:6px 0 0;font-size:12.5px;color:var(--soluk);line-height:1.5">Gol müziği bu takımın stadında, ev sahibi gol attığında gol anonsundan sonra çalar (oyun yeniden başlayınca ya da en çok 30 sn sonra kısılır). Birden çok müzik yüklenirse her golde biri seçilir. Dosyadan seçmek en iyisi (mp3/m4a, en çok 12 MB).</p>
         <input type="text" id="sAd" placeholder="Kayıt adı (örn. Ana marş)" maxlength="40">
       </div>
       <div id="sMetin" style="display:none"></div>
@@ -254,7 +255,7 @@ body.stadMod > :not(header):not(#stad):not(script){ display:none !important; }
   </div>
 </section>
 
-<script src="ortak/stadyum-ses.js?v=da00c682"></script>
+<script src="ortak/stadyum-ses.js?v=84cc1cad"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
@@ -691,7 +692,15 @@ var SUP = { url:'https://oasyhelzshbehnpyrssw.supabase.co', anahtar:'sb_publisha
 var SABIT = [['_gol', 'Golü atan oyuncu'], ['_kk', 'Kendi kalesine gol'], ['_cikan', 'Oyuncu değişikliği. Çıkan oyuncu'], ['_giren', 'Giren oyuncu'], ['_sari', 'Sarı kart'],
   ['_kirmizi', 'Kırmızı kart'], ['_ikisari', 'İkinci sarı karttan kırmızı kart'], ['_ilk11', 'Takımların ilk on birlerini açıklıyoruz'],
   ['_bas', 'Sayın seyirciler, karşılaşma birazdan başlıyor'], ['_ikinci', 'İkinci yarı başlıyor'], ['_son', 'Maç sona erdi']];
-var TUR_AD = { mars:'Marş', tez:'Tezahürat', gol:'Gol sevinci' };
+var TUR_AD = { mars:'Marş', tez:'Tezahürat', gol:'Gol sevinci', golMuzik:'Gol müziği' };
+/* GOL ANONSU KAYITLARI (2026-11-08, kullanıcı: "gol olunca 'Gooooool! (forma numarası ve ismi)' anonsu; anonsta oyuncunun ADI söylenecek,
+   taraftar SOYADINI söyleyecek; admin her takım stadyumu için ayrı gol müziği ekleyebilecek"). Stat anonsu sekmesinde iki yeni liste:
+   "Gol anonsu" (Gooooool!, 1-99 forma numaraları, oyuncuların yalnızca ADI) ve "Taraftar soyadları" (oyuncuların SOYADI, tribün gibi
+   bağırarak; statta dinle kalabalık olarak çalar). Taraftar sekmesinde takım başına "Gol müziği". Anahtarlar: _golBagir, n_<no>,
+   oi_<oyuncu>, os_<oyuncu>; müzik: taraftarSes/<takım>/<id> tur=golMuzik. */
+function sayiYazi(n){ var b = ['', 'bir', 'iki', 'üç', 'dört', 'beş', 'altı', 'yedi', 'sekiz', 'dokuz'], o = ['', 'on', 'yirmi', 'otuz', 'kırk', 'elli', 'altmış', 'yetmiş', 'seksen', 'doksan'];
+  var y = (o[Math.floor(n / 10)] + ' ' + b[n % 10]).trim(); return y.charAt(0).toLocaleUpperCase('tr-TR') + y.slice(1); }
+function adParca(a){ var t = String(a || '').trim().split(/\s+/).filter(Boolean); return { ilk:t.length > 1 ? t.slice(0, -1).join(' ') : (t[0] || ''), soy:t.length ? t[t.length - 1] : '' }; }
 var ST = { app:null, d:null, takimlar:[], ekAd:[], klip:{}, anons:{}, sekme:'tr', tur:'mars', blob:null, tip:'', hedef:null, kayit:null, ctx:null, calan:null, grup:'sabit' };
 function stHata(e){ var m = String((e && e.message) || e || ''); return /PERMISSION_DENIED|permission/i.test(m) ? 'Bu hesabın yazma yetkisi yok.' : m; }
 function stNot(m, sinif){ $('sDurum').textContent = m || ''; $('sDurum').className = sinif || ''; }
@@ -741,7 +750,7 @@ function stVeri(){
 function stGrupCiz(){
   var g = $('sGrup'), is = ST.sekme === 'is', L = ST.takimlar || []; g.innerHTML = '';
   // (2026-11-07) Takım kadrosu grupları kaldırıldı (başlangıç kadroları oyuncu kaydına girmez); oyuncular "Transfer oyuncuları" grubunda.
-  var G = (is ? [['tum', 'Transfer oyuncuları']] : [['sabit', 'Sabit cümleler'], ['takim', 'Takım adları'], ['tum', 'Transfer oyuncuları']]).concat([['ek', 'Eklediğim adlar']]);
+  var G = (is ? [['tum', 'Transfer oyuncuları']] : [['sabit', 'Sabit cümleler'], ['golc', 'Gol anonsu (Gooooool!, numara, ad)'], ['soy', 'Taraftar soyadları (gol)'], ['takim', 'Takım adları'], ['tum', 'Transfer oyuncuları']]).concat([['ek', 'Eklediğim adlar']]);
   G.forEach(function(c){ var o = document.createElement('option'); o.value = c[0]; o.textContent = c[1]; g.appendChild(o); });
   if(!G.some(function(c){ return c[0] === ST.grup; })) ST.grup = G[0][0];
   g.value = ST.grup;
@@ -752,6 +761,11 @@ function stYol(k){ return ST.sekme === 'is' ? 'isimSes/' + ST.rol + '/' + k + '/
 function stSatirlar(){
   var g = ST.grup, P = [];
   if(g === 'tum') (ST.tumOy || []).forEach(function(a){ P.push({ k:'o_' + stadSlug(a), m:a }); });
+  var _hep = function(){ var H = {}; (ST.tumOy || []).concat(ST.ekAd || []).forEach(function(a){ H[a] = 1; }); return Object.keys(H).sort(function(a, b){ return a.localeCompare(b, 'tr'); }); };
+  if(g === 'golc'){ P.push({ k:'_golBagir', m:'Gooooool! (uzatarak, bağırarak)' });
+    for(var i = 1; i <= 99; i++) P.push({ k:'n_' + i, m:sayiYazi(i) + ' numara' });
+    _hep().forEach(function(a){ var q = adParca(a); P.push({ k:'oi_' + stadSlug(a), m:q.ilk + '  (yalnızca adı · ' + a + ')' }); }); }
+  else if(g === 'soy') _hep().forEach(function(a){ P.push({ k:'os_' + stadSlug(a), m:adParca(a).soy.toLocaleUpperCase('tr-TR') + '!  (taraftar gibi bağırarak · ' + a + ')' }); });
   if(g === 'sabit') SABIT.forEach(function(c){ P.push({ k:c[0], m:c[1] }); });
   else if(g === 'takim') ST.takimlar.forEach(function(t){ P.push({ k:'t_' + t.sl, m:t.ad }); });
   else if(g === 'ek') ST.ekAd.forEach(function(a){ P.push({ k:'o_' + stadSlug(a), m:a }); });
@@ -770,7 +784,7 @@ function stCiz(){
     var sl = $('sTakim').value, v = ST.klip[sl] || {}, ids = Object.keys(v);
     if(!ids.length){ K.innerHTML = '<p style="margin:0;font-size:13px;color:var(--soluk)">Henüz kayıt yok. Kayıt yoksa maçta oyunun kendi tezahüratı çalar.</p>'; return; }
     ids.forEach(function(id){ var x = v[id], s = document.createElement('div'); s.className = 'satir'; var y = document.createElement('span'); y.textContent = x.ad || 'Kayıt'; var sm = document.createElement('small'); sm.textContent = TUR_AD[x.tur] || ''; y.appendChild(sm); s.appendChild(y);
-      s.appendChild(stBtn('▶', function(){ stUrlDinle(x.url, true); }, 'Statta dinle')); s.appendChild(stBtn('Sil', function(){ stSil('taraftarSes/' + sl + '/' + id, x); })); K.appendChild(s); });
+      s.appendChild(stBtn('▶', function(){ stUrlDinle(x.url, true, x.tur); }, 'Statta dinle')); s.appendChild(stBtn('Sil', function(){ stSil('taraftarSes/' + sl + '/' + id, x); })); K.appendChild(s); });
     return;
   }
   var H = stHarita(), is = ST.sekme === 'is', L = stSatirlar(), yap = L.filter(function(x){ return H[x.k]; }).length;
@@ -784,14 +798,15 @@ function stCiz(){
 function stHedef(x){ ST.hedef = x; ST.blob = null; stDugme(); $('sMetin').textContent = x ? x.m + (ST.sekme === 'is' ? ' (' + ({ normal:'normal', heyecan:'heyecanlı', bagir:'bağırarak' })[ST.ton] + ')' : '') : 'Liste boş'; stNot(''); }
 function stDugme(){ var v = !!ST.blob; $('sDinle').disabled = !v; $('sStadDinle').disabled = !v; $('sYukle').disabled = !v; }
 function stSusturCal(){ if(ST.calan){ try{ ST.calan.dur ? ST.calan.dur(0.2) : ST.calan.stop(); }catch(e){} ST.calan = null; } }
-function stTamponCal(b, stad){
+function stTamponCal(b, stad, tur){
   var c = stKtx(); stSusturCal();
   if(!stad){ var k = c.createBufferSource(); k.buffer = b; k.connect(c.destination); k.start(); ST.calan = k; return; }
-  if(ST.sekme === 'tr') ST.calan = StadSes.kalabalik(c, b, c.destination, { ses:0.55 });
+  if(ST.sekme === 'tr' && (tur || ST.tur) === 'golMuzik') ST.calan = StadSes.muzik(c, b, c.destination, { ses:0.6 });
+  else if(ST.sekme === 'tr' || (ST.sekme === 'an' && ST.grup === 'soy')) ST.calan = StadSes.kalabalik(c, b, c.destination, { ses:0.55 });
   else if(ST.sekme === 'is'){ var r0 = StadSes.kirp(b), k0 = c.createBufferSource(); k0.buffer = b; k0.connect(c.destination); k0.start(0, r0.bas, r0.sure); ST.calan = k0; }
   else { var r = StadSes.kirp(b), n = c.createBufferSource(); n.buffer = b; n.connect(StadSes.paGiris(c, c.destination)); n.start(0, r.bas, r.sure); ST.calan = n; }
 }
-function stUrlDinle(url, stad){ stNot('Yükleniyor…'); StadSes.tampon(stKtx(), url).then(function(b){ stNot(''); stTamponCal(b, stad); }, function(e){ stNot('Çalınamadı: ' + stHata(e), 'h'); }); }
+function stUrlDinle(url, stad, tur){ stNot('Yükleniyor…'); StadSes.tampon(stKtx(), url).then(function(b){ stNot(''); stTamponCal(b, stad, tur); }, function(e){ stNot('Çalınamadı: ' + stHata(e), 'h'); }); }
 function stBlobDinle(stad){ if(!ST.blob) return; var c = stKtx(); ST.blob.arrayBuffer().then(function(a){ return StadSes.coz(c, a); }).then(function(b){ stTamponCal(b, stad); }, function(){ stNot('Bu ses dosyası çözülemedi; başka bir biçim dene.', 'h'); }); }
 $('sDinle').onclick = function(){ stBlobDinle(false); }; $('sStadDinle').onclick = function(){ stBlobDinle(true); };
 function stKayitDur(){ var k = ST.kayit; if(k && k.r.state !== 'inactive') k.r.stop(); }
@@ -848,7 +863,7 @@ ST.rol = 'spiker'; ST.ton = 'normal';
 $('sRoller').onclick = function(e){ var r = e.target.getAttribute('data-r'); if(!r) return; ST.rol = r; ST.hedef = null; Array.prototype.forEach.call(this.children, function(b){ b.classList.toggle('on', b === e.target); }); stCiz(); };
 $('sTonlar').onclick = function(e){ var o = e.target.getAttribute('data-o'); if(!o) return; ST.ton = o; ST.hedef = null; Array.prototype.forEach.call(this.children, function(b){ b.classList.toggle('on', b === e.target); }); stCiz(); };
 $('sTakim').onchange = stCiz; $('sGrup').onchange = function(){ ST.grup = this.value; ST.hedef = null; stCiz(); };
-$('sTurler').onclick = function(e){ var t = e.target.getAttribute('data-t'); if(!t) return; ST.tur = t; Array.prototype.forEach.call(this.children, function(b){ b.classList.toggle('on', b === e.target); }); };
+$('sTurler').onclick = function(e){ var t = e.target.getAttribute('data-t'); if(!t) return; ST.tur = t; $('sMuzikNot').style.display = t === 'golMuzik' ? '' : 'none'; Array.prototype.forEach.call(this.children, function(b){ b.classList.toggle('on', b === e.target); }); };
 $('sYeniEkle').onclick = function(){ var a = $('sYeniAd').value.trim(); if(!stadSlug(a)) return; if(ST.ekAd.indexOf(a) < 0) ST.ekAd.push(a); try{ localStorage.setItem('sesKayitEkAd', JSON.stringify(ST.ekAd)); }catch(e){} $('sYeniAd').value = ''; ST.grup = 'ek'; stGrupCiz(); ST.hedef = null; stCiz(); };
 dbAc().then(function(){ var _s = stadYukle(); rolSec(MOD); if(_s && _s.then) _s.then(function(){ if(MOD !== 'diyalog') rolSec(MOD); }); if(Object.keys(kayitlar).length) $('nasil').open = false; })
   .catch(function(e){ hata('Kayıt deposu açılamadı (gizli sekme olabilir): ' + ((e && e.message) || e)); });

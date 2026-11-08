@@ -88,6 +88,19 @@ var StadSes = (function(){
       return new Promise(function(ok){ setTimeout(function(){ kisma(c, s, false); ok(); }, Math.max(0, (t - c.currentTime)) * 1000); });
     });
   }
-  return { paGiris:function(c, cikis){ return kur(c, cikis).pa; }, kalabalik:kalabalik, dizi:dizi, kirp:kirp, tampon:tampon, indir:indir, coz:coz, olcek:olcek,
+  /* GOL MÜZİĞİ (2026-11-08): stadın hoparlöründen çalan müzik. Anons zincirinden (dar bant) geçmez - müzik boğuk olmasın; hafif stat yankısı
+     alır, taraftar sesi müzik boyunca biraz kısılır. Dönen nesne: { dur(sn) } - kısılarak durur. */
+  function muzik(c, b, cikis, o){
+    o = o || {}; var s = kur(c, cikis), g = c.createGain(), t = c.currentTime + 0.05, k = c.createBufferSource();
+    var hp = c.createBiquadFilter(), lp = c.createBiquadFilter(), y = c.createGain(), v = (o.ses == null ? 0.6 : o.ses) * Math.min(1.6, olcek(b, 0.12));
+    hp.type = 'highpass'; hp.frequency.value = 70; lp.type = 'lowpass'; lp.frequency.value = 11000; y.gain.value = 0.22;
+    k.buffer = b; k.connect(hp); hp.connect(lp); lp.connect(g); g.connect(s.son); g.connect(y); y.connect(s.yanki);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.6); k.start(t);
+    kisma(c, s, true);
+    var bitti = false, kapat = function(){ if(bitti) return; bitti = true; kisma(c, s, false); };
+    k.onended = kapat;
+    return { dur:function(sn){ sn = sn == null ? 2 : sn; try{ var n = c.currentTime; g.gain.cancelScheduledValues(n); g.gain.setValueAtTime(g.gain.value, n); g.gain.linearRampToValueAtTime(0, n + sn); k.stop(n + sn + 0.05); }catch(e){} setTimeout(kapat, sn * 1000); } };
+  }
+  return { paGiris:function(c, cikis){ return kur(c, cikis).pa; }, kalabalik:kalabalik, muzik:muzik, dizi:dizi, kirp:kirp, tampon:tampon, indir:indir, coz:coz, olcek:olcek,
     kis:function(c, cikis, v){ kisma(c, kur(c, cikis), v); } };
 })();

@@ -170,7 +170,7 @@
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
 <script src="ortak/ortak.js?v=0538c694"></script>
-<script src="ortak/stadyum-ses.js?v=da00c682"></script>
+<script src="ortak/stadyum-ses.js?v=84cc1cad"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -282,7 +282,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-07-P</title>
+<title>SAHA — 3D Futbol v2026-11-08-A</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -10846,6 +10846,7 @@ function _odaOlayAl(v){
       else if(x.k === 'i'){ if(yas < 4000) isimSoyle({ ad:x.ad, _uzak:true }, x.t || 'normal', x.o || 0); }
       else if(x.k === 'a'){ if(yas < 12000 && AYAR.ses) _anonsKonus(x.m, x.p && x.p.length ? x.p : null); }
       else if(x.k === 'm'){ if(yas < 6000) taraftarCal('mars', { zorla:true }); }
+      else if(x.k === 'gc'){ if(yas < 12000) golAnonsuCal(x.g); }
     });
   }catch(e){ _sessiz(e, '_odaOlayAl', 'saha_ses'); }
 }
@@ -11311,12 +11312,76 @@ function stadAnons(metin, parcalar, zil){
 function _anonsOlay(type, p, o){
   if(mod === 'antrenman' || window._sahaIzleModu || !p) return;
   var ad = p.ad || '', k = _oyuncuAnahtar(ad);
-  if(type === 'goal' || type === 'pen_goal') setTimeout(function(){ stadAnons('Golü atan oyuncu ' + ad, ['_gol', k], true); }, 5000);
+  if(type === 'goal' || type === 'pen_goal') setTimeout(function(){ golAnonsu(p); }, 3800);   // (2026-11-08) bkz. GOL ANONSU
   else if(type === 'og') setTimeout(function(){ stadAnons('Kendi kalesine gol ' + ad, ['_kk', k], true); }, 5000);
   else if(type === 'yellow') stadAnons('Sarı kart ' + ad, ['_sari', k], false);
   else if(type === 'red') stadAnons('Kırmızı kart ' + ad, ['_kirmizi', k], true);
   else if(type === 'yellow2red') stadAnons('İkinci sarı karttan kırmızı kart ' + ad, ['_ikisari', k], true);
   else if(type === 'sub'){ var c = o.player2 || ''; stadAnons('Oyuncu değişikliği. Çıkan oyuncu ' + c + ', giren oyuncu ' + ad, ['_cikan', _oyuncuAnahtar(c), '_giren', k], true); }
+}
+/* GOL ANONSU (2026-11-08, kullanıcı: "spiker ve yorumcu dışında gol anonsu ekle: oyuncu gol attığında 'Gooooool! (forma numarası ve ismi)'
+   anonsu yapılırken anonsta oyuncunun ADI söylenecek, taraftar SOYADINI söyleyecek; admin her takımın stadyumu için ayrı gol müziği ekleyebilecek").
+   Ev sahibi takım gol atınca stat spikeri: "Gooooool!" + "<numara> numara" + <adı>; tribün soyadını bağırır; spiker adı bir kez daha söyler,
+   tribün soyadı yeniden bağırır; ardından o stadın gol müziği çalar (oyun yeniden başlayınca ya da en çok 30 sn sonra kısılarak biter).
+   Kayıtlar ses-kayit.html > Stadyum: "Stat anonsu > Gol anonsu" (Gooooool!, forma numaraları, oyuncu adları), "Stat anonsu > Taraftar
+   soyadları", "Taraftar > Gol müziği" (takım başına). EKSİK KAYITTA: Gooooool! kaydı yoksa eski "Golü atan oyuncu …" anonsu yapılır; numara
+   ya da ad kaydı yoksa o parça atlanır; soyadı kaydı yoksa tribün kısmı atlanır; müzik yoksa çalmaz. Konuk takımın golünde (gerçek statlardaki
+   gibi) tribün susar, spiker yalnızca "Golü atan oyuncu …" der. Online maçta rakip cihaz da aynı anonsu ve müziği duyar (bkz. KONUKTA SESLER). */
+function _adParca(ad){ var t = String(ad || '').trim().split(/\s+/).filter(Boolean); return { ilk:t.length > 1 ? t.slice(0, -1).join(' ') : (t[0] || ''), soy:t.length ? t[t.length - 1] : '' }; }
+function golAnonsu(p){
+  stadSesYukle().then(function(){ try{
+    var I = _TSES.anons || {}, ad = p.ad || '', sl = _tsSlug(ad), ev = p.team === _evTaraf(), u = function(k){ return I[k] && I[k].url; };
+    if(!ev || !u('_golBagir')){ stadAnons('Golü atan oyuncu ' + ad, ['_gol', _oyuncuAnahtar(ad)], true); return; }
+    var no = Number(p.no) || 0, a1 = [u('_golBagir'), no ? u('n_' + no) : null, u('oi_' + sl)].filter(Boolean), a2 = [u('oi_' + sl)].filter(Boolean);
+    var M = ((_TSES.klip || {}).golMuzik || []).map(function(x){ return x.url; });
+    var G = { a1:a1, a2:a2, soy:u('os_' + sl) || '', muzik:M.length ? M[Math.floor(Math.random() * M.length)] : '', m:'Gooooool! ' + (no ? no + ' numara ' : '') + _adParca(ad).ilk };
+    golAnonsuCal(G);
+    _odaOlay({ k:'gc', g:G });                                            // online: rakip cihaz da aynı anonsu çalar
+    try{ setTimeout(function(){ yayinAnonsGonder(G.m, undefined, a1); }, 0); }catch(e){}
+    try{ if(running && !bitti){ SPK.log.push({ ts:Date.now(), r:'anons', m:G.m }); if(SPK.log.length > 60) SPK.log.shift(); } }catch(e){}
+  }catch(e){ _sessiz(e, 'golAnonsu', 'saha_ses'); } });
+}
+// Sıraya girer: spiker/yorumcu konuşurken üstüne binmez, onlarla aynı söz sırasındadır (bkz. _anonsKonus).
+function golAnonsuCal(G){
+  try{
+    if(!G || !G.a1 || !G.a1.length || !AYAR.ses || !_sesUret() || window._sahaIzleModu) return;
+    var x = { rol:'anons', metin:G.m || 'Gol!', onemli:true, ts:Date.now(), oncelik:2, gol:G }, i = 0;
+    while(i < SPK.sira.length && SPK.sira[i].rol === 'anons') i++;
+    SPK.sira.splice(i, 0, x); _spkSiradaki();
+  }catch(e){ _sessiz(e, 'golAnonsuCal', 'saha_ses'); }
+}
+function _golCagriOku(G, bitti, gecerli){
+  var _b = false, son = function(){ if(_b) return; _b = true; bitti(); };
+  try{
+    if(gecerli && !gecerli()) return;
+    if(!ac || !window.StadSes){ setTimeout(son, 50); return; }
+    setTimeout(son, 25000);                                                 // güvenlik: anons sırası hiçbir koşulda kilitlenmez
+    var dz = Math.max(0, Math.min(1, ((AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100) * 1.1));
+    var oku = function(L){ return L && L.length ? StadSes.dizi(ac, L, sesCikis(), dz) : Promise.resolve(); };
+    var tribun = function(){ if(!G.soy) return Promise.resolve();
+      return StadSes.tampon(ac, G.soy).then(function(b){ var k = StadSes.kalabalik(ac, b, sesCikis(), { ses:0.95 * dz + 0.05 });
+        return new Promise(function(ok){ setTimeout(ok, Math.max(300, (k.bitis - ac.currentTime) * 1000 - 120)); }); }).catch(function(){}); };
+    oku(G.a1).then(tribun).then(function(){ return G.soy && G.a2 && G.a2.length ? oku(G.a2).then(tribun) : null; })
+      .then(function(){ golMuzikCal(G.muzik); son(); }, function(){ son(); });
+  }catch(e){ _sessiz(e, '_golCagriOku', 'saha_ses'); son(); }
+}
+var _golMuz = null;
+function golMuzikCal(url){
+  try{
+    if(!url || !ac || !window.StadSes || !_sesUret()) return;
+    if(_golMuz){ try{ _golMuz.dur(0.5); }catch(e){} _golMuz = null; }
+    var bas = Date.now();
+    StadSes.tampon(ac, url).then(function(b){
+      try{ taraftarSustur(2); }catch(e){}
+      var dz = Math.max(0, Math.min(1, ((AYAR.sesSeviye == null ? 70 : AYAR.sesSeviye) / 100)));
+      var m = _golMuz = StadSes.muzik(ac, b, sesCikis(), { ses:0.75 * dz });
+      // Oyun yeniden başlayınca (gol beklemesi ve tören bitince, en az 8 sn çaldıktan sonra) ya da en çok 30 sn sonra kısılarak biter.
+      var z = setInterval(function(){ try{
+        var gec = (Date.now() - bas) / 1000, oyun = !golBekleme && !(typeof TOREN !== 'undefined' && TOREN.aktif) && !window._knTkTekrar;
+        if(_golMuz !== m || gec > 30 || (gec > 8 && oyun) || bitti){ clearInterval(z); if(_golMuz === m){ m.dur(2.5); _golMuz = null; } }
+      }catch(e){ clearInterval(z); } }, 500);
+    }).catch(function(e){ _sessiz(e, 'golMuzikCal', 'saha_ses'); });
+  }catch(e){ _sessiz(e, 'golMuzikCal', 'saha_ses'); }
 }
 // Maç önü: önce ev sahibi, sonra konuk takımın ilk 11'i (kaleci başta). Takım okunurken ısınma beklenir (santradan önce biter; atlanırsa kesilir).
 function anonsIlk11(){
@@ -11644,7 +11709,7 @@ function _spkSiradaki(){
     var _bit = function(){ if(no !== SPK.no) return;                                     // kesilmiş cümlenin geç gelen "bitti"si yok sayılır
       x.bitti0 = Date.now(); SPK.konusuyor = false; SPK.calan = null; SPK._onemliOkunuyor = false; SPK.sonKonusma = x.bitti0; SPK._sonRol = x.rol; setTimeout(_spkSiradaki, 200); };
     var _gec = function(){ return no === SPK.no; };
-    if(x.rol === 'anons') _anonsOku(x.metin, _bit, _gec, x.parca);
+    if(x.rol === 'anons'){ if(x.gol) _golCagriOku(x.gol, _bit, _gec); else _anonsOku(x.metin, _bit, _gec, x.parca); }
     else if(x.isim) _isimOku(x, _bit, _gec);
     else _spkOku(x.metin, x.rol, _bit, x.h, x.oncelik >= 2, x.tur, _gec);
     return;
@@ -21041,7 +21106,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-07-P';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-08-A';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
