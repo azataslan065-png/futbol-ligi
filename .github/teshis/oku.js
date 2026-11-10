@@ -19,6 +19,8 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     const m = ses.muzikler || {};
     console.log('müzik sayısı:', Object.keys(m).length, '| seviye', ses.muzikSeviye, '| spiker', ses.spkSesSpiker, ses.spkSesSpikerAd ? '(adlı)' : '', '| yorumcu', ses.spkSesYorumcu);
     for(const k of Object.keys(m).slice(0, 4)){ const u = String(m[k].url || ''); let d = '?'; try{ const r = await fetch(u, { headers: { Range: 'bytes=0-1023' } }); d = r.status + ' ' + r.headers.get('content-type') + ' acao=' + r.headers.get('access-control-allow-origin'); }catch(e){ d = 'hata ' + e.message; } console.log('  ' + u.replace(/^https?:\/\/([^/]+).*\/([^/]{0,40})$/, '$1 …/$2') + ' → ' + d); }
+    { const A = await al(kok + 'sahaGorunum/anonsSes', '?shallow=true') || {}; const K = Object.keys(A); const g = {}; K.forEach(k => { const m = k.match(/^(_|o_|oi_|os_|n_|t_)/); const t = m ? m[1] : 'diger'; g[t] = (g[t] || 0) + 1; });
+      console.log('anonsSes anahtar:', K.length, JSON.stringify(g), '| sabit:', K.filter(k => k[0] === '_').join(','), '| o_ ilk 15:', K.filter(k => k.startsWith('o_')).slice(0, 15).join(','), '| oi_ ilk 8:', K.filter(k => k.startsWith('oi_')).slice(0, 8).join(',')); }
     const L = await al(kok + 'diagnostics/logs', '?orderBy="$key"&limitToLast=600') || {};
     const satir = Object.values(L).filter(x => x && x.app === 'saha' && x.ts > sinir).sort((a, b) => a.ts - b.ts);
     console.log('son 12 saat SAHA kaydı:', satir.length);
