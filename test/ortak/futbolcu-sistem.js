@@ -8,10 +8,15 @@ const G=(dx,dy,dz,sx,sy,sz)=>Math.exp(-(dx*dx/(sx*sx)+dy*dy/(sy*sy)+dz*dz/(sz*sz
 function deform(p,x,y,z,o){
  const ax=x<0?-x:x,s=x<0?-1:1;let dx=0,dy=0,dz=0,w;
  if(y>1.42&&ax<.2){const hy=y-1.66,hz=z;
+  /*TEMEL*/{const kv=sst(.03,.105,hy);dy+=kv*.016;
+  w=bump(.02,.06,.09,.125,hy)*sst(-.02,.05,hz)*(1-sst(.045,.085,ax));dz+=w*.012;
+  w=sst(-.16,-.10,hy)*(1-sst(-.07,.035,hy))*sst(-.10,.02,hz);dx-=x*w*.15;
+  w=G(ax,hy+.115,hz-.06,.06,.022,.05);dx-=x*w*.10;
+  w=G(ax-.0312,hy-.009,hz-.08,.022,.016,.02);dz-=w*.0028;}
   if(hz>-.05||hy<0){
   w=G(ax-.055,hy+.065,hz-.02,.05,.03,.07);dx+=s*w*.014*p.jawW;
   w=G(ax-.052,hy+.058,hz+.015,.03,.03,.04);dy+=-w*.012*p.jawH;
-  w=G(ax,hy+.10,hz-.07,.05,.028,.05);dy-=w*.013*p.chinL;dz+=w*.012*p.chinF;dx+=x*w*.4*p.chinW;
+  w=G(ax,hy+.10,hz-.07,.05,.028,.05);dy-=w*.013*p.chinL;dz+=w*.012*(p.chinF+.5);dx+=x*w*.4*p.chinW;
   w=G(ax-.05,hy+.012,hz-.058,.028,.026,.03);dx+=s*w*.007*p.cheek;dz+=w*.005*p.cheek;
   w=G(ax-.052,hy+.04,hz-.04,.03,.03,.035);dx+=s*w*.009*p.cheekF;
   w=G(ax-.035,hy-.034,hz-.085,.045,.016,.03);dz+=w*.006*p.brow;
@@ -23,8 +28,8 @@ function deform(p,x,y,z,o){
   dx+=s*we*.005*p.eyeD;dy+=we*.005*p.eyeY;dz+=we*.0045*p.eyeZ;dx+=s*ex*we*.32*p.eyeS;dy+=ey*we*.32*p.eyeS;dy+=ex*we*.22*p.eyeA;
   w=G(ax-.018,hy+.06,hz-.095,.026,.015,.022);dx+=x*w*.42*p.mouthW;
   w=G(ax,hy+.0605,hz-.10,.032,.0095,.016);dy+=(hy+.0605)*w*.8*p.lipT;dz+=w*.0035*p.lipT;
-  w=G(ax,hy+.06,hz-.09,.042,.018,.03);dy+=w*.006*p.mouthY;dz+=w*.006*p.mouthZ;}
-  const ew=G(ax-.086,hy,hz+.02,.022,.042,.032);if(ew>.01){dx+=s*ew*.010*p.earO+(ax-.078)*s*ew*.35*p.earS;dy+=hy*ew*.35*p.earS;dz+=(hz+.02)*ew*.35*p.earS}
+  w=G(ax,hy+.06,hz-.09,.042,.018,.03);dy+=w*.006*p.mouthY;dz+=w*.006*(p.mouthZ-.5);}
+  const ew=G(ax-.086,hy,hz+.02,.022,.042,.032);if(ew>.01){dx+=s*ew*.010*(p.earO-.45)+(ax-.078)*s*ew*.35*p.earS;dy+=hy*ew*.35*p.earS;dz+=(hz+.02)*ew*.35*p.earS}
   w=sst(.02,.09,hy);dy+=w*.012*p.foreH;
   const hw=sst(1.52,1.60,y);dx+=x*hw*.09*p.headW;dz+=z*hw*.10*p.headD;dy+=sst(1.54,1.62,y)*(y-1.60)*.11*p.headH;
   const hs=sst(1.50,1.57,y)*.10*p.headS;dx+=x*hs;dy+=(y-1.56)*hs;dz+=z*hs;
@@ -39,7 +44,7 @@ function deform(p,x,y,z,o){
   w=bump(.76,.86,.95,1.02,y)*sst(.02,-.05,z);dz+=z*w*.5*p.glute;
  }
  if(y<.92&&ax<.3){const cx=y>.519?.125-.0955*(y-.519):.125+.0525*(.519-y),cz=y>.519?-.002+.059*(y-.519):-.002-.085*(.519-y),rx=ax-cx,rz=z-cz;
-  let u=bump(.50,.60,.80,.90,y)*.24*p.thigh;dx+=s*rx*u;dz+=rz*u;u=bump(.13,.28,.44,.53,y)*.24*p.calf;dx+=s*rx*u;dz+=rz*u;
+  let u=bump(.50,.60,.80,.90,y)*.24*(p.thigh+.25);dx+=s*rx*u;dz+=rz*u;u=bump(.13,.28,.44,.53,y)*.24*(p.calf+.45);dx+=s*rx*u;dz+=rz*u;
   if(y<.15){const k=(1-sst(.105,.15,y))*.16*p.footS;dx+=s*(ax-.15)*k;dz+=(z+.03)*k;dy+=y*k*.6}
  }
  const sh=sst(1.26,1.36,y)*sst(.07,.20,ax)*.032*p.shoulder;dx+=s*sh;
@@ -59,10 +64,17 @@ function kart(p,p0,st,L,Vv,Ri,hx,hy,hz,po){var o=[0,0,0],off=0;for(var s=0;s<st.
 function ten(p,sak,W,base,m1,m2,har,fo,D){function h(c){return[parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)]}
  var R=h(p.ten),H=h(p.sac),d=p.beardD,bd=p.browD,sd=p.scalp,tr=R[0]/201,tg=R[1]/155,tb=R[2]/120,n=W*W*4,yg=p.yuzG==null?1:p.yuzG,fw=fo?fo.w:0,fh=fo?fo.h:0,fd=fo?fo.d:null,i,yX=(p.yuzX||0)*.012,yY=(p.yuzY||0)*.012,yS=1+(p.yuzS||0)*.12,yR=(p.yuzR||0)*.14,yc=Math.cos(yR),ys=Math.sin(yR);
  for(i=0;i<n;i+=4){var a=base[i]*tr,g=base[i+1]*tg,b=base[i+2]*tb;
-  if(fd){var w0=har[i+2]/255*yg;if(w0>.01){if(w0>1)w0=1;var hx=har[i]/255*.2-.1-yX,hy=har[i+1]/255*.24-.14+.03-yY,qx=(hx*yc+hy*ys)/yS,qy=(-hx*ys+hy*yc)/yS-.03,fx=(qx+.075)/.15,fy=(.065-qy)/.19;if(fx>=0&&fx<1&&fy>=0&&fy<1){var k=((fy*fh|0)*fw+(fx*fw|0))*4,L=(base[i]*.3+base[i+1]*.59+base[i+2]*.11)/164,sh=L<.6?.6:L>1.05?1.05:L;a+=(fd[k]*sh-a)*w0;g+=(fd[k+1]*sh-g)*w0;b+=(fd[k+2]*sh-b)*w0}}}
-  var be=(m1[i]*sak[1]+m1[i+1]*sak[2]+m1[i+2]*sak[3])*d/255;if(be>.004){var k1=be>1?1:be;a+=(H[0]*.8-a)*k1;g+=(H[1]*.8-g)*k1;b+=(H[2]*.8-b)*k1}
+  var w0=0;if(fd){w0=har[i+2]/255*yg;if(w0>.01){if(w0>1)w0=1;var hx=har[i]/255*.2-.1-yX,hy=har[i+1]/255*.24-.14+.03-yY,qx=(hx*yc+hy*ys)/yS,qy=(-hx*ys+hy*yc)/yS-.03,fx=(qx+.075)/.15,fy=(.065-qy)/.19;if(fx>=0&&fx<1&&fy>=0&&fy<1){var k=((fy*fh|0)*fw+(fx*fw|0))*4,L=(base[i]*.3+base[i+1]*.59+base[i+2]*.11)/164,sh=L<.6?.6:L>1.05?1.05:L;a+=(fd[k]*sh-a)*w0;g+=(fd[k+1]*sh-g)*w0;b+=(fd[k+2]*sh-b)*w0}}}
+  var fb=har[i+2];if(fb>2){var X=har[i]/255*.2-.1,Y=har[i+1]/255*.24-.14,AX=X<0?-X:X,wf=fb/255*(fd?1-(w0>1?1:w0<0?0:w0)*.8:1),u1,u2;
+   u1=(AX-.0312)/.025;u2=(Y-.015)/.017;var so=Math.exp(-(u1*u1+u2*u2));
+   u1=(AX-.014)/.007;u2=(Y+.004)/.02;var ny=Math.exp(-(u1*u1+u2*u2));
+   u1=(AX-.011)/.011;u2=(Y+.039)/.006;var bn=Math.exp(-(u1*u1+u2*u2));
+   u1=X/.03;u2=(Y+.079)/.007;var da=Math.exp(-(u1*u1+u2*u2));
+   u1=(AX-.05)/.022;u2=(Y+.024)/.02;var ya=Math.exp(-(u1*u1+u2*u2))*wf;
+   var gl=1-wf*(so*.2+ny*.1+bn*.17+da*.12);a=a*gl+ya*5;g=g*gl-ya*2;b=b*gl-ya*3}
+  var be=(m1[i]*sak[1]+m1[i+1]*sak[2]+m1[i+2]*sak[3])*d/255;if(be>.004){var k1=Math.pow(be>1?1:be,.6)*.9;a+=(H[0]*.8-a)*k1;g+=(H[1]*.8-g)*k1;b+=(H[2]*.8-b)*k1}
   var f=m2[i+1]*sd/255;if(f>.004){var k2=f>1?1:f;a+=(H[0]*.85-a)*k2;g+=(H[1]*.85-g)*k2;b+=(H[2]*.85-b)*k2}
-  var br=m2[i]*bd/255;if(br>.004){var k3=br>1?1:br;a+=(H[0]*.7-a)*k3;g+=(H[1]*.7-g)*k3;b+=(H[2]*.7-b)*k3}
+  var br=m2[i]*bd/255;if(br>.004){var k3=br>1?1:br;k3=k3*k3*(3-2*k3)*.86;a+=(H[0]*.7-a)*k3;g+=(H[1]*.7-g)*k3;b+=(H[2]*.7-b)*k3}
   D[i]=a;D[i+1]=g;D[i+2]=b;D[i+3]=255}}
 return{deform:deform,ag:ag,kart:kart,ten:ten,sst:sst,cl:cl}}
 var C=_cekirdek();
@@ -95,12 +107,12 @@ FS.varsayilan=function(){var p={},t,i;for(var k in VAR)p[k]=VAR[k];for(t in AYAR
 FS.farki=function(p){var d=FS.varsayilan(),o={};for(var k in d)if(k!=='klip'&&p[k]!==d[k]&&p[k]!==undefined)o[k]=p[k];if(p.yuzUrl)o.yuzUrl=p.yuzUrl;return o};
 FS.ac=function(g){var p=FS.varsayilan();if(g)for(var k in g)p[k]=g[k];return p};
 /* ---- veri ---- */
-var VS='ce773a24',_v=null;FS.GLBV='eaf7aea8';FS.LODV='4de817ae';
+var VS='ce773a24',_v=null;FS.GLBV='37fb90ae';FS.LODV='4de817ae';
 function b64(s){var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u}
 function resim(src){return new Promise(function(c,r){var i=new Image;i.crossOrigin='anonymous';i.onload=function(){c(i)};i.onerror=function(){r(new Error('Görsel açılamadı'))};i.src=src})}
 function piksel(i,W,H){var c=document.createElement('canvas');c.width=W;c.height=H||W;var g=c.getContext('2d',{willReadFrequently:true});g.drawImage(i,0,0,W,H||W);return g.getImageData(0,0,W,H||W).data}
 FS.veri=function(){if(_v)return _v;_v=fetch(FS.TAB+'saha_ozel_veri.json?v='+VS).then(function(r){if(!r.ok)throw new Error('saha_ozel_veri.json indirilemedi');return r.json()}).then(function(d){return Promise.all(['ten','m1','m2','har','sacg','tel'].map(function(k){return resim(d.res[k])})).then(function(I){d.img={ten:I[0],m1:I[1],m2:I[2],har:I[3],sacg:I[4],tel:I[5]};return d})});return _v};
-FS.goz=function(W,hex){var T=W,D=new Uint8Array(T*T*4),E=[parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)],iR=.205,pu=.085;for(var y=0;y<T;y++)for(var x=0;x<T;x++){var dx=x-T/2+.5,dy=y-T/2+.5,rr=Math.hypot(dx,dy)/(T/2),an=Math.atan2(dy,dx),v=[230,225,220],ra=(Math.sin(an*48)*.5+.5)*.35+(Math.sin(an*19+1)*.5+.5)*.3,sh=(.7+ra*1.1)*(1.25-.55*rr/iR),m=C.cl(0,1,(iR-rr)/.012),ri=Math.exp(-(((rr-iR)/.022)*((rr-iR)/.022))),k=(y*T+x)*4,hl=Math.exp(-(((x-T*.535)/(T/85))*((x-T*.535)/(T/85))+((y-T*.46)/(T/85))*((y-T*.46)/(T/85))));for(var i=0;i<3;i++){var c=v[i]*(1-m)+E[i]*sh*m;c*=1-ri*.75;var m2=C.cl(0,1,(pu-rr)/.012);c=c*(1-m2)+4*m2;D[k+i]=Math.min(255,c+hl*190)}D[k+3]=255}return D};
+FS.goz=function(W,hex){var T=W,D=new Uint8Array(T*T*4),E=[parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)],iR=.238,pu=.092;for(var y=0;y<T;y++)for(var x=0;x<T;x++){var dx=x-T/2+.5,dy=y-T/2+.5,rr=Math.hypot(dx,dy)/(T/2),an=Math.atan2(dy,dx),v=[222,215,209],ra=(Math.sin(an*48)*.5+.5)*.35+(Math.sin(an*19+1)*.5+.5)*.3,sh=(.7+ra*1.1)*(1.25-.55*rr/iR),m=C.cl(0,1,(iR-rr)/.012),ri=Math.exp(-(((rr-iR)/.022)*((rr-iR)/.022))),k=(y*T+x)*4,hl=Math.exp(-(((x-T*.535)/(T/85))*((x-T*.535)/(T/85))+((y-T*.46)/(T/85))*((y-T*.46)/(T/85))));for(var i=0;i<3;i++){var c=v[i]*(1-m)+E[i]*sh*m;c*=1-ri*.75;var m2=C.cl(0,1,(pu-rr)/.012);c=c*(1-m2)+4*m2;c*=1-.42*C.cl(0,1,(.42-y/T)/.3);D[k+i]=Math.min(255,c+hl*150)}D[k+3]=255}return D};
 /* ---- oyun: hesap çalışanı; ana iş parçacığı donmaz ---- */
 var _is=null,_sira={},_no=0,_ini=null;
 FS.isci=function(M,V){if(_ini)return _ini;_ini=Promise.resolve().then(function(){var kod='var C=('+_cekirdek.toString()+')();var G=null;onmessage=function(e){var m=e.data;if(m.t==="kur"){G=m;return}var p=m.p,out={pos:{},nor:{},id:m.id},tr=[];for(var k in G.ag){var a=G.ag[k],po=new Float32Array(a.p.length),no=new Float32Array(a.n.length);C.ag(p,a.p,a.n,po,no,true);out.pos[k]=po;out.nor[k]=no;tr.push(po.buffer,no.buffer)}var yo={},o=[0,0,0];for(var n in G.j){var q=G.j[n];C.deform(p,q[0],q[1],q[2],o);yo[n]=[o[0],o[1],o[2]]}out.j=yo;var H=yo.Head,W=G.W,R=new Uint8ClampedArray(W*W*4);C.ten(p,m.sak,W,G.base,G.m1,G.m2,G.har,m.fo,R);out.ten=R;tr.push(R.buffer);if(G.sac[p["sa\\u00e7Stil"]]){var s=G.sac[p["sa\\u00e7Stil"]],sp=new Float32Array(s.p.length);C.kart(p,s.p,s.st,p.hairL,p.hairV,G.Ri,H[0],H[1],H[2],sp);out.sac=sp;tr.push(sp.buffer)}if(p.beardL>.05){var b=G.sac._sakal,bp=new Float32Array(b.p.length);C.kart(p,b.p,b.st,p.beardL,1,G.Ri,H[0],H[1],H[2],bp);out.sakal=bp;tr.push(bp.buffer)}C.deform(p,0,1.785,.02,o);out.ust=o[1];postMessage(out,tr)};';
@@ -111,5 +123,8 @@ FS.isci=function(M,V){if(_ini)return _ini;_ini=Promise.resolve().then(function()
  _is.postMessage({t:'kur',ag:ag,j:j,W:W,sac:sac,Ri:Rb,base:piksel(V.img.ten,W),m1:piksel(V.img.m1,W),m2:piksel(V.img.m2,W),har:piksel(V.img.har,W)});return true});return _ini};
 FS.hesapla=function(M,V,g){return FS.isci(M,V).then(function(){var p=FS.ac(g),sak=SAKALLAR[p.sakal]||SAKALLAR.yok,once=p.yuzUrl?resim(p.yuzUrl).then(function(i){return{d:piksel(i,192,240),w:192,h:240}}).catch(function(){return null}):Promise.resolve(null);return once.then(function(fo){return new Promise(function(c){var id=++_no;_sira[id]=c;_is.postMessage({t:'h',id:id,p:p,sak:sak,fo:fo})})}).then(function(s){s.p=p;return s})})};
 FS.sacMesh=function(o,mt,hd,pos){var n8=new Int8Array(b64(o.n).buffer),u=new Uint16Array(b64(o.u).buffer),f=new Uint16Array(b64(o.f).buffer),g=new THREE.BufferGeometry,nn=new Float32Array(n8.length),uu=new Float32Array(u.length),i;for(i=0;i<nn.length;i++)nn[i]=n8[i]/127;for(i=0;i<uu.length;i++)uu[i]=u[i]/65535;g.setAttribute('position',new THREE.BufferAttribute(pos,3));g.setAttribute('normal',new THREE.BufferAttribute(nn,3));g.setAttribute('uv',new THREE.BufferAttribute(uu,2));g.setIndex(new THREE.BufferAttribute(f,1));var m=new THREE.Mesh(g,mt);m.frustumCulled=false;hd.add(m);return m};
+/* GEVŞEK EL (2026-11-10-B): klip parmakları oynatmıyorsa parmaklar dümdüz ve açık kalıyordu (kürek gibi el). Parmak kemikleri dinlenme
+   duruşunda hafifçe kıvrılır; parmakları oynatan klipler (sevinçler, kaleci tutuşu) kendi değerlerini kullanmaya devam eder. */
+FS.elGevset=function(kok){var e=new THREE.Vector3(1,0,0),q=new THREE.Quaternion;kok.traverse(function(o){if(o.isBone&&!o.userData.elG){var m=/Hand(Index|Middle|Ring|Pinky)([123])$/.exec(o.name);if(m){o.userData.elG=1;o.quaternion.multiply(q.setFromAxisAngle(e,(m[2]==='1'?.36:.5)*(m[1]==='Pinky'?1.2:m[1]==='Index'?.8:1)))}}})};
 window.FutbolcuSistem=FS;
 })();
