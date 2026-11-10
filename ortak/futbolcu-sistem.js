@@ -73,7 +73,7 @@ function ten(p,sak,W,base,m1,m2,har,fo,D){function h(c){return[parseInt(c.slice(
    u1=(AX-.05)/.022;u2=(Y+.024)/.02;var ya=Math.exp(-(u1*u1+u2*u2))*wf;
    var gl=1-wf*(so*.2+ny*.1+bn*.17+da*.12);a=a*gl+ya*5;g=g*gl-ya*2;b=b*gl-ya*3}
   var be=(m1[i]*sak[1]+m1[i+1]*sak[2]+m1[i+2]*sak[3])*d/255;if(be>.004){var k1=Math.pow(be>1?1:be,.6)*.9;a+=(H[0]*.8-a)*k1;g+=(H[1]*.8-g)*k1;b+=(H[2]*.8-b)*k1}
-  var f=m2[i+1]*sd/255;if(f>.004){var k2=f>1?1:f;a+=(H[0]*.85-a)*k2;g+=(H[1]*.85-g)*k2;b+=(H[2]*.85-b)*k2}
+  var f=m2[i+1]*sd/255;if(f>.004){var k2=Math.pow(f>1?1:f,.7)*.93;a+=(H[0]*.85-a)*k2;g+=(H[1]*.85-g)*k2;b+=(H[2]*.85-b)*k2}
   var br=m2[i]*bd/255;if(br>.004){var k3=br>1?1:br;k3=k3*k3*(3-2*k3)*.86;a+=(H[0]*.7-a)*k3;g+=(H[1]*.7-g)*k3;b+=(H[2]*.7-b)*k3}
   D[i]=a;D[i+1]=g;D[i+2]=b;D[i+3]=255}}
 return{deform:deform,ag:ag,kart:kart,ten:ten,sst:sst,cl:cl}}
@@ -94,15 +94,41 @@ S('neckT','Boyun kalınlığı','Boyun'),S('neckL','Boyun boyu','Boyun'),
 S('armL','Kol boyu','Kollar'),S('armU','Üst kol','Kollar'),S('armF','Ön kol','Kollar'),S('handS','El boyutu','Kollar'),
 S('legL','Bacak boyu','Bacaklar'),S('thigh','Uyluk','Bacaklar'),S('calf','Baldır','Bacaklar'),S('footS','Ayak boyutu','Bacaklar')]};
 const VAR={saçStil:'kisa',sakal:'kisa',ten:'#c99b78',sac:'#2a1d16',goz:'#4a2c17',forma:'#b30d15',sort:'#eaeaea',tozluk:'#b30d15',krampon:'#d3360c',klip:'Atak_Bekleme'};
-const SACLAR=[['kazima','Kazıma'],['kisa','Kısa'],['daginik','Dağınık'],['yukari','Yukarı taralı'],['yana','Yana taralı'],['kivircik','Kıvırcık'],['uzun','Uzun']];
-const SAKALLAR={yok:['Yok',0,0,0],kirli:['Kirli sakal',.5,.5,.5],kisa:['Kısa sakal',1,1,1],hat:['Çene hattı',.8,.75,0],keci:['Keçi',0,1,1],biyik:['Bıyık',0,0,1]};
+const SACLAR=[['kazima','Kazıma'],['uc','Üç numara'],['kisa','Kısa'],['daginik','Dağınık'],['ustuzun','Üstü uzun'],['percem','Perçemli'],['yukari','Yukarı taralı'],['sivri','Dik'],['mohawk','Mohawk'],['yana','Yana taralı'],['arkaya','Arkaya taralı'],['kivircik','Kıvırcık'],['afro','Afro'],['uzun','Uzun']];
+/* TÜREV SAÇ STİLLERİ (2026-11-10-C): yeni stiller mevcut saç kartlarından üretilir (ek dosya indirilmez). t: taban stil; sec(kökX,kökY,kökZ):
+   hangi teller kalır; bic(o,kökX,kökY,kökZ): telin köke göre konumunu (o[0..2]) yerinde değiştirir. */
+function _yon(o,ax,ay,az,k,L){var l=Math.hypot(o[0],o[1],o[2]);if(l<1e-6)return;var n=Math.hypot(ax,ay,az),x=o[0]/l*(1-k)+ax/n*k,y=o[1]/l*(1-k)+ay/n*k,z=o[2]/l*(1-k)+az/n*k,m=Math.hypot(x,y,z)||1;l*=L;o[0]=x/m*l;o[1]=y/m*l;o[2]=z/m*l}
+const TUREV={
+ uc:{t:['kisa'],bic:function(o){o[0]*=.26;o[1]*=.26;o[2]*=.26}},
+ ustuzun:{t:['daginik','yukari','kisa'],sec:function(x,y){return y>1.739},bic:function(o){o[0]*=1.1;o[1]*=1.1;o[2]*=1.1}},
+ percem:{t:['daginik'],bic:function(o,x,y,z){if(z>.015&&y>1.715)_yon(o,x*2,-.6,.8,.72,1.35)}},
+ sivri:{t:['yukari'],bic:function(o,x,y){if(y>1.735)_yon(o,x*.6,1,.12,.8,.95)}},
+ mohawk:{t:['yukari','daginik','kisa'],sec:function(x,y){return(x<0?-x:x)<.03&&y>1.70},bic:function(o,x){_yon(o,x*.3,1,-.15,.5,1.25)}},
+ arkaya:{t:['yana'],bic:function(o,x,y,z){if(y>1.725&&z>-.035)_yon(o,x*.5,.25,-1,.62,1)}},
+ afro:{t:['kivircik'],bic:function(o,x,y,z){_yon(o,x,(y-1.70)*1.1,z+.02,.18,1.5)}}};
+function _kod(u){var b='',i=0,n=u.length;for(;i<n;i+=8192)b+=String.fromCharCode.apply(null,u.subarray(i,Math.min(n,i+8192)));return btoa(b)}
+function _cozB(t){var b=atob(t),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u}
+function turet(sac){for(var ad in TUREV){var T=TUREV[ad];if(sac[ad]||!T.t.every(function(k){return sac[k]&&sac[k].st[0][1]===sac[T.t[0]].st[0][1]}))continue;
+ var w=sac[T.t[0]].st[0][1],tut=[],c,j,o=[0,0,0],kay=T.t.map(function(k){var K=sac[k];return{v:new Float32Array(_cozB(K.v).buffer),n:new Int8Array(_cozB(K.n).buffer),u:new Uint16Array(_cozB(K.u).buffer)}});
+ kay.forEach(function(S,si){var v=S.v,kn=v.length/3/w;for(c=0;c<kn;c++){var i=c*w*3,rx=(v[i]+v[i+3])/2,ry=(v[i+1]+v[i+4])/2,rz=(v[i+2]+v[i+5])/2;if(!T.sec||T.sec(rx,ry,rz))tut.push([c,rx,ry,rz,si])}});
+ if(tut.length*w>65000)tut.length=Math.floor(65000/w);
+ var N=tut.length,V2=new Float32Array(N*w*3),N2=new Int8Array(N*w*3),U2=new Uint16Array(N*w*2),fk=(w-2)*3,F2=new Uint16Array(N*fk);
+ for(c=0;c<N;c++){var q=tut[c],S=kay[q[4]],v=S.v,n=S.n,u=S.u,s0=q[0]*w,d0=c*w;for(j=0;j<w;j++){var a=(s0+j)*3,b=(d0+j)*3;o[0]=v[a]-q[1];o[1]=v[a+1]-q[2];o[2]=v[a+2]-q[3];if(T.bic&&j>1)T.bic(o,q[1],q[2],q[3]);V2[b]=q[1]+o[0];V2[b+1]=q[2]+o[1];V2[b+2]=q[3]+o[2];N2[b]=n[a];N2[b+1]=n[a+1];N2[b+2]=n[a+2];U2[(d0+j)*2]=u[(s0+j)*2];U2[(d0+j)*2+1]=u[(s0+j)*2+1]}
+  for(j=0;j<w-2;j+=2){var e=c*fk+j*3,g=d0+j;F2[e]=g;F2[e+1]=g+1;F2[e+2]=g+3;F2[e+3]=g;F2[e+4]=g+3;F2[e+5]=g+2}}
+ sac[ad]={v:_kod(new Uint8Array(V2.buffer)),n:_kod(new Uint8Array(N2.buffer)),u:_kod(new Uint8Array(U2.buffer)),f:_kod(new Uint8Array(F2.buffer)),st:[[N*w,w]]}}return sac}
+const SAKALLAR={yok:['Yok',0,0,0],kirli:['Kirli sakal',.5,.5,.5],kisa:['Kısa sakal',1,1,1],hat:['Çene hattı',.8,.75,0],keci:['Keçi',0,1,1],biyik:['Bıyık',0,0,1],top:['Top sakal',0,1,0],favori:['Favori',1,0,0],favbiyik:['Favori + bıyık',1,0,1],kirlibiyik:['Kirli sakal + bıyık',.45,.45,1],hafif:['Hafif gölge',.28,.28,.28]};
 const TENLER=['#f0cfb4','#e2b692','#c99b78','#a97650','#7f5337','#553524'];
 const SACR=['#0f0c0b','#2a1d16','#4a3020','#7a5230','#b08a50','#d9bf8a','#8c3a1c','#8f8f8f'];
 const GOZR=['#4a2c17','#6b4422','#3f6b3a','#3a6f93','#6f7f88','#16100c'];
 const KLIP={Atak_Bekleme:'Bekleme',Kosu:'Koşu',Kosu_Geri:'Geri koşu',Top_Surme:'Top sürme',Pas:'Pas',Sut_1:'Şut 1',Sut_2:'Şut 2',Kosarak_Sut:'Koşarak şut',Kafa_1:'Kafa',Top_Karsilama:'Top karşılama',Kayarak_Mudahale_1:'Kayarak müdahale',Tac_Atisi:'Taç',Faul_Dusme:'Faul düşme',Ayaga_Kalkma:'Ayağa kalkma',Sevinc_Yumruk:'Yumruklu sevinç',Sevinc_Kollar_Havada:'Kollar havada',Sevinc_Genis_Durus:'Geniş duruş',Hayal_Kirikligi:'Başa el',Kaleci_Bekleme:'Kaleci bekleme',Kaleci_Tutma_1:'Kaleci tutuş',Kaleci_Plonjon_1:'Plonjon 1',Kaleci_Plonjon_2:'Plonjon 2',Kaleci_Elle_Atis:'Kaleci atış',Kaleci_Top_Tutma:'Topu tutma'};
 const TIP={İnce:{chest:-.5,waist:-.6,hips:-.3,armU:-.5,armF:-.4,thigh:-.5,calf:-.4,shoulder:-.3,neckT:-.4},Atletik:{},Güçlü:{chest:.7,waist:.2,shoulder:.6,armU:.7,armF:.5,thigh:.7,calf:.6,neckT:.6,hips:.2},Kısa_Tıknaz:{boy:170,legL:-.4,chest:.4,waist:.5,thigh:.5,neckT:.4,neckL:-.5}};
 
-var FS={C:C,AYAR:AYAR,VAR:VAR,SACLAR:SACLAR,SAKALLAR:SAKALLAR,TENLER:TENLER,SACR:SACR,GOZR:GOZR,KLIP:KLIP,TIP:TIP,TAB:'ortak/'};
+/* YÜZ MODELLERİ (2026-11-10-C): hazır yüz yapıları; seçilince yüz ayarları sıfırlanıp bu değerler yazılır, sonra kaydırıcılarla inceltilir. */
+const YUZLER={Standart:{},Köşeli:{jawW:.7,jawH:.6,chinW:.5,brow:.4,cheek:.2,headW:.2},Oval:{jawW:-.6,cheekF:-.3,chinL:.3,headH:.3,headW:-.2},Yuvarlak:{cheekF:.7,jawW:.3,chinL:-.4,headW:.4,noseL:-.2,chinW:.3},
+Kemikli:{cheek:.7,cheekF:-.7,brow:.5,noseB:.5,jawH:.3,eyeZ:-.4},Genç:{eyeS:.4,noseL:-.4,noseW:-.2,jawW:-.3,lipT:.4,brow:-.5,cheekF:.3},Sert:{brow:.8,eyeS:-.3,eyeA:-.3,jawW:.5,noseW:.4,lipT:-.4,chinF:.3,eyeZ:-.3},
+Uzun:{headH:.6,chinL:.6,noseL:.4,headW:-.4,foreH:.4},Dolgun_dudak:{noseW:.8,noseZ:.3,lipT:.6,mouthW:.3,jawW:.2,brow:.2},İnce:{headW:-.5,jawW:-.5,cheekF:-.5,noseW:-.4,lipT:-.3,chinW:-.4},
+Güçlü_çene:{jawW:.5,chinL:.5,chinF:.6,chinW:.4,jawH:.4,mouthW:.2},Çekik:{eyeA:.7,eyeS:-.2,eyeD:.2,cheek:.5,noseB:-.5,noseW:.3,brow:-.3}};
+var FS={C:C,AYAR:AYAR,VAR:VAR,YUZLER:YUZLER,KAPSIZ:{kazima:1,uc:1,mohawk:1,ustuzun:1},SACLAR:SACLAR,SAKALLAR:SAKALLAR,TENLER:TENLER,SACR:SACR,GOZR:GOZR,KLIP:KLIP,TIP:TIP,TAB:'ortak/'};
 FS.varsayilan=function(){var p={},t,i;for(var k in VAR)p[k]=VAR[k];for(t in AYAR)for(i=0;i<AYAR[t].length;i++)p[AYAR[t][i].k]=AYAR[t][i].d;delete p.klip;p.yuzG=1;p.yuzX=0;p.yuzY=0;p.yuzS=0;p.yuzR=0;return p};
 FS.farki=function(p){var d=FS.varsayilan(),o={};for(var k in d)if(k!=='klip'&&p[k]!==d[k]&&p[k]!==undefined)o[k]=p[k];if(p.yuzUrl)o.yuzUrl=p.yuzUrl;return o};
 FS.ac=function(g){var p=FS.varsayilan();if(g)for(var k in g)p[k]=g[k];return p};
@@ -111,7 +137,7 @@ var VS='ce773a24',_v=null;FS.GLBV='37fb90ae';FS.LODV='4de817ae';
 function b64(s){var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u}
 function resim(src){return new Promise(function(c,r){var i=new Image;i.crossOrigin='anonymous';i.onload=function(){c(i)};i.onerror=function(){r(new Error('Görsel açılamadı'))};i.src=src})}
 function piksel(i,W,H){var c=document.createElement('canvas');c.width=W;c.height=H||W;var g=c.getContext('2d',{willReadFrequently:true});g.drawImage(i,0,0,W,H||W);return g.getImageData(0,0,W,H||W).data}
-FS.veri=function(){if(_v)return _v;_v=fetch(FS.TAB+'saha_ozel_veri.json?v='+VS).then(function(r){if(!r.ok)throw new Error('saha_ozel_veri.json indirilemedi');return r.json()}).then(function(d){return Promise.all(['ten','m1','m2','har','sacg','tel'].map(function(k){return resim(d.res[k])})).then(function(I){d.img={ten:I[0],m1:I[1],m2:I[2],har:I[3],sacg:I[4],tel:I[5]};return d})});return _v};
+FS.veri=function(){if(_v)return _v;_v=fetch(FS.TAB+'saha_ozel_veri.json?v='+VS).then(function(r){if(!r.ok)throw new Error('saha_ozel_veri.json indirilemedi');return r.json()}).then(function(d){try{turet(d.sac)}catch(e){}return Promise.all(['ten','m1','m2','har','sacg','tel'].map(function(k){return resim(d.res[k])})).then(function(I){d.img={ten:I[0],m1:I[1],m2:I[2],har:I[3],sacg:I[4],tel:I[5]};return d})});return _v};
 FS.goz=function(W,hex){var T=W,D=new Uint8Array(T*T*4),E=[parseInt(hex.slice(1,3),16),parseInt(hex.slice(3,5),16),parseInt(hex.slice(5,7),16)],iR=.238,pu=.092;for(var y=0;y<T;y++)for(var x=0;x<T;x++){var dx=x-T/2+.5,dy=y-T/2+.5,rr=Math.hypot(dx,dy)/(T/2),an=Math.atan2(dy,dx),v=[222,215,209],ra=(Math.sin(an*48)*.5+.5)*.35+(Math.sin(an*19+1)*.5+.5)*.3,sh=(.7+ra*1.1)*(1.25-.55*rr/iR),m=C.cl(0,1,(iR-rr)/.012),ri=Math.exp(-(((rr-iR)/.022)*((rr-iR)/.022))),k=(y*T+x)*4,hl=Math.exp(-(((x-T*.535)/(T/85))*((x-T*.535)/(T/85))+((y-T*.46)/(T/85))*((y-T*.46)/(T/85))));for(var i=0;i<3;i++){var c=v[i]*(1-m)+E[i]*sh*m;c*=1-ri*.75;var m2=C.cl(0,1,(pu-rr)/.012);c=c*(1-m2)+4*m2;c*=1-.42*C.cl(0,1,(.42-y/T)/.3);D[k+i]=Math.min(255,c+hl*150)}D[k+3]=255}return D};
 /* ---- oyun: hesap çalışanı; ana iş parçacığı donmaz ---- */
 var _is=null,_sira={},_no=0,_ini=null;
