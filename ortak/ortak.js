@@ -524,8 +524,10 @@ var SahaGuncelleme = (function(){
      sürümü kendisininkinden yeniyse aynı güncelleme ekranını gösterir. Yöneticinin elle yazdığı en düşük sürüm de geçerli.
      Önbellek eski dosyayı verirse sonsuz döngü olmasın diye aynı hedef için güncelleme 3 dakikada bir denenir. */
   function hedefHesapla(){
-    var a = _minYonetici, b = _sunucu ? { build:_sunucu, mesaj:'' } : null;
-    _min = !a ? b : (!b ? a : (karsilastir(a.build, b.build) >= 0 ? a : b));
+    /* (2026-11-13-J) Admin zorunluluk anahtarı kapalıyken (globalConfig/minSurum yok) hiçbir güncelleme ekranı gösterilmez; sunucudaki
+       yeni sürüm tek başına ekran açmaz, kullanıcı mevcut sürümle devam eder. Anahtar açıkken en yeni hedef (admin ya da sunucu) gösterilir. */
+    var a = _minYonetici, b = _sunucu ? { build:_sunucu, mesaj:a ? a.mesaj : '' } : null;
+    _min = !a ? null : (!b ? a : (karsilastir(a.build, b.build) >= 0 ? a : b));
   }
   /* (2026-11-07) Uygulamada (APK) sayfa uygulamanın içinde gelir (bkz. android Sayfa.java): yeni sürüm sayfayı yenileyerek değil, uygulama
      güncellenerek alınır. Sunucudaki sürüme uygulama kendisi bakar; "Güncelle" uygulamanın güncelleme ekranını açar. */
@@ -634,6 +636,7 @@ var SahaGuncelleme = (function(){
         refFn('globalConfig/minSurum').on('value', function(sn){
           var v = sn.val(); var b = v ? (typeof v === 'string' ? v : v.build) : null;
           _minYonetici = b ? { build:String(b), mesaj:(v && v.mesaj) || '' } : null; hedefHesapla(); goster();
+          try{ if(window.SahaApp && typeof SahaApp.guncellemeAyar === 'function') SahaApp.guncellemeAyar(!!b); }catch(e){}
         }, function(){ deneme++; if(deneme <= 40) setTimeout(kur, Math.min(15000, 1500 * deneme)); });
       }catch(e){ deneme++; if(deneme <= 40) setTimeout(kur, Math.min(15000, 1500 * deneme)); }
     };

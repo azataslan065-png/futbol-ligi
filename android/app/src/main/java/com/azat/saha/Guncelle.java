@@ -90,10 +90,25 @@ final class Guncelle {
         etkin = a;
         if (ekran == null && System.currentTimeMillis() - sp.getLong("son", 0) > ARALIK) denetle(a, false, true);
     }
+    /* ZORUNLULUK ANAHTARI (2026-11-13-J, kullanıcı: "admin güncelleme zorunluluğunu kapalı tutuyor fakat güncelleme ekranı çıkıyor; zorunlu
+       açıksa çıkacak, kapalıysa çıkmayacak, kullanıcı mevcut sürümü kullanacak"). KÖK SEBEP: uygulama sunucudaki surum.json'a bakıp yeni
+       derleme gördüğünde admin anahtarından bağımsız olarak kartı gösteriyordu. ŞİMDİ: sayfa admin anahtarını (globalConfig/minSurum var/yok)
+       SahaApp.guncellemeAyar ile bildirir, değer saklanır; kapalıyken (ya da henüz bilinmiyorken) kart hiç gösterilmez, açık kartı da kapatır.
+       Anahtar açılınca denetim hemen yapılır. */
+    static boolean zorunluAcik(Context c) { return c.getSharedPreferences("guncelle", Context.MODE_PRIVATE).getBoolean("zorunlu", false); }
+    static void ayar(final Activity a, boolean acik) {
+        SharedPreferences sp = a.getSharedPreferences("guncelle", Context.MODE_PRIVATE);
+        boolean once = sp.getBoolean("zorunlu", false), bilindi = sp.contains("zorunlu");
+        sp.edit().putBoolean("zorunlu", acik).apply();
+        etkin = a;
+        if (!acik) { kapat(); bekleKapat(); return; }
+        if (!once || !bilindi || ekran == null) denetle(a, false, true);
+    }
     static void denetle(final Activity a, final boolean elle) { denetle(a, elle, true); }
     private static void denetle(final Activity a, final boolean elle, boolean zorla) {
         final SharedPreferences sp = a.getSharedPreferences("guncelle", Context.MODE_PRIVATE);
         if (ekran != null) { H.post(Guncelle::bekleKapat); return; }
+        if (!elle && !zorunluAcik(a)) { H.post(Guncelle::bekleKapat); return; }   // admin zorunluluğu kapalı: kart yok
         if (denetiyor) return; denetiyor = true;
         new Thread(new Runnable() { public void run() {
             try {
@@ -109,7 +124,7 @@ final class Guncelle {
                 sp.edit().putLong("son", System.currentTimeMillis()).apply();
                 Teshis.olay("guncelle", (yeni ? "yeni " : "güncel ") + ad, yerelAd + " / " + yerelKod);
                 if (!yeni) { H.post(Guncelle::bekleKapat); if (elle) mesaj(a, "Uygulama güncel (" + yerelAd + "). Yeni sürüm hazırlanıyorsa birkaç dakika sonra yeniden dene."); return; }
-                H.post(new Runnable() { public void run() { Activity x = etkin(); if (x != null) goster(x, j, yerelAd); bekleKapat(); } });
+                H.post(new Runnable() { public void run() { Activity x = etkin(); if (x != null && (elle || zorunluAcik(x))) goster(x, j, yerelAd); bekleKapat(); } });
             } catch (Exception e) {
                 H.post(Guncelle::bekleKapat);
                 Teshis.yaz("guncelle", "okunamadı", String.valueOf(e.getMessage()));

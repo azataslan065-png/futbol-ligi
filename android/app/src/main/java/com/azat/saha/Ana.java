@@ -441,6 +441,7 @@ public class Ana extends Activity {
            "Tarayıcıdan çıkılamıyor" uyarısı gösteriyordu (kök sürümdeki sayfalar). window.close artık uygulamayı kapatır. */
         // (2026-11-07) Sayfadan elle güncelleme denetimi ve yüklü uygulama sürümü (bkz. Guncelle).
         @JavascriptInterface public void guncellemeDenetle() { h.post(new Runnable() { public void run() { Guncelle.denetle(Ana.this, true); } }); }
+        @JavascriptInterface public void guncellemeAyar(final boolean acik) { h.post(new Runnable() { public void run() { Guncelle.ayar(Ana.this, acik); } }); }
         @JavascriptInterface public String surum() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
         @JavascriptInterface public void teshis(String tur, String ayrinti) { String t = String.valueOf(tur); if (t.contains("hata")) Teshis.yaz(t, String.valueOf(ayrinti), BuildConfig.ADRES); else Teshis.olay(t, String.valueOf(ayrinti), BuildConfig.ADRES); }
         @JavascriptInterface public int kabuk() { return 3; }   // kabuk kuşağı: 2 = zorunlu güncelleme, 3 = sayfa uygulamaya gömülü (güncelleme yalnızca uygulamadan)
