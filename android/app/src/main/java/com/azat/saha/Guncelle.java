@@ -108,10 +108,21 @@ final class Guncelle {
     private static void denetle(final Activity a, final boolean elle, boolean zorla) {
         final SharedPreferences sp = a.getSharedPreferences("guncelle", Context.MODE_PRIVATE);
         if (ekran != null) { H.post(Guncelle::bekleKapat); return; }
-        if (!elle && !zorunluAcik(a)) { H.post(Guncelle::bekleKapat); return; }   // admin zorunluluğu kapalı: kart yok
         if (denetiyor) return; denetiyor = true;
         new Thread(new Runnable() { public void run() {
             try {
+                /* (2026-11-14-F, kullanıcı: "açtım güncelleme düşmedi"). Zorunluluk bilgisi yalnızca sayfadan geliyordu; sayfa bildirmezse (eski önbellekteki
+                   ortak.js, giriş öncesi okuma reddi vb.) uygulama anahtarın açıldığını hiç öğrenmiyordu. Artık uygulama anahtarı kendisi okur
+                   (globalConfig/minSurum); okunamazsa sayfanın son bildirdiği değer kullanılır. */
+                if (!elle) {
+                    try {
+                        String kok = BuildConfig.ADRES.contains("/test/") ? "test/" : "";
+                        String v = Teshis.istek("GET", "https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/" + kok + "globalConfig/minSurum.json?auth=" + Teshis.jeton(), null);
+                        boolean acik = v != null && !v.trim().equals("null") && v.trim().length() > 2;
+                        sp.edit().putBoolean("zorunlu", acik).apply();
+                    } catch (Exception e) { Teshis.olay("guncelle", "anahtar okunamadı", String.valueOf(e.getMessage())); }
+                    if (!zorunluAcik(a)) { H.post(Guncelle::bekleKapat); return; }   // admin zorunluluğu kapalı: kart yok (sayfa sessizce güncellenir)
+                }
                 JSONObject kok = new JSONObject(oku(KAYNAK));
                 final JSONObject j = kok.optJSONObject(BuildConfig.FLAVOR);
                 if (j == null) { if (elle) mesaj(a, "Güncelleme bilgisi bulunamadı"); return; }

@@ -83,7 +83,7 @@ final class Teshis {
             synchronized (Teshis.class) { gidiyor = false; }
         }).start();
     }
-    private static String jeton() throws Exception {
+    static String jeton() throws Exception {
         if (jeton != null && System.currentTimeMillis() < jetonSon) return jeton;
         String yenile = sp.getString("yenile", null);
         JSONObject r = null;
@@ -99,11 +99,11 @@ final class Teshis {
         jetonSon = System.currentTimeMillis() + 50 * 60 * 1000;
         return jeton;
     }
-    private static String istek(String yontem, String adres, String govde) throws Exception {
+    static String istek(String yontem, String adres, String govde) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(adres).openConnection();
         c.setRequestMethod(yontem); c.setConnectTimeout(10000); c.setReadTimeout(10000);
-        c.setRequestProperty("Content-Type", "application/json"); c.setRequestProperty("Referer", "https://azataslan065-png.github.io/futbol-ligi/test/"); c.setDoOutput(true);
-        try (OutputStream o = c.getOutputStream()) { o.write(govde.getBytes("UTF-8")); }
+        c.setRequestProperty("Content-Type", "application/json"); c.setRequestProperty("Referer", "https://azataslan065-png.github.io/futbol-ligi/test/");
+        if (govde != null) { c.setDoOutput(true); try (OutputStream o = c.getOutputStream()) { o.write(govde.getBytes("UTF-8")); } }   // (2026-11-14-F) gövdesiz GET de yapılabilir
         int k = c.getResponseCode();
         InputStream i = k < 400 ? c.getInputStream() : c.getErrorStream();
         byte[] b = new byte[65536]; int n; StringBuilder s = new StringBuilder();
