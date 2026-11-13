@@ -345,7 +345,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-14-B</title>
+<title>SAHA — 3D Futbol v2026-11-14-C</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -8212,6 +8212,7 @@ setInterval(function(){ try{ window._ledKayma = (window._ledKayma || 0) + 1; if(
 function ledGol(ad, takim){
   if(!(LED_GOL_SURE > 0)) return;                       // yönetici iki süreyi de 0 yaptı: gol animasyonu yok
   LEDBANT.golT = LED_GOL_SURE; LEDBANT.ad = String(ad || '').toLocaleUpperCase('tr-TR'); LEDBANT.takim = takim;
+  if(!window._klipKayit) window._ledSonGol = { ts:Date.now(), ad:String(ad || ''), takim:takim };   // (2026-11-14-C) gol videosu aynı bant animasyonunu oynatır
   try{ var _ga = _golAnimAyar(); LEDBANT.yazi = String(_ga.yazi || '').trim().toLocaleUpperCase('tr-TR') || 'MÜKEMMEL BİR GOL';
     _golVideoHazirla(); if(GOLVID.el){ try{ GOLVID.el.currentTime = 0; var _pr = GOLVID.el.play(); if(_pr && _pr.catch) _pr.catch(function(){}); }catch(e){self.__ds&&self.__ds(7343,e)} } }catch(e){ LEDBANT.yazi = 'MÜKEMMEL BİR GOL'; }
   try{ var tk = takim === 0 ? takA() : takB(); LEDBANT.takimAd = String((tk && tk.ad) || '').toLocaleUpperCase('tr-TR'); }catch(e){ LEDBANT.takimAd = ''; }
@@ -8257,30 +8258,42 @@ function ledGuncelle(dt){
         if(faz === 1){
           // 1. FAZ (0-5 sn): "MÜKEMMEL BİR GOL - TAKIM ADI" - içeri kayarak gelir, büyüyüp küçülür.
           var giris = Math.min(1, gecen / 0.6), metin = (LEDBANT.yazi || 'MÜKEMMEL BİR GOL') + (LEDBANT.takimAd ? ' - ' + LEDBANT.takimAd : '');
-          var boy = _ledYaziSigdir(c, metin, w - 60, Math.round(H * 0.5)) * (1 + 0.04 * Math.sin(z * 10));
+          var boy = _ledYaziSigdir(c, metin, w - 100, Math.round(H * 0.5)) * (1 + 0.04 * Math.sin(z * 10));
           c.font = '900 ' + Math.round(boy) + 'px system-ui,Arial,sans-serif';
           var mx = x0 + w/2 + (1 - giris) * w;
           c.lineWidth = 8; c.strokeStyle = 'rgba(0,0,0,.6)'; c.strokeText(metin, mx, H/2 + 3);
           c.fillStyle = (Math.floor(z * 4) % 2) ? '#ffffff' : '#ffe27a'; c.fillText(metin, mx, H/2 + 3);
         }else{
-          // 2. FAZ (5-10 sn): golcünün fotoğrafı (varsa) + adı.
-          var g2 = Math.min(1, (gecen - LED_GOL_F1) / 0.5), fx = x0 + 24, fs = H - 24, foto = LEDBANT.foto;
-          var adX = x0 + w/2, adW = w - 60;
-          if(foto && foto._hazir){
+          /* 2. FAZ: golcünün fotoğrafı (varsa) + adı. (2026-11-14-C, kullanıcı: "golü atan oyuncunun ismi ve fotoğrafı doğru gösterilmiyor,
+             iç içe geçiyor"). KÖK SEBEP: fotoğraf bölmenin en soluna, ad bölmenin kalanına ortalanıyordu; bölmeler yan yana tekrarlandığı için
+             bantta "…RONALDO (foto) CRİSTİANO RONALDO (foto) CRİSTİANO…" gibi ad ile bir sonraki fotoğraf birbirine yapışık görünüyordu.
+             ŞİMDİ fotoğraf + ad tek bir grup olarak bölmenin ORTASINA yerleşir, iki yanda boşluk ve bölmeler arasında ayraç vardır;
+             fotoğraf soldan, ad sağdan kayarak gelir. */
+          var g2 = Math.min(1, (gecen - LED_GOL_F1) / 0.6), e2 = 1 - Math.pow(1 - g2, 3), foto = LEDBANT.foto, fotoVar = !!(foto && foto._hazir && foto.width);
+          var fs = H - 28, bosluk = 30, ad = LEDBANT.ad || 'GOOOL!', alt2 = 'GOL' + (LEDBANT.takimAd ? ' · ' + LEDBANT.takimAd : '');
+          var adMax = w - 140 - (fotoVar ? fs + bosluk : 0), b2 = _ledYaziSigdir(c, ad, adMax, Math.round(H * 0.46)), adG = c.measureText(ad).width;
+          c.font = '800 ' + Math.round(H * 0.2) + 'px system-ui,Arial,sans-serif'; var altG = Math.min(adMax, c.measureText(alt2).width);
+          var metG = Math.max(adG, altG), grup = (fotoVar ? fs + bosluk : 0) + metG, gx = x0 + (w - grup) / 2;
+          c.globalAlpha = e2;
+          if(fotoVar){
             try{
-              c.save(); c.globalAlpha = g2; c.beginPath(); c.arc(fx + fs/2, H/2, fs/2, 0, Math.PI * 2); c.closePath(); c.fillStyle = '#0b0f14'; c.fill(); c.clip();
-              var rr = Math.max(fs / foto.width, fs / foto.height); c.drawImage(foto, fx + fs/2 - foto.width*rr/2, H/2 - foto.height*rr/2, foto.width*rr, foto.height*rr);
-              c.restore(); c.globalAlpha = 1;
-              c.lineWidth = 5; c.strokeStyle = sh; c.beginPath(); c.arc(fx + fs/2, H/2, fs/2, 0, Math.PI * 2); c.stroke();
+              var fcx = gx + fs/2 - (1 - e2) * 120, fcy = H/2;
+              c.save(); c.beginPath(); c.arc(fcx, fcy, fs/2, 0, Math.PI * 2); c.closePath(); c.fillStyle = '#0b0f14'; c.fill(); c.clip();
+              var rr = Math.max(fs / foto.width, fs / foto.height); c.drawImage(foto, fcx - foto.width*rr/2, fcy - foto.height*rr*0.42, foto.width*rr, foto.height*rr);
+              c.restore();
+              c.lineWidth = 5; c.strokeStyle = sh; c.beginPath(); c.arc(fcx, fcy, fs/2, 0, Math.PI * 2); c.stroke();
             }catch(e){self.__ds&&self.__ds(7402,e)}
-            adX = fx + fs + (w - fs - 48) / 2; adW = w - fs - 72;
           }
-          var ad = LEDBANT.ad || 'GOOOL!', b2 = _ledYaziSigdir(c, ad, adW, Math.round(H * 0.46));
-          c.globalAlpha = g2; c.lineWidth = 8; c.strokeStyle = 'rgba(0,0,0,.6)'; c.strokeText(ad, adX, H * 0.44);
-          c.fillStyle = '#ffffff'; c.fillText(ad, adX, H * 0.44);
+          var tx = gx + (fotoVar ? fs + bosluk : 0) + metG / 2 + (1 - e2) * 160;
+          c.font = '900 ' + b2 + 'px system-ui,Arial,sans-serif';
+          c.lineWidth = 8; c.strokeStyle = 'rgba(0,0,0,.6)'; c.strokeText(ad, tx, H * 0.42);
+          c.fillStyle = '#ffffff'; c.fillText(ad, tx, H * 0.42);
           c.font = '800 ' + Math.round(H * 0.2) + 'px system-ui,Arial,sans-serif'; c.fillStyle = '#ffe27a';
-          c.fillText(' GOL' + (LEDBANT.takimAd ? ' · ' + LEDBANT.takimAd : ''), adX, H * 0.8); c.globalAlpha = 1;
+          c.fillText(alt2, tx, H * 0.8, adMax); c.globalAlpha = 1;
         }
+        // Bölme ayracı: tekrar eden bölmeler birbirine karışmasın.
+        c.fillStyle = 'rgba(0,0,0,.55)'; c.fillRect(x0, 0, 10, H); c.fillRect(x0 + w - 10, 0, 10, H);
+        c.fillStyle = sh; c.fillRect(x0 + 3, 10, 4, H - 20); c.fillRect(x0 + w - 7, 10, 4, H - 20);
         for(var i = 0; i < 18; i++){ var px = x0 + (i * 97 + z * 260 * (1 + (i % 3))) % w, py = (i * 37 + Math.sin(z * 5 + i) * 26 + 40) % H;
           c.fillStyle = 'rgba(255,240,180,' + (0.35 + 0.6 * Math.abs(Math.sin(z * 12 + i))) + ')'; c.fillRect(px, py, 4, 4); }
         c.restore();
@@ -11566,7 +11579,18 @@ function golAnonsu(p){
   stadSesYukle().then(function(){ try{
     var I = _TSES.anons || {}, ad = p.ad || '', sl = _tsSlug(ad), ev = p.team === _evTaraf(), u = function(k){ return I[k] && I[k].url; };
     try{ sesDurumOlay('gol anonsu: ' + (ev ? 'ev' : 'konuk') + ' ' + _tsSlug(ad).slice(0, 14) + (u('_golBagir') ? '' : ' (Gooool kaydı yok)')); }catch(_s){}   // (2026-11-13-C) teşhis
-    if(!ev || !u('_golBagir')){ stadAnons('Golü atan oyuncu ' + ad, ['_gol', _oyuncuAnahtar(ad)], true); return; }
+    /* (2026-11-14-C, kullanıcı: "gol müziği gol kaydına geçmiyor"). KÖK SEBEP: "Gooooool!" kaydı yokken eski anons yapılıyor ve stadın gol müziği HİÇ
+       çalmıyordu (müzik yalnızca Gooool anonsunun sonunda çalıyordu); gol videosu da bu yüzden müziği bulamıyordu. Artık ev sahibi golünde
+       Gooool kaydı yoksa "Golü atan oyuncu <ad>" anonsu yapılır, ardından gol müziği çalar; aynı anons ve müzik videoya da girer. */
+    if(!ev || !u('_golBagir')){
+      var M0 = ev ? ((_TSES.klip || {}).golMuzik || []).map(function(x){ return x.url; }) : [];
+      if(!M0.length){ stadAnons('Golü atan oyuncu ' + ad, ['_gol', _oyuncuAnahtar(ad)], true); return; }
+      var G0 = { a1:u('_gol') ? [u('_gol'), u(_oyuncuAnahtar(ad))].filter(Boolean) : [], a2:[], soy:'', muzik:M0[Math.floor(Math.random() * M0.length)], m:'Golü atan oyuncu ' + ad };
+      if(G0.a1.length){ golAnonsuCal(G0); _odaOlay({ k:'gc', g:G0 }); try{ setTimeout(function(){ yayinAnonsGonder(G0.m, undefined, G0.a1); }, 0); }catch(e){}
+        try{ if(running && !bitti){ SPK.log.push({ ts:Date.now(), r:'anons', m:G0.m }); if(SPK.log.length > 60) SPK.log.shift(); } }catch(e){} }
+      else golMuzikCal(G0.muzik);
+      try{ var _GL0 = window._golCagriL || (window._golCagriL = []); _GL0.push({ ts:Date.now(), ad:ad, G:G0 }); if(_GL0.length > 20) _GL0.shift(); }catch(e){}
+      return; }
     var no = Number(p.no) || 0, a1 = [u('_golBagir'), no ? u('n_' + no) : null, u('oi_' + sl)].filter(Boolean), a2 = [u('oi_' + sl)].filter(Boolean);
     var M = ((_TSES.klip || {}).golMuzik || []).map(function(x){ return x.url; });
     var G = { a1:a1, a2:a2, soy:u('os_' + sl) || '', muzik:M.length ? M[Math.floor(Math.random() * M.length)] : '', m:'Gooooool! ' + (no ? no + ' numara ' : '') + _adParca(ad).ilk };
@@ -21674,7 +21698,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-14-B';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-14-C';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -29513,6 +29537,7 @@ function ozetKaydet(tur, metin, gecikme, takim){
       // ÖZET SKORBORDU (2026-10-06-D): pozisyon anındaki skor (ev-dep sırası) ve golü atan taraf saklanır.
       try{ var _evA = _benEvSahibiMi(); an.sk = _evA ? [skorA, skorB] : [skorB, skorA];
         if(takim === 0 || takim === 1) an.gt = _evA ? takim : 1 - takim; }catch(e){self.__ds&&self.__ds(25047,e)}
+      try{ var _lg = window._ledSonGol; if(tur === 'gol' && _lg && Date.now() - _lg.ts < 20000) an.led = { ad:_lg.ad, t:_lg.takim }; }catch(e){}   // bkz. GOL VİDEOSU GÖRSELLERİ
       OZET.anlar.push(an);
       // En fazla 24 an; dolunca ÖNEMİ EN DÜŞÜK olan en eski an çıkar (gol hiç çıkmaz).
       if(OZET.anlar.length > 24){
@@ -30653,6 +30678,10 @@ function _golKlibiBaslat(idx, btn, sesler){
     var kod = function(a){ try{ return kisaKod(String(a || '')); }catch(e){ return String(a || '').slice(0, 3).toUpperCase(); } };
     var bas = performance.now(), sure = Math.max(2000, Math.min(20000, _ozetAnSure(an) * 1000));
     window._klipKayit = { idx:idx, tut:0, faz:0, golOldu:false };
+    // (2026-11-14-C) Canlıdan kalan bant animasyonu ve "tribün tezahüratı çalıyor" işareti sıfırlanır: işaret canlı ses saatine göre tutulduğu için
+    // kayıt (ayrı ses saati) sırasında golün tezahüratı "zaten çalıyor" sanılıp hiç çalınmıyordu.
+    try{ LEDBANT.golT = 0; LEDBANT.parcaGol = false; stadLedCiz(); }catch(e){}
+    var _tsesOnce = null; try{ _tsesOnce = _TSES.calan; _TSES.calan = null; }catch(e){}
     // (2026-10-17-H) Golün karesi (top çizgiyi geçtiği an) ve golü atan: tekrarlar yalnızca golü gösterir, sevinç golcüye odaklanır.
     try{ var _K0 = window._klipKayit, _n0 = an.veri.length, _fps0 = an.fps || 30; _K0.gk = null;
       for(var _q = 1; _q < _n0; _q++){ var _fq = _ozetKare(an, _q); if(Math.abs(_fq[0]) > HLX + 0.05 && Math.abs(_fq[2]) < GOAL_HW + 0.3 && _fq[1] < GOAL_H + 0.3){ _K0.gk = _q; break; } }
@@ -30714,7 +30743,12 @@ function _golKlibiBaslat(idx, btn, sesler){
       if(KK.faz > 0 && !_tekrarSesCalindi && sesler.tekrar){ _tekrarSesCalindi = true; sozCal({ b:sesler.tekrar, r:'yorumcu' }); }
       sozAdim();
       // Top ağlara girdiği an tabela güncellenir.
-      if(!KK.golOldu){ var _bp = ball.position; if(KK.faz > 0 || (Math.abs(_bp.x) > HLX && Math.abs(_bp.z) < GOAL_HW + 1)) KK.golOldu = true; }
+      if(!KK.golOldu){ var _bp = ball.position; if(KK.faz > 0 || (Math.abs(_bp.x) > HLX && Math.abs(_bp.z) < GOAL_HW + 1)){ KK.golOldu = true;
+        /* GOL VİDEOSU GÖRSELLERİ (2026-11-14-C, kullanıcı: "kayıtta bazı görseller doğru kaydedilmiyor; örneğin stadyum reklamı, golü atan oyuncu için
+           mükemmel bir gol ismi ve fotoğrafı"). KÖK SEBEP: tribün LED bandının gol animasyonu ("MÜKEMMEL BİR GOL" → golcünün adı ve fotoğrafı) yalnızca
+           canlı golde başlıyordu; video maçtan sonra kaydedildiği için bant normal reklamları gösteriyordu. Artık canlıda bant animasyonu oynadıysa
+           videoda da top ağlara girdiği an aynı animasyon başlar. */
+        try{ if(an.led && !KK._led){ KK._led = true; ledGol(an.led.ad, an.led.t); } }catch(e){} } }
       sk = (KK.golOldu ? skSonra : skOnce) || [0, 0];
       try{ c.drawImage(src, 0, 0, W, H); }catch(_ce){ if(!KK._cizHata){ KK._cizHata = true; DiagSaha('golKlibiKopya', _ce, { modul:'saha_grafik', boyut:src.width + 'x' + src.height }); } }
       if(!dogrudan && ornekSay < 6){ ornekSay++; if(_ornek()) ornekSay = 99; else if(ornekSay >= 6){ dogrudanGec(); } }
@@ -30747,6 +30781,8 @@ function _golKlibiBaslat(idx, btn, sesler){
     };
     var bitince = function(){
       window._klipKayit = null; window._klipCiz = null; window._klipAnaSes = null;
+      try{ LEDBANT.golT = 0; LEDBANT.parcaGol = false; if(GOLVID.el) GOLVID.el.pause(); stadLedCiz(); }catch(e){}
+      try{ _TSES.calan = null; }catch(e){}
       try{ if(cv.parentNode) cv.parentNode.removeChild(cv); }catch(e){}
       try{ if(oyunSes) window._sahaYayinHat.disconnect(oyunSes); else if(sesHedef) window._sahaYayinHat.disconnect(sesHedef); }catch(e){}
       try{ if(window._klipOrnekGeri) window._klipOrnekGeri(); }catch(e){}
