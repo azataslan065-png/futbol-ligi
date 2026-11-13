@@ -1,6 +1,7 @@
 package com.azat.saha;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.net.Uri;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -18,7 +19,15 @@ final class Sayfa {
     private static Context baglam;
     private static String ev, yol;
     private static volatile boolean kapali, ilk = true;
-    static boolean acik() { return BuildConfig.GOMULU && !kapali; }
+    /* SİTEDEN AÇILIŞ (2026-11-14-E, kullanıcı: "zorunlu güncelleme kapalıyken en son sürüm kullanılacak, açıkken zorunlu olacak"). Admin anahtarı
+       kapalıysa (sayfanın bildirdiği son durum, bkz. Guncelle.ayar) sayfa uygulamanın içindeki kopya yerine siteden açılır: kullanıcı güncelleme
+       ekranı görmeden her zaman en son sürümü kullanır. Oturum içinde sitede daha yeni sürüm çıkarsa sayfa uygun anda siteden yenilenir
+       (bkz. ortak.js SESSİZ GÜNCELLEME). Site açılamazsa (internet yok) içerideki kopya kullanılır. */
+    private static volatile boolean site;
+    static boolean siteModu() { return site; }
+    static void siteAc() { site = true; }
+    static void siteKapat() { site = false; }
+    static boolean acik() { return BuildConfig.GOMULU && !kapali && !site; }
     static boolean verildi() { return !ilk; }
     /* (2026-11-07) Telefonda (Android 17, WebView 158) gömülü kopya verildiği halde sayfa motoru yüklemeye başlamadı (teşhis: ilerleme %10,
        "başladı" yok); emülatörde sorun yok. Gömülü kopya bu cihazda bir kez açılamazsa, bu sürüm için hatırlanır ve sonraki açılışlarda
@@ -28,6 +37,7 @@ final class Sayfa {
     static void baslat(Context c) {
         baglam = c.getApplicationContext();
         try { if (baglam.getSharedPreferences("sayfa", Context.MODE_PRIVATE).getLong("bozuk", -1) == BuildConfig.VERSION_CODE) kapali = true; } catch (Exception e) { }
+        try { SharedPreferences g = baglam.getSharedPreferences("guncelle", Context.MODE_PRIVATE); if (g.contains("zorunlu") && !g.getBoolean("zorunlu", true)) site = true; } catch (Exception e) { }
         // Sayfa önceden belleğe okunur: yanıt tek parça, uzunluğu belli olarak verilir (akış okuma gecikmesi/takılması olmaz).
         if (BuildConfig.GOMULU && !kapali) new Thread(() -> oku()).start();
         try { Uri a = Uri.parse(BuildConfig.ADRES); ev = a.getHost(); yol = a.getPath(); } catch (Exception e) { }

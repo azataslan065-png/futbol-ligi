@@ -516,7 +516,7 @@ var SahaGuncelleme = (function(){
     if(x.h.length !== y.h.length) return x.h.length < y.h.length ? -1 : 1;
     return x.h < y.h ? -1 : (x.h > y.h ? 1 : 0);
   }
-  var _minYonetici = null, _sunucu = null, _min = null, _ov = null, _gecildi = null, _bekZ = 0, _o = {};
+  var _minYonetici = null, _sunucu = null, _min = null, _ov = null, _gecildi = null, _bekZ = 0, _o = {}, _minBilindi = false, _sessizHedef = null, _sessizZ = 0;
   /* SUNUCUDAKİ SÜRÜM (2026-10-30-C, kullanıcı: "az önce yüklediğin dosya için hiçbir uygulama güncelleme istemedi"). KÖK SEBEP:
      ekran yalnızca yönetici admin panelinden "en düşük sürüm" yazınca açılıyordu; dosya yüklemek tek başına hiçbir şeyi
      tetiklemiyordu. ŞİMDİ: her uygulama, yanındaki surum.json dosyasına (GitHub her yüklemede dosyaların içindeki
@@ -525,22 +525,46 @@ var SahaGuncelleme = (function(){
      Önbellek eski dosyayı verirse sonsuz döngü olmasın diye aynı hedef için güncelleme 3 dakikada bir denenir. */
   function hedefHesapla(){
     /* (2026-11-13-J) Admin zorunluluk anahtarı kapalıyken (globalConfig/minSurum yok) hiçbir güncelleme ekranı gösterilmez; sunucudaki
-       yeni sürüm tek başına ekran açmaz, kullanıcı mevcut sürümle devam eder. Anahtar açıkken en yeni hedef (admin ya da sunucu) gösterilir. */
+       yeni sürüm ekran açmaz; (2026-11-14-E) kullanıcı en son sürüme SESSİZCE geçer (bkz. SESSİZ GÜNCELLEME). Anahtar açıkken en yeni hedef
+       (admin ya da sunucu) zorunlu güncelleme ekranıyla gösterilir. */
     var a = _minYonetici, b = _sunucu ? { build:_sunucu, mesaj:a ? a.mesaj : '' } : null;
     _min = !a ? null : (!b ? a : (karsilastir(a.build, b.build) >= 0 ? a : b));
   }
   /* (2026-11-07) Uygulamada (APK) sayfa uygulamanın içinde gelir (bkz. android Sayfa.java): yeni sürüm sayfayı yenileyerek değil, uygulama
      güncellenerek alınır. Sunucudaki sürüme uygulama kendisi bakar; "Güncelle" uygulamanın güncelleme ekranını açar. */
   function apkGomulu(){ try{ return !!(window.SahaApp && typeof SahaApp.kabuk === 'function' && SahaApp.kabuk() >= 3); }catch(e){ return false; } }
+  /* SESSİZ GÜNCELLEME (2026-11-14-E, kullanıcı: "zorunlu güncelleme kapalıyken en son sürüm kullanılacak, açıkken zorunlu olacak"). 11-13-J'de
+     anahtar kapalıyken kullanıcının ESKİ sürümde kalmasını sağlamıştım - yanlış anlamıştım. Doğrusu: kapalıyken güncelleme ekranı çıkmaz ama
+     kullanıcı kendiliğinden en son sürümü kullanır. Sunucuda yeni sürüm görülünce sayfa uygun anda (maç sürmüyorsa, yazı yazılmıyorsa)
+     sessizce yenilenir; uygulamada (APK) sayfa uygulamanın içindeki kopya yerine siteden açılır (bkz. android Sayfa.siteYukle). */
+  function sessizDene(){
+    try{
+      clearTimeout(_sessizZ); _sessizZ = 0;
+      if(!_minBilindi || _minYonetici || !_sessizHedef || karsilastir(window.APP_BUILD, _sessizHedef) >= 0) return;
+      var apk = apkGomulu(); if(apk && !(window.SahaApp && typeof SahaApp.siteYukle === 'function')) return;
+      var bekle = false; try{ bekle = !!(_o.ertele && _o.ertele()); }catch(e){}
+      try{ var ae = document.activeElement; if(ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName)) bekle = true; }catch(e){}
+      if(bekle){ _sessizZ = setTimeout(sessizDene, 15000); return; }
+      var an = 'sg-sessiz-' + _sessizHedef, son = 0; try{ son = Number(sessionStorage.getItem(an)) || 0; }catch(e){}
+      if(Date.now() - son < 180000) return;                                   // az önce denendi (önbellek eskiyi verdiyse döngü olmasın)
+      try{ sessionStorage.setItem(an, String(Date.now())); }catch(e){}
+      if(apk){ try{ SahaApp.siteYukle(); }catch(e){} return; }
+      guncelle();
+    }catch(e){}
+  }
   function sunucuIzle(dosya){
-    if(!dosya || !window.fetch || apkGomulu()) return;
+    if(!dosya || !window.fetch) return;
+    var _apk = apkGomulu();
+    if(_apk && !(window.SahaApp && typeof SahaApp.siteYukle === 'function')) return;
     var bak = function(){
       try{
         if(document.hidden) return;
         fetch(new URL('surum.json?t=' + Date.now(), location.href).href, { cache:'no-store' })
           .then(function(r){ return r.ok ? r.json() : null; })
           .then(function(j){
-            var b = j && j[dosya]; if(!b || karsilastir(window.APP_BUILD, b) >= 0){ if(_sunucu){ _sunucu = null; hedefHesapla(); goster(); } return; }
+            var b = j && j[dosya]; if(!b || karsilastir(window.APP_BUILD, b) >= 0){ _sessizHedef = null; if(_sunucu){ _sunucu = null; hedefHesapla(); goster(); } return; }
+            _sessizHedef = String(b); sessizDene();
+            if(_apk) return;                                                    // uygulamada zorunlu ekranı uygulamanın kendisi gösterir
             var son = 0; try{ son = Number(sessionStorage.getItem('sg-denendi-' + b)) || 0; }catch(e){}
             if(Date.now() - son < 180000) return;       // az önce bu sürüme güncellendi ama önbellek eskiyi verdi: biraz bekle
             _sunucu = String(b); hedefHesapla(); goster();
@@ -635,7 +659,7 @@ var SahaGuncelleme = (function(){
       try{
         refFn('globalConfig/minSurum').on('value', function(sn){
           var v = sn.val(); var b = v ? (typeof v === 'string' ? v : v.build) : null;
-          _minYonetici = b ? { build:String(b), mesaj:(v && v.mesaj) || '' } : null; hedefHesapla(); goster();
+          _minYonetici = b ? { build:String(b), mesaj:(v && v.mesaj) || '' } : null; _minBilindi = true; hedefHesapla(); goster(); sessizDene();
           try{ if(window.SahaApp && typeof SahaApp.guncellemeAyar === 'function') SahaApp.guncellemeAyar(!!b); }catch(e){}
         }, function(){ deneme++; if(deneme <= 40) setTimeout(kur, Math.min(15000, 1500 * deneme)); });
       }catch(e){ deneme++; if(deneme <= 40) setTimeout(kur, Math.min(15000, 1500 * deneme)); }

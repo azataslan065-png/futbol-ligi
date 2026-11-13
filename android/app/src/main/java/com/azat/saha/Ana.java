@@ -171,6 +171,7 @@ public class Ana extends Activity {
                 // (2026-11-07) Yalnızca ana sayfa ya da uygulamanın kendi kaynakları (site, veritabanı, kitaplıklar, ses dosyaları) kaydedilir.
                 // Reklam/izleme sunucuları (telefonun reklam engelleyicisi ya da özel DNS'i kapatır) ve YouTube video akışı hata değildir.
                 if (r.isForMainFrame() || bizim(r.getUrl())) Teshis.yaz("ag-hata", e.getErrorCode() + " " + e.getDescription(), (r.isForMainFrame() ? "ANA " : "") + r.getUrl());
+                if (r.isForMainFrame() && Sayfa.siteModu() && BuildConfig.GOMULU) { Sayfa.siteKapat(); Teshis.olay("sayfa", "site açılamadı, içerideki kopya kullanılıyor", ""); v.loadUrl(BuildConfig.ADRES); return; }   // (2026-11-14-E) bkz. Sayfa SİTEDEN AÇILIŞ
                 if (r.isForMainFrame()) v.loadDataWithBaseURL(BuildConfig.ADRES, HATA, "text/html", "utf-8", null);
             }
             @Override public void onReceivedHttpError(WebView v, WebResourceRequest r, WebResourceResponse e) {
@@ -479,6 +480,11 @@ public class Ana extends Activity {
            "Tarayıcıdan çıkılamıyor" uyarısı gösteriyordu (kök sürümdeki sayfalar). window.close artık uygulamayı kapatır. */
         // (2026-11-07) Sayfadan elle güncelleme denetimi ve yüklü uygulama sürümü (bkz. Guncelle).
         @JavascriptInterface public void guncellemeDenetle() { h.post(new Runnable() { public void run() { Guncelle.denetle(Ana.this, true); } }); }
+        @JavascriptInterface public void siteYukle() { h.post(new Runnable() { public void run() {
+            if (w == null) return;
+            Sayfa.siteAc(); Teshis.olay("sayfa", "sessiz güncelleme: siteden yükleniyor", BuildConfig.ADRES); Teshis.gonder();
+            java.util.Map<String, String> b = new java.util.HashMap<>(); b.put("Cache-Control", "no-cache"); b.put("Pragma", "no-cache");   // tarayıcı önbelleğindeki eski sayfa gelmesin
+            basladi = false; w.loadUrl(BuildConfig.ADRES, b); bekciKur(); } }); }
         @JavascriptInterface public void guncellemeAyar(final boolean acik) { h.post(new Runnable() { public void run() { Guncelle.ayar(Ana.this, acik); } }); }
         @JavascriptInterface public String surum() { try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; } catch (Exception e) { return ""; } }
         @JavascriptInterface public void teshis(String tur, String ayrinti) { String t = String.valueOf(tur); if (t.contains("hata")) Teshis.yaz(t, String.valueOf(ayrinti), BuildConfig.ADRES); else Teshis.olay(t, String.valueOf(ayrinti), BuildConfig.ADRES); }
