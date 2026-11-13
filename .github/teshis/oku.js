@@ -35,7 +35,7 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     console.log('-- SES DURUM KARTLARI (' + sd.length + ') --');
     sd.slice(0, 4).forEach(x => { console.log(saat(x.ts), x.surum, String(x.ua || '').replace(/Mozilla\/5.0 \(|\) AppleWebKit.*?(Chrome\/[\d]+|Version\/[\d.]+).*$/g, ' $1').slice(0, 80));
       console.log('   ayar', JSON.stringify(x.ayar), 'girişli', x.girisli, 'maçta', x.macta, 'maç motoru', x.macMotoru);
-      console.log('   müzik', JSON.stringify(x.muzik)); console.log('   doğal', JSON.stringify(x.dogal)); (x.olay || []).forEach(o => console.log('     · ' + o)); });
+      console.log('   müzik', JSON.stringify(x.muzik)); console.log('   kalabalık', JSON.stringify(x.kalabalik || null)); console.log('   doğal', JSON.stringify(x.dogal)); (x.olay || []).forEach(o => console.log('     · ' + o)); });
     { const KD = await al(kok + 'diagnostics/klipDurum') || {}; Object.values(KD).filter(x => x && x.ts > sinir).sort((a, b) => b.ts - a.ts).slice(0, 4).forEach(x => { const y = Object.assign({}, x); delete y.ua; console.log('KLİP', saat(x.ts), JSON.stringify(y)); }); }
     const D = await al(kok + 'diagnostics/devices') || {};
     const cihaz = Object.values(D).filter(x => x && (x.sonGorulme || 0) > sinir);

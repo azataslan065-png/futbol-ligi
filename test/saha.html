@@ -343,7 +343,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-13-A</title>
+<title>SAHA — 3D Futbol v2026-11-13-B</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -9122,10 +9122,28 @@ var _KLB = null;
    32 ayrı piksel okumasıyla üretiliyordu; her okuma ekran kartının işini bitirmesini bekletir (zayıf cihazda yüzlerce ms) ve
    takım renkleri her uygulandığında baştan yapılıyordu. ŞİMDİ: 32 kare TEK bir hedefe (her biri kendi bölmesine) çizilir ve
    TEK seferde okunur; aynı takım renkleri için atlas yeniden üretilmez. Zayıf cihazda yarı çözünürlükte çizilir. */
+/* TRİBÜN BÖLÜMLERİ (2026-11-13-B, kullanıcı: "tribünler sadece ön tarafta görünüyor, stadyum kapasitesinin neredeyse %80'i boş, dolduralım").
+   KÖK SEBEP: uzak tribün figürleri stadyum kurulurken takıma göre iki kümeye ayrılıyordu (kulüp stadında hepsi o anki ev sahibine). Kurulum,
+   maçın takımları ve ev sahibi belli olmadan yapılabiliyordu; ev sahibi sonradan değişince figürlerin neredeyse tamamı DİĞER takımın kümesinde
+   kalıyor, o takımın (ör. lacivert/siyah) formasını giyip koyu koltukların üstünde kayboluyordu - tribün boş görünüyordu. Ayrıca kulüp
+   stadında misafir taraftara hiç yer yoktu. ŞİMDİ kümeler takıma değil BÖLÜME bağlı: 0 = ev sahibi bölümü (tribünün neredeyse tamamı),
+   1 = misafir bölümü (ev sahibinin karşısındaki kale arkasının ortası, ~%8); tarafsız statta eskisi gibi sahanın iki yarısı. Hangi bölümün
+   hangi takım olduğu her an ev sahibinden hesaplanır, değişince figür atlası yeniden çizilir. Koyu formalı takımda taraftarların çoğu
+   ikinci (açık) rengi giyer; figürler de koltuktan ayırt edilsin diye biraz daha aydınlık çizilir. */
+function _kbTakim(m){ try{ if(STAD_TEMA === 'notr') return m; var ev = STAD.evTaraf === 1 ? 1 : 0; return m === 0 ? ev : 1 - ev; }catch(e){ return m; } }
+function _kbBolum(x, z){
+  try{ if(STAD_TEMA === 'notr') return x < 0 ? 0 : 1;
+    var evX = STAD.evTaraf === 1 ? 1 : -1;
+    return (x * -evX > HLX + 1 && Math.abs(z) < 15) ? 1 : 0; }catch(e){ return 0; }
+}
+function _kbParlak(hex){ var c = new THREE.Color(hex); return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b; }
 function _kalabalikAtlasCiz(t){
+  var _m = t; t = _kbTakim(_m);
   var tk = t === 0 ? takA() : takB(), W = 1024, H = 256, cw = 64, ch = 128;
   var R = window._sahaModeller || {}, M = R.hafif || R.detayli;
-  var anahtar = (M ? M.ad : '-') + '|' + tk.jer + '|' + tk.shr;
+  var anahtar = (M ? M.ad : '-') + '|' + tk.jer + '|' + tk.shr + '|' + t;
+  try{ var u0 = KALABALIK.u[_m]; if(u0 && u0.uOran){ var lj = _kbParlak(tk.jer), ls = _kbParlak(tk.shr === tk.jer ? 0xffffff : tk.shr); u0.uOran.value = (lj < 0.16 && ls > lj + 0.12) ? 0.62 : 0.28; } }catch(e){}
+  t = _m;
   if(KALABALIK.atlas[t] && KALABALIK._anahtar && KALABALIK._anahtar[t] === anahtar) return;
   var cv = KALABALIK.atlas[t] ? KALABALIK.atlas[t].image : document.createElement('canvas');
   cv.width = W; cv.height = H;
@@ -9236,7 +9254,7 @@ function kalabalikKur(){
         var pt = stadYolNokta(_u);
         var x = pt.x + pt.nx * o, z = pt.z + pt.nz * o;
         // (2026-10-16-C, kullanıcı: "koltuklar yer yer boş, bütün koltuklar dolu olmalı") rastgele boş koltuk kaldırıldı.
-        yer[_stadTaraf(x)].push([x, y, z, Math.atan2(-pt.nx, -pt.nz)]);
+        yer[_kbBolum(x, z)].push([x, y, z, Math.atan2(-pt.nx, -pt.nz)]);
       }
     }
     var A = STAD.ALT, U = STAD.UST;
@@ -9254,15 +9272,16 @@ function kalabalikKur(){
       var gi = geo.clone();
       // (2026-11-11) aVar: forma (0 ya da 8); aKisi: kişinin rastgele sayısı - pozu tribün durumuna göre gölgelendiricide seçilir (bkz. TRİBÜN TEPKİSİ)
       var aVar = new Float32Array(L.length), aFaz = new Float32Array(L.length), aKisi = new Float32Array(L.length);
-      for(var n = 0; n < L.length; n++){ aVar[n] = Math.random() < 0.72 ? 0 : 8; aFaz[n] = Math.random() * 6.283; aKisi[n] = Math.random(); }
+      for(var n = 0; n < L.length; n++){ aVar[n] = Math.random(); aFaz[n] = Math.random() * 6.283; aKisi[n] = Math.random(); }   // aVar < uOran: ikinci renk forma
       gi.setAttribute('aVar', new THREE.InstancedBufferAttribute(aVar, 1));
       gi.setAttribute('aFaz', new THREE.InstancedBufferAttribute(aFaz, 1));
       gi.setAttribute('aKisi', new THREE.InstancedBufferAttribute(aKisi, 1));
-      var uni = { uZaman:{ value:0 }, uSev:{ value:0 }, uUz:{ value:0 }, uDur:{ value:0 }, uOnce:{ value:0 }, uDegT:{ value:0 } };
+      var uni = { uZaman:{ value:0 }, uSev:{ value:0 }, uUz:{ value:0 }, uDur:{ value:0 }, uOnce:{ value:0 }, uDegT:{ value:0 }, uOran:{ value:0.28 } };
+      KALABALIK.u[t] = uni;
       // alphaTest 0,5 → 0,3: uzakta küçülen figürlerin kenar saydamlığı ortalanınca figür tamamen siliniyordu (eksik tribün).
       var mat = new THREE.MeshBasicMaterial({ map:KALABALIK.atlas[t], alphaTest:0.3, side:THREE.DoubleSide });
       mat.onBeforeCompile = function(sh){
-        sh.uniforms.uZaman = uni.uZaman; sh.uniforms.uSev = uni.uSev; sh.uniforms.uUz = uni.uUz; sh.uniforms.uDur = uni.uDur; sh.uniforms.uOnce = uni.uOnce; sh.uniforms.uDegT = uni.uDegT;
+        sh.uniforms.uZaman = uni.uZaman; sh.uniforms.uSev = uni.uSev; sh.uniforms.uUz = uni.uUz; sh.uniforms.uDur = uni.uDur; sh.uniforms.uOnce = uni.uOnce; sh.uniforms.uDegT = uni.uDegT; sh.uniforms.uOran = uni.uOran;
         /* (2026-10-17-G) Uzaktaki figürlerde doku küçük kopyasına (mipmap) geçince kenar saydamlığı ortalanıyor, saydamlık eşiğin altına
            düşen figür kamera yaklaşıp uzaklaştıkça tek tek kaybolup beliriyordu. Saydamlık eşikten önce güçlendirilir. */
         sh.fragmentShader = sh.fragmentShader.replace('#include <alphatest_fragment>', 'diffuseColor.a = clamp(diffuseColor.a * 2.2, 0.0, 1.0);\n#include <alphatest_fragment>');
@@ -9276,8 +9295,8 @@ function kalabalikKur(){
           + '  else if(_d < 3.5){ _t = _r < 0.6 ? 6.0 : 0.0; }\n'
           + '  else { _t = _r < 0.45 ? 6.0 : 0.0; }\n'
           + '  float _hz = _d < 0.5 ? 0.35 : (_d < 1.5 ? 2.4 : (_d < 2.5 ? 6.5 : 0.6));\n';
-        sh.vertexShader = 'attribute float aVar;\nattribute float aFaz;\nattribute float aKisi;\nuniform float uZaman;\nuniform float uSev;\nuniform float uUz;\nuniform float uDur;\nuniform float uOnce;\nuniform float uDegT;\n' + sh.vertexShader
-          .replace('#include <uv_vertex>', '#include <uv_vertex>\n  ' + _poz + '  float _fr = step(0.0, sin(uZaman * _hz + aFaz * 1.7));\n  vUv = vec2((uv.x + _t + aVar) / 16.0, (uv.y + _fr) / 2.0);')
+        sh.vertexShader = 'attribute float aVar;\nattribute float aFaz;\nattribute float aKisi;\nuniform float uZaman;\nuniform float uSev;\nuniform float uUz;\nuniform float uDur;\nuniform float uOnce;\nuniform float uDegT;\nuniform float uOran;\n' + sh.vertexShader
+          .replace('#include <uv_vertex>', '#include <uv_vertex>\n  ' + _poz + '  float _fr = step(0.0, sin(uZaman * _hz + aFaz * 1.7));\n  vUv = vec2((uv.x + _t + (aVar < uOran ? 8.0 : 0.0)) / 16.0, (uv.y + _fr) / 2.0);')
           .replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed.y += abs(sin(uZaman * (2.2 + uSev * 6.0) + aFaz)) * (0.012 + uSev * 0.32) - uUz * 0.22;\n  transformed.x += sin(uZaman * 0.9 + aFaz * 3.1) * 0.015;')
           /* (2026-10-16-C, kullanıcı: "taraftarlar kutu gibi duruyor"): figür kartları sahaya dönük sabitti; yandan / çapraz
              bakınca incecik kart (kutu kenarı) gibi görünüyordu. Artık her figür kendi ekseni çevresinde KAMERAYA döner. */
@@ -9289,7 +9308,7 @@ function kalabalikKur(){
         var P = L[n2]; q.setFromAxisAngle(ax, P[3]); v.set(P[0], P[1], P[2]);
         var s0 = 0.92 + Math.random() * 0.16; sc.set(s0, s0, 1);
         m4.compose(v, q, sc); m.setMatrixAt(n2, m4);
-        var b = 0.72 + Math.random() * 0.28; col.setRGB(b, b, b); m.setColorAt(n2, col);
+        var b = 0.86 + Math.random() * 0.14; col.setRGB(b, b, b); m.setColorAt(n2, col);
       }
       m.frustumCulled = false;                       // kase tüm sahneyi sarar; sınır kutusu hesabı gereksiz
       scene.add(m);
@@ -9301,12 +9320,14 @@ function kalabalikKur(){
 function kalabalikGuncelle(dt){
   try{
     if(!KALABALIK.hazir){ kalabalikKur(); if(!KALABALIK.hazir) return; }
+    var _hk = STAD_TEMA + '|' + (STAD.evTaraf === 1 ? 1 : 0); if(KALABALIK._harita !== _hk){ KALABALIK._harita = _hk; try{ _kalabalikAtlasCiz(0); _kalabalikAtlasCiz(1); }catch(e){} }   // ev sahibi değişti: bölümlerin forması
     var z = performance.now() / 1000, cos = window._sahaCosku || 0;
     [0, 1].forEach(function(t){
       var u = KALABALIK.u[t]; if(!u) return;
-      var tp = (typeof TARAFTAR !== 'undefined' && TARAFTAR.tepki) ? TARAFTAR.tepki[t] : 0;
+      var tm = _kbTakim(t);
+      var tp = (typeof TARAFTAR !== 'undefined' && TARAFTAR.tepki) ? TARAFTAR.tepki[tm] : 0;
       var sev = tp > 0 ? Math.min(1, tp / 1.5) : 0, uz = tp < 0 ? Math.min(1, -tp / 1.5) : 0;
-      var D = TRIB.d[t]; if(t === 0 && !(typeof TARAFTAR !== 'undefined' && TARAFTAR.hazir)) try{ _tribunDurumHesapla(); }catch(e){}
+      var D = TRIB.d[tm]; if(t === 0 && !(typeof TARAFTAR !== 'undefined' && TARAFTAR.hazir)) try{ _tribunDurumHesapla(); }catch(e){}
       u.uDur.value = D.dur; u.uOnce.value = D.once; u.uDegT.value = D.degT;
       var _hd = D.dur === 1 ? 0.12 : 0;
       u.uZaman.value = z; u.uSev.value += ((Math.max(sev, _hd)) - u.uSev.value) * Math.min(1, dt * 4); u.uUz.value += (uz - u.uUz.value) * Math.min(1, dt * 3);
@@ -11437,7 +11458,9 @@ function stadyumAnons(metin, zil, parca){
     if(window._sahaOdaHost && !window._sahaIzleModu){ var _ap = (parca && parca.length && typeof parca[0] === 'string' && !/^https?:/.test(parca[0])) ? _anonsUrller(parca) : (parca || null);
       setTimeout(function(){ _odaOlay({ k:'a', m:String(metin).slice(0, 200), p:_ap && _ap.length ? _ap : 0 }); }, zil !== false ? 1100 : 0); }   // bkz. KONUKTA SESLER
     if(!_sesUret() || window._sahaIzleModu) return;
-    try{ if(running && !bitti){ SPK.log.push({ ts:Date.now() + (zil !== false ? 1100 : 0), r:'anons', m:String(metin) }); if(SPK.log.length > 60) SPK.log.shift(); } }catch(e){self.__ds&&self.__ds(10106,e)}
+    try{ if(running && !bitti){ var _lg = { ts:Date.now() + (zil !== false ? 1100 : 0), r:'anons', m:String(metin) };
+      try{ var _pu = (parca && parca.length) ? ((typeof parca[0] === 'string' && !/^https?:/.test(parca[0])) ? _anonsUrller(parca) : parca) : null; if(_pu && _pu.length) Object.defineProperty(_lg, 'p', { value:_pu.slice(0, 8), enumerable:false }); }catch(_p){}
+      SPK.log.push(_lg); if(SPK.log.length > 60) SPK.log.shift(); } }catch(e){self.__ds&&self.__ds(10106,e)}
     if(zil !== false) stadyumZil();
     // Görüntülü yayındaki izleyici de duysun: zil videoda gider, konuşma metni ayrıca.
     setTimeout(function(){ yayinAnonsGonder(metin, undefined, parca); }, zil !== false ? 1100 : 0);
@@ -11531,6 +11554,7 @@ function golAnonsu(p){
     _odaOlay({ k:'gc', g:G });                                            // online: rakip cihaz da aynı anonsu çalar
     try{ setTimeout(function(){ yayinAnonsGonder(G.m, undefined, a1); }, 0); }catch(e){}
     try{ if(running && !bitti){ SPK.log.push({ ts:Date.now(), r:'anons', m:G.m }); if(SPK.log.length > 60) SPK.log.shift(); } }catch(e){}
+    try{ var _GL = window._golCagriL || (window._golCagriL = []); _GL.push({ ts:Date.now(), ad:ad, G:G }); if(_GL.length > 20) _GL.shift(); }catch(e){}   // gol videosu da aynı anonsu çalar (bkz. GOL VİDEOSU SESLERİ)
   }catch(e){ _sessiz(e, 'golAnonsu', 'saha_ses'); } });
 }
 // Sıraya girer: spiker/yorumcu konuşurken üstüne binmez, onlarla aynı söz sırasındadır (bkz. _anonsKonus).
@@ -12084,7 +12108,7 @@ function _spkSiradaki(){
       x.bitti0 = Date.now(); SPK.konusuyor = false; SPK.calan = null; SPK._onemliOkunuyor = false; SPK.sonKonusma = x.bitti0; SPK._sonRol = x.rol; setTimeout(_spkSiradaki, 200); };
     var _gec = function(){ return no === SPK.no; };
     if(x.rol === 'anons'){ if(x.gol) _golCagriOku(x.gol, _bit, _gec); else _anonsOku(x.metin, _bit, _gec, x.parca); }
-    else if(x.isim) _isimOku(x, _bit, _gec);
+    else if(x.isim){ try{ if(running && !bitti && x.isim.b){ var _il = { ts:simdi, r:x.rol, m:x.metin }; Object.defineProperty(_il, 'b', { value:x.isim.b, enumerable:false }); SPK.log.push(_il); if(SPK.log.length > 60) SPK.log.shift(); } }catch(_i){} _isimOku(x, _bit, _gec); }
     else _spkOku(x.metin, x.rol, _bit, x.h, x.oncelik >= 2, x.tur, _gec);
     return;
   }
@@ -14696,6 +14720,8 @@ function sesDurumKart(){
         motor:SAHA_SES.ctx ? SAHA_SES.ctx.state : null, kazanc:SAHA_SES.gain ? +SAHA_SES.gain.gain.value.toFixed(2) : null,
         akisYolu:B ? { kapali:!!B.kapali, hata:String(B.hata || '').slice(0, 80), oge:(B.durum && el) ? B.durum(el) : null } : 'yok', ekran:(function(){ var m = document.getElementById('macSonuEkran'); return m && m.style.display && m.style.display !== 'none' ? 'macSonu' : ''; })(), hataliParca:Object.keys(SAHA_SES.hata || {}).filter(function(u){ return SAHA_SES.hata[u] > Date.now(); }).length },
       macMotoru:(typeof ac !== 'undefined' && ac) ? ac.state : null,
+      kalabalik:(function(){ try{ return { hazir:!!KALABALIK.hazir, toplam:KALABALIK.toplam || 0, m:[0, 1].map(function(i){ var m = KALABALIK.mesh[i]; return m ? m.count + '/' + m.instanceMatrix.count + (m.visible ? '' : ' gizli') : '-'; }),
+        modelli:!!KALABALIK._modelli, harita:KALABALIK._harita || '', tema:typeof STAD_TEMA !== 'undefined' ? STAD_TEMA : '', on3B:typeof TARAFTAR !== 'undefined' ? (TARAFTAR._gor === false ? 'gizli' : (TARAFTAR._modelli ? 'acik' : 'model yok')) : '-', kalite:window._otoKalite || 0 }; }catch(e){ return 'hata'; } })(),
       dogal:S ? { destek:S.destek(), spiker:S.hazirMi('spiker') ? 'hazır' : '%' + S.yuzde('spiker'), yorumcu:S.hazirMi('yorumcu') ? 'hazır' : '%' + S.yuzde('yorumcu'), indiriyor:S.indiriyor(),
         onbellek:!!window._spkDogalOnbellek, hata:String(S.hata() || '').slice(0, 120), olcum:S.olcum(), istendi:!!window._spkDogalIstendi } : 'yok',
       olay:_SDK.olay.slice(-15) };
@@ -21495,7 +21521,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-13-A';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-13-B';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -29306,7 +29332,9 @@ function ozetKaydet(tur, metin, gecikme, takim){
           // Özette pozisyon sonunda konuşma bitene kadar (en fazla 2,5 sn) son kare beklenir - bir sonraki pozisyona taşmaz.
           if(c.ts < t0 - 200 || c.ts > t1 + 600) return;
           var k = pen.bas; while(k < pen.son && OZT[k].ts < c.ts) k++;
-          soz.push({ t:Math.round((k - pen.bas) / OZT_FPS * 10) / 10, r:c.r, m:c.m });
+          var _sz = { t:Math.round((k - pen.bas) / OZT_FPS * 10) / 10, r:c.r, m:c.m };
+          try{ if(c.b) Object.defineProperty(_sz, 'b', { value:c.b, enumerable:false }); if(c.p) Object.defineProperty(_sz, 'p', { value:c.p, enumerable:false }); }catch(_d){}   // (2026-11-13-B) gol videosu için çalınan ses (kayda yazılmaz)
+          soz.push(_sz);
         });
         soz.sort(function(x, y){ return x.t - y.t; });
         // Maç sesleri (vuruş, düdük, tribün, tezahürat, direk/zil) aynı zamanlamayla.
@@ -30000,7 +30028,7 @@ function macSonucGorsel(){
     ser(V.evRenk || '#3f8a45', 0); ser(V.depRenk || '#c0392b', W);
     x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillStyle = '#fff';
     var font = function(px, w){ x.font = (w || 800) + ' ' + px + 'px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif'; };
-    font(34, 700); x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(({ lig:'LİG MAÇI', arkadas:'ARKADAŞ MAÇI', ai:'MAÇ' }[V.tur] || 'MAÇ') + (V.tur === 'lig' && V.hafta ? ' · ' + V.hafta + '. HAFTA' : '') + ' · MAÇ SONU', W/2, 140);
+    font(34, 700); x.fillStyle = 'rgba(255,255,255,.7)'; x.fillText(({ lig:'LİG MAÇI', arkadas:'ARKADAŞ MAÇI', ai:'YAPAY ZEKÂ MAÇI' }[V.tur] || 'MAÇ') + (V.tur === 'lig' && V.hafta ? ' · ' + V.hafta + '. HAFTA' : '') + ' · MAÇ SONU', W/2, 140);
     var sigdir = function(t, mx, px){ font(px); while(x.measureText(t).width > mx && px > 26){ px -= 2; font(px); } return t; };
     x.fillStyle = '#fff'; sigdir(V.ev, 420, 58); x.fillText(V.ev, W/4 + 10, 300); sigdir(V.dep, 420, 58); x.fillText(V.dep, W*3/4 - 10, 300);
     font(250, 900); x.fillText(V.evSkor + ' - ' + V.depSkor, W/2, 500);
@@ -30088,6 +30116,8 @@ window._klipOffDestek = false;
       VideoEncoder.isConfigSupported({ codec:'vp8', width:960, height:540, bitrate:4000000, framerate:30 }),
       AudioEncoder.isConfigSupported({ codec:'opus', sampleRate:48000, numberOfChannels:1, bitrate:128000 })
     ]).then(function(r){ window._klipOffDestek = !!(r[0] && r[0].supported && r[1] && r[1].supported);
+      if(window._klipOffDestek) VideoEncoder.isConfigSupported({ codec:'vp8', width:960, height:540, bitrate:4000000, framerate:30, latencyMode:'realtime', hardwareAcceleration:'prefer-software' })
+        .then(function(h){ window._klipOffHizli = !!(h && h.supported); }).catch(function(){});
     }).catch(function(){});
   }catch(e){}
 })();
@@ -30282,26 +30312,51 @@ function mespeakSentezle(metin, rol){
   });
 }
 // Klip için anlatım sesleri: pozisyonda canlıda söylenenler; hiç yoksa kısa bir gol anonsu.
+/* GOL VİDEOSU SESLERİ (2026-11-13-B, kullanıcı: "gol videosu tam eklendi fakat spiker, yorumcu anonsu, gol müziği vs. videoya dahil edilmemiş").
+   KÖK SEBEP: video anlatımı, canlıda söylenen cümlelerin METNİNİ yeniden seslendirmeye çalışıyordu (ölçüm: anlatım hazırlığı 3 ms - hiçbir ses
+   bulunamadı). Kayıtlı spiker kipinde ses metinden kayıt aranarak bulunur; metin önce "temizlendiği" için kayıt eşleşmiyordu; eklenen "Goool!"
+   ve tekrar cümleleri hiçbir kayıtta yoktu; oyuncu adları, stat anonsu, gol anonsu ve gol müziği hiç saklanmıyordu. ŞİMDİ canlıda ÇALINAN
+   sesin kendisi saklanır ve videoda aynı anda çalınır: spiker/yorumcu kaydı (metniyle aynen bulunur), oyuncu adı kaydı, stat anonsu parçaları,
+   golde "Gooooool! + numara + ad", tribünün soyadı bağırışı ve o stadın gol müziği. Tekrar bölümüne kayıtlı bir yorumcu gol tepkisi eklenir. */
+function _klipTamponAl(url){ try{ var c = (typeof ac !== 'undefined' && ac) ? ac : SahaSes.baglam(); return (window.StadSes && c) ? StadSes.tampon(c, url).catch(function(){ return null; }) : Promise.resolve(null); }catch(e){ return Promise.resolve(null); } }
+function _klipKayitliSes(rol, tur){
+  try{ if(!(window.SahaSes && SahaSes.kayitSec)) return Promise.resolve(null); var k = SahaSes.kayitSec(rol, tur, {}); if(!k || !k.m) return Promise.resolve(null);
+    try{ SahaSes.kayitKullan && SahaSes.kayitKullan(k.id); }catch(e){} return SahaSes.tampon(k.m, rol).catch(function(){ return null; }); }catch(e){ return Promise.resolve(null); }
+}
 function _klipAnlatimHazirla(an){
-  var soz = (an.soz || []).map(function(c){ return { t:c.t, r:c.r || 'spiker', m:_ozetSozTemizle(c.m) }; }).filter(function(c){ return c.m; });
-  if(!soz.some(function(c){ return /gol/i.test(c.m); })){
-    var son = (an.veri.length - 1) / (an.fps || 30);
-    soz.push({ t:Math.max(0, son * 0.9), r:'spiker', m:'Goool! ' + (an.metin || '') + (an.dk ? ', ' + an.dk + '. dakika!' : '!') });
-  }
-  // (2026-10-17-J) Aynı cümle bir kez; en çok 5 cümle (uzun VAR anlatımında video bitmeden konuşma bitsin).
-  var _gor = {}; soz = soz.filter(function(c){ if(_gor[c.m]) return false; _gor[c.m] = 1; return true; }).slice(0, 5);
-  var TEKRAR_SOZ = ['Golü bir de farklı açılardan izleyelim.', 'Tekrarda pozisyon daha net görülüyor.', 'Bir kez daha izleyelim, bitiriş kusursuz.', 'Yavaş çekimde golün güzelliği ortaya çıkıyor.'];
-  var tekrarSoz = TEKRAR_SOZ[Math.floor(Math.random() * TEKRAR_SOZ.length)];
-  /* (2026-10-31-A) Doğal ses varsa videoya da aynı ses: canlıda söylenen cümleler Piper ile ses dosyasına çevrilir (aynı metin, aynı ses). */
-  if(spkDogalAcik()){
-    return SahaSes.hazirla('spiker').then(function(){ return SahaSes.hazirla('yorumcu'); }).then(function(){
-      return Promise.all(soz.map(function(c){ return SahaSes.tampon(c.m, c.r === 'yorumcu' ? 'yorumcu' : 'spiker').then(function(b){ return { t:c.t, b:b, r:c.r }; }, function(){ return null; }); })
-        .concat([SahaSes.tampon(tekrarSoz, 'yorumcu').catch(function(){ return null; })]));
-    }).then(function(l){ var tk = l.pop(); var son = l.filter(Boolean).sort(function(x, y){ return x.t - y.t; }); if(tk) son.tekrar = tk; son.tekrarRol = 'yorumcu'; if(!son.length && !tk) son.sesYok = true; return son; })
-      .catch(function(){ var bos = []; bos.sesYok = true; return bos; });
-  }
-  // (2026-10-31-F) robot ses (meSpeak) kaldırıldı: doğal ses yoksa gol videosu anlatımsız.
-  var bos = []; bos.sesYok = true; return Promise.resolve(bos);
+  var ham = (an.soz || []).filter(function(c){ return c && (c.m || c.b || c.p); });
+  var gor = {}, soz = ham.filter(function(c){ var k = (c.r || '') + '|' + (c.m || ''); if(gor[k] && !c.b) return false; gor[k] = 1; return true; }).slice(0, 10);
+  var fps = an.fps || 30, golT = null;
+  try{ if(an.tur === 'gol' && an.veri){ for(var q = 1; q < an.veri.length; q++){ var fq = _ozetKare(an, q); if(Math.abs(fq[0]) > HLX + 0.05 && Math.abs(fq[2]) < GOAL_HW + 0.3 && fq[1] < GOAL_H + 0.3){ golT = q / fps; break; } } } }catch(e){}
+  if(golT == null) golT = Math.max(0, (an.veri ? an.veri.length - 1 : 0) / fps * 0.9);
+  var isler = soz.map(function(c){
+    var r = c.r || 'spiker';
+    if(c.b) return Promise.resolve({ t:c.t, b:c.b, r:r });
+    if(r === 'anons'){ if(!c.p || !c.p.length || /^Goo+l/i.test(c.m || '')) return Promise.resolve(null);
+      return Promise.all(c.p.map(_klipTamponAl)).then(function(L){ L = L.filter(Boolean); return L.length ? { t:c.t, seq:L, r:'anons' } : null; }); }
+    if(!(window.SahaSes && SahaSes.tampon)) return Promise.resolve(null);
+    var rr = r === 'yorumcu' ? 'yorumcu' : 'spiker';
+    return SahaSes.tampon(c.m, rr).catch(function(){ var m2 = _ozetSozTemizle(c.m); return m2 && m2 !== c.m ? SahaSes.tampon(m2, rr) : null; }).then(function(b){ return b ? { t:c.t, b:b, r:r } : null; }, function(){ return null; });
+  });
+  // Gol anonsu + tribün soyadı + gol müziği (canlıda golden ~4 sn sonra çalındığı için pozisyon penceresinin dışında kalır; gol anına göre eklenir)
+  var golIs = Promise.resolve(null);
+  try{ if(an.tur === 'gol'){ var GL = window._golCagriL || [], en = null, ed = 1e9;
+    GL.forEach(function(x){ var d = Math.abs(x.ts - (an.ts || 0)); if(d < ed && d < 25000){ ed = d; en = x; } });
+    if(en && en.G){ var G = en.G;
+      golIs = Promise.all([Promise.all((G.a1 || []).map(_klipTamponAl)), G.soy ? _klipTamponAl(G.soy) : null, Promise.all((G.a2 || []).map(_klipTamponAl)), G.muzik ? _klipTamponAl(G.muzik) : null])
+        .then(function(R){ var a1 = R[0].filter(Boolean), a2 = R[2].filter(Boolean); if(!a1.length && !R[3]) return null;
+          return { t:golT + 0.6, gol:true, a1:a1, soy:R[1], a2:a2, muzik:R[3], r:'anons' }; }).catch(function(){ return null; }); } } }catch(e){}
+  var spikerGol = !soz.some(function(c){ return (c.r || 'spiker') === 'spiker' && /gol/i.test(c.m || ''); }) && an.tur === 'gol' ? _klipKayitliSes('spiker', 'gol').then(function(b){ return b ? { t:golT + 0.1, b:b, r:'spiker' } : null; }) : Promise.resolve(null);
+  var tekrarIs = _klipKayitliSes('yorumcu', an.tur === 'gol' ? 'golY' : 'kurtarisY');
+  var hazirla = (window.SahaSes && SahaSes.hazirla) ? SahaSes.hazirla('spiker').catch(function(){}) : Promise.resolve();
+  return hazirla.then(function(){ return Promise.all([Promise.all(isler), golIs, spikerGol, tekrarIs]); }).then(function(R){
+    var son = R[0].filter(Boolean); if(R[2]) son.push(R[2]); if(R[1]) son.push(R[1]);
+    son.sort(function(x, y){ return x.t - y.t; });
+    if(R[3]) son.tekrar = R[3]; son.tekrarRol = 'yorumcu';
+    if(!son.length && !R[3]) son.sesYok = true;
+    son.ozet = son.map(function(x){ return x.gol ? 'gol' : (x.seq ? 'anons' : x.r); }).join(',');
+    return son;
+  }).catch(function(){ var bos = []; bos.sesYok = true; return bos; });
 }
 function _klipAnlatimMespeak(soz, tekrarSoz){
   return mespeakYukle().then(function(ok){
@@ -30471,9 +30526,24 @@ function _golKlibiBaslat(idx, btn, sesler){
        ana gelince HEMEN çalınıyordu; aynı ana düşen spiker + yorumcu cümleleri ve tekrara geçişte kalan cümleler üst üste biniyor, aynı ses
        kısa arayla iki kez duyuluyor (yankı) gibi geliyordu. Artık cümleler SIRAYA girer; biri bitmeden diğeri başlamaz, aynı cümle iki kez çalınmaz. */
     var sozKuyruk = [], sozGoruldu = {};
-    var sozCal = function(x){ try{ var ky = x.b ? (x.b.length + '_' + x.b.duration.toFixed(3)) : ''; if(ky && sozGoruldu[ky]) return; if(ky) sozGoruldu[ky] = 1; sozKuyruk.push(x); }catch(e){} };
+    var sozCal = function(x){ try{ if(!x || !(x.b || x.seq || x.gol)) return; var ky = x.b ? (x.b.length + '_' + x.b.duration.toFixed(3)) : ''; if(ky && sozGoruldu[ky]) return; if(ky) sozGoruldu[ky] = 1; sozKuyruk.push(x); }catch(e){} };
     var sozAdim = function(){ try{ if(!sozKuyruk.length || performance.now() < konusBitis - 180) return; /* konusBitis = bitiş + 300 ms → 120 ms boşluk */ var x = sozKuyruk.shift(); _sozCalGercek(x); }catch(e){} };
-    var _sozCalGercek = function(x){ try{ if(!sesHedef || !ac) return; var k = ac.createBufferSource(); k.buffer = x.b;
+    var _sozCalGercek = function(x){ try{ if(!sesHedef || !ac) return;
+      if(x.seq || x.gol){   // (2026-11-13-B) stat anonsu / gol anonsu parça parça, ardından tribün ve gol müziği (bkz. GOL VİDEOSU SESLERİ)
+        var _ana2 = window._klipAnaSes || sesHedef, t0 = ac.currentTime + 0.05, tt = t0;
+        var cal1 = function(b, hedef, kaz){ if(!b) return; var s1 = ac.createBufferSource(), g1 = ac.createGain(); s1.buffer = b; g1.gain.value = kaz; s1.connect(g1); g1.connect(hedef); s1.start(tt); tt += b.duration; };
+        var konusma = sesZincir || _ana2;
+        if(x.seq) x.seq.forEach(function(b){ cal1(b, konusma, _sozSeviye(b)); });
+        else {
+          (x.a1 || []).forEach(function(b){ cal1(b, konusma, _sozSeviye(b) * 1.1); });
+          if(x.soy){ cal1(x.soy, _ana2, 0.9); }
+          if(x.a2 && x.a2.length && x.soy){ x.a2.forEach(function(b){ cal1(b, konusma, _sozSeviye(b)); }); cal1(x.soy, _ana2, 0.9); }
+          if(x.muzik){ var sm = ac.createBufferSource(), gm = ac.createGain(), mb = tt + 0.2, ms = Math.min(x.muzik.duration, 22);
+            sm.buffer = x.muzik; gm.gain.setValueAtTime(0.0001, mb); gm.gain.linearRampToValueAtTime(0.55, mb + 0.8); gm.gain.setValueAtTime(0.55, mb + ms - 3); gm.gain.linearRampToValueAtTime(0.0001, mb + ms);
+            sm.connect(gm); gm.connect(_ana2); sm.start(mb); sm.stop(mb + ms + 0.1); }
+        }
+        konusBitis = Math.max(konusBitis, performance.now() + (tt - t0) * 1000 + 300); return; }
+      var k = ac.createBufferSource(); k.buffer = x.b;
       var _hd = sesZincir || window._klipAnaSes || sesHedef, _sg = ac.createGain(); _sg.gain.value = _sozSeviye(x.b); k.connect(_sg); _sg.connect(_hd);   // (2026-10-18-C) seviye eşitleme, ortadan
       k.start(); konusBitis = Math.max(konusBitis, performance.now() + x.b.duration * 1000 + 300); }catch(e){} };
     var _tekrarSesCalindi = false;
@@ -30557,7 +30627,13 @@ function _golKlibiBaslat(idx, btn, sesler){
            hızlı kipe ve telefonun donanım kodlayıcısına almıştım (telefonda denenmeden). En olası sebep donanım kodlayıcısının birkaç saniye
            sonra hata verip kaydı erken bitirmesi (kayıt hatada o ana kadarki kısımla iner). Kodlayıcı önceki,
            sorunsuz çalışan ayarına döndü; yavaşlığın asıl yeri ölçülüp ayrıca düzeltilecek (bkz. _klipDurumYaz). */
-        venc.configure({ codec:'vp8', width:W, height:H, bitrate:4000000, framerate:30, latencyMode:'quality' }); OFF.t0 = Date.now();
+        /* (2026-11-13-B) ÖLÇÜM SONUCU (telefon, 33 sn'lik gol videosu): toplam 791 sn; bunun 763 sn'si kodlayıcıyı BEKLEMEK (çizim 15 sn, kopya
+           0,6 sn, ses 2,7 sn). Kök sebep yazılımla çalışan VP8 kodlayıcının "en yüksek kalite" kipi: telefonda kare başına ~0,76 sn. Artık
+           yazılım kodlayıcı HIZLI kipte çalışır (donanım kodlayıcısı kullanılmaz - 2026-11-10-E'de videoyu 3 sn'de kesmişti); kalite bit hızıyla
+           korunur. Hızlı kip desteklenmezse eski ayar. */
+        var _vk = { codec:'vp8', width:W, height:H, bitrate:4000000, framerate:30, latencyMode:'quality' };
+        if(window._klipOffHizli && !window._klipOffYavasZorla){ _vk.latencyMode = 'realtime'; _vk.hardwareAcceleration = 'prefer-software'; }
+        venc.configure(_vk); OFF.t0 = Date.now(); OFF.kip = _vk.latencyMode;
       }catch(e){ hata = e; }
       if(hata){ geriAl(); window._klipOffKapali = true; DiagSaha('klipOffKurulum', hata, { modul:'saha_grafik', anlami:'Kare kare kayıt kurulamadı; gerçek zamanlı kayda dönülüyor.' }); window._klipKayit = null; window._klipCiz = null; try{ if(cv.parentNode) cv.parentNode.removeChild(cv); }catch(_e){} try{ if(window._klipOrnekGeri) window._klipOrnekGeri(); }catch(_e){} return _golKlibiBaslat(idx, btn, sesler); }
       var off = OFF.off;
@@ -30590,7 +30666,7 @@ function _golKlibiBaslat(idx, btn, sesler){
         if(hata) DiagSaha('klipOffKare', hata, { modul:'saha_grafik', kare:i, anlami:'Kare kare kayıtta hata; kaydın o ana kadarki kısmı kullanıldı.' });
         try{ var _O2 = window._klipOlc || {}, _r = function(x){ return Math.round(x || 0); };
           _klipDurumYaz({ kare:i, sure:+(i / 30).toFixed(1), toplam:Date.now() - (_O2.t0 || OFF.t0), anlatim:_r(_O2.anlatim), kayit:Date.now() - OFF.t0, ciz:_r(_O2.ciz), kopya:_r(_O2.kopya), kod:_r(_O2.kod), bekle:_r(_O2.bekle), ses:_r(_O2.ses),
-            hata:hata ? String(hata.message || hata).slice(0, 160) : '', bitis:!window._klipCiz ? 'klip' : (OFF.bitti ? 'durdu' : (i >= 30 * 90 ? 'sinir' : '?')), boyut:W + 'x' + H });
+            hata:hata ? String(hata.message || hata).slice(0, 160) : '', kip:OFF.kip || '', cikti:vparca.length, anlatimSes:String((sesler && sesler.ozet) || (sesler && sesler.sesYok ? 'yok' : '')).slice(0, 120), tekrarSes:!!(sesler && sesler.tekrar), bitis:!window._klipCiz ? 'klip' : (OFF.bitti ? 'durdu' : (i >= 30 * 90 ? 'sinir' : '?')), boyut:W + 'x' + H });
           DiagSaha('golKlibiSure', new Error('Gol videosu ' + (i / 30).toFixed(1) + ' sn, ' + ((Date.now() - (_O2.t0 || OFF.t0)) / 1000).toFixed(1) + ' sn sürdü'), { modul:'saha_grafik', tur:'bilgi', kare:i, toplam:Date.now() - (_O2.t0 || OFF.t0),
             anlatim:_r(_O2.anlatim), kayit:Date.now() - OFF.t0, ciz:_r(_O2.ciz), kopya:_r(_O2.kopya), kod:_r(_O2.kod), bekle:_r(_O2.bekle), ses:_r(_O2.ses), donanim:!!window._klipOffDonanim, boyut:W + 'x' + H, anlami:'Gol videosu hazırlama süresi (ölçüm, ms).' }); }catch(_d){}
         parca = vparca;   // son() teşhis için kare sayısını okur
