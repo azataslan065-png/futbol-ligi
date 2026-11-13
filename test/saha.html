@@ -345,7 +345,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-13-K</title>
+<title>SAHA — 3D Futbol v2026-11-14-A</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -6613,7 +6613,7 @@ try{
        malzemeler yeniden yüklenir; (3) tekrarlamasın diye piksel yoğunluğu 1'e, gölge ve stadyum
        ekranı yükü düşürülür. Kullanıcıya kısa bir bildirim gösterilir. */
     renderer.domElement.addEventListener('webglcontextlost', function(ev){ try{ ev.preventDefault(); }catch(e){self.__ds&&self.__ds(5761,e)}
-      window._sahaBaglamKayip = (window._sahaBaglamKayip || 0) + 1;
+      window._sahaBaglamKayip = (window._sahaBaglamKayip || 0) + 1; try{ window._mrOlay && window._mrOlay('webgl-kayip'); }catch(e){}
       try{ sahaBildir('Görüntü yenileniyor…', 2500); }catch(e){self.__ds&&self.__ds(5763,e)} });
     renderer.domElement.addEventListener('webglcontextrestored', function(){
       try{
@@ -9793,13 +9793,13 @@ function _grafikKalabalikOran(){ return (window._ekranKaydi || window._bellekDar
    uyarısını bildirince oyun hafif çizime geçer: çözünürlük 1x, tribün figürleri %55, ön sıra 3B taraftarlar gizli, kare hızı en çok 30. Kayıt
    bitince (bellek uyarısında 2 dk sonra) eski hâline döner. */
 window.__appEkranKaydi = function(v){
-  try{ window._ekranKaydi = !!v; try{ sesDurumOlay('ekran kaydı ' + (v ? 'başladı: hafif çizim' : 'bitti')); }catch(e){}
+  try{ window._ekranKaydi = !!v; try{ window._mrOlay && window._mrOlay('ekran-kaydi', v ? 'basladi' : 'bitti'); }catch(e){} try{ sesDurumOlay('ekran kaydı ' + (v ? 'başladı: hafif çizim' : 'bitti')); }catch(e){}
     try{ sahaPikselOranUygula(); }catch(e){}
     try{ if(typeof TARAFTAR !== 'undefined' && TARAFTAR.parca) _tfGorunur(!v && !window._bellekDar); }catch(e){}
   }catch(e){}
 };
 window.__appBellek = function(sv){
-  try{ window._bellekDar = true; sesDurumOlay('bellek uyarısı ' + sv + ': hafif çizim'); sahaPikselOranUygula(); try{ if(typeof TARAFTAR !== 'undefined' && TARAFTAR.parca) _tfGorunur(false); }catch(e){}
+  try{ window._bellekDar = true; try{ window._mrOlay && window._mrOlay('bellek', sv); }catch(e){} sesDurumOlay('bellek uyarısı ' + sv + ': hafif çizim'); sahaPikselOranUygula(); try{ if(typeof TARAFTAR !== 'undefined' && TARAFTAR.parca) _tfGorunur(false); }catch(e){}
     clearTimeout(window._bellekT); window._bellekT = setTimeout(function(){ window._bellekDar = false; try{ sahaPikselOranUygula(); if(!window._ekranKaydi && typeof TARAFTAR !== 'undefined' && TARAFTAR.parca) _tfGorunur(true); }catch(e){} }, 120000);
   }catch(e){}
 };   // (2026-10-17-C) çok zayıf cihazda tribün figürleri %60
@@ -21368,11 +21368,115 @@ var _kareOlcum = [], _kareSonUyari = 0;
 /* MAÇ PERFORMANS ÖZETİ (2026-11-07): "ekran sekiyor / takılıyor" telefonda ölçülsün diye her maçın kare süreleri toplanır; maç bitince
    teşhis kaydına tek satır yazılır: ortalama kare hızı, takılma sayıları (>34 ms ve >50 ms kare), en uzun kare, kalite kademesi değişimi,
    cihaz/ekran kartı ve uygulama (APK mı tarayıcı mı). */
+/* MAÇ RAPORU (2026-11-14-A, kullanıcı: "bu pazar farklı cihazlar için test maçları yapılacak; cihaz performansları, takılmalar ve
+   bağlantılar gibi raporlar çok işe yarayacak"). Teşhis bayraklarından bağımsız, her maçta çalışır; ekranda hiçbir şey görünmez,
+   kullanıcı adı yazılmaz. Toplananlar: cihaz (model, işletim sistemi, çekirdek, bellek, ekran, yenileme hızı, ekran kartı, APK kabuğu),
+   ağ (tür, hız, gecikme; maç içinde değişimleri), veritabanı bağlantısı (kopma sayısı, kopuk kalınan süre), çevrimiçi maçta oda
+   gecikmesi (rtt) ve paket aralıkları, 30 sn'lik dilimlerle kare hızı ve takılmalar, uzun görevler, bellek (JS yığını), pil ve şarj,
+   cihaz ısınması (APK), ekran kaydı / bellek uyarısı / görüntü motoru kaybı / arka plana alma olayları, maç içindeki hatalar.
+   Maç sürerken her 60 sn'de son durum diagnostics/macCanli/{cihaz}'a yazılır (uygulama çökerse son durum kalır); maç bitince tam rapor
+   diagnostics/macRapor'a eklenir. */
+var MR = null, _mrBagKur = false, _mrUzunGorev = null;
+function _mrSn(){ return MR ? Math.round((performance.now() - MR.p0) / 1000) : 0; }
+window._mrOlay = function(t, a){ try{ if(!MR) return; MR.olay.push([_mrSn(), String(t).slice(0, 28), a == null ? '' : String(a).slice(0, 90)]); if(MR.olay.length > 80) MR.olay.splice(20, 1); }catch(e){} };
+function _mrDev(){ var d = 'dev_gecici'; try{ d = localStorage.getItem('diag_deviceId') || d; }catch(e){} return d; }
+function _mrAg(){ try{ var c = navigator.connection; return c ? { tur:c.type || '', etkin:c.effectiveType || '', rtt:c.rtt || 0, mbps:c.downlink || 0, tasarruf:!!c.saveData } : null; }catch(e){ return null; } }
+function _mrYigin(){ try{ var m = performance.memory; return m ? Math.round(m.usedJSHeapSize / 1048576) : 0; }catch(e){ return 0; } }
+function _mrCihaz(){
+  var n = navigator, s = window.screen || {}, ua = String(n.userAgent || '');
+  var model = (ua.match(/Android [\d.]+; (?:[a-z]{2}-[a-z]{2}; )?([^;)]+?)(?: Build\/|\))/i) || [])[1] || (/iPhone/.test(ua) ? 'iPhone' : (/iPad/.test(ua) ? 'iPad' : ''));
+  var apk = ''; try{ if(window.SahaApp) apk = (typeof SahaApp.kabuk === 'function' ? 'kabuk' + SahaApp.kabuk() : 'eski') + (typeof SahaApp.surum === 'function' ? ' ' + SahaApp.surum() : ''); }catch(e){ apk = 'hata'; }
+  return { model:String(model).slice(0, 40), os:(ua.match(/Android [\d.]+|OS [\d_]+ like Mac|Windows NT [\d.]+|Mac OS X [\d_]+|CrOS|Linux x86_64/) || [''])[0],
+    tarayici:(ua.match(/SamsungBrowser\/[\d.]+|Firefox\/\d+|Edg\/\d+|Chrome\/\d+|Version\/[\d.]+.*Safari/) || [''])[0].slice(0, 30), webview:/; wv\)/.test(ua),
+    cekirdek:n.hardwareConcurrency || 0, bellekGB:n.deviceMemory || 0, ekran:[s.width || 0, s.height || 0, Math.round((window.devicePixelRatio || 1) * 100) / 100],
+    hz:(function(){ try{ return Math.round(1 / _vsAra); }catch(e){ return 0; } })(), gpu:String(window.SAHA_GPU || '').slice(0, 70), apk:apk };
+}
+function _mrTur(){
+  try{ if(window._sahaIzleModu) return 'izleyici'; if(window._sahaOdaHost) return 'cevrimici-kurucu'; if(window._sahaOdaKonuk) return 'cevrimici-konuk'; }catch(e){}
+  return String(window._mrMod || 'mac');
+}
+function _mrBaglantiDinle(){
+  if(_mrBagKur) return;
+  try{ if(typeof fbDb === 'undefined' || !fbDb) return; _mrBagKur = true; var ilk = true;
+    fbDb.ref('.info/connected').on('value', function(sn){ var v = sn.val() === true; if(ilk){ ilk = false; window._mrBagli = v; return; }
+      if(v === window._mrBagli) return; window._mrBagli = v; if(!MR) return;
+      if(!v){ MR.bag.kopma++; MR.bag.kopT = performance.now(); window._mrOlay('db-koptu', (_mrAg() || {}).etkin); }
+      else { if(MR.bag.kopT){ var ms = performance.now() - MR.bag.kopT; MR.bag.kopukMs += ms; MR.bag.enUzunMs = Math.max(MR.bag.enUzunMs, ms); MR.bag.kopT = 0; window._mrOlay('db-geldi', Math.round(ms) + ' ms'); } } });
+  }catch(e){ _mrBagKur = false; }
+  try{ var c = navigator.connection; if(c && c.addEventListener) c.addEventListener('change', function(){ try{ if(MR){ MR.ag.deg++; var a = _mrAg() || {}; window._mrOlay('ag', (a.tur || '') + ' ' + a.etkin + ' ' + a.mbps + 'Mb ' + a.rtt + 'ms'); } }catch(e){} }); }catch(e){}
+  try{ window.addEventListener('offline', function(){ window._mrOlay('cevrimdisi'); }); window.addEventListener('online', function(){ window._mrOlay('cevrimici'); }); }catch(e){}
+  try{ document.addEventListener('visibilitychange', function(){ try{ if(!MR) return; if(document.hidden){ MR.gizli.n++; MR.gizli.t = performance.now(); window._mrOlay('arka-plan'); }
+    else if(MR.gizli.t){ MR.gizli.ms += performance.now() - MR.gizli.t; MR.gizli.t = 0; window._mrOlay('on-plan'); } }catch(e){} }); }catch(e){}
+  try{ if(window.PerformanceObserver && (PerformanceObserver.supportedEntryTypes || []).indexOf('longtask') >= 0){
+    _mrUzunGorev = new PerformanceObserver(function(l){ try{ if(!MR) return; l.getEntries().forEach(function(e){ MR.uzun.n++; MR.uzun.ms += e.duration; if(e.duration > MR.uzun.en) MR.uzun.en = e.duration; }); }catch(e){} });
+    _mrUzunGorev.observe({ type:'longtask', buffered:false }); } }catch(e){}
+  try{ var hk = function(m){ try{ if(!MR) return; MR.hata.n++; if(MR.hata.L.length < 8) MR.hata.L.push([_mrSn(), String(m || '').slice(0, 140)]); }catch(e){} };
+    window.addEventListener('error', function(e){ hk((e && (e.message || (e.error && e.error.message))) + ' @' + String((e && e.filename) || '').split('/').pop() + ':' + ((e && e.lineno) || 0)); });
+    window.addEventListener('unhandledrejection', function(e){ var r = e && e.reason; hk('söz: ' + ((r && (r.message || r.code)) || r)); }); }catch(e){}
+}
+function _mrPil(cb){ try{ if(!navigator.getBattery) return cb(null); navigator.getBattery().then(function(b){ cb({ y:Math.round(b.level * 100), sarj:!!b.charging }); }, function(){ cb(null); }); }catch(e){ cb(null); } }
+function _mrBasla(){
+  try{
+    _mrBaglantiDinle();
+    MR = { p0:performance.now(), bas:Date.now(), surum:window.APP_BUILD || '?', tur:_mrTur(), cihaz:_mrCihaz(), ag:{ bas:_mrAg(), deg:0 },
+      bag:{ kopma:0, kopukMs:0, enUzunMs:0, kopT:0, bas:window._mrBagli !== false }, gizli:{ n:0, ms:0, t:0 }, uzun:{ n:0, ms:0, en:0 }, hata:{ n:0, L:[] },
+      dilim:[], d:{ n:0, t:0, k50:0, k100:0, en:0 }, yigin:{ bas:_mrYigin(), en:_mrYigin() }, oda:{ rttEn:0, rttT:0, rttN:0, araEn:0 }, olay:[], isi:0, pil:null };
+    _mrPil(function(p){ if(MR) MR.pil = { bas:p }; });
+    window._mrOlay('basla', MR.tur);
+    if(window._ekranKaydi) window._mrOlay('ekran-kaydi', 'acik'); if(window._bellekDar) window._mrOlay('bellek-dar');
+    clearInterval(window._mrZam); window._mrZam = setInterval(function(){ _mrCanliYaz(false); }, 60000);
+  }catch(e){ MR = null; }
+}
+function _mrKare(dt){
+  if(!MR) return;
+  var D = MR.d; D.n++; D.t += dt; if(dt > 0.05) D.k50++; if(dt > 0.1) D.k100++; if(dt > D.en) D.en = dt;
+  if(D.t >= 30) _mrDilim();
+}
+function _mrDilim(){
+  var D = MR.d; if(!D.n || !D.t) return;
+  {
+    var y = _mrYigin(); if(y > MR.yigin.en) MR.yigin.en = y;
+    var rtt = 0; try{ if(window._sahaOdaHost || window._sahaOdaKonuk){ rtt = Math.round(ODA_AG.rtt || 0); if(rtt){ MR.oda.rttT += rtt; MR.oda.rttN++; MR.oda.rttEn = Math.max(MR.oda.rttEn, rtt); }
+      var A = ODA_AG.araliklar || []; if(A.length){ var en = Math.max.apply(null, A); MR.oda.araEn = Math.max(MR.oda.araEn, Math.round(en)); } } }catch(e){}
+    MR.dilim.push([_mrSn(), Math.round(D.n / D.t), D.k50, D.k100, Math.round(D.en * 1000), window._otoKalite || 0, rtt, y]);
+    if(MR.dilim.length > 80) MR.dilim.splice(1, 1);
+    MR.d = { n:0, t:0, k50:0, k100:0, en:0 };
+  }
+}
+function _mrOzet(bitti){
+  var M = MR, ust = function(o){ var r = {}; for(var k in o) if(k !== 't' && k !== 'kopT') r[k] = typeof o[k] === 'number' ? Math.round(o[k]) : o[k]; return r; };
+  var o = { surum:M.surum, tur:M.tur, bas:M.bas, sure_sn:_mrSn(), bitti:!!bitti, cihaz:M.cihaz, agBas:M.ag.bas, agSon:_mrAg(), agDegisim:M.ag.deg,
+    db:ust(M.bag), gizli:ust(M.gizli), uzunGorev:ust(M.uzun), hata:M.hata, yiginMB:M.yigin, pil:M.pil, isi:M.isi,
+    oda:M.oda.rttN ? { rttOrt:Math.round(M.oda.rttT / M.oda.rttN), rttEn:M.oda.rttEn, paketAraEn:M.oda.araEn } : null,
+    pr:(function(){ try{ return renderer.getPixelRatio(); }catch(e){ return 0; } })(), ekranKaydi:!!window._ekranKaydi, bellekDar:!!window._bellekDar,
+    dilim:M.dilim, olay:M.olay, ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 160) };
+  if(M.bag.kopT) o.db.suAnKopuk = true;
+  return o;
+}
+function _mrCanliYaz(bitti){
+  try{ if(!MR || typeof fbDb === 'undefined' || !fbDb) return; fbDb.ref('diagnostics/macCanli/' + _mrDev()).set(JSON.parse(JSON.stringify(_mrOzet(bitti)))).catch(function(){}); }catch(e){}
+}
+function _mrBitir(yarim){
+  try{
+    if(!MR) return; clearInterval(window._mrZam);
+    if(MR.d.n > 30) _mrDilim();   // son yarım dilim
+    var bitis = function(){
+      try{ var o = JSON.parse(JSON.stringify(_mrOzet(true))); o.yarim = !!yarim; MR = null;
+        if(typeof fbDb === 'undefined' || !fbDb) return;
+        fbDb.ref('diagnostics/macRapor/' + _mrDev() + '_' + o.bas).set(o).catch(function(){});
+        fbDb.ref('diagnostics/macCanli/' + _mrDev()).set(o).catch(function(){}); }catch(e){ MR = null; }
+    };
+    _mrPil(function(p){ try{ if(MR){ MR.pil = MR.pil || {}; MR.pil.son = p; } }catch(e){} bitis(); });
+  }catch(e){ MR = null; }
+}
+window.__appIsi = function(d){ try{ d = +d || 0; if(MR){ if(d > MR.isi) MR.isi = d; window._mrOlay('isi', d); } }catch(e){} };
 var _mPerf = null;
 function _mPerfKare(dt){
   try{
     if(typeof running === 'undefined' || !running || bitti || duraklat || document.hidden || window._sahaIzleModu) return;
     if(!_mPerf) try{ _PF.L = []; }catch(e){}
+    if(!_mPerf) _mrBasla();
+    _mrKare(dt);
     var P = _mPerf || (_mPerf = { n:0, t:0, k34:0, k50:0, k100:0, enUzun:0, kalite0:window._otoKalite || 0, kaliteDeg:0, sonKalite:window._otoKalite || 0 });
     P.n++; P.t += dt; if(dt > 0.034) P.k34++; if(dt > 0.05) P.k50++; if(dt > 0.1) P.k100++; if(dt > P.enUzun) P.enUzun = dt;
     if((window._otoKalite || 0) !== P.sonKalite){ P.kaliteDeg++; P.sonKalite = window._otoKalite || 0; }
@@ -21381,6 +21485,7 @@ function _mPerfKare(dt){
 function _mPerfYaz(yarim){
   try{
     var P = _mPerf; _mPerf = null;
+    try{ if(P && P.n >= 300) _mrBitir(yarim); else MR = null; }catch(e){}
     if(!P || P.n < 300) return;
     P.yarim = !!yarim;   // maç bitmeden menüye dönüldü
     var dk = P.t / 60;
@@ -21569,7 +21674,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-13-K';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-14-A';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -33893,6 +33998,7 @@ function basla(yeniMod){
 }
 function baslatDugme(m){
   return () => {
+    window._mrMod = m;
     if(m !== 'antrenman' && sahaAskiEngel()) return;       // askıdaki kullanıcı maç oynayamaz (antrenman serbest)
     // Oda maçı DEĞİLSE oda süresi sıfırlanır: bir arkadaş maçından sonra bütün lig
     // maçlarının o süreyle oynanması, fark edilmesi zor bir hata olurdu.

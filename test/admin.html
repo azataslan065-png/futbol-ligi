@@ -3402,7 +3402,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-13-K';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-14-A';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true, dosya:'admin', kap:function(){ return document.getElementById('loginWrap'); }, giris:function(){ var e = document.getElementById('loginWrap'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // yönetici geçebilir
@@ -9249,18 +9249,47 @@ var KY_TUR = { gol:'Gol', golY:'Gol yorumu', sut:'Şut', kurtaris:'Kurtarış', 
   pas:'Pas', tac:'Taç', tacY:'Taç yorumu', kale:'Kale vuruşu', korner:'Korner', kaleciAldi:'Kaleci topu aldı', serbest:'Serbest vuruş', direk:'Direk', direkY:'Direk yorumu',
   avantaj:'Avantaj', degisiklik:'Oyuncu değişikliği', ceza:'Ceza', basla:'Maç başı', baslaY:'Maç başı yorumu', ikinci:'İkinci yarı', ikinciY:'İkinci yarı yorumu',
   devre:'Devre arası', devreY:'Devre yorumu', uzatma:'Uzatma', uzatmaY:'Uzatma yorumu', son:'Maç sonu', durgun:'Sakin an', durgunY:'Sakin an yorumu', macOnu:'Maç önü', stadyum:'Stadyum' };
-function _kyTurYaz(k){ var t = (k.tur || []).map(function(x){ return KY_TUR[x] || x; }); if(k.stad) t.unshift('Stadyum: ' + k.stad); if(k.dkMax) t.push('ilk ' + k.dkMax + ' dk'); return t.join(' · '); }
+function _kyTurYaz(k){ if(k.etiket) return k.etiket; var t = (k.tur || []).map(function(x){ return KY_TUR[x] || x; }); if(k.stad) t.unshift('Stadyum: ' + k.stad); if(k.dkMax) t.push('ilk ' + k.dkMax + ' dk'); return t.join(' · '); }
 function _kyGrup(L){   // diyalog kayıtları dlg_NNN altında, parça sırasına göre
   var G = {}, sira = [];
   L.forEach(function(k){ var m = /^dlg_(\d+)_\d+$/.exec(k.id); if(!m) return; if(!G[m[1]]){ G[m[1]] = []; sira.push(m[1]); } G[m[1]].push(k); });
   return sira.map(function(n){ return { id:'dlg_' + n, no:+n, parca:G[n].sort(function(a, b){ return String(a.id).localeCompare(String(b.id), 'tr', { numeric:true }); }) }; });
+}
+/* SES KAYIT SAYFASI KAYITLARI (2026-11-14-A, kullanıcı: "SAHA'da kayıtlı birkaç spiker sesi var, neden burada görünmüyor?"). KÖK SEBEP:
+   bu liste yalnızca uygulamayla gelen hazır kayıtları (ortak/ses/kayit/liste.json) gösteriyordu; test ortamında 82 hazır kaydın hepsi
+   daha önce silinmiş (kayitSilinen). Ses kayıt sayfasında (ses-kayit.html) kaydedilen anonslar (sahaGorunum/anonsSes: sabit cümleler,
+   takım/oyuncu adları, gol anonsu) ve isim kayıtları (sahaGorunum/isimSes/{rol}/{ad}/{ton}) hiç listelenmiyordu. Artık bunlar da Spiker /
+   Yorumcu sekmelerinde görünür, dinlenir ve silinir (silme kaydı veritabanından kaldırır; dosya depodan da silinir). */
+var _kyFb = { anons:{}, isim:{} };
+(function kyFbDinle(){
+  try{
+    if(typeof firebase === 'undefined' || !firebase.apps || !firebase.apps.length){ setTimeout(kyFbDinle, 1200); return; }
+    firebase.database().ref('sahaGorunum/anonsSes').on('value', function(sn){ _kyFb.anons = sn.val() || {}; try{ kyCiz(); }catch(e){} }, function(err){ DiagSil('kyFbAnons', err); });
+    firebase.database().ref('sahaGorunum/isimSes').on('value', function(sn){ _kyFb.isim = sn.val() || {}; try{ kyCiz(); }catch(e){} }, function(err){ DiagSil('kyFbIsim', err); });
+  }catch(e){ DiagSil('kyFbDinle', e); setTimeout(kyFbDinle, 2000); }
+})();
+var _KY_TON = { normal:'Normal', heyecan:'Heyecanlı', bagir:'Bağırarak' };
+function _kyAnonsTur(k){
+  if(k === '_golBagir') return 'Gol anonsu (Gooool!)'; if(/^n_/.test(k)) return 'Forma numarası'; if(/^oi_/.test(k)) return 'Gol anonsu · ad';
+  if(/^os_/.test(k)) return 'Taraftar soyadı'; if(/^o_/.test(k)) return 'Oyuncu adı'; if(/^t_/.test(k)) return 'Takım adı'; if(/^_/.test(k)) return 'Sabit cümle'; return 'Anons';
+}
+function _kyFbListe(){
+  var S = [], Y = [], A = _kyFb.anons || {}, I = _kyFb.isim || {};
+  Object.keys(A).forEach(function(k){ var x = A[k]; if(!x || !x.url) return;
+    S.push({ id:'fb:anonsSes/' + k, rol:'spiker', m:String(x.m || k), etiket:'Ses kayıt sayfası · ' + _kyAnonsTur(k), url:x.url, t:x.t || 0, fb:'anonsSes/' + k, sira:0 }); });
+  Object.keys(I).forEach(function(r){ var R = I[r] || {}; Object.keys(R).forEach(function(k){ var T = R[k] || {}; Object.keys(T).forEach(function(ton){ var x = T[ton]; if(!x || !x.url) return;
+    var o = { id:'fb:isimSes/' + r + '/' + k + '/' + ton, rol:r === 'yorumcu' ? 'yorumcu' : 'spiker', m:String(x.m || k), etiket:'Ses kayıt sayfası · İsim · ' + (_KY_TON[ton] || ton), url:x.url, t:x.t || 0, fb:'isimSes/' + r + '/' + k + '/' + ton, sira:1 };
+    (o.rol === 'yorumcu' ? Y : S).push(o); }); }); });
+  var sr = function(a, b){ return (a.sira - b.sira) || a.etiket.localeCompare(b.etiket, 'tr') || a.m.localeCompare(b.m, 'tr'); };
+  return { spiker:S.sort(sr), yorumcu:Y.sort(sr) };
 }
 function _kyVeri(){
   var T = (window.SahaSes && SahaSes.kayitTum) ? SahaSes.kayitTum() : [], sil = (_sahaSesVeri && _sahaSesVeri.kayitSilinen) || {};
   T.forEach(function(k){ k.gizli = !!sil[k.id] && !(k.t && k.t > +sil[k.id]); });   // silindikten sonra yeniden eklenen kayıt görünür
   var tek = T.filter(function(k){ return !/^dlg_/.test(k.id); }), D = _kyGrup(T);
   D.forEach(function(g){ g.gizli = g.parca.every(function(k){ return k.gizli; }); });
-  return { spiker:tek.filter(function(k){ return k.rol === 'spiker'; }), yorumcu:tek.filter(function(k){ return k.rol === 'yorumcu'; }), diyalog:D };
+  var F = _kyFbListe();
+  return { spiker:F.spiker.concat(tek.filter(function(k){ return k.rol === 'spiker'; })), yorumcu:F.yorumcu.concat(tek.filter(function(k){ return k.rol === 'yorumcu'; })), diyalog:D };
 }
 function spkSesCiz(){ kyCiz(); }
 function kySekme(t){ KY_SEKME = t; KY_SECILI = {}; kyCiz(); }
@@ -9269,8 +9298,7 @@ function kyCiz(){
   try{
     var kut = qs('kyListe'); if(!kut) return;
     if(!window.SahaSes || !SahaSes.kayitTum){ admHtml(kut, '<div class="ses2-bos">Ses katmanı yüklenemedi.</div>'); return; }
-    if(!SahaSes.kayitHazir()){ admHtml(kut, '<div class="ses2-bos">Kayıtlar yükleniyor…</div>');
-      SahaSes.kayitYukle().then(function(l){ if(l) kyCiz(); else admHtml(kut, '<div class="ses2-bos">Kayıt listesi okunamadı.</div>'); }); return; }
+    if(!SahaSes.kayitHazir() && !window._kyYukDenendi){ window._kyYukDenendi = true; SahaSes.kayitYukle().then(function(){ kyCiz(); }, function(){ kyCiz(); }); }
     var V = _kyVeri(), A = { spiker:V.spiker.filter(function(k){ return !k.gizli; }), yorumcu:V.yorumcu.filter(function(k){ return !k.gizli; }), diyalog:V.diyalog.filter(function(g){ return !g.gizli; }) };
     var sayT = A.spiker.length + A.yorumcu.length + A.diyalog.reduce(function(n, g){ return n + g.parca.length; }, 0);
     qs('kySay').textContent = sayT + ' kayıt'; qs('kySayS').textContent = A.spiker.length; qs('kySayY').textContent = A.yorumcu.length; qs('kySayD').textContent = A.diyalog.length;
@@ -9301,8 +9329,12 @@ function kySil(ids){
   var tum = _kyAc(ids); if(!tum.length) return;
   var ad = ids.length > 1 ? ids.length + (KY_SEKME === 'diyalog' ? ' diyalog' : ' kayıt') : (KY_SEKME === 'diyalog' ? 'Bu diyalog' : 'Bu kayıt');
   ptOnay(ad + ' kalıcı olarak silinsin mi? Bu işlem geri alınamaz; kayıt hiçbir maçta çalınmaz ve kayıt sayfasında kaydedilmemiş olarak görünür.', { baslik:'Kaydı Sil', ikon:'', tehlikeli:true, tamamYazi:'Sil' }).then(function(ok){ if(!ok) return;
-    var u = {}, t = Date.now(); tum.forEach(function(id){ u[id] = t; });
-    _sahaSesRef('kayitSilinen').update(u).then(function(){ ids.forEach(function(id){ delete KY_SECILI[id]; }); toast(ad + ' silindi'); })
+    var u = {}, t = Date.now(), fb = {}, V0 = _kyVeri(), urls = [];
+    tum.forEach(function(id){ if(/^fb:/.test(id)){ fb[id.slice(3)] = null; var k = V0.spiker.concat(V0.yorumcu).find(function(x){ return x.id === id; }); if(k && k.url) urls.push(k.url); } else u[id] = t; });
+    var isler = [];
+    if(Object.keys(fb).length) isler.push(firebase.database().ref('sahaGorunum').update(fb).then(function(){ urls.forEach(function(x){ try{ deleteOwnSupabaseFileIfAny(x); }catch(e){} }); }));
+    if(Object.keys(u).length) isler.push(_sahaSesRef('kayitSilinen').update(u));
+    Promise.all(isler).then(function(){ ids.forEach(function(id){ delete KY_SECILI[id]; }); toast(ad + ' silindi'); })
       .catch(function(e){ toast('Silinemedi: ' + ((e && e.message) || ''), 'er'); }); });
 }
 function kySeciliSil(){ var ids = Object.keys(KY_SECILI); if(ids.length) kySil(ids); }
@@ -9310,9 +9342,12 @@ function kyDinle(id){
   try{
     if(!window.SahaSes) return;
     SahaSes.sustur();
-    if(KY_CALAN === id){ KY_CALAN = null; kyCiz(); return; }
+    if(KY_CALAN === id){ KY_CALAN = null; try{ if(window._kyAu) window._kyAu.pause(); }catch(e){} kyCiz(); return; }
     KY_CALAN = id; kyCiz();
     var bit = function(){ if(KY_CALAN === id){ KY_CALAN = null; kyCiz(); } };
+    if(/^fb:/.test(id)){ var V = _kyVeri(), k = V.spiker.concat(V.yorumcu).find(function(x){ return x.id === id; });
+      if(!k){ bit(); return; } try{ if(window._kyAu) window._kyAu.pause(); }catch(e){}
+      var au = window._kyAu = new Audio(k.url); au.onended = au.onerror = bit; au.play().catch(function(e){ bit(); var d = qs('spkSesDurum'); if(d) d.textContent = 'Çalınamadı: ' + ((e && e.message) || ''); }); return; }
     SahaSes.kayitCal(id).then(bit, function(e){ bit(); var d = qs('spkSesDurum'); if(d) d.textContent = 'Çalınamadı: ' + ((e && e.message) || ''); });
   }catch(e){ DiagSil('kyDinle', e); }
 }

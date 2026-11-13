@@ -82,6 +82,7 @@ public class Ana extends Activity {
         setVolumeControlStream(AudioManager.STREAM_MUSIC);
         try { getContentResolver().registerContentObserver(Settings.System.CONTENT_URI, true, sesGozcu); } catch (Exception e) { }
         Teshis.olay("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
+        sensorKur();
         kur();
         // (2026-11-07) Sayfa, etkinlik penceresi kurulduktan sonra yüklenir (bkz. SAYFA BEKÇİSİ).
         h.post(() -> { if (w != null) { basladi = false; w.loadUrl(BuildConfig.ADRES); bekciKur(); } });   // (2026-11-06) sayfa her açılışta baştan yüklenir
@@ -307,6 +308,8 @@ public class Ana extends Activity {
         // sayfa o an henüz yüklenmeye başlamamıştı (boş ölçüldü) ve sayfa gereksiz yere baştan yükleniyordu. Artık yalnızca yüklenmiş sayfaya bakılır.
         if (w != null && sayfaHazir && w.getUrl() != null && w.getUrl().startsWith("http")) bosDenetle(w, 2500); }
     @Override protected void onDestroy() {
+        try { if (agGozcu != null) ((android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE)).unregisterNetworkCallback(agGozcu); agGozcu = null; } catch (Throwable e) { }
+        try { if (isiGozcu != null && Build.VERSION.SDK_INT >= 29) ((android.os.PowerManager) getSystemService(POWER_SERVICE)).removeThermalStatusListener(isiGozcu); isiGozcu = null; } catch (Throwable e) { }
         Teshis.olay("kapandi", isFinishing() ? "kullanıcı" : "sistem", ""); Teshis.gonder(); h.removeCallbacks(bekci); Guncelle.sifirla(this); if (etkinAna == this) { etkinAna = null; arkaOynat = false; Arka.durdur(this); }
         try { getContentResolver().unregisterContentObserver(sesGozcu); } catch (Exception e) { }
         if (w != null) { kok.removeView(w); w.destroy(); w = null; }   // eski sayfa arka planda açık kalmasın (iki oturum çakışırdı)
@@ -353,6 +356,37 @@ public class Ana extends Activity {
                 ekranKaydi(ilk == WindowManager.SCREEN_RECORDING_STATE_VISIBLE);
             } catch (Throwable e) { Teshis.yaz("ekran-kaydi", "izlenemiyor", String.valueOf(e.getMessage())); }
         }
+    }
+    /* CİHAZ SENSÖRLERİ (2026-11-14-A, kullanıcı: "bütün hata yakalama kodları ile sensörleri güçlendirip eksik olan yerlere ekle; pazar farklı
+       cihazlarla test maçları yapılacak"). Ağ değişimi (Wi-Fi / mobil / kopma, hız) ve cihaz ısınması (Android 10+) teşhis olay kaydına yazılır;
+       ısınma sayfaya da iletilir (bkz. saha.html MAÇ RAPORU). */
+    private android.net.ConnectivityManager.NetworkCallback agGozcu;
+    private String agSon = "";
+    private android.os.PowerManager.OnThermalStatusChangedListener isiGozcu;
+    private void sensorKur() {
+        try {
+            final android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            if (cm != null && Build.VERSION.SDK_INT >= 24 && agGozcu == null) {
+                agGozcu = new android.net.ConnectivityManager.NetworkCallback() {
+                    @Override public void onCapabilitiesChanged(android.net.Network n, android.net.NetworkCapabilities c) {
+                        String t = c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ? "wifi" : (c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) ? "mobil" : (c.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) ? "vpn" : "diger"));
+                        String d = t + (c.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) ? "" : " (internet doğrulanmadı)");
+                        if (!d.equals(agSon)) { agSon = d; Teshis.olay("ag", d + " " + (c.getLinkDownstreamBandwidthKbps() / 1000) + " Mb/sn", ""); }
+                    }
+                    @Override public void onLost(android.net.Network n) { agSon = "yok"; Teshis.olay("ag", "bağlantı koptu", ""); Teshis.gonder(); }
+                };
+                cm.registerDefaultNetworkCallback(agGozcu);
+            }
+        } catch (Throwable e) { Teshis.yaz("sensor", "ağ izlenemiyor", String.valueOf(e.getMessage())); }
+        try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+                if (pm != null && isiGozcu == null) pm.addThermalStatusListener(getMainExecutor(), isiGozcu = d -> {
+                    Teshis.olay("isi", "durum " + d + (d >= 3 ? " (ciddi: sistem performansı düşürür)" : ""), ""); if (d >= 3) Teshis.gonder();
+                    if (w != null) w.evaluateJavascript("try{window.__appIsi&&window.__appIsi(" + d + ")}catch(e){}", null);
+                });
+            }
+        } catch (Throwable e) { Teshis.yaz("sensor", "ısı izlenemiyor", String.valueOf(e.getMessage())); }
     }
     @Override public void onTrimMemory(int seviye) {
         super.onTrimMemory(seviye);

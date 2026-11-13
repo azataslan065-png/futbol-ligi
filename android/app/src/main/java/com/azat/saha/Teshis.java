@@ -33,6 +33,26 @@ final class Teshis {
         cihaz = Build.MANUFACTURER + " " + Build.MODEL + " Android " + Build.VERSION.RELEASE;
         ua = "SahaApp/" + BuildConfig.FLAVOR + " " + BuildConfig.VERSION_NAME + " " + cihaz;
         try { ua += " WebView/" + android.webkit.WebView.getCurrentWebViewPackage().versionName; } catch (Throwable e) { }
+        /* ÇÖKME KAYDI (2026-11-14-A, pazar cihaz denemeleri için): uygulama çökerse kayıt sırası bellekte kaybolurdu. Çökme anında hata ve son
+           olaylar telefona (eşzamanlı) yazılır; bir sonraki açılışta teşhis kaydına gönderilir. */
+        try {
+            String c0 = sp.getString("cokme", null);
+            if (c0 != null) { sp.edit().remove("cokme").commit(); yaz("cokme", c0, "önceki oturum"); }
+            if (!(Thread.getDefaultUncaughtExceptionHandler() instanceof Yakala)) Thread.setDefaultUncaughtExceptionHandler(new Yakala(Thread.getDefaultUncaughtExceptionHandler()));
+        } catch (Throwable e) { }
+    }
+    private static final class Yakala implements Thread.UncaughtExceptionHandler {
+        private final Thread.UncaughtExceptionHandler once;
+        Yakala(Thread.UncaughtExceptionHandler o) { once = o; }
+        @Override public void uncaughtException(Thread t, Throwable e) {
+            try {
+                java.io.StringWriter sw = new java.io.StringWriter(); e.printStackTrace(new java.io.PrintWriter(sw));
+                StringBuilder b = new StringBuilder(); b.append(t.getName()).append(": ").append(sw.toString().length() > 1500 ? sw.toString().substring(0, 1500) : sw.toString());
+                synchronized (Teshis.class) { int n = SIRA.size(); for (int i = Math.max(0, n - 6); i < n; i++) b.append(" | ").append(SIRA.get(i).optString("title")).append(" ").append(SIRA.get(i).optString("detail")); }
+                if (sp != null) sp.edit().putString("cokme", b.length() > 2500 ? b.substring(0, 2500) : b.toString()).commit();
+            } catch (Throwable x) { }
+            if (once != null) once.uncaughtException(t, e);
+        }
     }
     /** Gerçek sorun: hata kayıtlarına. */
     static void yaz(String baslik, String ayrinti, String yer) { ekle(baslik, ayrinti, yer, false); }
