@@ -155,6 +155,8 @@
       if(B.giris && ctx){ if(!B._an){ B._an = ctx.createAnalyser(); B._an.fftSize = 1024; B.giris.connect(B._an); } var d = new Float32Array(1024), t = 0; B._an.getFloatTimeDomainData(d); for(var i = 0; i < d.length; i++) t += d[i] * d[i]; o.rms = +Math.sqrt(t / d.length).toFixed(4); }
       if(B.st){ var a = B.st.getAudioTracks(); o.iz = a.map(function(x){ return x.readyState + (x.muted ? '/sessiz' : '') + (x.enabled ? '' : '/kapali'); }).join(','); }
       return o; }catch(e){ return 'hata ' + e.message; } };
+    // (2026-11-13-C) "Stadyum hoparlörü" etkisi: öğenin ses yoluna yankılı, dar bantlı ıslak kol eklenir/çıkarılır (bkz. sahaMuzikDenetle).
+    D.efekt = function(el, acik){ try{ var B = el && el._bsz; if(!B || !B.giris || !ctx) return false; if(!B.ef){ B.ef = window._stadEfektKur(ctx, B.giris, B.cikis); } B.ef.ayarla(!!acik); return true; }catch(e){ return false; } };
     D.uyandir = function(){ try{ if(ctx && ctx.state !== 'running' && !document.hidden) ctx.resume(); }catch(e){} };
     D.surdur = function(){ try{ if(ctx && ctx.state !== 'running') ctx.resume(); }catch(e){} };   // arka planda da (gizliyken) motoru açık tutar
     try{ document.addEventListener('visibilitychange', function(){ if(!document.hidden) D.uyandir(); }); }catch(e){}
@@ -343,7 +345,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-13-B</title>
+<title>SAHA — 3D Futbol v2026-11-13-C</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -11546,6 +11548,7 @@ function _adParca(ad){ var t = String(ad || '').trim().split(/\s+/).filter(Boole
 function golAnonsu(p){
   stadSesYukle().then(function(){ try{
     var I = _TSES.anons || {}, ad = p.ad || '', sl = _tsSlug(ad), ev = p.team === _evTaraf(), u = function(k){ return I[k] && I[k].url; };
+    try{ sesDurumOlay('gol anonsu: ' + (ev ? 'ev' : 'konuk') + ' ' + _tsSlug(ad).slice(0, 14) + (u('_golBagir') ? '' : ' (Gooool kaydı yok)')); }catch(_s){}   // (2026-11-13-C) teşhis
     if(!ev || !u('_golBagir')){ stadAnons('Golü atan oyuncu ' + ad, ['_gol', _oyuncuAnahtar(ad)], true); return; }
     var no = Number(p.no) || 0, a1 = [u('_golBagir'), no ? u('n_' + no) : null, u('oi_' + sl)].filter(Boolean), a2 = [u('oi_' + sl)].filter(Boolean);
     var M = ((_TSES.klip || {}).golMuzik || []).map(function(x){ return x.url; });
@@ -11564,10 +11567,19 @@ function golAnonsuCal(G){
     var x = { rol:'anons', metin:G.m || 'Gol!', onemli:true, ts:Date.now(), oncelik:2, gol:G }, i = 0;
     while(i < SPK.sira.length && SPK.sira[i].rol === 'anons') i++;
     SPK.sira.splice(i, 0, x); _spkSiradaki();
+    /* (2026-11-13-C, kullanıcı: "ev sahibi gol attığında 3. veya 5. gol gibi bazı gollerde anons çalmıyor"). Gol anonsu sıradan düşerse (sıra
+       temizlendi ya da çalmadan atıldı) 10 sn içinde bir kez yeniden sıraya girer; ne olduğu ses teşhis kartına yazılır. */
+    sesDurumOlay('gol anonsu sırada (' + SPK.sira.length + ', konuşuyor=' + !!SPK.konusuyor + ', çalan=' + ((SPK.calan && SPK.calan.rol) || '-') + ')');
+    setTimeout(function(){ try{ if(x.basladi) return; var sirada = SPK.sira.indexOf(x) >= 0;
+      sesDurumOlay('gol anonsu ' + (sirada ? 'hâlâ bekliyor (konuşuyor=' + !!SPK.konusuyor + ', çalan=' + ((SPK.calan && SPK.calan.rol) || '-') + ')' : 'sıradan düştü, yeniden') ); sesDurumKart();
+      if(!sirada && !x._tekrar){ x._tekrar = true; x.ts = Date.now(); var j = 0; while(j < SPK.sira.length && SPK.sira[j].rol === 'anons') j++; SPK.sira.splice(j, 0, x); _spkSiradaki(); }
+      else if(sirada && SPK.konusuyor && SPK.calan && SPK.calan !== x && Date.now() - (SPK.calan.basladi || 0) > 15000){ _spkKes(); _spkSiradaki(); }   // takılan konuşma anonsu bekletmesin
+    }catch(e){} }, 10000);
   }catch(e){ _sessiz(e, 'golAnonsuCal', 'saha_ses'); }
 }
 function _golCagriOku(G, bitti, gecerli){
   var _b = false, son = function(){ if(_b) return; _b = true; bitti(); };
+  try{ sesDurumOlay('gol anonsu çalıyor (' + ((G.a1 || []).length) + ' parça' + (G.soy ? ', tribün' : '') + (G.muzik ? ', müzik' : '') + ')'); }catch(e){}
   try{
     if(gecerli && !gecerli()) return;
     if(!ac || !window.StadSes){ setTimeout(son, 50); return; }
@@ -14477,6 +14489,20 @@ try{ sahaArkaplanDinle(); }catch(e){_sessiz(e,'sahaArkaplanDinle:cagri','saha_ag
    ŞİMDİ: müzik ve tuş sesi Web Audio ile (çözülmüş ses tamponu) çalınır - tarayıcı bunu medya oturumu saymaz, bildirim
    çıkmaz. Bellek için yalnızca çalan parça çözülmüş tutulur. Müzik yalnızca kullanıcı adı/şifreyle giriş yapılmışsa
    çalar; maça girince durur, menüye dönünce LİSTENİN BAŞINDAN (karışıksa rastgele bir parçadan) başlar. */
+/* STADYUM ORTAMI (2026-11-13-C, kullanıcı: "maç sonu arka plan müziği, kullanıcı ana sayfaya dön butonuna basmadıysa stadyum ortamındaymış gibi mevcut
+   sesin %20 daha kısığında çalsın; ana sayfaya dön butonuna tıkladığında müzik normale dönsün"). Maç sonu ekranı açıkken müzik %80 düzeyde ve stat
+   hoparlöründen yayılıyormuş gibi (alçak/yüksek frekanslar kırpılmış, tribünden geri gelen yankılı) çalar; ana sayfada etki kalkar, düzey %100. */
+window._stadEfektKur = function(c, giris, cikis){
+  var hp = c.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 220;
+  var lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 4200;
+  var d1 = c.createDelay(1); d1.delayTime.value = 0.13; var fb = c.createGain(); fb.gain.value = 0.34;
+  var d2 = c.createDelay(1); d2.delayTime.value = 0.29; var fb2 = c.createGain(); fb2.gain.value = 0.22;
+  var islak = c.createGain(); islak.gain.value = 0;
+  giris.connect(hp); hp.connect(lp); lp.connect(d1); d1.connect(fb); fb.connect(d1); lp.connect(d2); d2.connect(fb2); fb2.connect(d2);
+  d1.connect(islak); d2.connect(islak); lp.connect(islak); islak.connect(cikis);
+  var kuru = null;
+  return { ayarla:function(a){ try{ var t = c.currentTime; islak.gain.cancelScheduledValues(t); islak.gain.setTargetAtTime(a ? 0.5 : 0, t, 0.3); }catch(e){ islak.gain.value = a ? 0.5 : 0; } } };
+};
 var SAHA_SES = { tus:'', tusSv:60, muzSv:45, karisik:false, liste:[], i:0, kilitAcik:false,
                  ctx:null, gain:null, src:null, buf:null, bufUrl:'', yukleniyor:'', tusBuf:null, tusUrl:'', basaSar:false, hata:{} };
 function _sahaSesGenel(){ try{ if(AYAR.ses === false) return 0; var v = AYAR.sesSeviye; return (v == null ? 100 : v) / 100; }catch(e){ return 1; } }
@@ -14605,7 +14631,7 @@ function _sahaMuzikDur(){
    olunca ya da sayfa gizlenince çalan parça DURDURULUYOR, sonra baştan yeniden başlatılıyordu. ŞİMDİ: ses kapalı/düzey 0
    → parça sessizce sürer (yalnızca düzey 0); sayfa gizlenince ses motoru askıya alınır ve döndüğünde aynı noktadan
    devam eder. Parça yalnızca maça girince durur (maç bitince liste baştan) ya da çıkış yapılınca. */
-function _sahaMuzikDuzey(){ var _ms = document.getElementById('macSonuEkran'), _k = (_ms && _ms.style.display && _ms.style.display !== 'none') ? 0.85 : 1; /* (2026-11-10-E) 0,55 → 0,85: tribün ve kapanış anlatımının altında duyulmuyordu */ return (AYAR.muzik === false) ? 0 : Math.max(0, Math.min(1, _k * _sahaSesGenel() * SAHA_SES.muzSv / 100 * ((AYAR.sesMuzik == null ? 100 : AYAR.sesMuzik) / 100))); }
+function _sahaMuzikDuzey(){ var _ms = document.getElementById('macSonuEkran'), _k = (_ms && _ms.style.display && _ms.style.display !== 'none') ? 0.8 : 1; /* (2026-11-13-C) maç sonu ekranında %80 (bkz. STADYUM ORTAMI) */ return (AYAR.muzik === false) ? 0 : Math.max(0, Math.min(1, _k * _sahaSesGenel() * SAHA_SES.muzSv / 100 * ((AYAR.sesMuzik == null ? 100 : AYAR.sesMuzik) / 100))); }
 function sahaMuzikDenetle(){
   try{
     var macta = _sahaMacta();
@@ -14620,6 +14646,10 @@ function sahaMuzikDenetle(){
     if(document.hidden){ if(ctx.state === 'running'){ try{ ctx.suspend(); }catch(e){self.__ds&&self.__ds(12299,e)} } if(_el && !_el.paused){ try{ _el.pause(); }catch(e){} } return; }
     if(ctx.state === 'suspended'){ try{ ctx.resume(); }catch(e){self.__ds&&self.__ds(12300,e)} }
     SAHA_SES.gain.gain.value = _sahaMuzikDuzey();
+    try{ var _msA = (function(){ var m = document.getElementById('macSonuEkran'); return !!(m && m.style.display && m.style.display !== 'none'); })();
+      if(_el && window.ptBildirimsizSes && window.ptBildirimsizSes.efekt) window.ptBildirimsizSes.efekt(_el, _msA);
+      if(SAHA_SES.src && !_el){ if(!SAHA_SES.ef) SAHA_SES.ef = window._stadEfektKur(ctx, SAHA_SES.gain, ctx.destination); SAHA_SES.ef.ayarla(_msA); }
+      else if(SAHA_SES.ef && !_msA) SAHA_SES.ef.ayarla(false); }catch(_ef){}
     if(_el){ try{ _el.volume = Math.max(0, Math.min(1, _sahaMuzikDuzey())); if(_el.paused && !_el.ended && _el.currentSrc) _el.play().catch(function(){}); }catch(e){} }
     /* MÜZİK BEKÇİSİ (2026-10-23-A, kullanıcı: "bazı durumlarda arka plan müziği çalmıyor"). KÖK SEBEPLER: (1) akışla çalan
        parça ağ takıldığında ne hata ne bitiş olayı üretiyor, öğe sonsuza dek "yükleniyor"da kalıyordu - SAHA_SES.src dolu
@@ -21521,7 +21551,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-13-B';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-13-C';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };

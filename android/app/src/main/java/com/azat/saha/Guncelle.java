@@ -155,32 +155,29 @@ final class Guncelle {
         kaydir.addView(dis, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         ekran.addView(kaydir, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        TextView bas = yazi(a, "Uygulamanın Yeni Bir Sürümü Mevcut", 19, Color.WHITE, true);
+        /* GÜNCELLEME KARTI (2026-11-13-C, kullanıcı: "ilgili bütün güncelleme ekranlarını buna benzet" - verdiği görsel): mor daire içinde "i",
+           "Uygulamanın Yeni Bir Sürümü Mevcut", uygulama adı, mor altı çizili "Yenilikler" ve notu, ince ayraç, mor "i" ile öneri satırı, yeşil
+           "Güncelle". Aynı düzen sayfaların güncelleme ekranında da var (bkz. ortak.js SahaGuncelleme). */
+        kart.setPadding(dp(a, 24), dp(a, 26), dp(a, 24), dp(a, 22));
+        kart.setBackground(zemin(Color.parseColor("#15152A"), dp(a, 26), Color.parseColor("#3A3460")));
+        TextView ik = iDaire(a, 68, 34); LinearLayout.LayoutParams ikp = new LinearLayout.LayoutParams(dp(a, 68), dp(a, 68)); ikp.gravity = Gravity.CENTER_HORIZONTAL; ikp.bottomMargin = dp(a, 16);
+        kart.addView(ik, ikp);
+        TextView bas = yazi(a, "Uygulamanın Yeni Bir Sürümü Mevcut", 22, Color.WHITE, true);
         bas.setGravity(Gravity.CENTER); kart.addView(bas);
-        TextView alt = yazi(a, a.getString(R.string.app_name), 13, Color.parseColor("#9AA3B8"), false);
-        alt.setGravity(Gravity.CENTER); alt.setPadding(0, dp(a, 4), 0, dp(a, 14)); kart.addView(alt);
-
-        // (2026-11-07) Kullanıcının verdiği düzen: Yüklü Sürüm, Gereken Sürüm, Güncelleme Boyutu, Güncellenme Tarihi, Yenilikler.
-        String[][] satir = {
-            {"Yüklü Sürüm", yerelAd},
-            {"Gereken Sürüm", ad},
-            {"Güncelleme Boyutu", mb(boyut)},
-            {"Güncellenme Tarihi", zaman > 0 ? new SimpleDateFormat("dd/MM/yyyy", new Locale("tr")).format(new Date(zaman)) : ""}
-        };
-        for (String[] s : satir) {
-            if (s[1].length() == 0) continue;
-            LinearLayout r = new LinearLayout(a); r.setPadding(0, dp(a, 5), 0, dp(a, 5));
-            TextView k = yazi(a, s[0], 14, Color.parseColor("#9AA3B8"), false);
-            TextView v = yazi(a, s[1], 14, Color.WHITE, true); v.setGravity(Gravity.END);
-            r.addView(k, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
-            r.addView(v, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            kart.addView(r);
-        }
-        TextView nb = yazi(a, "Yenilikler", 14, Color.parseColor("#9AA3B8"), false); nb.setPadding(0, dp(a, 12), 0, dp(a, 4)); kart.addView(nb);
-        TextView nt = yazi(a, "Güncelleme notları için Ayarlar > Yenilikler > Sürüm Notları adımını takip ederek en son sürümü kontrol edin.", 14, Color.WHITE, false);
-        nt.setLineSpacing(0, 1.25f); kart.addView(nt);
-        TextView bilgi = yazi(a, "Uygulamayı kullanmaya devam etmek için güncellemen gerekiyor. Girişin ve ayarların silinmez.", 12, Color.parseColor("#7C8499"), false);
-        bilgi.setPadding(0, dp(a, 12), 0, dp(a, 10)); kart.addView(bilgi);
+        TextView alt = yazi(a, a.getString(R.string.app_name), 16, Color.parseColor("#A9A6C9"), false);
+        alt.setGravity(Gravity.CENTER); alt.setPadding(0, dp(a, 6), 0, dp(a, 20)); kart.addView(alt);
+        TextView nb = yazi(a, "Yenilikler", 17, Color.parseColor("#B36BFF"), true); kart.addView(nb, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        View cizgi = new View(a); GradientDrawable cg = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, new int[]{ Color.parseColor("#B36BFF"), Color.parseColor("#7A3CF0") }); cg.setCornerRadius(dp(a, 2)); cizgi.setBackground(cg);
+        nb.measure(0, 0); LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(Math.max(dp(a, 60), nb.getMeasuredWidth()), dp(a, 3)); cp.topMargin = dp(a, 3); cp.bottomMargin = dp(a, 12); kart.addView(cizgi, cp);
+        TextView nt = yazi(a, "Güncelleme notları için Ayarlar > Yenilikler > Sürüm Notları adımını takip ederek en son sürümü kontrol edin.", 15, Color.parseColor("#ECEBF5"), false);
+        nt.setLineSpacing(0, 1.3f); kart.addView(nt);
+        View ayrac = new View(a); ayrac.setBackgroundColor(Color.parseColor("#2E2B4A")); LinearLayout.LayoutParams ap = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(a, 1)); ap.topMargin = dp(a, 18); ap.bottomMargin = dp(a, 16);
+        kart.addView(ayrac, ap);
+        LinearLayout bilgiS = new LinearLayout(a); bilgiS.setGravity(Gravity.CENTER_VERTICAL);
+        bilgiS.addView(iDaire(a, 34, 18), new LinearLayout.LayoutParams(dp(a, 34), dp(a, 34)));
+        TextView bilgi = yazi(a, "Uygulamayı kullanmaya devam etmek için güncellemenizi gerçekleştirmeniz önerilir.", 13.5f, Color.parseColor("#A9A6C9"), false);
+        bilgi.setPadding(dp(a, 14), 0, 0, 0); bilgi.setLineSpacing(0, 1.2f); bilgiS.addView(bilgi, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); bp.bottomMargin = dp(a, 16); kart.addView(bilgiS, bp);
 
         cubuk = new ProgressBar(a, null, android.R.attr.progressBarStyleHorizontal);
         cubuk.setMax(1000); cubuk.setVisibility(View.GONE); kart.addView(cubuk, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(a, 10)));
@@ -195,10 +192,17 @@ final class Guncelle {
         ekran.requestFocus();
     }
 
+    /** Mor degrade daire içinde "i" simgesi (bkz. GÜNCELLEME KARTI). */
+    private static TextView iDaire(Activity a, int capDp, float yaziSp) {
+        TextView t = new TextView(a); t.setText("i"); t.setGravity(Gravity.CENTER); t.setTextColor(Color.WHITE); t.setTextSize(TypedValue.COMPLEX_UNIT_SP, yaziSp);
+        t.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD_ITALIC)); t.setIncludeFontPadding(false);
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[]{ Color.parseColor("#A066FF"), Color.parseColor("#6A33E6") }); g.setShape(GradientDrawable.OVAL);
+        t.setBackground(g); return t;
+    }
     private static Button dugme(Activity a, String s, boolean ana) {
-        Button b = new Button(a); b.setText(s); b.setAllCaps(false); b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        Button b = new Button(a); b.setText(s); b.setAllCaps(false); b.setTextSize(TypedValue.COMPLEX_UNIT_SP, ana ? 18 : 15);
         b.setTypeface(Typeface.DEFAULT_BOLD); b.setTextColor(ana ? Color.parseColor("#0B0B14") : Color.WHITE);
-        b.setBackground(zemin(ana ? Color.parseColor("#3FCF8E") : Color.parseColor("#262A3B"), 24, 0)); b.setMinHeight(dp(a, 46));
+        b.setBackground(zemin(ana ? Color.parseColor("#32D28C") : Color.parseColor("#262A3B"), dp(a, 22), ana ? Color.parseColor("#5BE3A6") : 0)); b.setMinHeight(dp(a, 56));
         return b;
     }
     private static void dugmeleriKur(final Activity a, String anaYazi, final String url, final String ad, final long boyut, boolean zorunlu) {

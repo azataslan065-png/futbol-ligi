@@ -548,10 +548,14 @@ var SahaGuncelleme = (function(){
     setTimeout(bak, 1200); setInterval(bak, 600000);
     document.addEventListener('visibilitychange', function(){ if(!document.hidden) bak(); });
   }
+  function iDaire(cap, boy, ek){ return '<div style="' + (ek || '') + ';width:' + cap + 'px;height:' + cap + 'px;border-radius:50%;background:linear-gradient(135deg,#a066ff,#6a33e6);display:flex;align-items:center;justify-content:center;'
+    + 'color:#fff;font:italic 800 ' + boy + 'px/1 Georgia,serif;box-shadow:0 6px 18px rgba(122,60,240,.45)">i</div>'; }
+  function uygulamaAdi(){ var d = _o.dosya, ad = d === 'index' ? 'Puan Tablosu' : (d === 'saha' ? 'SAHA' : (d === 'admin' ? 'Admin Paneli' : (document.title || 'Uygulama')));
+    try{ if(/\/test\//.test(location.pathname)) ad += ' Test'; }catch(e){} return ad; }
   function esc(t){ return String(t == null ? '' : t).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
   function guncelle(){
     if(apkGomulu()){ try{ SahaApp.guncellemeDenetle(); }catch(e){} setTimeout(function(){ try{ var d = document.getElementById('sgGuncelleDug'), e2 = document.getElementById('sgBantDug');
-      if(d){ d.disabled = false; d.textContent = 'Şimdi güncelle'; } if(e2){ e2.disabled = false; e2.textContent = 'Güncelle'; } }catch(e){} }, 2500); return; }
+      if(d){ d.disabled = false; d.textContent = 'Güncelle'; } if(e2){ e2.disabled = false; e2.textContent = 'Güncelle'; } }catch(e){} }, 2500); return; }
     try{ var b = document.getElementById('sgGuncelleDug'); if(b){ b.disabled = true; b.textContent = 'Güncelleniyor…'; } }catch(e){}
     try{ if(_min) sessionStorage.setItem('sg-denendi-' + _min.build, String(Date.now())); }catch(e){}
     var isler = [];
@@ -581,12 +585,12 @@ var SahaGuncelleme = (function(){
   function bantKaldir(){ if(_bant){ try{ _bant.remove(); }catch(e){} _bant = null; kapKaydir(0); } }
   function bantGoster(){
     if(!_bant){ _bant = document.createElement('div'); _bant.id = 'sahaGuncelleBant'; document.body.appendChild(_bant); }
-    _bant.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483500;display:flex;align-items:center;gap:10px;flex-wrap:wrap;'
+    _bant.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:2147483500;display:flex;align-items:center;gap:12px;flex-wrap:wrap;'
       + 'padding:calc(10px + env(safe-area-inset-top,0px)) max(14px,env(safe-area-inset-right,0px)) 10px max(14px,env(safe-area-inset-left,0px));'
-      + 'background:#14301d;color:#eef2ee;border-bottom:1px solid rgba(255,255,255,.14);box-shadow:0 6px 20px rgba(0,0,0,.35);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif';
-    _bant.innerHTML = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#7ee0a0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex:none"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>'
-      + '<div style="flex:1;min-width:160px"><b style="display:block;font-size:14.5px">Yeni sürüm mevcut</b><span style="font-size:12.5px;opacity:.75">' + esc(_min.build) + (_min.mesaj ? ' · ' + esc(_min.mesaj) : ' · giriş yapmadan önce güncelleyebilirsin') + '</span></div>'
-      + '<button id="sgBantDug" type="button" style="min-height:40px;padding:0 18px;border:0;border-radius:999px;background:#3f8a45;color:#fff;font-weight:800;font-size:14px;cursor:pointer">Güncelle</button>';
+      + 'background:#15152a;color:#fff;border-bottom:1px solid #3a3460;box-shadow:0 6px 20px rgba(0,0,0,.4);font:14px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif';
+    _bant.innerHTML = iDaire(34, 19, 'flex:none')
+      + '<div style="flex:1;min-width:160px"><b style="display:block;font-size:14.5px">Uygulamanın Yeni Bir Sürümü Mevcut</b><span style="font-size:12.5px;color:#a9a6c9">' + esc(uygulamaAdi()) + (_min.mesaj ? ' · ' + esc(_min.mesaj) : ' · giriş yapmadan önce güncelleyebilirsin') + '</span></div>'
+      + '<button id="sgBantDug" type="button" style="min-height:42px;padding:0 20px;border:1px solid #5be3a6;border-radius:999px;background:#32d28c;color:#0b0b14;font-weight:800;font-size:14.5px;cursor:pointer">Güncelle</button>';
     _bant.querySelector('#sgBantDug').onclick = function(){ this.disabled = true; this.textContent = 'Güncelleniyor…'; guncelle(); };
     // Üstte sabit bir şerit (ör. test ortamı uyarısı) varsa bant onun altına iner.
     try{ var ust = 0; [].forEach.call(document.body.children, function(e){ if(e === _bant) return; var cs = getComputedStyle(e);
@@ -604,17 +608,21 @@ var SahaGuncelleme = (function(){
     try{ if(_o.ertele && _o.ertele()){ if(!_bekZ) _bekZ = setTimeout(function(){ _bekZ = 0; goster(); }, 5000); return; } }catch(e){}
     if(!_ov){ _ov = document.createElement('div'); _ov.id = 'sahaGuncelleEkran'; document.body.appendChild(_ov); }
     _ov._hedef = _min.build;
-    _ov.style.cssText = 'position:fixed;inset:0;z-index:2147483600;display:flex;align-items:center;justify-content:center;padding:20px;'
-      + 'background:rgba(6,12,9,.94);color:#eef2ee;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;text-align:center';
-    _ov.innerHTML = '<div style="max-width:380px;width:100%">'
-      + '<div style="width:64px;height:64px;margin:0 auto 16px;border-radius:20px;background:#3f8a45;display:flex;align-items:center;justify-content:center">'
-      + '<svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg></div>'
-      + '<div style="font-size:21px;font-weight:900;margin-bottom:8px">Yeni sürüm yayında</div>'
-      + '<div style="font-size:14px;line-height:1.55;opacity:.85;margin-bottom:6px">' + (_min.mesaj ? esc(_min.mesaj) : 'Uygulamanın yeni sürümü yüklendi. Devam etmek için güncelle; birkaç saniye sürer.') + '</div>'
-      + '<div style="font-size:12px;opacity:.6;margin-bottom:18px">Yüklü: ' + esc(window.APP_BUILD || '?') + ' · Gerekli: ' + esc(_min.build) + '</div>'
-      + '<button id="sgGuncelleDug" type="button" style="width:100%;min-height:48px;border:0;border-radius:14px;background:#3f8a45;color:#fff;font-size:16px;font-weight:800;cursor:pointer">Şimdi güncelle</button>'
-      + (_o.gecilebilir ? '<button id="sgGecDug" type="button" style="width:100%;min-height:44px;margin-top:10px;border:1px solid rgba(255,255,255,.25);border-radius:14px;background:transparent;color:#eef2ee;font-size:14px;font-weight:700;cursor:pointer">Şimdilik geç (yönetici)</button>' : '')
-      + '<div style="font-size:11.5px;opacity:.55;margin-top:14px;line-height:1.5">Güncelleme birkaç saniye sürer; hesabın ve takımın etkilenmez.</div></div>';
+    /* GÜNCELLEME KARTI (2026-11-13-C, kullanıcı: "ilgili bütün güncelleme ekranlarını buna benzet" - verdiği görsel). Uygulamadaki (APK)
+       güncelleme kartıyla aynı düzen: mor daire içinde "i", başlık, uygulama adı, "Yenilikler", ayraç, öneri satırı, yeşil "Güncelle". */
+    _ov.style.cssText = 'position:fixed;inset:0;z-index:2147483600;display:flex;align-items:center;justify-content:center;padding:18px;overflow:auto;'
+      + 'background:rgba(8,8,18,.96);color:#fff;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif';
+    _ov.innerHTML = '<div style="max-width:440px;width:100%;box-sizing:border-box;background:#15152a;border:1px solid #3a3460;border-radius:26px;padding:26px 24px 22px;box-shadow:0 24px 70px rgba(0,0,0,.5)">'
+      + iDaire(68, 36, 'margin:0 auto 16px')
+      + '<div style="font-size:23px;font-weight:800;line-height:1.25;text-align:center">Uygulamanın Yeni Bir Sürümü Mevcut</div>'
+      + '<div style="font-size:16px;color:#a9a6c9;text-align:center;margin:6px 0 20px">' + esc(uygulamaAdi()) + '</div>'
+      + '<div style="display:inline-block;font-size:18px;font-weight:800;color:#b36bff;border-bottom:3px solid #9b5cf6;padding-bottom:3px;margin-bottom:12px">Yenilikler</div>'
+      + '<div style="font-size:15.5px;line-height:1.55;color:#ecebf5">' + (_min.mesaj ? esc(_min.mesaj) : 'Güncelleme notları için Ayarlar &gt; Yenilikler &gt; Sürüm Notları adımını takip ederek en son sürümü kontrol edin.') + '</div>'
+      + '<div style="height:1px;background:#2e2b4a;margin:18px 0 16px"></div>'
+      + '<div style="display:flex;align-items:center;gap:14px;margin-bottom:18px">' + iDaire(34, 19, 'flex:none') + '<div style="font-size:13.5px;line-height:1.45;color:#a9a6c9">Uygulamayı kullanmaya devam etmek için güncellemenizi gerçekleştirmeniz önerilir.</div></div>'
+      + '<button id="sgGuncelleDug" type="button" style="width:100%;min-height:56px;border:1px solid #5be3a6;border-radius:22px;background:#32d28c;color:#0b0b14;font-size:18px;font-weight:800;cursor:pointer">Güncelle</button>'
+      + (_o.gecilebilir ? '<button id="sgGecDug" type="button" style="width:100%;min-height:44px;margin-top:10px;border:1px solid #3a3460;border-radius:22px;background:transparent;color:#a9a6c9;font-size:14px;font-weight:700;cursor:pointer">Şimdilik geç</button>' : '')
+      + '<div style="font-size:11.5px;color:#6f6c90;margin-top:12px;text-align:center">Yüklü: ' + esc(window.APP_BUILD || '?') + ' · Yeni: ' + esc(_min.build) + '</div></div>';
     _ov.querySelector('#sgGuncelleDug').onclick = guncelle;
     var g = _ov.querySelector('#sgGecDug'); if(g) g.onclick = function(){ _gecildi = _min.build; kaldir(); };
   }
