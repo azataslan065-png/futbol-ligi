@@ -333,6 +333,33 @@ public class Ana extends Activity {
     }
     @Override protected void onPause() { super.onPause(); CookieManager.getInstance().flush(); Teshis.gonder(); }
 
+    /* EKRAN KAYDI (2026-11-13-I, kullanıcı: "telefonun kendi ekran kaydı başlıyor fakat belli bir süre sonra reddediyor veya kaydetmiyor; maç oynanırken
+       ve diğer durumlarda da"). Ekran kaydı telefonun video kodlayıcısını ve belleğini uygulamayla paylaşır; oyun ağır çizerken sistem kaydediciyi
+       durdurabilir ya da bellek için kapatabilir. Uygulama artık (Android 15+) ekranının kaydedildiğini algılar ve sayfaya bildirir: sayfa bu sürede
+       hafif çizime geçer (bkz. saha.html __appEkranKaydi). Sistem bellek uyarıları da teşhis kaydına yazılır ve sayfaya iletilir. */
+    private java.util.function.Consumer<Integer> kayitGozcu;
+    private boolean ekranKaydiVar;
+    private void ekranKaydi(boolean v) {
+        if (v == ekranKaydiVar) return; ekranKaydiVar = v;
+        Teshis.olay("ekran-kaydi", v ? "başladı" : "bitti", ""); Teshis.gonder();
+        if (w != null) w.evaluateJavascript("try{window.__appEkranKaydi&&window.__appEkranKaydi(" + v + ")}catch(e){}", null);
+    }
+    @Override protected void onStart() {
+        super.onStart();
+        if (Build.VERSION.SDK_INT >= 35) {
+            try {
+                if (kayitGozcu == null) kayitGozcu = d -> h.post(() -> ekranKaydi(d == WindowManager.SCREEN_RECORDING_STATE_VISIBLE));
+                int ilk = getWindowManager().addScreenRecordingCallback(getMainExecutor(), kayitGozcu);
+                ekranKaydi(ilk == WindowManager.SCREEN_RECORDING_STATE_VISIBLE);
+            } catch (Throwable e) { Teshis.yaz("ekran-kaydi", "izlenemiyor", String.valueOf(e.getMessage())); }
+        }
+    }
+    @Override public void onTrimMemory(int seviye) {
+        super.onTrimMemory(seviye);
+        Teshis.olay("bellek", "uyarı " + seviye + (ekranKaydiVar ? " (ekran kaydı açık)" : ""), ""); Teshis.gonder();
+        if (w != null && seviye >= 10 && seviye < 20) w.evaluateJavascript("try{window.__appBellek&&window.__appBellek(" + seviye + ")}catch(e){}", null);
+    }
+
     /* PENCERE İÇİNDE PENCERE (2026-11-07, kullanıcı: "TV sekmesinde APK için pencere içinde pencere modu çalışmıyor"). KÖK SEBEP: TV oynatıcısının
        PiP düğmesi tarayıcının video PiP'ini (requestPictureInPicture) çağırıyordu; uygulamanın sayfa motoru (WebView) bunu desteklemez, YouTube
        gibi gömülü oynatıcılarda ise tarayıcıda da hiç çalışmaz. Artık uygulamanın KENDİSİ küçük pencereye geçer (Android PiP): sayfa yayını
@@ -402,6 +429,7 @@ public class Ana extends Activity {
     }
     @Override protected void onStop() {
         super.onStop();
+        if (Build.VERSION.SDK_INT >= 35 && kayitGozcu != null) { try { getWindowManager().removeScreenRecordingCallback(kayitGozcu); } catch (Throwable e) { } }
         Teshis.olay("arka", "görünmez oldu (arka=" + arkaOynat + ", pip=" + pipIdi + ", pipModu=" + (Build.VERSION.SDK_INT >= 24 && isInPictureInPictureMode()) + ")", ""); Teshis.gonder();
         // Küçük pencere kapatıldı (X ya da aşağı kaydırma): etkinlik görünmez oldu - yayın durdurulur. Küçük pencere AÇIKKEN ekran kapatılırsa da
         // onStop gelir; o zaman pencere hâlâ açıktır (isInPictureInPictureMode) ve yayın DURDURULMAZ (2026-11-07, "arka plan yine duruyor").

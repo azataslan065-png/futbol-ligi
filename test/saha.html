@@ -345,7 +345,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-13-H</title>
+<title>SAHA — 3D Futbol v2026-11-13-I</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -9785,7 +9785,23 @@ function _eldivenTak(kopya){
 /* (2026-10-16-C) KÖK SEBEP ("stadyum koltukları yer yer boş"): grafik ayarı Düşük/Orta olan cihazda (çoğu telefon) kalabalığın
    yarısı / dörtte biri GİZLENİYORDU; karışık sırada gizlendikleri için tribünde rastgele boşluklar oluşuyordu. 2B figürler çok
    ucuz (kişi başı 2 üçgen), artık her ayarda tribün tam dolu. */
-function _grafikKalabalikOran(){ return window.SAHA_COK_ZAYIF ? 0.6 : 1; }   // (2026-10-17-C) çok zayıf cihazda tribün figürleri %60
+function _grafikKalabalikOran(){ return (window._ekranKaydi || window._bellekDar) ? 0.55 : (window.SAHA_COK_ZAYIF ? 0.6 : 1); }
+/* EKRAN KAYDI SIRASINDA HAFİF ÇİZİM (2026-11-13-I, kullanıcı: "telefonun kendi ekran kaydı başlıyor fakat belli bir süre sonra reddediyor veya kaydetmiyor").
+   Telefonun ekran kaydı, oyunla aynı ekran kartını, video kodlayıcıyı ve belleği kullanır; oyun tam yükte çizerken (120 Hz, 1,5-2x çözünürlük, 23 bin
+   figür) sistem kaydediciyi yetiştiremeyip durdurabiliyor ya da bellek için kapatabiliyor. Uygulama ekranın kaydedildiğini (Android 15+) ya da bellek
+   uyarısını bildirince oyun hafif çizime geçer: çözünürlük 1x, tribün figürleri %55, ön sıra 3B taraftarlar gizli, kare hızı en çok 30. Kayıt
+   bitince (bellek uyarısında 2 dk sonra) eski hâline döner. */
+window.__appEkranKaydi = function(v){
+  try{ window._ekranKaydi = !!v; try{ sesDurumOlay('ekran kaydı ' + (v ? 'başladı: hafif çizim' : 'bitti')); }catch(e){}
+    try{ sahaPikselOranUygula(); }catch(e){}
+    try{ if(typeof TARAFTAR !== 'undefined' && TARAFTAR.parca) _tfGorunur(!v && !window._bellekDar); }catch(e){}
+  }catch(e){}
+};
+window.__appBellek = function(sv){
+  try{ window._bellekDar = true; sesDurumOlay('bellek uyarısı ' + sv + ': hafif çizim'); sahaPikselOranUygula(); try{ if(typeof TARAFTAR !== 'undefined' && TARAFTAR.parca) _tfGorunur(false); }catch(e){}
+    clearTimeout(window._bellekT); window._bellekT = setTimeout(function(){ window._bellekDar = false; try{ sahaPikselOranUygula(); if(!window._ekranKaydi && typeof TARAFTAR !== 'undefined' && TARAFTAR.parca) _tfGorunur(true); }catch(e){} }, 120000);
+  }catch(e){}
+};   // (2026-10-17-C) çok zayıf cihazda tribün figürleri %60
 function grafikAyrintiUygula(){
   try{
     var g = grafikGecerli(), goster = g > 1 && ((window._otoKalite || 0) < 4 || _sahaGuclu());
@@ -21530,6 +21546,7 @@ function sahaPikselOranUygula(){
     if(window.SAHA_COK_ZAYIF) pr = Math.min(pr, 1.25);
     if((window._otoKalite || 0) >= 2) pr = Math.min(pr, 1.5);   /* (2026-11-07) ölçüm: S24 FE'de kalite 2'ye indiği halde çizim 2x çözünürlükte (1,46 MP) kalıyordu; 1,5x piksel sayısını ~%44 azaltır */
     if((window._otoKalite || 0) >= 4) pr = Math.min(pr, 1.25);
+    if(window._ekranKaydi || window._bellekDar) pr = Math.min(pr, 1);   // (2026-11-13-I) ekran kaydı / bellek uyarısı: bkz. __appEkranKaydi
     if((window._otoKalite || 0) >= 5) pr = Math.min(pr, window.SAHA_COK_ZAYIF ? 0.85 : 1);      // (2026-10-17-E) yalnızca çok zayıf cihaz: 4. kademe de yetmezse 1x; (2026-10-20-A) çok zayıf cihazda 0,85x (piksel ~%28 az; arayüz yazıları etkilenmez)
     if(Math.abs(renderer.getPixelRatio() - pr) > 0.01){ renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight); }
   }catch(e){ _sessiz(e, 'sahaPikselOranUygula', 'saha_grafik'); }
@@ -21551,7 +21568,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-13-H';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-13-I';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -33473,7 +33490,7 @@ function _kareAtla(ts){
   if(_ksOnce){ var v = (ts - _ksOnce) / 1000; if(v > 0.004 && v < _ksVs * 1.5) _ksVs += (v - _ksVs) * 0.02; }   // ekran tazeleme aralığı
   _ksOnce = ts;
   if(typeof running === 'undefined' || !running || bitti || duraklat || document.hidden){ _ksSon = 0; return false; }
-  var hz = 1 / _ksVs, kmin = Math.max(1, Math.ceil(hz / 61 - 0.05));
+  var hz = 1 / _ksVs, kmin = Math.max(1, Math.ceil(hz / ((window._ekranKaydi || window._bellekDar) ? 31 : 61) - 0.05));   // ekran kaydında en çok 30 kare/sn (bkz. __appEkranKaydi)
   if(_ksK < kmin) _ksK = kmin;
   var hedef = _ksK * _ksVs * 1000;
   if(_ksSon && ts - _ksSon < hedef - _ksVs * 500) return true;                      // bu tazelemede çizme
