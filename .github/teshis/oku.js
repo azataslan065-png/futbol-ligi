@@ -25,6 +25,7 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     { const TS = await al(kok + 'sahaGorunum/taraftarSes') || {}; const o = {}; Object.keys(TS).forEach(t => { const g = {}; Object.values(TS[t] || {}).forEach(x => { const k = (x && x.tur) || '?'; g[k] = (g[k] || 0) + 1; }); o[t] = g; }); console.log('taraftarSes:', JSON.stringify(o).slice(0, 900)); }
     { const T = await al(kok + 'reklamPanolari/tribun') || {}; const GA = await al(kok + 'sahaGorunum/golAnim') || {}; const o = {}; Object.keys(GA).forEach(k => { const x = GA[k] || {}; o[k] = { yazi:x.yazi || '', video:x.video ? String(x.video).slice(-50) : '' }; });
       console.log('LED gol süreleri:', T.golSure1, T.golSure2, '| tribün öğe:', Object.keys(T.ogeler || {}).length, '| golAnim:', JSON.stringify(o).slice(0, 600)); }
+    { const MS = await al(kok + 'globalConfig/minSurum'); console.log('globalConfig/minSurum:', JSON.stringify(MS)); }
     { const A = await al(kok + 'sahaGorunum/anonsSes/_golBagir'); console.log('_golBagir kaydı:', A && A.url ? 'VAR' : 'yok'); }
     { const I = await al(kok + 'sahaGorunum/isimSes') || {}; const r = {}; Object.keys(I).forEach(rol => { const T = I[rol] || {}; r[rol] = Object.keys(T).length + ' ad (' + Object.keys(T).slice(0, 6).join(',') + ')'; }); console.log('isimSes:', JSON.stringify(r)); }
     const L = await al(kok + 'diagnostics/logs', '?orderBy="$key"&limitToLast=600') || {};
