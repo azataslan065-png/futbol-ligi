@@ -17,6 +17,7 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     console.log('\n===== ' + (kok || 'KÖK') + ' =====');
     const ses = await al(kok + 'sahaGorunum/ses') || {};
     const m = ses.muzikler || {};
+    { const S = ses.kayitSilinen || {}; const K = Object.keys(S); console.log('kayitSilinen:', K.length, K.slice(0, 12).join(','), '| alanlar:', Object.keys(ses).join(',')); }
     console.log('müzik sayısı:', Object.keys(m).length, '| seviye', ses.muzikSeviye, '| spiker', ses.spkSesSpiker, ses.spkSesSpikerAd ? '(adlı)' : '', '| yorumcu', ses.spkSesYorumcu);
     for(const k of Object.keys(m).slice(0, 4)){ const u = String(m[k].url || ''); let d = '?'; try{ const r = await fetch(u, { headers: { Range: 'bytes=0-1023' } }); d = r.status + ' ' + r.headers.get('content-type') + ' acao=' + r.headers.get('access-control-allow-origin'); }catch(e){ d = 'hata ' + e.message; } console.log('  ' + u.replace(/^https?:\/\/([^/]+).*\/([^/]{0,40})$/, '$1 …/$2') + ' → ' + d); }
     { const A = await al(kok + 'sahaGorunum/anonsSes', '?shallow=true') || {}; const K = Object.keys(A); const g = {}; K.forEach(k => { const m = k.match(/^(_|o_|oi_|os_|n_|t_)/); const t = m ? m[1] : 'diger'; g[t] = (g[t] || 0) + 1; });
