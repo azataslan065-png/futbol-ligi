@@ -19,6 +19,7 @@ final class Sayfa {
     private static String ev, yol;
     private static volatile boolean kapali, ilk = true;
     static boolean acik() { return BuildConfig.GOMULU && !kapali; }
+    static boolean verildi() { return !ilk; }
     /* (2026-11-07) Telefonda (Android 17, WebView 158) gömülü kopya verildiği halde sayfa motoru yüklemeye başlamadı (teşhis: ilerleme %10,
        "başladı" yok); emülatörde sorun yok. Gömülü kopya bu cihazda bir kez açılamazsa, bu sürüm için hatırlanır ve sonraki açılışlarda
        hiç beklemeden siteden açılır - kullanıcı her girişte beklemez. */

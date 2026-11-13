@@ -14,7 +14,14 @@ var MEDYA = 'saha-medya-v1', META_URL = '/__saha-medya-meta__';
 var BUYUK_SINIR = 25 * 1024 * 1024, TOPLAM_SINIR = 300 * 1024 * 1024;
 var DOGRULA_MS = 12 * 3600e3, TARAMA_MS = 24 * 3600e3, KULLANILMAYAN_MS = 30 * 24 * 3600e3;
 
-self.addEventListener('install', function(){ self.skipWaiting(); });
+/* (2026-11-14-B) SAYFA AÇILIŞI SERVİS ÇALIŞANINI BEKLEMESİN: uygulamada (APK) her açılışta ilk sayfa isteği 3 sn içinde başlamıyor, yeniden
+   isteniyordu (teşhiste 150 kaydın 87'si). Servis çalışanı sayfa isteklerine hiç karışmadığı halde, tarayıcı her sayfa açılışında önce onu
+   uyandırmak zorundaydı (soğuk açılışta saniyeler sürebilir). Yönlendirme kuralıyla (Chrome 123+) sayfa istekleri servis çalışanı
+   uyandırılmadan doğrudan ağa gider; medya ve varlık önbelleği aynen çalışır. */
+self.addEventListener('install', function(e){
+  try{ if(e.addRoutes) e.waitUntil(Promise.resolve(e.addRoutes([{ condition:{ requestMode:'navigate' }, source:'network' }])).catch(function(){})); }catch(x){}
+  self.skipWaiting();
+});
 self.addEventListener('activate', function(e){
   e.waitUntil(caches.keys().then(function(ad){
     return Promise.all(ad.filter(function(k){ return (k.indexOf('saha-medya-') === 0 && k !== MEDYA) || (k.indexOf('saha-varlik-') === 0 && k !== VARLIK); })

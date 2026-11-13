@@ -102,13 +102,17 @@ public class Ana extends Activity {
     private void bekciCalis() {
         if (w == null || basladi || sayfaHazir || isFinishing()) return;
         bekciDeneme++;
-        Teshis.yaz("sayfa", "3 sn'de başlamadı, yeniden isteniyor (deneme " + bekciDeneme + ", ilerleme %" + w.getProgress() + ", gömülü=" + Sayfa.acik() + ")", BuildConfig.ADRES);
-        Teshis.gonder();
+        /* (2026-11-14-B) Bu durum bekçi tarafından çözülüyor (yeniden istek hemen açılıyor): hata listesini doldurmasın (teşhiste 150 kaydın 87'si
+           buydu), olay olarak yazılır; ancak bütün denemeler tükenirse hata yazılır. Gömülü sayfa verildiyse (yanıt hazır) 2 sn beklenir. */
+        String d = "başlamadı, yeniden isteniyor (deneme " + bekciDeneme + ", " + (System.currentTimeMillis() - bekciBas) + " ms, ilerleme %" + w.getProgress() + ", gömülü=" + Sayfa.acik() + ", verildi=" + Sayfa.verildi() + ")";
+        if (bekciDeneme > 3) { Teshis.yaz("sayfa", "açılamadı: " + d, BuildConfig.ADRES); Teshis.gonder(); return; }
+        Teshis.olay("sayfa", d, BuildConfig.ADRES);
         if (bekciDeneme >= 2 && Sayfa.acik()) Sayfa.kapat();
-        if (bekciDeneme > 3) return;
+        bekciBas = System.currentTimeMillis();
         w.stopLoading(); w.loadUrl(BuildConfig.ADRES); h.postDelayed(bekci, 3000);
     }
-    private void bekciKur() { h.removeCallbacks(bekci); bekciDeneme = 0; h.postDelayed(bekci, 3000); }
+    private long bekciBas;
+    private void bekciKur() { h.removeCallbacks(bekci); bekciDeneme = 0; bekciBas = System.currentTimeMillis(); h.postDelayed(bekci, Sayfa.acik() ? 2000 : 3000); }
     private boolean sayfaHazir;
     // Uygulamanın kendi kaynakları: site, veritabanı/giriş, kitaplık sunucuları, ses/müzik deposu.
     private static boolean bizim(Uri u) {
@@ -156,7 +160,7 @@ public class Ana extends Activity {
         w.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) { return disari(r.getUrl()); }
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest r) { WebResourceResponse x = Sayfa.ver(r); if (x == null) x = Reklam.ver(r); return x != null ? x : Onbellek.ver(r); }
-            @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); sayfaHazir = false; basladi = true; Teshis.olay("sayfa", "başladı" + (Sayfa.acik() ? " (gömülü)" : ""), u); Teshis.gonder(); }
+            @Override public void onPageStarted(WebView v, String u, android.graphics.Bitmap f) { yuklemeBas = System.currentTimeMillis(); sayfaHazir = false; basladi = true; Teshis.olay("sayfa", "başladı" + (Sayfa.acik() ? " (gömülü)" : "") + " " + (bekciBas > 0 ? (System.currentTimeMillis() - bekciBas) + " ms" : "") + (bekciDeneme > 0 ? " · deneme " + bekciDeneme : ""), u); Teshis.gonder(); }
             @Override public void onPageFinished(WebView v, String u) {
                 v.evaluateJavascript(YAMA, null);
                 sayfaHazir = true;

@@ -61,7 +61,7 @@ final class Guncelle {
     private static FrameLayout bekle;
     private static final Handler H = new Handler(Looper.getMainLooper());
     private static FrameLayout ekran;
-    private static volatile boolean iniyor, denetiyor;
+    private static volatile boolean iniyor, denetiyor, tekrarDenendi;
     /** Etkinlik kapanırken: ekran görünümleri o etkinliğe aittir, yeni açılışta yeniden kurulur. */
     static void sifirla(Activity a) { if (etkin == a) etkin = null; ekran = null; bekle = null; durum = null; cubuk = null; dugmeler = null; }
     /* Denetim sonucu, denetim süresince etkinlik yeniden kurulduysa (açılışta sistem bunu yapabiliyor; emülatör denemesinde görüldü: kart
@@ -121,13 +121,15 @@ final class Guncelle {
                 final String ad = j.optString("ad", ""), url = j.optString("url", "");
                 // Test: her yeni derleme (sayfa APK'ya gömülü, bkz. Sayfa). Kök: sürüm adı (kok-surum.txt) değişince.
                 boolean yeni = j.optLong("kod", 0) > yerelKod && ad.length() > 0 && url.startsWith("https://") && (BuildConfig.GOMULU || !ad.equals(yerelAd));
-                sp.edit().putLong("son", System.currentTimeMillis()).apply();
+                sp.edit().putLong("son", System.currentTimeMillis()).apply(); tekrarDenendi = false;
                 Teshis.olay("guncelle", (yeni ? "yeni " : "güncel ") + ad, yerelAd + " / " + yerelKod);
                 if (!yeni) { H.post(Guncelle::bekleKapat); if (elle) mesaj(a, "Uygulama güncel (" + yerelAd + "). Yeni sürüm hazırlanıyorsa birkaç dakika sonra yeniden dene."); return; }
                 H.post(new Runnable() { public void run() { Activity x = etkin(); if (x != null && (elle || zorunluAcik(x))) goster(x, j, yerelAd); bekleKapat(); } });
             } catch (Exception e) {
                 H.post(Guncelle::bekleKapat);
-                Teshis.yaz("guncelle", "okunamadı", String.valueOf(e.getMessage()));
+                // (2026-11-14-B) Teşhiste "okunamadı: Connection reset" görülüyordu (açılışta ağ henüz hazır değil): bir kez 4 sn sonra yeniden denenir.
+                if (!elle && !tekrarDenendi) { tekrarDenendi = true; Teshis.olay("guncelle", "okunamadı, yeniden denenecek", String.valueOf(e.getMessage())); H.postDelayed(() -> { Activity x = etkin(); if (x != null) denetle(x, false, true); }, 4000); }
+                else Teshis.yaz("guncelle", "okunamadı", String.valueOf(e.getMessage()));
                 if (elle) mesaj(a, "Güncelleme denetlenemedi, bağlantını kontrol et");
             } finally { denetiyor = false; }
         }}).start();
