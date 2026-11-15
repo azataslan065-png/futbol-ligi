@@ -372,6 +372,11 @@ public class Ana extends Activity {
        cihazlarla test maçları yapılacak"). Ağ değişimi (Wi-Fi / mobil / kopma, hız) ve cihaz ısınması (Android 10+) teşhis olay kaydına yazılır;
        ısınma sayfaya da iletilir (bkz. saha.html MAÇ RAPORU). */
     private String googleJs;
+    private android.os.CancellationSignal biyoIptal;
+    private void biyoCevap(String sonuc, String mesaj) {
+        final String js = "try{window.__appBiyo&&window.__appBiyo(" + org.json.JSONObject.quote(sonuc) + "," + org.json.JSONObject.quote(mesaj == null ? "" : mesaj) + ")}catch(e){}";
+        h.post(() -> { if (w != null) w.evaluateJavascript(js, null); });
+    }
     @Override protected void onNewIntent(Intent i) { super.onNewIntent(i); googleDonus(i); }
     private void googleDonus(Intent i) {
         try {
@@ -510,6 +515,46 @@ public class Ana extends Activity {
                 Intent i = new Intent(Intent.ACTION_VIEW, u); i.addCategory(Intent.CATEGORY_BROWSABLE); i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 startActivity(i); Teshis.olay("google", "tarayıcıda giriş açıldı (" + mod + ")", "");
             } catch (Exception e) { Teshis.yaz("google", "tarayıcı açılamadı", String.valueOf(e.getMessage())); if (w != null) w.evaluateJavascript("try{window.__appGoogle&&window.__appGoogle(null,'tarayici')}catch(e){}", null); }
+        } }); }
+        /* PARMAK İZİ İLE GİRİŞ (2026-11-15-M, kullanıcı: "admin tarafında şifreye ek olarak parmak izi ile giriş sağlamalıyız").
+           Telefonun kendi biyometrik penceresi (parmak izi / yüz) açılır; parmak izi telefonda kalır, uygulamaya ya da sayfaya gelmez.
+           Sayfaya yalnızca sonuç gider: window.__appBiyo('ok'|'iptal'|'hata'|'kilit', mesaj). */
+        @JavascriptInterface public String biyometrikDurum() {
+            try {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    android.hardware.biometrics.BiometricManager bm = getSystemService(android.hardware.biometrics.BiometricManager.class);
+                    int r = Build.VERSION.SDK_INT >= 30 ? bm.canAuthenticate(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG | android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK) : bm.canAuthenticate();
+                    if (r == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS) return "var";
+                    if (r == android.hardware.biometrics.BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED) return "kayitsiz";
+                    return "yok";
+                }
+                if (Build.VERSION.SDK_INT >= 28) {
+                    @SuppressWarnings("deprecation") android.hardware.fingerprint.FingerprintManager fm = getSystemService(android.hardware.fingerprint.FingerprintManager.class);
+                    if (fm == null || !fm.isHardwareDetected()) return "yok";
+                    return fm.hasEnrolledFingerprints() ? "var" : "kayitsiz";
+                }
+            } catch (Throwable e) { Teshis.yaz("biyo", "durum okunamadı", String.valueOf(e.getMessage())); }
+            return "yok";
+        }
+        @JavascriptInterface public void biyometrikDogrula(final String baslik, final String alt) { h.post(new Runnable() { public void run() {
+            if (Build.VERSION.SDK_INT < 28) { biyoCevap("hata", "Bu Android sürümü desteklemiyor"); return; }
+            try {
+                android.hardware.biometrics.BiometricPrompt.Builder b = new android.hardware.biometrics.BiometricPrompt.Builder(Ana.this)
+                    .setTitle(baslik == null || baslik.isEmpty() ? "Parmak izi ile giriş" : baslik)
+                    .setNegativeButton("Şifre ile gir", getMainExecutor(), (d, w0) -> biyoCevap("iptal", ""));
+                if (alt != null && !alt.isEmpty()) b.setSubtitle(alt);
+                if (Build.VERSION.SDK_INT >= 30) b.setAllowedAuthenticators(android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_STRONG | android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK);
+                if (Build.VERSION.SDK_INT >= 29) b.setConfirmationRequired(false);
+                biyoIptal = new android.os.CancellationSignal();
+                b.build().authenticate(biyoIptal, getMainExecutor(), new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                    @Override public void onAuthenticationSucceeded(android.hardware.biometrics.BiometricPrompt.AuthenticationResult r) { Teshis.olay("biyo", "doğrulandı", ""); biyoCevap("ok", ""); }
+                    @Override public void onAuthenticationError(int kod, CharSequence m) {
+                        String t = (kod == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED || kod == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_CANCELED || kod == 13 /* NEGATIVE_BUTTON */) ? "iptal"
+                               : (kod == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_LOCKOUT || kod == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_LOCKOUT_PERMANENT) ? "kilit" : "hata";
+                        Teshis.olay("biyo", "sonuç " + t + " (" + kod + ")", String.valueOf(m)); biyoCevap(t, String.valueOf(m));
+                    }
+                });
+            } catch (Throwable e) { Teshis.yaz("biyo", "pencere açılamadı", String.valueOf(e.getMessage())); biyoCevap("hata", String.valueOf(e.getMessage())); }
         } }); }
         @JavascriptInterface public void siteYukle() { h.post(new Runnable() { public void run() {
             if (w == null) return;
