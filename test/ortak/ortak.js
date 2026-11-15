@@ -558,8 +558,16 @@ var SahaGoogle = (function(){
       return { kimlik:k, sonuc:s };
     });
   }
-  // Geçici nesnede yeni açılmış (hiçbir profile bağlı olmayan) hesabı sil.
-  function basibosSil(s){ var u = s && s.user; if(!u) return Promise.resolve(); return u.delete().catch(function(){ return gecici().signOut(); }).catch(function(){}); }
+  /* Geçici nesnede YENİ açılmış (hiçbir profile bağlı olmayan) hesabı sil.
+     (2026-11-15-I) KRİTİK DÜZELTME: önceden "oyuncu hesabı değil" diye ÖNCEDEN VAR OLAN hesaplar da siliniyordu; yöneticinin kendi Google
+     e-postasıyla "Google ile giriş" denemesi, aynı e-postalı YÖNETİCİ HESABINI sildi. Artık yalnızca bu denemede yeni oluşan hesap silinir;
+     var olan hesaba asla dokunulmaz, yalnızca geçici oturum kapatılır. */
+  function basibosSil(s){
+    var u = s && s.user, yeni = !!(s && s.additionalUserInfo && s.additionalUserInfo.isNewUser);
+    if(!u) return Promise.resolve();
+    if(!yeni){ return gecici().signOut().catch(function(){}); }
+    return u.delete().catch(function(){ return gecici().signOut(); }).catch(function(){});
+  }
   /* GİRİŞ. Sonuç: {durum:'ok', profil} (ana oturum o profilin hesabında) · {durum:'bagli-degil'} (bir kez ad+şifre gerekir)
      · {durum:'iptal'|'hata', kod} */
   function giris(ref){
@@ -568,7 +576,8 @@ var SahaGoogle = (function(){
       var s = r.sonuc, u = s && s.user, yeni = !!(s && s.additionalUserInfo && s.additionalUserInfo.isNewUser);
       if(!u) return { durum:'hata', kod:'google/kullanici-yok' };
       var bitir = function(){ _bek = r.kimlik; iz('bağlı değil', { ms:Date.now() - t0 }); return { durum:'bagli-degil' }; };
-      if(yeni || !SahaKimlik.sentetikMi(u)) return basibosSil(s).then(bitir);
+      if(!yeni && !SahaKimlik.sentetikMi(u)){ return gecici().signOut().catch(function(){}).then(function(){ iz('yönetici/diğer hesap', {}); return { durum:'hata', kod:'google/oyuncu-hesabi-degil' }; }); }
+      if(yeni) return basibosSil(s).then(bitir);
       return ref('kimlik/' + u.uid).once('value').then(function(sn){
         var p = sn.val() && sn.val().p;
         try{ gecici().signOut(); }catch(e){}
@@ -610,7 +619,7 @@ var SahaGoogle = (function(){
   function bagla(ref, profil){
     return kimlikAl('bagla').then(function(r){
       var s = r.sonuc, u = s && s.user, yeni = !!(s && s.additionalUserInfo && s.additionalUserInfo.isNewUser);
-      if(!yeni && u && SahaKimlik.sentetikMi(u)){ try{ gecici().signOut(); }catch(e){} return { durum:'baska' }; }
+      if(!yeni && u){ try{ gecici().signOut(); }catch(e){} return { durum:'baska' }; }   // var olan hesap (başka oyuncu ya da yönetici): dokunulmaz
       return basibosSil(s).then(function(){ return baglaKimlik(ref, profil, r.kimlik); });
     }).catch(function(e){ var c = kod(e); return { durum: /popup-closed|cancelled|google\/iptal/i.test(c) ? 'iptal' : 'hata', kod:c }; });
   }
@@ -620,6 +629,7 @@ var SahaGoogle = (function(){
   function vazgec(){ _bek = null; }
   function mesaj(r){
     var k = (r && r.kod) || '';
+    if(/oyuncu-hesabi-degil/.test(k)) return 'Bu Google hesabı bir yönetici hesabı; oyuncu girişinde kullanılamaz. Başka bir Google hesabı seç.';
     if(/eski-uygulama/.test(k)) return 'Google ile giriş için uygulamanın yeni sürümü gerekli; güncelleme açılıyor.';
     if(/operation-not-allowed|configuration-not-found/.test(k)) return 'Google ile giriş henüz açılmadı.';
     if(/unauthorized-domain/.test(k)) return 'Bu adres Google girişine kayıtlı değil.';
