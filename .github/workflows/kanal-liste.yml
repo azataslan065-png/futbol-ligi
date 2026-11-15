@@ -1,0 +1,39 @@
+# Bütün TV kanalı / video kayıtlarını listeler (salt okunur): ad, kategori ve adresin yalnızca alan adı + yolu.
+# Sorgu dizesindeki erişim anahtarları yazılmaz (herkese açık depo).
+name: Kanal liste
+on:
+  workflow_dispatch:
+jobs:
+  liste:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Listele
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json" >/dev/null 2>&1 || true
+          cd "$RUNNER_TEMP" && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          node -e '
+            const {GoogleAuth}=require("google-auth-library"); const fs=require("fs");
+            (async()=>{
+              let f=process.env.RUNNER_TEMP+"/sa_temiz"; if(!fs.existsSync(f)) f=process.env.RUNNER_TEMP+"/sa.json";
+              const SAJ=JSON.parse(fs.readFileSync(f,"utf8"));
+              const auth=new GoogleAuth({credentials:SAJ,scopes:["https://www.googleapis.com/auth/firebase.database","https://www.googleapis.com/auth/userinfo.email"]});
+              const tok=(await (await auth.getClient()).getAccessToken()).token;
+              const DB="https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/";
+              const al=async y=>{ const r=await fetch(DB+y+".json",{headers:{Authorization:"Bearer "+tok}}); return r.ok?r.json():null; };
+              const adr=u=>{ try{ const x=new URL(String(u)); const q=[...x.searchParams.keys()]; return x.host+x.pathname+(q.length?" ?"+q.join(","):""); }catch(e){ return String(u||"").slice(0,80); } };
+              const yaz=(baslik,o)=>{ const L=Array.isArray(o)?o:Object.values(o||{}); console.log("\n== "+baslik+" ("+L.length+")"); L.forEach(k=>{ if(!k||typeof k!=="object") return; const u=k.url||k.src||k.link||""; console.log("  "+(k.gizli?"[gizli] ":"")+(k.title||k.ad||k.name||"?")+" | "+(k.category||k.kategori||"")+" | "+adr(u)); }); };
+              for(const kok of ["test/",""]){
+                yaz(kok+"paylasilan/tvKanallari", await al(kok+"paylasilan/tvKanallari"));
+                yaz(kok+"channelPool", await al(kok+"channelPool"));
+                for(const r of [kok+"leagues", kok+"sahaVeri/leagues"]){ const L=await (await fetch(DB+r+".json?shallow=true",{headers:{Authorization:"Bearer "+tok}})).json()||{}; for(const lid of Object.keys(L)){ const v=await al(r+"/"+lid+"/videoLinks"); if(v) yaz(r+"/"+lid+"/videoLinks", v); } }
+              }
+            })().catch(e=>console.log("HATA "+e.message));
+          '
+          rm -f "$RUNNER_TEMP/sa.json" "$RUNNER_TEMP/sa_temiz"
