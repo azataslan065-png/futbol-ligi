@@ -502,6 +502,136 @@ var SahaKimlik = (function(){
   return { eposta:eposta, sifre:sifre, sha256:sha256, ortam:ortam, sentetikMi:sentetikMi, adminOturumuMu:adminOturumuMu,
            giris:giris, olustur:olustur, sifreDegistir:sifreDegistir, yoneticiSifirla:yoneticiSifirla, yeniSifreBelirle:yeniSifreBelirle, oturumBuProfil:oturumBuProfil, cikis:cikis };
 })();
+/* ═══ GOOGLE İLE GİRİŞ (2026-11-15-F, test) ══════════════════════════════════════════════════════════════════════
+   Kullanıcı: "eFootball / FC gibi hesap bağlayarak giriş deneyelim". Google hesabı, kullanıcının mevcut SAHA hesabına
+   (SahaKimlik'in açtığı hesap) İKİNCİ GİRİŞ YOLU olarak bağlanır; profil, şifre, veriler aynı kalır.
+   · İlk kez: Google seçilir → hesap henüz bağlı değilse kullanıcı bir kez adını + şifresini girer, Google o an bağlanır.
+   · Sonraki girişler: yalnızca "Google ile giriş".
+   · Tarayıcıda Google penceresi (popup) açılır. Uygulamada (APK) Google uygulama içi sayfada girişe izin vermediği için giriş
+     telefonun tarayıcısında google-giris.html sayfasında yapılır ve kısa ömürlü kimlik belgesi uygulamaya geri gelir.
+   · Bağlı olmayan bir Google hesabı denenirse kimlik sunucusunda açılan geçici boş hesap hemen silinir (başıboş hesap kalmaz).
+   Kayıt: userProfiles/{p}/googleBagli = zaman (yalnızca işaret; Google e-postası yazılmaz). */
+var SahaGoogle = (function(){
+  var _bek = null, _apkBek = null;            // _bek: bağlanmayı bekleyen Google kimliği · _apkBek: tarayıcıdan dönüş bekleyen söz
+  function destek(){ try{ return !!(window.firebase && firebase.auth && firebase.auth.GoogleAuthProvider); }catch(e){ return false; } }
+  function apkMi(){ try{ return !!(window.SahaApp && typeof SahaApp.googleGiris === 'function'); }catch(e){ return false; } }
+  function kod(e){ return String((e && e.code) || (e && e.message) || e || 'bilinmeyen'); }
+  function iz(baslik, ek){ try{ var ad = /admin/.test(location.pathname) ? 'admin' : (/saha/.test(location.pathname) ? 'saha' : 'puan');
+    (typeof fbDb !== 'undefined' && fbDb ? fbDb : firebase.database()).ref('diagnostics/logs').push({ app:ad, appLabel:ad, mod:'google', modLabel:'Google girişi', kind:/hata|bağlanamadı/.test(baslik) ? 'uyari' : 'bilgi',
+      title:'google: ' + baslik, detail:JSON.stringify(Object.assign({ surum:window.APP_BUILD || '?', apk:apkMi() }, ek || {})), ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140) }).catch(function(){}); }catch(e){} }
+  var _ga = null;
+  function gecici(){     // Google denemesi için oturum saklamayan ayrı kimlik nesnesi (ana oturum yalnızca doğrulanınca değişir)
+    if(_ga) return _ga;
+    var app; try{ app = firebase.app('sahaGoogle'); }catch(e){ app = firebase.initializeApp(firebase.app().options, 'sahaGoogle'); }
+    _ga = app.auth(); try{ _ga.setPersistence(firebase.auth.Auth.Persistence.NONE); }catch(e){}
+    return _ga;
+  }
+  function saglayici(){ var p = new firebase.auth.GoogleAuthProvider(); try{ p.setCustomParameters({ prompt:'select_account' }); }catch(e){} return p; }
+  // APK: tarayıcı sayfası belgeyi döndürünce Ana.java burayı çağırır.
+  window.__appGoogle = function(t, hata, mod){
+    var b = _apkBek; _apkBek = null;
+    if(!b){ if(t){ iz('beklenmeyen dönüş', { mod:mod }); try{ window.dispatchEvent(new CustomEvent('sahaGoogleDonus', { detail:{ t:t, mod:mod } })); }catch(e){} } return; }
+    clearTimeout(b.z);
+    if(t) b.res(firebase.auth.GoogleAuthProvider.credential(t)); else b.rej({ code:'google/' + (hata || 'iptal') });
+  };
+  // Google kimliği al → {kimlik, sonuc} (sonuc: geçici nesnede açılan oturum)
+  function kimlikAl(mod){
+    if(!destek()) return Promise.reject({ code:'google/sdk-yok' });
+    var ga = gecici();
+    if(apkMi()){
+      return new Promise(function(res, rej){
+        if(_apkBek){ try{ _apkBek.rej({ code:'google/yinelendi' }); }catch(e){} clearTimeout(_apkBek.z); }
+        _apkBek = { res:res, rej:rej, z:setTimeout(function(){ _apkBek = null; rej({ code:'google/zaman-asimi' }); }, 300000) };
+        try{ SahaApp.googleGiris(mod || 'giris'); }catch(e){ _apkBek = null; rej({ code:'google/kopru' }); }
+      }).then(function(k){ return ga.signInWithCredential(k).then(function(s){ return { kimlik:k, sonuc:s }; }); });
+    }
+    return ga.signInWithPopup(saglayici()).then(function(s){
+      var k = s && (s.credential || (firebase.auth.GoogleAuthProvider.credentialFromResult && firebase.auth.GoogleAuthProvider.credentialFromResult(s)));
+      return { kimlik:k, sonuc:s };
+    });
+  }
+  // Geçici nesnede yeni açılmış (hiçbir profile bağlı olmayan) hesabı sil.
+  function basibosSil(s){ var u = s && s.user; if(!u) return Promise.resolve(); return u.delete().catch(function(){ return gecici().signOut(); }).catch(function(){}); }
+  /* GİRİŞ. Sonuç: {durum:'ok', profil} (ana oturum o profilin hesabında) · {durum:'bagli-degil'} (bir kez ad+şifre gerekir)
+     · {durum:'iptal'|'hata', kod} */
+  function giris(ref){
+    var t0 = Date.now();
+    return kimlikAl('giris').then(function(r){
+      var s = r.sonuc, u = s && s.user, yeni = !!(s && s.additionalUserInfo && s.additionalUserInfo.isNewUser);
+      if(!u) return { durum:'hata', kod:'google/kullanici-yok' };
+      var bitir = function(){ _bek = r.kimlik; iz('bağlı değil', { ms:Date.now() - t0 }); return { durum:'bagli-degil' }; };
+      if(yeni || !SahaKimlik.sentetikMi(u)) return basibosSil(s).then(bitir);
+      return ref('kimlik/' + u.uid).once('value').then(function(sn){
+        var p = sn.val() && sn.val().p;
+        try{ gecici().signOut(); }catch(e){}
+        if(!p) return bitir();
+        var a = firebase.auth();
+        return a.signInWithCredential(r.kimlik).then(function(){
+          iz('giriş tamam', { ms:Date.now() - t0 });
+          try{ ref('userProfiles/' + p + '/googleSon').set(Date.now()); }catch(e){}
+          return { durum:'ok', profil:p, uid:u.uid };
+        });
+      });
+    }).catch(function(e){
+      var k = kod(e), iptal = /popup-closed|cancelled|google\/iptal|google\/yinelendi|user-cancel/i.test(k);
+      if(!iptal) iz('hata', { kod:k, ms:Date.now() - t0 });
+      return { durum: iptal ? 'iptal' : 'hata', kod:k };
+    });
+  }
+  // Bekleyen Google kimliğini şu an açık SAHA hesabına bağla (ad+şifre girişinden hemen sonra).
+  function bekleyeniBagla(ref, profil){
+    if(!_bek) return Promise.resolve({ durum:'yok' });
+    var k = _bek; _bek = null;
+    return baglaKimlik(ref, profil, k);
+  }
+  function baglaKimlik(ref, profil, k){
+    var a = firebase.auth(), u = a && a.currentUser;
+    try{ if(SahaKimlik.adminOturumuMu()){ a = SahaKimlik && firebase.app('sahaKimlik').auth(); u = a && a.currentUser; } }catch(e){}
+    if(!u || !SahaKimlik.sentetikMi(u)) return Promise.resolve({ durum:'hata', kod:'google/oturum-yok' });
+    return u.linkWithCredential(k).then(function(){
+      iz('bağlandı', {});
+      return ref('userProfiles/' + profil + '/googleBagli').set(Date.now()).then(function(){ return { durum:'ok' }; }, function(){ return { durum:'ok' }; });
+    }, function(e){
+      var c = kod(e); iz('bağlanamadı', { kod:c });
+      if(/provider-already-linked/.test(c)) return { durum:'ok', zaten:true };
+      if(/credential-already-in-use|email-already-in-use/.test(c)) return { durum:'baska', kod:c };
+      return { durum:'hata', kod:c };
+    });
+  }
+  // Ayarlardan: açık hesaba Google bağla (oturum açıkken).
+  function bagla(ref, profil){
+    return kimlikAl('bagla').then(function(r){
+      var s = r.sonuc, u = s && s.user, yeni = !!(s && s.additionalUserInfo && s.additionalUserInfo.isNewUser);
+      if(!yeni && u && SahaKimlik.sentetikMi(u)){ try{ gecici().signOut(); }catch(e){} return { durum:'baska' }; }
+      return basibosSil(s).then(function(){ return baglaKimlik(ref, profil, r.kimlik); });
+    }).catch(function(e){ var c = kod(e); return { durum: /popup-closed|cancelled|google\/iptal/i.test(c) ? 'iptal' : 'hata', kod:c }; });
+  }
+  function bagliMi(){ try{ var u = firebase.auth().currentUser; return !!(u && (u.providerData || []).some(function(p){ return p && p.providerId === 'google.com'; })); }catch(e){ return false; } }
+  function bekliyor(){ return !!_bek; }
+  function vazgec(){ _bek = null; }
+  function mesaj(r){
+    var k = (r && r.kod) || '';
+    if(/operation-not-allowed|configuration-not-found/.test(k)) return 'Google ile giriş henüz açılmadı.';
+    if(/unauthorized-domain/.test(k)) return 'Bu adres Google girişine kayıtlı değil.';
+    if(/popup-blocked/.test(k)) return 'Tarayıcı Google penceresini engelledi; açılır pencerelere izin ver.';
+    if(/network|zaman-asimi|timeout/.test(k)) return 'Bağlantı sorunu; tekrar dene.';
+    if(r && r.durum === 'baska') return 'Bu Google hesabı başka bir kullanıcıya bağlı.';
+    return 'Google ile giriş yapılamadı (' + k.replace(/^auth\//, '') + ').';
+  }
+  // Ad + şifre girişleri başarılı olunca bekleyen Google kimliği kendiliğinden bağlanır.
+  ['giris', 'olustur', 'yeniSifreBelirle'].forEach(function(ad){
+    var asil = SahaKimlik[ad]; if(typeof asil !== 'function') return;
+    SahaKimlik[ad] = function(ref, profil){
+      return asil.apply(SahaKimlik, arguments).then(function(r){
+        if(_bek && (ad !== 'giris' || (r && r.durum === 'ok'))){
+          bekleyeniBagla(ref, profil).then(function(b){ try{ window.dispatchEvent(new CustomEvent('sahaGoogleBaglandi', { detail:b })); }catch(e){} });
+        }
+        return r;
+      });
+    };
+  });
+  return { destek:destek, apkMi:apkMi, giris:giris, bagla:bagla, bekleyeniBagla:bekleyeniBagla, bagliMi:bagliMi, bekliyor:bekliyor, vazgec:vazgec, mesaj:mesaj };
+})();
 /* ═══ ZORUNLU GÜNCELLEME (2026-10-30-A, V1.4.0) ══════════════════════════════════════════════════════════════════
    Yönetici admin panelinden globalConfig/minSurum = { build:'YYYY-AA-GG-H', mesaj, ts } yazar. Yüklü sürümü (APP_BUILD) bundan
    eski olan Puan Tablosu, SAHA ve admin ekranı "Güncelle" ekranı gösterir. Güncelle: medya dışındaki önbellekleri siler, servis

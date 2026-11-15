@@ -83,6 +83,7 @@ public class Ana extends Activity {
         try { getContentResolver().registerContentObserver(Settings.System.CONTENT_URI, true, sesGozcu); } catch (Exception e) { }
         Teshis.olay("acilis", b != null ? "durum geri yüklendi" : "yeni", "");
         sensorKur();
+        googleDonus(getIntent());
         kur();
         // (2026-11-07) Sayfa, etkinlik penceresi kurulduktan sonra yüklenir (bkz. SAYFA BEKÇİSİ).
         h.post(() -> { if (w != null) { basladi = false; w.loadUrl(BuildConfig.ADRES); bekciKur(); } });   // (2026-11-06) sayfa her açılışta baştan yüklenir
@@ -164,6 +165,7 @@ public class Ana extends Activity {
             @Override public void onPageFinished(WebView v, String u) {
                 v.evaluateJavascript(YAMA, null);
                 sayfaHazir = true;
+                if (googleJs != null) { final String gj = googleJs; googleJs = null; v.postDelayed(new Runnable() { public void run() { if (w != null) w.evaluateJavascript(gj, null); } }, 1500); }
                 if (yuklemeBas > 0) { Teshis.olay("sayfa", "bitti " + (System.currentTimeMillis() - yuklemeBas) + " ms", u);
                     yuklemeBas = 0; if (u != null && u.startsWith("http")) bosDenetle(v, 12000); }
             }
@@ -369,6 +371,19 @@ public class Ana extends Activity {
     /* CİHAZ SENSÖRLERİ (2026-11-14-A, kullanıcı: "bütün hata yakalama kodları ile sensörleri güçlendirip eksik olan yerlere ekle; pazar farklı
        cihazlarla test maçları yapılacak"). Ağ değişimi (Wi-Fi / mobil / kopma, hız) ve cihaz ısınması (Android 10+) teşhis olay kaydına yazılır;
        ısınma sayfaya da iletilir (bkz. saha.html MAÇ RAPORU). */
+    private String googleJs;
+    @Override protected void onNewIntent(Intent i) { super.onNewIntent(i); googleDonus(i); }
+    private void googleDonus(Intent i) {
+        try {
+            Uri u = i == null ? null : i.getData();
+            if (u == null || !"google".equals(u.getHost())) return;
+            String t = u.getQueryParameter("t"), hata = u.getQueryParameter("h"), m = u.getQueryParameter("m");
+            setIntent(new Intent());
+            Teshis.olay("google", t != null ? "belge geldi (" + m + ")" : "dönüş: " + hata, "");
+            googleJs = "try{window.__appGoogle&&window.__appGoogle(" + org.json.JSONObject.quote(t == null ? "" : t) + "," + org.json.JSONObject.quote(hata == null ? "" : hata) + "," + org.json.JSONObject.quote(m == null ? "giris" : m) + ")}catch(e){}";
+            if (w != null && sayfaHazir) { w.evaluateJavascript(googleJs, null); googleJs = null; }
+        } catch (Exception e) { Teshis.yaz("google", "dönüş işlenemedi", String.valueOf(e.getMessage())); }
+    }
     private android.net.ConnectivityManager.NetworkCallback agGozcu;
     private String agSon = "";
     private android.os.PowerManager.OnThermalStatusChangedListener isiGozcu;
@@ -484,6 +499,18 @@ public class Ana extends Activity {
            "Tarayıcıdan çıkılamıyor" uyarısı gösteriyordu (kök sürümdeki sayfalar). window.close artık uygulamayı kapatır. */
         // (2026-11-07) Sayfadan elle güncelleme denetimi ve yüklü uygulama sürümü (bkz. Guncelle).
         @JavascriptInterface public void guncellemeDenetle() { h.post(new Runnable() { public void run() { Guncelle.denetle(Ana.this, true); } }); }
+        /* GOOGLE İLE GİRİŞ (2026-11-15-F, kullanıcı: "eFootball / FC gibi hesap bağlayarak giriş deneyelim"). Google, uygulama içi sayfa motorunda
+           (WebView) giriş yapılmasına izin vermez. Giriş telefonun tarayıcısında, sitedeki google-giris.html sayfasında yapılır; sayfa Google'ın verdiği
+           kimlik belgesini (kısa ömürlü) bu uygulamanın kendi adresine (paket adı://google) gönderir, uygulama da belgeyi sayfaya iletir (bkz. googleDonus).
+           Şifre uygulamaya ya da sayfaya hiç gelmez. */
+        @JavascriptInterface public void googleGiris(final String mod) { h.post(new Runnable() { public void run() {
+            try {
+                String a = BuildConfig.ADRES; String taban = a.substring(0, a.lastIndexOf('/') + 1);
+                Uri u = Uri.parse(taban + "google-giris.html").buildUpon().appendQueryParameter("d", getPackageName()).appendQueryParameter("m", mod == null ? "giris" : mod).build();
+                Intent i = new Intent(Intent.ACTION_VIEW, u); i.addCategory(Intent.CATEGORY_BROWSABLE); i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i); Teshis.olay("google", "tarayıcıda giriş açıldı (" + mod + ")", "");
+            } catch (Exception e) { Teshis.yaz("google", "tarayıcı açılamadı", String.valueOf(e.getMessage())); if (w != null) w.evaluateJavascript("try{window.__appGoogle&&window.__appGoogle(null,'tarayici')}catch(e){}", null); }
+        } }); }
         @JavascriptInterface public void siteYukle() { h.post(new Runnable() { public void run() {
             if (w == null) return;
             Sayfa.siteAc(); Teshis.olay("sayfa", "sessiz güncelleme: siteden yükleniyor", BuildConfig.ADRES); Teshis.gonder();
