@@ -1,0 +1,53 @@
+# Silinmiş yönetici hesabının yetkilerini (admins, adminPerms; kök ve test) yeni açılan yönetici hesabına taşır ve yeni hesabın e-postasını
+# doğrulanmış işaretler (Google girişinin aynı e-postalı şifre hesabını ezmesini önler). Herkese açık depo: e-posta maskelenir.
+name: Yonetici tasi
+on:
+  workflow_dispatch:
+jobs:
+  tasi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Tasi
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json" >/dev/null 2>&1 || true
+          cd "$RUNNER_TEMP" && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          node -e '
+            const {GoogleAuth}=require("google-auth-library"); const fs=require("fs");
+            (async()=>{
+              let f=process.env.RUNNER_TEMP+"/sa_temiz"; if(!fs.existsSync(f)) f=process.env.RUNNER_TEMP+"/sa.json";
+              const SAJ=JSON.parse(fs.readFileSync(f,"utf8")), P=SAJ.project_id;
+              const auth=new GoogleAuth({credentials:SAJ,scopes:["https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/userinfo.email","https://www.googleapis.com/auth/firebase.database"]});
+              const tok=(await (await auth.getClient()).getAccessToken()).token;
+              const H={Authorization:"Bearer "+tok,"Content-Type":"application/json"};
+              const DB="https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/";
+              const mask=e=>e?String(e).replace(/^(.).*@/,"$1***@"):"-", kisa=u=>String(u).slice(0,6)+"…";
+              const oku=async y=>(await (await fetch(DB+y+".json?access_token="+tok)).json());
+              const yaz=async(y,v)=>{ const r=await fetch(DB+y+".json?access_token="+tok,{method:v===null?"DELETE":"PUT",body:v===null?undefined:JSON.stringify(v)}); return r.status; };
+              const var_=async uid=>{ const r=await (await fetch("https://identitytoolkit.googleapis.com/v1/projects/"+P+"/accounts:lookup",{method:"POST",headers:H,body:JSON.stringify({localId:[uid]})})).json(); return (r.users||[])[0]; };
+              const adm=Object.assign({},await oku("admins")||{},await oku("test/admins")||{});
+              const eski=[]; for(const u of Object.keys(adm)) if(!(await var_(u))) eski.push(u);
+              console.log("silinmis yonetici uid: "+eski.map(kisa).join(",")||"yok");
+              const b=await (await fetch("https://identitytoolkit.googleapis.com/v1/projects/"+P+"/accounts:batchGet?maxResults=1000",{headers:H})).json();
+              const yeni=(b.users||[]).filter(u=>u.email&&!/@saha-lig\.app$/i.test(u.email)&&+u.createdAt>Date.parse("2026-11-15T15:00:00Z")&&(u.providerUserInfo||[]).some(p=>p.providerId==="password"));
+              console.log("yeni gercek e-postali hesap: "+yeni.length+" "+yeni.map(u=>kisa(u.localId)+" "+mask(u.email)).join(" | "));
+              if(eski.length!==1||yeni.length!==1){ console.log("DURDU: tam olarak 1 silinmis ve 1 yeni hesap bekleniyordu; hicbir sey degistirilmedi."); return; }
+              const E=eski[0], N=yeni[0].localId;
+              for(const k of ["admins","test/admins","adminPerms","test/adminPerms"]){
+                const v=await oku(k+"/"+E);
+                if(v===null||v===undefined){ console.log("  "+k+": eski kayit yok"); continue; }
+                const s1=await yaz(k+"/"+N,v), s2=await yaz(k+"/"+E,null);
+                console.log("  "+k+": tasindi ("+s1+","+s2+")");
+              }
+              const ur=await fetch("https://identitytoolkit.googleapis.com/v1/projects/"+P+"/accounts:update",{method:"POST",headers:H,body:JSON.stringify({localId:N,emailVerified:true})});
+              console.log("e-posta dogrulandi isareti: "+ur.status);
+              console.log("TAMAM: yonetici yetkileri "+kisa(E)+" -> "+kisa(N));
+            })().catch(e=>{ console.log("HATA "+e.message); });
+          ' | tee "$GITHUB_STEP_SUMMARY"
+          rm -f "$RUNNER_TEMP/sa.json" "$RUNNER_TEMP/sa_temiz"
