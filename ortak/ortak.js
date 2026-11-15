@@ -1274,3 +1274,36 @@ var SahaSes = (function(){
     kayitGizle:function(m){ GIZ = (m && typeof m === 'object') ? m : {}; haber(); },
     kayitCal:function(id, o){ var k = KY && KY.L.find(function(x){ return x.id === id; }); if(!k) return Promise.reject(kyYok()); o = o || {}; o._d0 = DONEM; o._sap = 1; return kyTampon(k).then(function(b){ return calB(b, o); }); } };
 })();
+/* VERİTABANI İZİN REDDİ YOLU (2026-11-15-D, SAHA test raporu: maç sonunda aynı saniyede 9 kez "Uncaught (in promise) Error: PERMISSION_DENIED"; hata
+   mesajı HANGİ yola yazılmak istendiğini söylemiyor). Veritabanı yazma işlemleri (set, update, push, remove, transaction) sarmalanır: reddedilen
+   yazmanın yolu (kullanıcı kimliği gizlenerek) ve işlem türü teşhis kaydına yazılır; aynı yol oturumda bir kez yazılır. Davranış değişmez. */
+(function _fbYazmaIzle(){
+  function _uygAd(){ var p = location.pathname; return /saha\.html/.test(p) ? 'saha' : (/admin/.test(p) ? 'admin' : 'puan'); }
+  try{
+    var R = window.firebase && firebase.database && firebase.database.Reference && firebase.database.Reference.prototype;
+    if(!R){ setTimeout(_fbYazmaIzle, 1500); return; }
+    if(R.__sahaIzli) return; R.__sahaIzli = true;
+    var gor = {};
+    ['set', 'update', 'push', 'remove', 'transaction', 'setWithPriority'].forEach(function(ad){
+      var orj = R[ad]; if(typeof orj !== 'function') return;
+      R[ad] = function(){
+        var sonuc = orj.apply(this, arguments), ref = this;
+        try{ var pr = sonuc && (typeof sonuc.then === 'function' ? sonuc : null);
+          if(pr) pr.then(null, function(e){ try{ var m = String((e && (e.code || e.message)) || e);
+            if(!/PERMISSION_DENIED|permission/i.test(m)) return;
+            var yol = String(ref.toString()).replace(/^https?:\/\/[^/]+\//, '').replace(/[A-Za-z0-9]{20,}/g, '<id>').slice(0, 120);
+            var an = ad + '|' + yol; if(gor[an]) return; gor[an] = 1;
+            // Teşhis bayraklarından bağımsız (her zaman) yazılır - bkz. MAÇ RAPORU.
+            try{ (typeof fbDb !== 'undefined' && fbDb ? fbDb : firebase.database()).ref('diagnostics/logs').push({ app:_uygAd(), appLabel:_uygAd(), mod:'veritabani', modLabel:'Veritabanı', kind:'uyari',
+              title:'yazmaReddedildi: ' + ad + ' ' + yol, detail:JSON.stringify({ surum:window.APP_BUILD || '?', islem:ad, yol:yol, giris:!!(window.firebase && firebase.auth && firebase.auth().currentUser && !firebase.auth().currentUser.isAnonymous),
+              ekran:(function(){ try{ var a = document.querySelector('#shellMenu .sh-tab.on, .ni.active, .nav-btn.active'); return a ? String(a.getAttribute('data-s') || a.textContent || '').trim().slice(0, 30) : ''; }catch(e){ return ''; } })(), mac:(function(){ try{ return typeof sahaMacSuruyorMu === 'function' ? sahaMacSuruyorMu() : null; }catch(e){ return null; } })() }),
+              ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140) }).catch(function(){}); }catch(_d){}
+            try{ window._mrOlay && window._mrOlay('izin-reddi', ad + ' ' + yol); }catch(_m){}
+          }catch(_x){} });
+        }catch(_y){}
+        return sonuc;
+      };
+    });
+  }catch(e){ setTimeout(_fbYazmaIzle, 3000); }
+})();
+

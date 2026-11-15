@@ -185,9 +185,13 @@ public class Ana extends Activity {
             }
         });
         w.setWebChromeClient(new WebChromeClient() {
+            /* (2026-11-15-D, test raporu: 150 kaydın 62'si "android-webview-video-poster ... blocked by CORS"). Sayfada afişi olmayan her video için
+               WebView kendi varsayılan afiş resmini yüklemeye çalışıyor, bu da konsol hatası üretiyordu. Şeffaf 1x1 afiş verilir: hata kalkar,
+               videolarda gri oynat simgesi de görünmez. */
+            @Override public android.graphics.Bitmap getDefaultVideoPoster() { return android.graphics.Bitmap.createBitmap(1, 1, android.graphics.Bitmap.Config.ARGB_8888); }
             @Override public boolean onConsoleMessage(ConsoleMessage m) {
                 // (2026-11-07) Gömülü YouTube oynatıcısının ve reCAPTCHA'nın kendi iç uyarıları (accelerometer, requestStorageAccess…) bizim hatamız değil.
-                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR && bizimKaynak(m.sourceId())) Teshis.yaz("konsol", m.message(), m.sourceId() + ":" + m.lineNumber());
+                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR && bizimKaynak(m.sourceId()) && !String.valueOf(m.message()).contains("android-webview-video-poster") && !String.valueOf(m.sourceId()).contains("/recaptcha/")) Teshis.yaz("konsol", m.message(), m.sourceId() + ":" + m.lineNumber());
                 return false;
             }
             @Override public void onShowCustomView(View v, CustomViewCallback g) {

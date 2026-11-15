@@ -176,7 +176,7 @@
 </script>
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=48a8e3a8"></script>
+<script src="ortak/ortak.js?v=b0e030b7"></script>
 <script src="ortak/stadyum-ses.js?v=84cc1cad"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 /* KADRO ANONSU EKRANI (2026-11-08) - yumuşak açılış/kapanış */
@@ -345,7 +345,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-15-C</title>
+<title>SAHA — 3D Futbol v2026-11-15-D</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -21441,6 +21441,7 @@ function _mrBaglantiDinle(){
 function _mrPil(cb){ try{ if(!navigator.getBattery) return cb(null); navigator.getBattery().then(function(b){ cb({ y:Math.round(b.level * 100), sarj:!!b.charging }); }, function(){ cb(null); }); }catch(e){ cb(null); } }
 function _mrBasla(){
   try{
+    try{ _otoK.zorlu = false; _otoK.zorluSay = 0; }catch(e){}
     _mrBaglantiDinle();
     MR = { p0:performance.now(), bas:Date.now(), surum:window.APP_BUILD || '?', tur:_mrTur(), cihaz:_mrCihaz(), ag:{ bas:_mrAg(), deg:0 },
       bag:{ kopma:0, kopukMs:0, enUzunMs:0, kopT:0, bas:window._mrBagli !== false }, gizli:{ n:0, ms:0, t:0 }, uzun:{ n:0, ms:0, en:0 }, hata:{ n:0, L:[] },
@@ -21493,7 +21494,16 @@ function _mrBitir(yarim){
     _mrPil(function(p){ try{ if(MR){ MR.pil = MR.pil || {}; MR.pil.son = p; } }catch(e){} bitis(); });
   }catch(e){ MR = null; }
 }
-window.__appIsi = function(d){ try{ d = +d || 0; if(MR){ if(d > MR.isi) MR.isi = d; window._mrOlay('isi', d); } }catch(e){} };
+/* CİHAZ ISISI (2026-11-15-D): APK ısı durumunu bildirir (0 yok, 1 hafif, 2 orta, 3 ciddi, 4 kritik). Orta ve üstünde: kare hızı ~40'a sınırlanır (ekran
+   kartının yükü ve ısınma azalır; düzenli 40 kare, düzensiz 60'tan akıcı görünür), otomatik kalite güçlü cihazda da 4. kademeye inebilir; ciddi
+   ısınmada çizim çözünürlüğü 1x ve kalite en az 3. kademe. Isı düşünce sınırlar kalkar (kalite yine kare hızına göre geri yükselir). */
+window._isiDurum = 0;
+window.__appIsi = function(d){ try{ d = +d || 0; var once = window._isiDurum; window._isiDurum = d;
+  if(MR){ if(d > MR.isi) MR.isi = d; window._mrOlay('isi', d); }
+  try{ sesDurumOlay('cihaz ısısı ' + d); }catch(e){}
+  if(d >= 3 && (window._otoKalite || 0) < 3){ try{ otoKaliteUygula(3); }catch(e){} }
+  if(d !== once){ try{ sahaPikselOranUygula(); }catch(e){} }
+}catch(e){} };
 var _mPerf = null;
 function _mPerfKare(dt){
   try{
@@ -21645,7 +21655,13 @@ function otoKaliteDegerlendir(ort){
   // (2026-11-07) Kare sınırı hedefi düşürmüşse (cihaz 60'a yetişemiyor) kalite yükseltilmez: sınırlı kare süresi 'hızlı' görünse de pay yoktur.
   try{ if(_ksK > Math.max(1, Math.ceil((1 / _ksVs) / 61 - 0.05))) _otoK.yuksek = 0; }catch(e){}
   if(t - _otoK.sonT < 4000) return;
-  if(_otoK.dusuk >= 3 && window._otoKalite < (window.SAHA_COK_ZAYIF ? 5 : (window.SAHA_GUCLU_DONANIM ? 2 : 4))){ _otoK.sonT = t; _otoK.dusuk = 0; otoKaliteUygula(window._otoKalite + 1); }
+  /* ISINAN GÜÇLÜ CİHAZ (2026-11-15-D, test raporu: S24 FE'de maç 476 sn, ortalama 22 kare/sn, 3517 takılma; cihaz ısısı 55. sn'de "orta" düzeye çıktı,
+     ekran tazelemesi 120 → 75 Hz'e indi, ama kalite 2. kademede KALDI). KÖK SEBEP: güçlü sayılan cihazda otomatik kalite en çok 2. kademeye inebiliyordu;
+     telefon ısınıp sistem işlemciyi yavaşlatınca güçlü cihaz da zayıflıyor ama kalite inmiyordu. Artık: cihaz ısınınca (APK: ısı durumu ≥ 2) ya da 2. kademede
+     kare hızı düşük kalmaya devam ederse güçlü cihaz da 4. kademeye kadar iner. */
+  var _ust = window.SAHA_COK_ZAYIF ? 5 : ((window.SAHA_GUCLU_DONANIM && !(window._isiDurum >= 2) && !_otoK.zorlu) ? 2 : 4);
+  if(_otoK.dusuk >= 3 && window._otoKalite >= _ust && window.SAHA_GUCLU_DONANIM && !_otoK.zorlu){ _otoK.zorluSay = (_otoK.zorluSay || 0) + 1; if(_otoK.zorluSay >= 2){ _otoK.zorlu = true; _ust = 4; try{ window._mrOlay && window._mrOlay('kalite', 'güçlü cihaz zorlanıyor'); }catch(e){} } }
+  if(_otoK.dusuk >= 3 && window._otoKalite < _ust){ _otoK.sonT = t; _otoK.dusuk = 0; otoKaliteUygula(window._otoKalite + 1); try{ window._mrOlay && window._mrOlay('kalite', window._otoKalite); }catch(e){} }
   else if(_otoK.yuksek >= 20 && window._otoKalite > (window.SAHA_COK_ZAYIF ? 3 : 0)){ _otoK.sonT = t; _otoK.yuksek = 0; otoKaliteUygula(window._otoKalite - 1); }
 }
 /* ESKİ CİHAZ ALGILAMA (2026-10-17-B, kullanıcı: "eski model cihazlarda maç yaparken, özellikle online maçlarda aşırı kasma").
@@ -21677,6 +21693,7 @@ function sahaPikselOranUygula(){
     if((window._otoKalite || 0) >= 2) pr = Math.min(pr, 1.5);   /* (2026-11-07) ölçüm: S24 FE'de kalite 2'ye indiği halde çizim 2x çözünürlükte (1,46 MP) kalıyordu; 1,5x piksel sayısını ~%44 azaltır */
     if((window._otoKalite || 0) >= 4) pr = Math.min(pr, 1.25);
     if(window._ekranKaydi || window._bellekDar) pr = Math.min(pr, 1);   // (2026-11-13-I) ekran kaydı / bellek uyarısı: bkz. __appEkranKaydi
+    if(window._isiDurum >= 3) pr = Math.min(pr, 1);                       // (2026-11-15-D) cihaz ciddi ısındı: bkz. __appIsi
     if((window._otoKalite || 0) >= 5) pr = Math.min(pr, window.SAHA_COK_ZAYIF ? 0.85 : 1);      // (2026-10-17-E) yalnızca çok zayıf cihaz: 4. kademe de yetmezse 1x; (2026-10-20-A) çok zayıf cihazda 0,85x (piksel ~%28 az; arayüz yazıları etkilenmez)
     if(Math.abs(renderer.getPixelRatio() - pr) > 0.01){ renderer.setPixelRatio(pr); renderer.setSize(innerWidth, innerHeight); }
   }catch(e){ _sessiz(e, 'sahaPikselOranUygula', 'saha_grafik'); }
@@ -21698,7 +21715,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-15-C';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-15-D';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -33644,7 +33661,7 @@ function _kareAtla(ts){
   if(_ksOnce){ var v = (ts - _ksOnce) / 1000; if(v > 0.004 && v < _ksVs * 1.5) _ksVs += (v - _ksVs) * 0.02; }   // ekran tazeleme aralığı
   _ksOnce = ts;
   if(typeof running === 'undefined' || !running || bitti || duraklat || document.hidden){ _ksSon = 0; return false; }
-  var hz = 1 / _ksVs, kmin = Math.max(1, Math.ceil(hz / ((window._ekranKaydi || window._bellekDar) ? 31 : 61) - 0.05));   // ekran kaydında en çok 30 kare/sn (bkz. __appEkranKaydi)
+  var hz = 1 / _ksVs, kmin = Math.max(1, Math.ceil(hz / ((window._ekranKaydi || window._bellekDar) ? 31 : (window._isiDurum >= 2 ? 41 : 61)) - 0.05));   // ekran kaydında en çok 30, cihaz ısınınca en çok ~40 kare/sn (bkz. __appIsi)
   if(_ksK < kmin) _ksK = kmin;
   var hedef = _ksK * _ksVs * 1000;
   if(_ksSon && ts - _ksSon < hedef - _ksVs * 500) return true;                      // bu tazelemede çizme

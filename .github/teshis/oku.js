@@ -30,6 +30,8 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     { const A = await al(kok + 'sahaGorunum/anonsSes/_golBagir'); console.log('_golBagir kaydı:', A && A.url ? 'VAR' : 'yok'); }
     { const I = await al(kok + 'sahaGorunum/isimSes') || {}; const r = {}; Object.keys(I).forEach(rol => { const T = I[rol] || {}; r[rol] = Object.keys(T).length + ' ad (' + Object.keys(T).slice(0, 6).join(',') + ')'; }); console.log('isimSes:', JSON.stringify(r)); }
     const L = await al(kok + 'diagnostics/logs', '?orderBy="$key"&limitToLast=600') || {};
+    { const V = Object.values(L).filter(x => x && x.mod === 'veritabani' && x.ts > Date.now() - 3 * 86400e3);   // (2026-11-15-D) reddedilen veritabanı yazmaları (üç uygulama)
+      console.log('-- VERİTABANI YAZMA REDDİ (' + V.length + ', son 3 gün) --'); V.sort((a, b) => b.ts - a.ts).slice(0, 15).forEach(x => console.log(saat(x.ts), x.app, x.title, String(x.detail || '').slice(0, 200))); }
     const satir = Object.values(L).filter(x => x && x.app === 'saha' && x.ts > sinir).sort((a, b) => a.ts - b.ts);
     console.log('son 12 saat SAHA kaydı:', satir.length);
     const say = {}; satir.forEach(x => { const k = x.mod + ' | ' + x.title; say[k] = (say[k] || 0) + 1; });
