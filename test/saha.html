@@ -176,7 +176,7 @@
 </script>
 <meta charset="utf-8">
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=77ef1fdb"></script>
+<script src="ortak/ortak.js?v=01df1f25"></script>
 <script src="ortak/stadyum-ses.js?v=84cc1cad"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
 /* KADRO ANONSU EKRANI (2026-11-08) - yumuşak açılış/kapanış */
@@ -345,7 +345,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-15-I</title>
+<title>SAHA — 3D Futbol v2026-11-15-J</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -15366,25 +15366,37 @@ function girisMesaj(m, hataMi){
 }
 /* DOKUNARAK GİRİŞ (2026-11-15-H; bkz. ortak/ortak.js SahaGirisKabuk). */
 function _gsHatirlanan(){ try{ var h = localStorage.getItem('saha_hatirla'); if(h === '0') return null; return localStorage.getItem('saha_girisIsim') || null; }catch(e){ return null; } }
-function gsIpucuTazele(){ try{ var ad = _gsHatirlanan(); if(window._gsKabuk) window._gsKabuk.ipucu('Başlamak için dokun', ad || ''); }catch(e){} }
+var _gsAv = { vid:'', url:null };
+function gsIpucuTazele(){
+  try{
+    var ad = _gsHatirlanan(), K = window._gsKabuk; if(!K) return;
+    if(!ad){ _gsAv = { vid:'', url:null }; K.ipucu('Başlamak için dokun', ''); return; }
+    var vid = visitorIdFromNameSaha(ad);
+    K.ipucu('Başlamak için dokun', ad, _gsAv.vid === vid ? (_gsAv.url || true) : true);
+    if(_gsAv.vid !== vid && fbHazir && fbDb){ _gsAv = { vid:vid, url:null };
+      fbDb.ref('userProfiles/' + vid + '/avatar').once('value').then(function(sn){ if(_gsAv.vid !== vid) return; _gsAv.url = sn.val() || null; if(window._gsKabuk && !window._gsKabuk.acikMi()) window._gsKabuk.ipucu('Başlamak için dokun', ad, _gsAv.url || true); }, function(){}); }
+  }catch(e){}
+}
 function gsDokun(){
   var K = window._gsKabuk, ad = _gsHatirlanan();
   if(!ad || !fbHazir || !fbDb || !window.SahaKimlik){ K && K.ac(); return; }
   var vid = visitorIdFromNameSaha(ad);
-  K && K.ipucu('Giriş yapılıyor…', ad);
+  K && K.ipucu('Giriş yapılıyor…', ad, _gsAv.url || true);
   SahaGirisKabuk.kimlikHazir().then(function(){ return fbDb.ref('userProfiles/' + vid).once('value'); }).then(function(sn){
-    var v = sn.val();
+    var v = sn.val(), _dz = SahaGirisKabuk.oturumDurum(v);
     if(v && v.authEposta && SahaKimlik.oturumBuProfil(v)){
+      SahaGirisKabuk.iz('saha', 'şifresiz giriş', _dz);
       window._sahaDokunOnay = vid; window._sahaDokunAd = ad;
       var gi = document.getElementById('gsIsim'); if(gi) gi.value = ad;
       try{ var _h = document.getElementById('gsHatirla'); if(_h) _h.checked = true; }catch(e){}
       girisYap(); gsIpucuTazele(); return;
     }
+    SahaGirisKabuk.iz('saha', 'oturum eşleşmedi - şifre istendi', _dz);
     gsIpucuTazele();
     var gi2 = document.getElementById('gsIsim'); if(gi2 && !gi2.value) gi2.value = ad;
     girisMesaj(v ? 'Bu cihazda bir kez şifreni ya da Google hesabını gir; sonra dokunman yeterli.' : 'Bu isimde bir Puan Tablosu hesabı bulunamadı.', !v);
     if(K) K.ac(); try{ document.getElementById('gsSifre').focus(); }catch(e){}
-  }).catch(function(e){ gsIpucuTazele(); _sessiz(e, 'gsDokun', 'saha_ag'); girisMesaj('Bağlantı sorunu - tekrar dokun.', true); });
+  }).catch(function(e){ SahaGirisKabuk.iz('saha', 'hata', { kod:String((e && (e.code || e.message)) || e) }); gsIpucuTazele(); _sessiz(e, 'gsDokun', 'saha_ag'); girisMesaj('Bağlantı sorunu - tekrar dokun.', true); });
 }
 function gsAyarCiz(){
   try{
@@ -21830,7 +21842,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-15-I';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-15-J';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -34439,7 +34451,7 @@ catch(e){ _sessiz(e,'shellCikis:bagla','saha_oyun'); }
 document.getElementById('b-giris').onclick   = girisYap;
 try{ document.getElementById('b-google').onclick = googleGirisYap; }catch(e){}
 try{
-  window._gsKabuk = SahaGirisKabuk.kur({ ekran:document.getElementById('p-start'), panel:document.querySelector('#p-start .card'), baslik:'Hesap ve giriş', dokun:gsDokun, acildi:gsAyarCiz });
+  window._gsKabuk = SahaGirisKabuk.kur({ ekran:document.getElementById('p-start'), panel:document.querySelector('#p-start .card'), baslik:'Hesap ve giriş', dokun:gsDokun, acildi:gsAyarCiz, kapandi:gsIpucuTazele });
   gsIpucuTazele();
 }catch(e){ _sessiz(e, 'gsKabukKur', 'saha_oyun'); }
 document.getElementById('gsIsim').addEventListener('keydown', function(e){ if(e.key==='Enter') girisYap(); });

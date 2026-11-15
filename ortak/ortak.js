@@ -676,6 +676,8 @@ var SahaGirisKabuk = (function(){
       '  color:#fff;font:600 15px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;letter-spacing:.06em;text-shadow:0 2px 10px rgba(0,0,0,.6);max-width:calc(100vw - 180px);animation:sgkNabiz 2.4s ease-in-out infinite}',
       '.sgk-ipucu b{display:block;font-size:12px;font-weight:600;letter-spacing:.04em;opacity:.8;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
       '.sgk-acik .sgk-ipucu{display:none}',
+      '.sgk-av{display:flex;align-items:center;justify-content:center;width:64px;height:64px;margin:0 auto 10px;border-radius:50%;background:rgba(255,255,255,.16) center/cover no-repeat;border:2.5px solid rgba(255,255,255,.92);box-shadow:0 8px 26px rgba(0,0,0,.45);font:900 26px system-ui,sans-serif;font-style:normal;color:#fff;animation:none}',
+      '@media (orientation:landscape) and (max-height:600px){.sgk-av{width:52px;height:52px;font-size:22px;margin-bottom:7px}}',
       '@keyframes sgkNabiz{0%,100%{opacity:.55}50%{opacity:1}}',
       '.sgk-ort{position:fixed;inset:0;z-index:2999;background:rgba(0,0,0,.38);display:none}',
       '.sgk-acik .sgk-ort{display:block}',
@@ -723,7 +725,11 @@ var SahaGirisKabuk = (function(){
     });
     return {
       ac:ac, kapat:kapat, acikMi:function(){ return acik; },
-      ipucu:function(metin, alt){ ipucu.innerHTML = ''; ipucu.appendChild(document.createTextNode(metin || 'Başlamak için dokun')); if(alt){ var b = document.createElement('b'); b.textContent = alt; ipucu.appendChild(b); } }
+      // av: profil fotoğrafı adresi ya da (fotoğraf yoksa) true → adın baş harfi
+      ipucu:function(metin, alt, av){ ipucu.innerHTML = '';
+        if(av && alt){ var a = document.createElement('i'); a.className = 'sgk-av'; if(typeof av === 'string') a.style.backgroundImage = 'url("' + av.replace(/"/g, '%22') + '")'; else a.textContent = String(alt).trim().charAt(0).toLocaleUpperCase('tr'); ipucu.appendChild(a); }
+        ipucu.appendChild(document.createTextNode(metin || 'Başlamak için dokun')); if(alt){ var b = document.createElement('b'); b.textContent = alt; ipucu.appendChild(b); } },
+      ipucuOge:function(){ return ipucu; }
     };
   }
   // Kimlik sisteminin cihazdaki oturumu yükleyip yüklemediğini bekle (ilk durum bildirimi).
@@ -782,7 +788,12 @@ var SahaGirisKabuk = (function(){
       }
     };
   }
-  return { kur:kur, kimlikHazir:kimlikHazir, ayarCiz:ayarCiz };
+  // Teşhis: dokunarak giriş adımları her zaman kaydedilir (cihaz raporlarında görünsün).
+  function iz(app, adim, ek){ try{ (typeof fbDb !== 'undefined' && fbDb ? fbDb : firebase.database()).ref('diagnostics/logs').push({ app:app, appLabel:app, mod:'giris', modLabel:'Dokunarak giriş', kind:/hata|yok|eşleşmedi|yüklenmedi/.test(adim) ? 'uyari' : 'bilgi',
+    title:'dokun: ' + adim, detail:JSON.stringify(Object.assign({ surum:window.APP_BUILD || '?' }, ek || {})), ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140) }).catch(function(){}); }catch(e){} }
+  function oturumDurum(v){ var u = null; try{ u = firebase.auth().currentUser; }catch(e){}
+    return { profil:!!v, tasinmis:!!(v && v.authEposta), oturum:u ? (u.isAnonymous ? 'anonim' : (window.SahaKimlik && SahaKimlik.sentetikMi(u) ? 'oyuncu' : 'diger')) : 'yok', eslesme:!!(v && u && u.email && v.authEposta === u.email), sifreYenile:!!(v && v.sifreYenile) }; }
+  return { kur:kur, kimlikHazir:kimlikHazir, ayarCiz:ayarCiz, iz:iz, oturumDurum:oturumDurum };
 })();
 /* ═══ ZORUNLU GÜNCELLEME (2026-10-30-A, V1.4.0) ══════════════════════════════════════════════════════════════════
    Yönetici admin panelinden globalConfig/minSurum = { build:'YYYY-AA-GG-H', mesaj, ts } yazar. Yüklü sürümü (APP_BUILD) bundan
