@@ -1,0 +1,49 @@
+# Yönetici hesaplarını denetler: admins listesindeki her uid kimlik sisteminde var mı, hangi giriş yöntemleri bağlı. Yalnızca okur.
+# Herkese açık depo: e-postalar maskelenir (ilk harf + alan adı), gizli bilgi yazılmaz.
+name: Yonetici kimlik oku
+on:
+  workflow_dispatch:
+jobs:
+  oku:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Oku
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json" >/dev/null 2>&1 || true
+          cd "$RUNNER_TEMP" && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          node -e '
+            const {GoogleAuth}=require("google-auth-library"); const fs=require("fs");
+            (async()=>{
+              let f=process.env.RUNNER_TEMP+"/sa_temiz"; if(!fs.existsSync(f)) f=process.env.RUNNER_TEMP+"/sa.json";
+              const SAJ=JSON.parse(fs.readFileSync(f,"utf8")), P=SAJ.project_id;
+              const auth=new GoogleAuth({credentials:SAJ,scopes:["https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/userinfo.email","https://www.googleapis.com/auth/firebase.database"]});
+              const tok=(await (await auth.getClient()).getAccessToken()).token;
+              const H={Authorization:"Bearer "+tok,"Content-Type":"application/json"};
+              const DB="https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/";
+              const mask=e=>e?String(e).replace(/^(.).*@/,"$1***@"):"-";
+              const kisa=u=>u?String(u).slice(0,6)+"…":"-";
+              for(const yol of ["admins","test/admins"]){
+                const a=await (await fetch(DB+yol+".json?access_token="+tok)).json()||{};
+                console.log("== "+yol+": "+Object.keys(a).length+" kayıt");
+                for(const uid of Object.keys(a)){
+                  const r=await (await fetch("https://identitytoolkit.googleapis.com/v1/projects/"+P+"/accounts:lookup",{method:"POST",headers:H,body:JSON.stringify({localId:[uid]})})).json();
+                  const u=(r.users||[])[0];
+                  if(!u){ console.log("  "+kisa(uid)+" deger="+a[uid]+" -> KIMLIK SISTEMINDE YOK (silinmis)"); continue; }
+                  console.log("  "+kisa(uid)+" deger="+a[uid]+" eposta="+mask(u.email)+" dogrulandi="+!!u.emailVerified+" yontemler="+(u.providerUserInfo||[]).map(p=>p.providerId).join(",")+" sifre="+(!!u.passwordHash)+" kapali="+!!u.disabled+" sonGiris="+(u.lastLoginAt?new Date(+u.lastLoginAt).toISOString():"-"));
+                }
+              }
+              // Sentetik olmayan (gerçek e-postalı) hesaplar
+              const b=await (await fetch("https://identitytoolkit.googleapis.com/v1/projects/"+P+"/accounts:batchGet?maxResults=1000",{headers:H})).json();
+              const g=(b.users||[]).filter(u=>u.email&&!/@saha-lig\.app$/i.test(u.email));
+              console.log("== gercek e-postali hesaplar: "+g.length+" / toplam "+(b.users||[]).length);
+              g.forEach(u=>console.log("  "+kisa(u.localId)+" "+mask(u.email)+" yontemler="+(u.providerUserInfo||[]).map(p=>p.providerId).join(",")+" sifre="+(!!u.passwordHash)+" olusturma="+(u.createdAt?new Date(+u.createdAt).toISOString():"-")+" sonGiris="+(u.lastLoginAt?new Date(+u.lastLoginAt).toISOString():"-")));
+            })().catch(e=>{ console.log("HATA "+e.message); });
+          ' | tee "$GITHUB_STEP_SUMMARY"
+          rm -f "$RUNNER_TEMP/sa.json" "$RUNNER_TEMP/sa_temiz"
