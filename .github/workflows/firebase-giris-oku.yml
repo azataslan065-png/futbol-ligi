@@ -1,0 +1,35 @@
+# Firebase Authentication yapılandırmasını okur (giriş yöntemleri, Google sağlayıcısı, yetkili alan adları, uygulamalar). Yalnızca okur.
+name: Firebase giris oku
+on:
+  workflow_dispatch:
+jobs:
+  oku:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Oku
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json" >/dev/null 2>&1 || true
+          cd "$RUNNER_TEMP" && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          node -e '
+            const {GoogleAuth}=require("google-auth-library"); const fs=require("fs");
+            (async()=>{
+              let f=process.env.RUNNER_TEMP+"/sa_temiz"; if(!fs.existsSync(f)) f=process.env.RUNNER_TEMP+"/sa.json";
+              const SAJ=JSON.parse(fs.readFileSync(f,"utf8")), P=SAJ.project_id;
+              const auth=new GoogleAuth({credentials:SAJ,scopes:["https://www.googleapis.com/auth/cloud-platform","https://www.googleapis.com/auth/firebase"]});
+              const tok=(await (await auth.getClient()).getAccessToken()).token;
+              const H={Authorization:"Bearer "+tok,"X-Goog-User-Project":P};
+              const al=async(u)=>{ const r=await fetch(u,{headers:H}); const t=await r.text(); return r.status+" "+t.replace(/"clientSecret":"[^"]*"/g,"\"clientSecret\":\"***\"").replace(/\s+/g," ").slice(0,1500); };
+              console.log("CONFIG", await al("https://identitytoolkit.googleapis.com/admin/v2/projects/"+P+"/config"));
+              console.log("IDP", await al("https://identitytoolkit.googleapis.com/admin/v2/projects/"+P+"/defaultSupportedIdpConfigs"));
+              console.log("WEBAPPS", await al("https://firebase.googleapis.com/v1beta1/projects/"+P+"/webApps"));
+              console.log("ANDROID", await al("https://firebase.googleapis.com/v1beta1/projects/"+P+"/androidApps"));
+            })().catch(e=>{ console.log("HATA "+e.message); });
+          ' | tee "$GITHUB_STEP_SUMMARY"
+          rm -f "$RUNNER_TEMP/sa.json" "$RUNNER_TEMP/sa_temiz"
