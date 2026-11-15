@@ -515,6 +515,12 @@ var SahaGoogle = (function(){
   var _bek = null, _apkBek = null;            // _bek: bağlanmayı bekleyen Google kimliği · _apkBek: tarayıcıdan dönüş bekleyen söz
   function destek(){ try{ return !!(window.firebase && firebase.auth && firebase.auth.GoogleAuthProvider); }catch(e){ return false; } }
   function apkMi(){ try{ return !!(window.SahaApp && typeof SahaApp.googleGiris === 'function'); }catch(e){ return false; } }
+  /* (2026-11-15-G) KÖK SEBEP (kullanıcı: "Google düğmesine basınca yükleniyor ekranı çıkıyor, ardından uygulamadan atıyor"): telefondaki uygulama
+     eski sürümdü (yerel kısım 2026-11-15-D; sayfa sessizce F'ye güncellendi ama Google köprüsü yeni uygulama dosyasında). Köprü olmayınca tarayıcı yolu
+     (popup) seçildi; uygulama içinde popup ayrı bir pencerede kimlik sayfasını açtı (karanlık "yükleniyor" ekranı), Google sayfası dış tarayıcıya
+     atıldı ve uygulamadan çıkıldı. Artık uygulama içindeyse ve köprü yoksa popup hiç denenmez; yeni sürüm güncellemesi açılır. */
+  function eskiUygulamaMi(){ try{ return !apkMi() && (!!window.SahaApp || /; wv\)/.test(navigator.userAgent || '')); }catch(e){ return false; } }
+  var _yetim = null;   // uygulama, sayfa yeniden yüklendikten sonra dönen Google belgesi (bekleyen söz kaybolmuşsa)
   function kod(e){ return String((e && e.code) || (e && e.message) || e || 'bilinmeyen'); }
   function iz(baslik, ek){ try{ var ad = /admin/.test(location.pathname) ? 'admin' : (/saha/.test(location.pathname) ? 'saha' : 'puan');
     (typeof fbDb !== 'undefined' && fbDb ? fbDb : firebase.database()).ref('diagnostics/logs').push({ app:ad, appLabel:ad, mod:'google', modLabel:'Google girişi', kind:/hata|bağlanamadı/.test(baslik) ? 'uyari' : 'bilgi',
@@ -530,7 +536,7 @@ var SahaGoogle = (function(){
   // APK: tarayıcı sayfası belgeyi döndürünce Ana.java burayı çağırır.
   window.__appGoogle = function(t, hata, mod){
     var b = _apkBek; _apkBek = null;
-    if(!b){ if(t){ iz('beklenmeyen dönüş', { mod:mod }); try{ window.dispatchEvent(new CustomEvent('sahaGoogleDonus', { detail:{ t:t, mod:mod } })); }catch(e){} } return; }
+    if(!b){ if(t){ _yetim = firebase.auth.GoogleAuthProvider.credential(t); iz('sayfa yenilendikten sonra dönüş', { mod:mod }); try{ window.dispatchEvent(new CustomEvent('sahaGoogleDonus', { detail:{ mod:mod } })); }catch(e){} } return; }
     clearTimeout(b.z);
     if(t) b.res(firebase.auth.GoogleAuthProvider.credential(t)); else b.rej({ code:'google/' + (hata || 'iptal') });
   };
@@ -538,6 +544,8 @@ var SahaGoogle = (function(){
   function kimlikAl(mod){
     if(!destek()) return Promise.reject({ code:'google/sdk-yok' });
     var ga = gecici();
+    if(_yetim){ var y = _yetim; _yetim = null; return ga.signInWithCredential(y).then(function(s){ return { kimlik:y, sonuc:s }; }); }
+    if(eskiUygulamaMi()){ iz('eski uygulama', {}); try{ if(window.SahaApp && SahaApp.guncellemeDenetle) setTimeout(function(){ SahaApp.guncellemeDenetle(); }, 1200); }catch(e){} return Promise.reject({ code:'google/eski-uygulama' }); }
     if(apkMi()){
       return new Promise(function(res, rej){
         if(_apkBek){ try{ _apkBek.rej({ code:'google/yinelendi' }); }catch(e){} clearTimeout(_apkBek.z); }
@@ -608,9 +616,11 @@ var SahaGoogle = (function(){
   }
   function bagliMi(){ try{ var u = firebase.auth().currentUser; return !!(u && (u.providerData || []).some(function(p){ return p && p.providerId === 'google.com'; })); }catch(e){ return false; } }
   function bekliyor(){ return !!_bek; }
+  function donusVar(){ return !!_yetim; }
   function vazgec(){ _bek = null; }
   function mesaj(r){
     var k = (r && r.kod) || '';
+    if(/eski-uygulama/.test(k)) return 'Google ile giriş için uygulamanın yeni sürümü gerekli; güncelleme açılıyor.';
     if(/operation-not-allowed|configuration-not-found/.test(k)) return 'Google ile giriş henüz açılmadı.';
     if(/unauthorized-domain/.test(k)) return 'Bu adres Google girişine kayıtlı değil.';
     if(/popup-blocked/.test(k)) return 'Tarayıcı Google penceresini engelledi; açılır pencerelere izin ver.';
@@ -630,7 +640,7 @@ var SahaGoogle = (function(){
       });
     };
   });
-  return { destek:destek, apkMi:apkMi, giris:giris, bagla:bagla, bekleyeniBagla:bekleyeniBagla, bagliMi:bagliMi, bekliyor:bekliyor, vazgec:vazgec, mesaj:mesaj };
+  return { destek:destek, apkMi:apkMi, giris:giris, bagla:bagla, bekleyeniBagla:bekleyeniBagla, bagliMi:bagliMi, bekliyor:bekliyor, donusVar:donusVar, eskiUygulamaMi:eskiUygulamaMi, vazgec:vazgec, mesaj:mesaj };
 })();
 /* ═══ ZORUNLU GÜNCELLEME (2026-10-30-A, V1.4.0) ══════════════════════════════════════════════════════════════════
    Yönetici admin panelinden globalConfig/minSurum = { build:'YYYY-AA-GG-H', mesaj, ts } yazar. Yüklü sürümü (APP_BUILD) bundan
