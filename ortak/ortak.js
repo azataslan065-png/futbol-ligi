@@ -642,6 +642,138 @@ var SahaGoogle = (function(){
   });
   return { destek:destek, apkMi:apkMi, giris:giris, bagla:bagla, bekleyeniBagla:bekleyeniBagla, bagliMi:bagliMi, bekliyor:bekliyor, donusVar:donusVar, eskiUygulamaMi:eskiUygulamaMi, vazgec:vazgec, mesaj:mesaj };
 })();
+/* ═══ DOKUNARAK GİRİŞ KABUĞU (2026-11-15-H) ════════════════════════════════════════════════════════════════════════
+   Kullanıcı: "giriş ekranındaki giriş düğmelerini kaldır; sağ alt köşede üç çizgili bir düğme olsun, giriş bilgileri, Google ile hesap
+   bağlama, isim ve şifre ayarları oradan gelsin. İsim, şifre ve Google hesabı yalnızca bir kez girilecek, sonra ekrana bir kez dokunmak
+   yeterli olacak." SAHA ve Puan Tablosu aynı kabuğu kullanır:
+   · Giriş ekranı sade: arka plan + altta "Başlamak için dokun" + sağ altta menü düğmesi.
+   · Dokunma: bu cihazda o hesabın kimlik oturumu açıksa (bir kez ad+şifre ya da Google ile girilmiş) şifre sorulmadan girilir.
+     Şifre hiçbir yerde saklanmaz; doğrulama Firebase'in cihazda tuttuğu oturumdur. Oturum yoksa menü açılır.
+   · Menü: giriş formu (ad, şifre, Google) + hesap ayarları (Google bağla, şifre değiştir, bu cihazda unut, sürüm). */
+var SahaGirisKabuk = (function(){
+  var IKON = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="5" cy="7" r=".9" fill="currentColor" stroke="none"/><circle cx="5" cy="12" r=".9" fill="currentColor" stroke="none"/><circle cx="5" cy="17" r=".9" fill="currentColor" stroke="none"/><path d="M9 7h11M9 12h11M9 17h11"/></svg>';
+  function css(){
+    if(document.getElementById('sgkCss')) return;
+    var s = document.createElement('style'); s.id = 'sgkCss';
+    s.textContent = [
+      '.sgk-ekran:not(.sgk-acik) .sgk-panel{display:none !important}',
+      '.sgk-menu{position:fixed;right:max(18px,env(safe-area-inset-right,0px));bottom:max(18px,calc(env(safe-area-inset-bottom,0px) + 14px));z-index:3002;width:58px;height:58px;border-radius:50%;',
+      '  display:flex;align-items:center;justify-content:center;color:#fff;background:rgba(10,14,30,.28);border:2.5px solid rgba(255,255,255,.92);cursor:pointer;padding:0;',
+      '  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);box-shadow:0 6px 22px rgba(0,0,0,.35);-webkit-tap-highlight-color:transparent;transition:transform .18s ease,background .18s ease}',
+      '.sgk-menu:active{transform:scale(.92)}',
+      '.sgk-acik .sgk-menu{background:rgba(255,255,255,.18)}',
+      '.sgk-ipucu{position:fixed;left:50%;bottom:max(30px,calc(env(safe-area-inset-bottom,0px) + 26px));transform:translateX(-50%);z-index:3001;pointer-events:none;text-align:center;',
+      '  color:#fff;font:600 15px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;letter-spacing:.06em;text-shadow:0 2px 10px rgba(0,0,0,.6);max-width:calc(100vw - 180px);animation:sgkNabiz 2.4s ease-in-out infinite}',
+      '.sgk-ipucu b{display:block;font-size:12px;font-weight:600;letter-spacing:.04em;opacity:.8;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+      '.sgk-acik .sgk-ipucu{display:none}',
+      '@keyframes sgkNabiz{0%,100%{opacity:.55}50%{opacity:1}}',
+      '.sgk-ort{position:fixed;inset:0;z-index:2999;background:rgba(0,0,0,.38);display:none}',
+      '.sgk-acik .sgk-ort{display:block}',
+      '.sgk-acik .sgk-panel{z-index:3000 !important;animation:sgkGel .22s ease-out}',
+      '@keyframes sgkGel{from{opacity:0;margin-top:14px}to{opacity:1;margin-top:0}}',
+      '.sgk-bas{display:flex;align-items:center;justify-content:space-between;margin:0 0 10px}',
+      '.sgk-bas span{font:700 13px system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;opacity:.75}',
+      '.sgk-kapat{background:none;border:0;color:inherit;font-size:22px;line-height:1;padding:4px 6px;cursor:pointer;opacity:.75}',
+      '.sha-ayar{margin-top:12px;padding-top:10px;border-top:1px solid rgba(255,255,255,.12);font:13px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}',
+      '.sha-ayar .sha-satir{display:flex;align-items:center;gap:10px;padding:7px 0}',
+      '.sha-ayar .sha-av{width:34px;height:34px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:800;background:rgba(255,255,255,.14);overflow:hidden;background-size:cover;background-position:center}',
+      '.sha-ayar .sha-ad{font-weight:700;font-size:14px}',
+      '.sha-ayar .sha-not{opacity:.7;font-size:11.5px}',
+      '.sha-ayar .sha-d{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:7px;padding:9px 10px;border-radius:11px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.07);color:inherit;font:600 13px system-ui,sans-serif;cursor:pointer}',
+      '.sha-ayar .sha-d:disabled{opacity:.55}',
+      '.sha-ayar .sha-d.sha-tehlike{color:#ff9f9f;border-color:rgba(255,120,120,.3)}',
+      '.sha-ayar .sha-ok{color:#7be0a6;font-weight:700}',
+      '.sha-ayar input{width:100%;box-sizing:border-box;margin-top:6px;padding:9px 11px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(0,0,0,.25);color:inherit;font:14px system-ui,sans-serif}',
+      '.sha-ayar .sha-msj{min-height:0;font-size:12px;margin-top:6px}',
+      '.sha-ayar .sha-surum{opacity:.55;font-size:11px;text-align:center;margin-top:10px}'
+    ].join('\n');
+    document.head.appendChild(s);
+  }
+  /* o: { ekran, panel, baslik, dokun(), acildi(), kapandi() } */
+  function kur(o){
+    css();
+    var ekran = o.ekran, panel = o.panel, acik = false;
+    ekran.classList.add('sgk-ekran'); panel.classList.add('sgk-panel');
+    var ort = document.createElement('div'); ort.className = 'sgk-ort'; ekran.appendChild(ort);
+    var ipucu = document.createElement('div'); ipucu.className = 'sgk-ipucu'; ipucu.textContent = 'Başlamak için dokun'; ekran.appendChild(ipucu);
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'sgk-menu'; btn.setAttribute('aria-label', 'Hesap ve ayarlar'); btn.innerHTML = IKON; ekran.appendChild(btn);
+    var bas = document.createElement('div'); bas.className = 'sgk-bas'; bas.innerHTML = '<span>' + (o.baslik || 'Hesap') + '</span><button type="button" class="sgk-kapat" aria-label="Kapat">×</button>';
+    panel.insertBefore(bas, panel.firstChild);
+    function ac(){ if(acik) return; acik = true; ekran.classList.add('sgk-acik'); try{ o.acildi && o.acildi(); }catch(e){} }
+    function kapat(){ if(!acik) return; acik = false; ekran.classList.remove('sgk-acik'); try{ document.activeElement && document.activeElement.blur && document.activeElement.blur(); }catch(e){} try{ o.kapandi && o.kapandi(); }catch(e){} }
+    btn.addEventListener('click', function(e){ e.stopPropagation(); acik ? kapat() : ac(); });
+    bas.querySelector('.sgk-kapat').addEventListener('click', function(e){ e.stopPropagation(); kapat(); });
+    ort.addEventListener('click', function(e){ e.stopPropagation(); kapat(); });
+    var son = 0;
+    ekran.addEventListener('click', function(e){
+      if(acik || panel.contains(e.target) || btn.contains(e.target)) return;
+      if(e.target.closest && e.target.closest('a,button,input,select,textarea,label')) return;
+      var t = Date.now(); if(t - son < 900) return; son = t;   // çift dokunma tek giriş
+      try{ o.dokun && o.dokun(); }catch(err){ ac(); }
+    });
+    return {
+      ac:ac, kapat:kapat, acikMi:function(){ return acik; },
+      ipucu:function(metin, alt){ ipucu.innerHTML = ''; ipucu.appendChild(document.createTextNode(metin || 'Başlamak için dokun')); if(alt){ var b = document.createElement('b'); b.textContent = alt; ipucu.appendChild(b); } }
+    };
+  }
+  // Kimlik sisteminin cihazdaki oturumu yükleyip yüklemediğini bekle (ilk durum bildirimi).
+  var _hazir = null;
+  function kimlikHazir(){
+    if(_hazir) return _hazir;
+    _hazir = new Promise(function(res){
+      try{ var a = firebase.auth(), k = a.onAuthStateChanged(function(u){ try{ k(); }catch(e){} res(u); }); setTimeout(function(){ res(a.currentUser); }, 6000); }catch(e){ res(null); }
+    });
+    return _hazir;
+  }
+  /* HESAP AYARLARI (menünün alt bölümü). o: { kap, ref, profil, ad, kayit, avatar, unut(), bildir(m, hata), surum } */
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
+  function ayarCiz(o){
+    var kap = o.kap; if(!kap) return;
+    var oturum = !!(o.kayit && window.SahaKimlik && SahaKimlik.oturumBuProfil(o.kayit));
+    var gb = !!(oturum && window.SahaGoogle && SahaGoogle.bagliMi());
+    var h = '';
+    if(o.ad){
+      var av = o.avatar ? '<div class="sha-av" style="background-image:url(&quot;' + esc(o.avatar) + '&quot;)"></div>' : '<div class="sha-av">' + esc(String(o.ad).trim().charAt(0).toLocaleUpperCase('tr')) + '</div>';
+      h += '<div class="sha-satir">' + av + '<div><div class="sha-ad">' + esc(o.ad) + '</div><div class="sha-not">' + (oturum ? 'Bu cihazda kayıtlı · ekrana dokunman yeterli' : 'Bu cihazda bir kez şifre ya da Google ile gir') + '</div></div></div>';
+      if(oturum){
+        h += gb ? '<div class="sha-satir"><span class="sha-ok">✓ Google hesabı bağlı</span></div>'
+                : '<button type="button" class="sha-d" data-i="google">Google hesabını bağla</button>';
+        if(o.kayit && o.kayit.authEposta) h += '<button type="button" class="sha-d" data-i="sifreAc">Şifreyi değiştir</button><div data-b="sifre" style="display:none"><input type="password" data-a="eski" placeholder="Mevcut şifre" autocomplete="current-password"><input type="password" data-a="yeni" placeholder="Yeni şifre (en az 4 karakter)" autocomplete="new-password"><button type="button" class="sha-d" data-i="sifreKaydet">Kaydet</button></div>';
+      }
+      h += '<button type="button" class="sha-d sha-tehlike" data-i="unut">Bu cihazda hesabı unut</button>';
+    }
+    h += '<div class="sha-msj" data-b="msj"></div>';
+    if(o.surum) h += '<div class="sha-surum">Sürüm ' + esc(o.surum) + '</div>';
+    kap.innerHTML = h; kap.className = 'sha-ayar';
+    var msj = kap.querySelector('[data-b="msj"]');
+    function yaz(m, hata){ if(msj){ msj.textContent = m || ''; msj.style.color = hata ? '#ff9f9f' : '#9fe0bd'; } }
+    kap.onclick = function(e){
+      var d = e.target.closest && e.target.closest('[data-i]'); if(!d) return; e.stopPropagation();
+      var i = d.getAttribute('data-i');
+      if(i === 'google'){
+        d.disabled = true; yaz(SahaGoogle.apkMi() ? 'Tarayıcıda Google açılıyor…' : 'Google açılıyor…');
+        SahaGoogle.bagla(o.ref, o.profil).then(function(r){
+          d.disabled = false;
+          if(r.durum === 'ok'){ yaz('Google hesabın bağlandı.'); ayarCiz(o); }
+          else if(r.durum === 'iptal') yaz('');
+          else yaz(SahaGoogle.mesaj(r), true);
+        });
+      } else if(i === 'sifreAc'){
+        var b = kap.querySelector('[data-b="sifre"]'); if(b){ b.style.display = b.style.display === 'none' ? 'block' : 'none'; try{ b.querySelector('input').focus(); }catch(_){} }
+      } else if(i === 'sifreKaydet'){
+        var es = kap.querySelector('[data-a="eski"]').value || '', ye = (kap.querySelector('[data-a="yeni"]').value || '').trim();
+        if(!es){ yaz('Mevcut şifreni gir.', true); return; }
+        if(ye.length < 4){ yaz('Yeni şifre en az 4 karakter olmalı.', true); return; }
+        d.disabled = true; yaz('Kaydediliyor…');
+        SahaKimlik.sifreDegistir(o.ref, o.profil, es, ye, o.kayit).then(function(){ d.disabled = false; yaz('Şifren değişti.'); kap.querySelector('[data-b="sifre"]').style.display = 'none'; },
+          function(e){ d.disabled = false; var k = String((e && e.code) || e || ''); yaz(/wrong-password|invalid-credential|invalid-login/.test(k) ? 'Mevcut şifre hatalı.' : 'Şifre değiştirilemedi (' + k.replace(/^auth\//, '') + ').', true); });
+      } else if(i === 'unut'){
+        try{ o.unut && o.unut(); }catch(_){}
+      }
+    };
+  }
+  return { kur:kur, kimlikHazir:kimlikHazir, ayarCiz:ayarCiz };
+})();
 /* ═══ ZORUNLU GÜNCELLEME (2026-10-30-A, V1.4.0) ══════════════════════════════════════════════════════════════════
    Yönetici admin panelinden globalConfig/minSurum = { build:'YYYY-AA-GG-H', mesaj, ts } yazar. Yüklü sürümü (APP_BUILD) bundan
    eski olan Puan Tablosu, SAHA ve admin ekranı "Güncelle" ekranı gösterir. Güncelle: medya dışındaki önbellekleri siler, servis
