@@ -524,7 +524,7 @@ var SahaGoogle = (function(){
   function kod(e){ return String((e && e.code) || (e && e.message) || e || 'bilinmeyen'); }
   function iz(baslik, ek){ try{ var ad = /admin/.test(location.pathname) ? 'admin' : (/saha/.test(location.pathname) ? 'saha' : 'puan');
     (typeof fbDb !== 'undefined' && fbDb ? fbDb : firebase.database()).ref('diagnostics/logs').push({ app:ad, appLabel:ad, mod:'google', modLabel:'Google girişi', kind:/hata|bağlanamadı/.test(baslik) ? 'uyari' : 'bilgi',
-      title:'google: ' + baslik, detail:JSON.stringify(Object.assign({ surum:window.APP_BUILD || '?', apk:apkMi() }, ek || {})), ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140) }).catch(function(){}); }catch(e){} }
+      title:'google: ' + baslik, detail:JSON.stringify(Object.assign({ surum:window.APP_BUILD || '?', apk:apkMi() }, ek || {})), ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140), dev:(function(){ try{ return localStorage.getItem('diag_deviceId'); }catch(_){ return null; } })() }).catch(function(){}); }catch(e){} }
   var _ga = null;
   function gecici(){     // Google denemesi için oturum saklamayan ayrı kimlik nesnesi (ana oturum yalnızca doğrulanınca değişir)
     if(_ga) return _ga;
@@ -806,8 +806,10 @@ var SahaGirisKabuk = (function(){
     };
   }
   // Teşhis: dokunarak giriş adımları her zaman kaydedilir (cihaz raporlarında görünsün).
-  function iz(app, adim, ek){ try{ (typeof fbDb !== 'undefined' && fbDb ? fbDb : firebase.database()).ref('diagnostics/logs').push({ app:app, appLabel:app, mod:'giris', modLabel:'Dokunarak giriş', kind:/hata|yok|eşleşmedi|yüklenmedi/.test(adim) ? 'uyari' : 'bilgi',
-    title:'dokun: ' + adim, detail:JSON.stringify(Object.assign({ surum:window.APP_BUILD || '?' }, ek || {})), ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140) }).catch(function(){}); }catch(e){} }
+  // (2026-11-15-N) cihaz kimliği eklendi: raporlarda "model bilinmiyor" yerine cihaz kartıyla eşleşir.
+  function iz(app, adim, ek){ try{ var dev = null; try{ dev = localStorage.getItem('diag_deviceId'); }catch(_){}
+    (typeof fbDb !== 'undefined' && fbDb ? fbDb : firebase.database()).ref('diagnostics/logs').push({ app:app, appLabel:app, mod:'giris', modLabel:'Dokunarak giriş', kind:/hata|yok|eşleşmedi|yüklenmedi/.test(adim) ? 'uyari' : 'bilgi',
+    title:'dokun: ' + adim, detail:JSON.stringify(Object.assign({ surum:window.APP_BUILD || '?' }, ek || {})), ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140), dev:dev }).catch(function(){}); }catch(e){} }
   function oturumDurum(v){ var u = null; try{ u = firebase.auth().currentUser; }catch(e){}
     return { profil:!!v, tasinmis:!!(v && v.authEposta), oturum:u ? (u.isAnonymous ? 'anonim' : (window.SahaKimlik && SahaKimlik.sentetikMi(u) ? 'oyuncu' : 'diger')) : 'yok', eslesme:!!(v && u && u.email && v.authEposta === u.email), sifreYenile:!!(v && v.sifreYenile) }; }
   return { kur:kur, kimlikHazir:kimlikHazir, ayarCiz:ayarCiz, iz:iz, oturumDurum:oturumDurum };
@@ -1594,6 +1596,23 @@ var SahaSes = (function(){
     if(!R){ setTimeout(_fbYazmaIzle, 1500); return; }
     if(R.__sahaIzli) return; R.__sahaIzli = true;
     var gor = {};
+    /* (2026-11-15-N) OKUMA REDDİ: raporlarda Google ile girişten hemen sonra 10-14 kez "Uncaught (in promise) PERMISSION_DENIED"
+       görülüyordu; yazma reddi sayacı 0 olduğu için bunların okuma (once) olduğu anlaşıldı ama yolu bilinmiyordu. Artık reddedilen
+       her okuma yolu bir kez kaydedilir ve hata yakalandığı için konsolu doldurmaz. */
+    try{
+      var Q = firebase.database.Query && firebase.database.Query.prototype;
+      if(Q && !Q.__sahaOkuIzli && typeof Q.once === 'function'){ Q.__sahaOkuIzli = true; var orjOnce = Q.once;
+        Q.once = function(){ var sonuc = orjOnce.apply(this, arguments), ref = this;
+          try{ if(sonuc && typeof sonuc.then === 'function') sonuc.then(null, function(e){ try{ var m = String((e && (e.code || e.message)) || e); if(!/PERMISSION_DENIED|permission/i.test(m)) return;
+            var yol = String(ref.toString()).replace(/^https?:\/\/[^/]+\//, '').replace(/[A-Za-z0-9]{20,}/g, '<id>').slice(0, 120), an = 'oku|' + yol; if(gor[an]) return; gor[an] = 1;
+            var u = null; try{ u = firebase.auth().currentUser; }catch(_){}
+            var dev = null; try{ dev = localStorage.getItem('diag_deviceId'); }catch(_){}
+            (typeof fbDb !== 'undefined' && fbDb ? fbDb : firebase.database()).ref('diagnostics/logs').push({ app:_uygAd(), appLabel:_uygAd(), mod:'veritabani', modLabel:'Veritabanı', kind:'uyari',
+              title:'okumaReddedildi: ' + yol, detail:JSON.stringify({ surum:window.APP_BUILD || '?', yol:yol, oturum:u ? (u.isAnonymous ? 'anonim' : 'hesap') : 'yok' }), ts:Date.now(), ua:String(navigator.userAgent || '').slice(0, 140), dev:dev }).catch(function(){});
+          }catch(_x){} }); }catch(_y){}
+          return sonuc; };
+      }
+    }catch(_q){}
     ['set', 'update', 'push', 'remove', 'transaction', 'setWithPriority'].forEach(function(ad){
       var orj = R[ad]; if(typeof orj !== 'function') return;
       R[ad] = function(){
