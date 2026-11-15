@@ -716,13 +716,30 @@ var SahaGirisKabuk = (function(){
     btn.addEventListener('click', function(e){ e.stopPropagation(); acik ? kapat() : ac(); });
     bas.querySelector('.sgk-kapat').addEventListener('click', function(e){ e.stopPropagation(); kapat(); });
     ort.addEventListener('click', function(e){ e.stopPropagation(); kapat(); });
-    var son = 0;
-    ekran.addEventListener('click', function(e){
-      if(acik || panel.contains(e.target) || btn.contains(e.target)) return;
-      if(e.target.closest && e.target.closest('a,button,input,select,textarea,label')) return;
+    /* (2026-11-15-K) Dokunma algılama: telefonda "click" olayı bazı sayfalarda gelmeyebiliyor (başka bir dokunma işleyicisi yutabiliyor ya da
+       üstte görünmez bir katman olabiliyor). Artık parmağın kalkışı (pointerup, belgenin en başında yakalanır) da dinlenir; kısa ve kaymayan
+       her dokunuş sayılır. İlk birkaç dokunuşun neye denk geldiği teşhis kaydına yazılır. */
+    var son = 0, bas = null, izSay = 0;
+    function gorunur(){ try{ return ekran.getClientRects().length > 0 && getComputedStyle(ekran).visibility !== 'hidden'; }catch(e){ return false; } }
+    function tanim(el){ try{ if(!el || !el.tagName) return String(el); var cs = getComputedStyle(el); return el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '') + ' z=' + cs.zIndex + ' pos=' + cs.position; }catch(e){ return '?'; } }
+    function tetikle(hedef, yol){
+      if(!gorunur()) return;
+      var icinde = ekran.contains(hedef);
+      if(izSay < 4 && o.app){ izSay++; SahaGirisKabuk.iz(o.app, 'dokunma algılandı', { yol:yol, hedef:tanim(hedef), ekranIcinde:icinde, menuAcik:acik }); }
+      if(acik || panel.contains(hedef) || btn.contains(hedef)) return;
+      if(hedef && hedef.closest && hedef.closest('a,button,input,select,textarea,label,[onclick]')) return;
+      if(!icinde) return;
       var t = Date.now(); if(t - son < 900) return; son = t;   // çift dokunma tek giriş
       try{ o.dokun && o.dokun(); }catch(err){ ac(); }
-    });
+    }
+    ekran.addEventListener('click', function(e){ tetikle(e.target, 'click'); });
+    document.addEventListener('pointerdown', function(e){ bas = gorunur() ? { x:e.clientX, y:e.clientY, t:Date.now() } : null; }, true);
+    document.addEventListener('pointerup', function(e){
+      var b = bas; bas = null; if(!b) return;
+      if(Date.now() - b.t > 800 || Math.abs(e.clientX - b.x) > 16 || Math.abs(e.clientY - b.y) > 16) return;
+      var h = e.target; try{ var u = document.elementFromPoint(e.clientX, e.clientY); if(u) h = u; }catch(_){}
+      tetikle(h, 'pointer');
+    }, true);
     return {
       ac:ac, kapat:kapat, acikMi:function(){ return acik; },
       // av: profil fotoğrafı adresi ya da (fotoğraf yoksa) true → adın baş harfi
