@@ -1,0 +1,45 @@
+# Bir kanal/video kaydını kimliğiyle bulur ve kaynağını özetler (salt okunur). Herkese açık depo: adreslerin yalnızca alan adı ve
+# yolu yazılır; sorgu dizesindeki erişim anahtarları (token vb.) yazılmaz, yalnızca adları gösterilir.
+name: Kanal bul
+on:
+  workflow_dispatch:
+    inputs:
+      id:
+        description: Kanal / video kimliği
+        required: true
+jobs:
+  bul:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Bul
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          KID: ${{ inputs.id }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json" >/dev/null 2>&1 || true
+          cd "$RUNNER_TEMP" && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          node -e '
+            const {GoogleAuth}=require("google-auth-library"); const fs=require("fs");
+            (async()=>{
+              let f=process.env.RUNNER_TEMP+"/sa_temiz"; if(!fs.existsSync(f)) f=process.env.RUNNER_TEMP+"/sa.json";
+              const SAJ=JSON.parse(fs.readFileSync(f,"utf8"));
+              const auth=new GoogleAuth({credentials:SAJ,scopes:["https://www.googleapis.com/auth/firebase.database","https://www.googleapis.com/auth/userinfo.email"]});
+              const tok=(await (await auth.getClient()).getAccessToken()).token;
+              const DB="https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/";
+              const al=async y=>{ const r=await fetch(DB+y+".json",{headers:{Authorization:"Bearer "+tok}}); return r.ok?r.json():null; };
+              const ID=process.env.KID;
+              const temiz=v=>{ if(typeof v!=="string") return v; return v.replace(/https?:\/\/[^\s"<>]+/g,u=>{ try{ const x=new URL(u); const q=[...x.searchParams.keys()]; return x.protocol+"//"+x.host+x.pathname+(q.length?" [sorgu: "+q.join(",")+"]":""); }catch(e){ return "(adres)"; } }); };
+              const ozet=o=>{ const r={}; for(const k of Object.keys(o||{})){ const v=o[k]; if(v&&typeof v==="object") r[k]=Array.isArray(v)?("["+v.length+" öğe] "+JSON.stringify(v.slice(0,6).map(x=>typeof x==="object"?Object.fromEntries(Object.entries(x).map(([a,b])=>[a,temiz(b)])):temiz(x))).slice(0,900)):"{"+Object.keys(v).slice(0,12).join(",")+"}"; else r[k]=temiz(v); } return r; };
+              const bul=(o,yol,sonuc)=>{ if(!o||typeof o!=="object") return; for(const k of Object.keys(o)){ const v=o[k], y=yol+"/"+k; if(k===ID||(v&&typeof v==="object"&&(v.id===ID||v.key===ID))) sonuc.push([y,v]); else if(v&&typeof v==="object") bul(v,y,sonuc); } };
+              const kokler=["test/channelPool","channelPool","test/paylasilan","paylasilan","test/leagues","leagues","test/sahaVeri"];
+              let n=0;
+              for(const k of kokler){ const v=await al(k); const s=[]; bul(v,k,s); for(const [y,o] of s){ n++; console.log("BULUNDU: "+y); console.log(JSON.stringify(ozet(o),null,1)); } }
+              if(!n) console.log("Bulunamadı: "+ID);
+            })().catch(e=>console.log("HATA "+e.message));
+          '
+          rm -f "$RUNNER_TEMP/sa.json" "$RUNNER_TEMP/sa_temiz"
