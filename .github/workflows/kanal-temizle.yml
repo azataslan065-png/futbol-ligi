@@ -1,0 +1,53 @@
+# İzinsiz yayın sunucularından gelen kanal kayıtlarını verilen listeden siler. Silinen kayıtlar aynı ortamda _kanalYedek/{zaman} altına
+# yedeklenir (geri alınabilir). Liste admin'in yaptığı gibi sıkıştırılarak (boşluksuz dizi) yeniden yazılır.
+name: Kanal temizle
+on:
+  workflow_dispatch:
+    inputs:
+      yol:
+        description: Liste yolu (ör. test/leagues/<lig>/videoLinks)
+        required: true
+      sunucular:
+        description: Silinecek alan adları (virgülle)
+        required: true
+jobs:
+  temizle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Temizle
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          YOL: ${{ inputs.yol }}
+          SUN: ${{ inputs.sunucular }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          node .github/scripts/anahtar-onar.js "$RUNNER_TEMP/sa.json" >/dev/null 2>&1 || true
+          cd "$RUNNER_TEMP" && npm i --silent google-auth-library@9 >/dev/null 2>&1
+          node -e '
+            const {GoogleAuth}=require("google-auth-library"); const fs=require("fs");
+            (async()=>{
+              let f=process.env.RUNNER_TEMP+"/sa_temiz"; if(!fs.existsSync(f)) f=process.env.RUNNER_TEMP+"/sa.json";
+              const SAJ=JSON.parse(fs.readFileSync(f,"utf8"));
+              const auth=new GoogleAuth({credentials:SAJ,scopes:["https://www.googleapis.com/auth/firebase.database","https://www.googleapis.com/auth/userinfo.email"]});
+              const tok=(await (await auth.getClient()).getAccessToken()).token, H={Authorization:"Bearer "+tok,"Content-Type":"application/json"};
+              const DB="https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/";
+              const YOL=process.env.YOL.replace(/^\/+|\/+$/g,""), SUN=process.env.SUN.split(",").map(s=>s.trim()).filter(Boolean);
+              if(!/videoLinks$|tvKanallari$|channelPool$/.test(YOL)){ console.log("DURDU: yalnızca kanal listeleri temizlenir"); return; }
+              const v=await (await fetch(DB+YOL+".json",{headers:H})).json();
+              const L=Array.isArray(v)?v:Object.values(v||{});
+              const host=u=>{ try{ return new URL(String(u)).host; }catch(e){ return ""; } };
+              const sil=L.filter(k=>k&&SUN.includes(host(k.url))), kalan=L.filter(k=>k&&!SUN.includes(host(k.url)));
+              console.log("liste: "+L.length+" kayıt, silinecek: "+sil.length+" ("+sil.map(k=>k.title).join(", ")+")");
+              if(!sil.length) return;
+              const kok=YOL.startsWith("test/")?"test/":"";
+              const y=await fetch(DB+kok+"_kanalYedek/"+Date.now()+".json",{method:"PUT",headers:H,body:JSON.stringify({yol:YOL,kayitlar:sil})});
+              if(!y.ok){ console.log("DURDU: yedek yazılamadı "+y.status); return; }
+              const r=await fetch(DB+YOL+".json",{method:"PUT",headers:H,body:JSON.stringify(kalan)});
+              console.log("yazıldı: "+r.status+" · kalan "+kalan.length+" kayıt");
+            })().catch(e=>console.log("HATA "+e.message));
+          '
+          rm -f "$RUNNER_TEMP/sa.json" "$RUNNER_TEMP/sa_temiz"
