@@ -2760,6 +2760,13 @@ html.hafif-cihaz .pu-ort,html.hafif-cihaz .pu-etik{-webkit-backdrop-filter:none 
 
       </div>
     </details>
+    <!-- (2026-11-16-A) KANAL YASALLIK TARAMASI: TV listesi ve kanal havuzundaki bütün kayıtlar; izinsizler tek dokunuşla kaldırılır. -->
+    <details style="margin-bottom:.7rem;border:1px solid var(--br);border-radius:12px;padding:.5rem .7rem;background:var(--s2)">
+      <summary style="cursor:pointer;font-size:.72rem;font-weight:800">Kanal yasallık denetimi</summary>
+      <div style="font-size:.62rem;color:var(--mu);line-height:1.5;margin:.4rem 0">Eklenen her adres girildiği anda denetlenir (adres alanından çıkınca, bağlantı sınamasının altında); buradan mevcut bütün kanalları tarayabilirsiniz. <b style="color:#16a34a">Yasal</b>: kaynağı belli ve kullanımı uygun (TRT, sizin yüklediğiniz, onaylı kaynak). <b style="color:#d97706">Kontrol et</b>: kaynağın sahibi doğrulanamadı. <b style="color:#dc2626">İzinsiz</b>: bilinen yeniden yayın sunucuları ya da yayıncının yalnız kendi siteleri için kullandığı sunucular. Kesin hukuki karar değildir; şüpheli kayıtlarda yayıncının izni olduğundan emin olun.</div>
+      <button type="button" id="kanalYasalBtn" class="btn bp" style="width:100%;min-height:34px" onclick="kanalYasalTaraHepsi()">Kanalları yasallık için tara</button>
+      <div id="kanalYasalSonuc" style="margin-top:.4rem"></div>
+    </details>
     <div id="adminTvTabBar" style="display:flex;gap:.5rem;margin-bottom:.7rem"></div>
     <!-- KULLANICI TALEBİ: "Yeni kanal/video eklemek istediğinde ekleme butonu gittikçe
          aşağıda kalıyor, her zaman sabit yukarıda kalacak" + "Kaydet butonu da her zaman
@@ -3437,7 +3444,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-15-N';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-16-A';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true, dosya:'admin', kap:function(){ return document.getElementById('loginWrap'); }, giris:function(){ var e = document.getElementById('loginWrap'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // yönetici geçebilir
@@ -14128,6 +14135,173 @@ window.ptKanalSaglikTara=function(){
     sira();
   }).catch(function(e){kutu.innerHTML='<div style="color:#b91c1c;font-size:.68rem">Havuz okunamadı</div>';});
 };
+/* ═══ KANAL YASALLIK DENETİMİ (2026-11-16-A, kullanıcı: "admin bir kanal bağlantısı eklediğinde - m3u8, YouTube ya da başka bir link -
+   sistem bunun yasal olup olmadığını tarasın; mevcut kanalları da tarasın") ════════════════════════════════════════════════════
+   Bir yayının izinli olup olmadığı adresten KESİN anlaşılamaz; bu denetim bilinen kaynakları ayırır ve şüphelileri işaretler:
+   · YEŞİL  - kaynağı belli ve kullanımı uygun: yayıncının herkese açık sunucusu (TRT), sizin depolamanız, yönetici onaylı kaynak,
+              yerleştirmeye izin veren resmi YouTube kanalı.
+   · SARI   - kaynağın sahibi bilinmiyor; yayıncının izni olduğundan emin olun (bilinmeyen sunucu, sahibi doğrulanmamış YouTube kanalı,
+              yerleştirmeyi kapatmış video).
+   · KIRMIZI- izinsiz: bilinen yeniden yayın (korsan) sunucuları, yayıncının yalnız kendi siteleri için kullandığı sunucular,
+              ücretli platform kanalları (beIN, S Sport, Exxen, TOD…) resmi olmayan bir adresten.
+   Yönetici bir kaynağı "izinli" diye onaylarsa (ör. kendi anlaşması varsa) o kaynak yeşil sayılır: globalConfig/kanalYasalOnay.
+   Kurallar aşağıdaki tek listede; yeni bir korsan sunucusu görülünce buraya bir satır eklemek yeter. */
+var KanalYasal=(function(){
+  var KENDI=['oasyhelzshbehnpyrssw.supabase.co'];
+  var ACIK=[ [/(^|\.)medya\.trt\.com\.tr$/,'TRT\'nin kendi sunucusu; herkese açık yayın'],
+             [/(^|\.)trt\.net\.tr$|(^|\.)trtworld\.com$/,'TRT\'nin kendi sunucusu'] ];
+  var YAYINCI_OZEL=[ [/(^|\.)daioncdn\.net$/,'Turkuvaz (ATV, A Spor, A Haber…) yayın sunucusu'],
+             [/^ciner-live\.ercdn\.net$/,'Ciner (Habertürk, HT Spor, Show TV) yayın sunucusu'],
+             [/(^|\.)dogannet\.tv$|(^|\.)dogusdijital\.com$/,'Doğan / Doğuş grubu yayın sunucusu'],
+             [/(^|\.)digiturk|(^|\.)beinsports|(^|\.)tod\.tv$|(^|\.)exxen\.com$|(^|\.)ssport\.tv$|(^|\.)tivibu|(^|\.)dsmart/,'ücretli platformun kendi sunucusu'] ];
+  var KORSAN=[ [/(^|\.)turknet\.ercdn\.net$/,'izinsiz yeniden yayın sunucusu (ATV/A Spor kopyaları burada bulundu)'],
+             [/(^|\.)rocketcdn\.com$/,'sahibi belirsiz yeniden yayın sunucusu'],
+             [/^[a-z0-9]{8,12}\.[a-z0-9-]+\.ercdn\.net$/,'rastgele adlı ara sunucu (yeniden yayın kalıbı)'],
+             [/(^|\.)(iptv|xtream|freeiptv|tvnow|canlitv|canli-tv|selcuksport|taraftarium|justintv|netspor|jestyayin|trgoals|bosspor)/,'IPTV / izinsiz canlı maç sitesi kalıbı'],
+             [/\/(get\.php|player_api\.php|live\/[^\/]+\/[^\/]+\/\d+\.(m3u8|ts))/,'IPTV panel adresi kalıbı (kullanıcı adı/şifre ile paylaşılan liste)'] ];
+  var UCRETLI=/\b(be[iİ]n|bein\s*sports?|s\s*sport|exxen|tod\b|digiturk|tivibu|d-?smart|smart\s*spor|spor\s*smart|tabii\s*spor)\b/i;
+  var RESMI_YT={ 'UCUVZ7T_kwkxDOGFcDlFI-hg':'atv (resmi)' };   // kanal kimliği → ad (doğrulananlar)
+  var RESMI_YT_URL={ '@atvturkiye':'atv (resmi)' };          // oEmbed yükleyen adresi (youtube.com/@…) → ad
+  var _onay=null, _ytOnbellek={};
+  function onaylar(){ if(_onay) return Promise.resolve(_onay); return db.ref('globalConfig/kanalYasalOnay').once('value').then(function(s){ _onay=s.val()||{}; return _onay; },function(){ _onay={}; return _onay; }); }
+  function anahtar(s){ return String(s||'').toLowerCase().replace(/[.#$\[\]\/]/g,'_').slice(0,120); }
+  function onayla(kaynak,ad){ var k=anahtar(kaynak); _onay=_onay||{}; _onay[k]={ad:ad||kaynak,ts:Date.now()}; return db.ref('globalConfig/kanalYasalOnay/'+k).set(_onay[k]); }
+  function onayKaldir(kaynak){ var k=anahtar(kaynak); if(_onay) delete _onay[k]; return db.ref('globalConfig/kanalYasalOnay/'+k).remove(); }
+  function sonuc(seviye,neden,ek){ return Object.assign({seviye:seviye,neden:neden},ek||{}); }
+  function ytBilgi(url){
+    if(_ytOnbellek[url]) return _ytOnbellek[url];
+    var kanal=url.match(/[?&]channel=(UC[A-Za-z0-9_-]{10,})/)||url.match(/\/channel\/(UC[A-Za-z0-9_-]{10,})/);
+    if(kanal){ return (_ytOnbellek[url]=Promise.resolve({kanalId:kanal[1]})); }
+    var v=url.match(/(?:watch\?v=|\/live\/|\/shorts\/|\/embed\/|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+    if(!v) return Promise.resolve({hata:'bicim'});
+    var izle='https://www.youtube.com/watch?v='+v[1];
+    return (_ytOnbellek[url]=fetch('https://www.youtube.com/oembed?format=json&url='+encodeURIComponent(izle),{cache:'no-store'}).then(function(r){
+      if(r.status===401||r.status===403) return {gommeKapali:true,video:v[1]};
+      if(r.status===404||r.status===400) return {yok:true,video:v[1]};
+      if(!r.ok) return {hata:'durum '+r.status};
+      return r.json().then(function(j){ return {sahip:j.author_name||'',sahipUrl:j.author_url||'',baslik:j.title||'',video:v[1]}; });
+    }).catch(function(){ return {hata:'okunamadi'}; }));
+  }
+  function tara(url,baslik){
+    url=String(url||'').trim();
+    if(!url) return Promise.resolve(sonuc('bos','Adres yok'));
+    return onaylar().then(function(O){
+      var host='', yol='';
+      try{ var u=new URL(url); host=u.host.toLowerCase(); yol=u.pathname+u.search; }catch(e){ return sonuc('sari','Adres çözümlenemedi; doğrudan akış adresi değil (gömme kodu olabilir). Kaynağını kontrol edin.'); }
+      if(O[anahtar(host)]) return sonuc('yesil','Yönetici onaylı kaynak: '+((O[anahtar(host)]||{}).ad||host),{kaynak:host,onayli:true});
+      if(/(^|\.)(youtube\.com|youtube-nocookie\.com|youtu\.be)$/.test(host)){
+        return ytBilgi(url).then(function(b){
+          if(b.kanalId){
+            if(RESMI_YT[b.kanalId]) return sonuc('yesil','Resmi YouTube kanalı: '+RESMI_YT[b.kanalId]+' (kanalın canlı yayını)',{kaynak:b.kanalId});
+            if(O[anahtar(b.kanalId)]) return sonuc('yesil','Yönetici onaylı YouTube kanalı: '+O[anahtar(b.kanalId)].ad,{kaynak:b.kanalId,onayli:true});
+            return sonuc('sari','YouTube kanal yayını (kanal kimliği '+b.kanalId+'). Kanalın yayıncıya ait resmi kanal olduğunu doğrulayıp onaylayın.',{kaynak:b.kanalId,kaynakAd:b.kanalId});
+          }
+          if(b.hata==='bicim') return sonuc('sari','YouTube adresinden video kimliği okunamadı; bağlantıyı kontrol edin.');
+          if(b.yok) return sonuc('sari','Video bulunamadı ya da özel/silinmiş.');
+          if(b.gommeKapali) return sonuc('sari','Yayıncı bu videonun başka uygulamalarda oynatılmasını kapatmış; uygulamada açılmaz.');
+          if(b.hata) return sonuc('sari','Kanal sahibi okunamadı ('+b.hata+'); YouTube\'da yükleyen kanalı kontrol edin.');
+          var _h=(String(b.sahipUrl||'').match(/\/(@[^\/?#]+)/)||[])[1];
+          if(_h&&RESMI_YT_URL[_h.toLowerCase()]) return sonuc('yesil','Resmi YouTube kanalı: '+RESMI_YT_URL[_h.toLowerCase()],{kaynak:b.sahipUrl,sahip:b.sahip});
+          var sk=anahtar(b.sahipUrl||b.sahip);
+          if(O[sk]) return sonuc('yesil','Yönetici onaylı YouTube kanalı: '+b.sahip,{kaynak:b.sahipUrl||b.sahip,onayli:true,sahip:b.sahip});
+          if(UCRETLI.test(baslik||'')&&!/bein|ssport|exxen|tod|digiturk/i.test(b.sahip)) return sonuc('kirmizi','Ücretli platform içeriği ("'+(baslik||'')+'") resmi olmayan bir kanaldan yüklenmiş: '+b.sahip,{kaynak:b.sahipUrl||b.sahip,sahip:b.sahip});
+          return sonuc('sari','Yükleyen kanal: <b>'+escHtml(b.sahip)+'</b>. Yayıncının resmi kanalıysa onaylayın; değilse izinsiz yeniden yükleme olabilir.',{kaynak:b.sahipUrl||b.sahip,kaynakAd:b.sahip,sahip:b.sahip});
+        });
+      }
+      if(KENDI.indexOf(host)>=0) return sonuc('yesil','Kendi depolama alanınız (sizin yüklediğiniz içerik)');
+      for(var i=0;i<ACIK.length;i++) if(ACIK[i][0].test(host)) return sonuc('yesil',ACIK[i][1],{kaynak:host});
+      for(i=0;i<KORSAN.length;i++) if(KORSAN[i][0].test(host)||KORSAN[i][0].test(yol)) return sonuc('kirmizi','İzinsiz: '+KORSAN[i][1],{kaynak:host});
+      for(i=0;i<YAYINCI_OZEL.length;i++) if(YAYINCI_OZEL[i][0].test(host)) return sonuc('kirmizi','İzinsiz kullanım: '+YAYINCI_OZEL[i][1]+'. Yayıncı bu sunucuyu yalnızca kendi siteleri ve uygulamaları için kullanıyor; başka uygulamaya koymak için izin yok.',{kaynak:host});
+      if(UCRETLI.test(baslik||'')) return sonuc('kirmizi','Ücretli platform kanalı ("'+(baslik||'')+'") resmi olmayan bir sunucudan: '+host,{kaynak:host});
+      if(/\.m3u8?($|\?)|\.ts($|\?)|\/playlist|\/manifest/i.test(yol)) return sonuc('sari','Sahibi bilinmeyen yayın sunucusu: <b>'+escHtml(host)+'</b>. Yayıncının bu adresi herkese açık paylaştığından ya da izniniz olduğundan emin olun; eminseniz onaylayın.',{kaynak:host,kaynakAd:host});
+      return sonuc('sari','Bilinmeyen kaynak: <b>'+escHtml(host)+'</b>. İçeriğin size ait olduğundan ya da izinli olduğundan emin olun.',{kaynak:host,kaynakAd:host});
+    });
+  }
+  var RENK={yesil:'#16a34a',sari:'#d97706',kirmizi:'#dc2626',bos:'var(--mu)'}, AD={yesil:'Yasal',sari:'Kontrol et',kirmizi:'İzinsiz',bos:''};
+  function rozet(r){ return '<span style="display:inline-flex;align-items:center;gap:.25rem;font-weight:800;color:'+RENK[r.seviye]+'">● '+AD[r.seviye]+'</span>'; }
+  return {tara:tara,onayla:onayla,onayKaldir:onayKaldir,rozet:rozet,RENK:RENK,AD:AD,anahtar:anahtar,sifirla:function(){ _onay=null; }};
+})();
+/* Eklenen/değiştirilen adresin altında yasallık sonucu (bağlantı sınamasından ayrı satır). */
+function kanalYasalGoster(kutu,url,baslik){
+  try{
+    if(!kutu) return;
+    var id=(kutu.id||'kyz')+'_yasal', el=document.getElementById(id);
+    if(!el){ el=document.createElement('div'); el.id=id; el.style.cssText='font-size:.64rem;line-height:1.5;margin-top:.3rem;padding:.4rem .5rem;border-radius:8px;background:var(--s3)'; kutu.parentNode.insertBefore(el,kutu.nextSibling); }
+    if(!String(url||'').trim()){ el.style.display='none'; return; }
+    el.style.display=''; el.innerHTML='<span style="color:var(--mu)">Yasallık denetleniyor…</span>';
+    KanalYasal.tara(url,baslik).then(function(r){
+      el.innerHTML=KanalYasal.rozet(r)+' <span style="color:var(--tx)">'+r.neden+'</span>'
+        +(r.seviye==='sari'&&r.kaynak?'<div style="margin-top:.3rem"><button type="button" class="btn bgh" style="min-height:30px;font-size:.62rem;padding:.25rem .55rem" onclick="kanalYasalOnayla(\''+encodeURIComponent(r.kaynak)+'\',\''+encodeURIComponent(r.kaynakAd||r.kaynak)+'\',this)">Bu kaynak izinli, onayla</button></div>':'')
+        +(r.seviye==='kirmizi'?'<div style="margin-top:.25rem;color:#dc2626;font-weight:700">Bu kanalı eklemeyin; eklendiyse listeden kaldırın.</div>':'');
+      el.style.border='1px solid '+KanalYasal.RENK[r.seviye];
+    });
+  }catch(e){ DiagSil('kanalYasalGoster',e); }
+}
+window.kanalYasalOnayla=function(k,ad,btn){
+  k=decodeURIComponent(k); ad=decodeURIComponent(ad);
+  ptOnay('"'+ad+'" kaynağı izinli olarak işaretlensin mi?\n\nYalnızca yayıncının resmi kaynağıysa ya da yayın izniniz varsa onaylayın. Onaylanan kaynaktan gelen bütün kanallar "Yasal" sayılır.',{baslik:'Kaynağı onayla',tamamYazi:'Onayla'}).then(function(ok){
+    if(!ok) return;
+    KanalYasal.onayla(k,ad).then(function(){ toast('Kaynak onaylandı'); logAction('Kanal kaynağı izinli olarak onaylandı: '+ad); if(btn&&btn.parentNode) btn.parentNode.innerHTML='<span style="color:#16a34a;font-weight:800">✓ Onaylandı</span>'; })
+      .catch(function(e){ toast('Onay kaydedilemedi: '+((e&&e.message)||'hata'),'er'); });
+  });
+};
+/* MEVCUT KANALLARI TARA: bu ligin TV listesi (lig + ortak liste aynı), kanal havuzu. İzinsizler tek dokunuşla bütün listelerden kaldırılır. */
+window.kanalYasalTaraHepsi=function(){
+  var kutu=qs('kanalYasalSonuc'), btn=qs('kanalYasalBtn'); if(!kutu) return;
+  if(btn){ btn.disabled=true; btn.textContent='Taranıyor…'; }
+  KanalYasal.sifirla();
+  db.ref('channelPool').once('value').then(function(sn){
+    var havuz=sn.val()||{}, kayit=[];
+    (S.videoLinks||[]).forEach(function(v){ if(v&&v.url) kayit.push({liste:'TV listesi',ad:v.title||'(başlıksız)',url:v.url,id:v.id}); });
+    Object.keys(havuz).forEach(function(k){ var v=havuz[k]; if(v&&v.url) kayit.push({liste:'Kanal havuzu',ad:v.title||'(başlıksız)',url:v.url,havuzKey:k}); });
+    var sonuclar=[], i=0;
+    (function sira(){
+      if(i>=kayit.length){ ciz(); return; }
+      var k=kayit[i++]; kutu.innerHTML='<div style="font-size:.66rem;color:var(--mu)">'+i+'/'+kayit.length+' · '+escHtml(k.ad)+'</div>';
+      KanalYasal.tara(k.url,k.ad).then(function(r){ sonuclar.push({k:k,r:r}); setTimeout(sira,30); });
+    })();
+    function ciz(){
+      if(btn){ btn.disabled=false; btn.textContent='Kanalları yasallık için tara'; }
+      var say={yesil:0,sari:0,kirmizi:0}; sonuclar.forEach(function(x){ say[x.r.seviye]=(say[x.r.seviye]||0)+1; });
+      var sira={kirmizi:0,sari:1,yesil:2,bos:3}; sonuclar.sort(function(a,b){ return sira[a.r.seviye]-sira[b.r.seviye]; });
+      window._kanalYasalSon=sonuclar;
+      kutu.innerHTML='<div style="font-size:.7rem;font-weight:800;margin:.3rem 0">'+sonuclar.length+' kayıt · <span style="color:#dc2626">'+say.kirmizi+' izinsiz</span> · <span style="color:#d97706">'+say.sari+' kontrol et</span> · <span style="color:#16a34a">'+say.yesil+' yasal</span></div>'
+        +(say.kirmizi?'<button type="button" class="btn" style="width:100%;min-height:34px;margin:.2rem 0 .5rem;background:rgba(220,38,38,.15);color:#f87171;border:1px solid rgba(220,38,38,.4)" onclick="kanalYasalKaldirHepsi()">İzinsiz '+say.kirmizi+' kaydı bütün listelerden kaldır</button>':'')
+        +sonuclar.map(function(x){ return '<div style="display:flex;gap:.45rem;align-items:flex-start;padding:.35rem 0;border-top:1px solid var(--br)">'
+          +'<span style="color:'+KanalYasal.RENK[x.r.seviye]+';flex-shrink:0;font-size:.8rem">●</span><div style="flex:1;min-width:0">'
+          +'<div style="font-size:.72rem;font-weight:700">'+escHtml(x.k.ad)+' <span style="font-weight:600;color:var(--mu);font-size:.62rem">· '+x.k.liste+'</span></div>'
+          +'<div style="font-size:.64rem;color:var(--mu);line-height:1.45">'+x.r.neden+'</div>'
+          +(x.r.seviye==='sari'&&x.r.kaynak?'<button type="button" class="btn bgh" style="min-height:30px;font-size:.6rem;padding:.2rem .5rem;margin-top:.25rem" onclick="kanalYasalOnayla(\''+encodeURIComponent(x.r.kaynak)+'\',\''+encodeURIComponent(x.r.kaynakAd||x.r.kaynak)+'\',this)">Bu kaynak izinli, onayla</button>':'')
+          +'</div></div>'; }).join('');
+      try{ localStorage.setItem('adm_kanalYasalSon',JSON.stringify({ts:Date.now(),kirmizi:say.kirmizi,sari:say.sari})); }catch(e){}
+      if(say.kirmizi) toast(say.kirmizi+' izinsiz kanal bulundu','er');
+    }
+  }).catch(function(e){ if(btn){ btn.disabled=false; btn.textContent='Kanalları yasallık için tara'; } kutu.innerHTML='<div style="color:#dc2626;font-size:.68rem">Kanal havuzu okunamadı</div>'; DiagSil('kanalYasalTaraHepsi',e); });
+};
+window.kanalYasalKaldirHepsi=function(){
+  var L=(window._kanalYasalSon||[]).filter(function(x){ return x.r.seviye==='kirmizi'; }); if(!L.length) return;
+  ptOnay(L.length+' izinsiz kayıt kaldırılsın mı?\n\n'+L.map(function(x){ return '• '+x.k.ad+' ('+x.k.liste+')'; }).join('\n'),{baslik:'İzinsiz kanalları kaldır',tamamYazi:'Kaldır'}).then(function(ok){
+    if(!ok) return;
+    var urller={}; L.forEach(function(x){ urller[x.k.url]=1; });
+    var isler=[];
+    L.filter(function(x){ return x.k.havuzKey; }).forEach(function(x){ isler.push(db.ref('channelPool/'+x.k.havuzKey).remove()); });
+    var tv=(S.videoLinks||[]), kalan=tv.filter(function(v){ return !(v&&urller[v.url]); });
+    if(kalan.length!==tv.length){ window._editVideoLinks=kalan.slice(); S.videoLinks=kalan.slice(); window._videoLinksDirty=true; isler.push(save()); }
+    Promise.all(isler).then(function(){ toast(L.length+' izinsiz kayıt kaldırıldı'); logAction('İzinsiz kanallar kaldırıldı: '+L.map(function(x){ return x.k.ad; }).join(', ')); try{ renderVideoLinkAdmin(); }catch(e){} kanalYasalTaraHepsi(); })
+      .catch(function(e){ toast('Kaldırılamadı: '+((e&&e.message)||'hata'),'er'); });
+  });
+};
+/* Açılışta günde bir kez sessiz tarama: izinsiz kayıt varsa yöneticiye bildirilir (sonuç ekranı açılmadan). */
+setTimeout(function(){
+  try{
+    var son=JSON.parse(localStorage.getItem('adm_kanalYasalSon')||'null');
+    if(son&&Date.now()-son.ts<20*3600e3) return;
+    if(sessionStorage.getItem('adm')!=='1'||!window.S||!Array.isArray(S.videoLinks)) return;
+    var kayit=(S.videoLinks||[]).filter(function(v){ return v&&v.url; }), kir=0, i=0;
+    (function sira(){ if(i>=kayit.length){ try{ localStorage.setItem('adm_kanalYasalSon',JSON.stringify({ts:Date.now(),kirmizi:kir})); }catch(e){} if(kir) toast(kir+' kanal izinsiz görünüyor - TV yönetiminde "Kanalları yasallık için tara"','er'); return; }
+      var v=kayit[i++]; KanalYasal.tara(v.url,v.title).then(function(r){ if(r.seviye==='kirmizi') kir++; setTimeout(sira,50); }); })();
+  }catch(e){}
+},15000);
 window.testChannelPoolUrl=function(){
   var url=qs('cpUrl')?qs('cpUrl').value.trim():'';
   window._cpTestKayit=[{url:url}];
@@ -14144,6 +14318,7 @@ window.testVideoLink=function(i,otomatik){
   if(otomatik&&url.length<12)return;
   if(otomatik&&kutu._sonUrl===url)return;   // aynı adres için tekrar tekrar sınama yapma
   kutu._sonUrl=url;
+  try{ kanalYasalGoster(kutu,url,v.title||((qs('cpTitle')||{}).value)||''); }catch(_y){}   // (2026-11-16-A) yasallık denetimi
   function yaz(renk,metin){kutu.innerHTML='<div style="color:'+renk+'">'+metin+'</div>';}
   if(!url){yaz('var(--mu)','Önce bir adres girin.');return;}
   if(!/^https?:\/\//i.test(url)){yaz('var(--mu)',' Bu bir doğrudan akış adresi değil (gömme kodu / platform linki olabilir) - sınama yalnızca http(s) adresleri için yapılır.');return;}
