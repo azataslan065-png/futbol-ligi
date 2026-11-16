@@ -408,6 +408,7 @@ window.addEventListener('DOMContentLoaded',function(){
    CSS ile yapılıyor: her kartı JS'te tek tek gizlemek, yeni bir kart eklendiğinde
    işaretlemeyi unutmayı kaçınılmaz kılardı; burada tek sınıf yetiyor. */
 body.kaynak-klasik .saha-ozel{display:none!important}
+body:not(.kaynak-skorbord) .yalniz-skorbord{display:none!important}
 /* Sekme çubuğundaki SAHA'ya özgü düğmeler de aynı kuralla gizlenir. */
 body.kaynak-klasik .ntab.saha-ozel{display:none!important}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -2419,7 +2420,14 @@ html.hafif-cihaz .pu-ort,html.hafif-cihaz .pu-etik{-webkit-backdrop-filter:none 
 
   <!-- YÖNETİM -->
   <div id="pg-admin" class="pg">
-    <!-- (2026-11-16-C) Skorbord kartı kaldırıldı: Skorbord artık giriş ekranındaki / "Değiştir" ekranındaki kaynak seçicinin üçüncü seçeneği (bkz. SkorbordPanel). -->
+    <!-- (2026-11-16-D) Skorbord kökündeyken: Skorbord'a özgü (gerçek lig verisi) ayarlar. Panelin geri kalanı SAHA / SAHA dışı ile aynı çalışır. -->
+    <div class="card yalniz-skorbord" style="border:1.5px solid rgba(59,130,246,.35)">
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <img src="https://azataslan065-png.github.io/skorbord/app-icon-192.png" alt="" style="width:40px;height:40px;border-radius:11px;flex-shrink:0" onerror="this.style.display='none'">
+        <div style="flex:1;min-width:0"><div style="font-size:.8rem;font-weight:800">Skorbord'a özel ayarlar</div><div style="font-size:.62rem;color:var(--mu);line-height:1.5">Gerçek lig verisi: görünen ligler, lig ve takım adları, canlı yenileme hızı, alt şerit, Skorbord duyurusu / bakımı, APK güncellemesi.</div></div>
+      </div>
+      <button class="btn bp" style="width:100%;min-height:38px;margin-top:.6rem" onclick="skorbordAyarAc()">Aç</button>
+    </div>
     <div class="card" style="border:1.5px solid rgba(251,191,36,.35);background:rgba(251,191,36,.06)">
       <div style="font-size:.68rem;font-weight:800;color:#854d0e;margin-bottom:.5rem;text-transform:uppercase;letter-spacing:.05em"> Güvenlik Notu</div>
       <div style="font-size:.68rem;color:var(--mu);line-height:1.6">Bu uygulama kullanıcı girişi/kimlik doğrulama sistemi kullanmadığı için Firebase veritabanı kuralları şu an <b>herkese açık okuma/yazma</b> (<code>.read: true, .write: true</code>) olarak ayarlı olmalıdır - aksi halde uygulama hiç çalışmaz. Bunun anlamı: veritabanı adresini bilen biri teorik olarak veriye doğrudan erişip değiştirebilir. Bu, uygulamanın çalışması için şu anki tasarımda gerekli bir durumdur; tamamen kapatmak için kullanıcı hesap/kimlik doğrulama sistemi eklenmesi gerekir (büyük bir değişiklik). Düzenli olarak " Veri Dışa Aktar" ile yedek almanız önerilir.</div>
@@ -3360,7 +3368,15 @@ function _tkKopyala(sec){
 window.SAHA_KOK_ONEK = 'sahaVeri/';
 window._AYRIK_KOKLER = /^(leagues|leaguesMeta|activeDisplayLeague)(\/|$)/;
 window._SOHBET_YOLU = /^leagues\/[^\/]+\/generalChat(\/|$)/;
+/* SKORBORD KÖKÜ (2026-11-16-D, kullanıcı: "adminindeki varsayılan bütün özellikler skorboard için de geçerli olacak; saha ve saha dışı
+   sistem aynı, sadece veritabanı ayrı"). SAHA kökü yalnızca lig verisini ayırır; Skorbord TAMAMEN ayrıdır: her yol skorbord/ altına gider
+   (sohbet, bakım, TV, görünüm dahil). Ortak kalanlar yalnızca yönetici kimliği/yetkisi, teşhis ve yönetim kuyrukları. Skorbord tek
+   ortamdır (test kopyası yok): test panelinden de skorbord/ yazılır, Skorbord uygulaması bu düğümü okur. */
+window.SKORBORD_KOK_ONEK = 'skorbord/';
+window._SKORBORD_ORTAK = /^(admins|adminPerms|diagnostics|zamanliIslemler|_dalKaydi|_kopyaBilgi|skorbord|\.info)(\/|$)/;
+function _admKokOnek(){ var k = (typeof admVeriKaynagi === 'function') ? admVeriKaynagi() : ''; return k === 'saha' ? window.SAHA_KOK_ONEK : (k === 'skorbord' ? window.SKORBORD_KOK_ONEK : ''); }
 function _kokUygula(y, onek){
+  if(onek === window.SKORBORD_KOK_ONEK) return (!y || window._SKORBORD_ORTAK.test(y)) ? y : onek + y;
   if(window._SOHBET_YOLU.test(y)){
     return 'paylasilan/genelSohbet' + y.replace(/^leagues\/[^\/]+\/generalChat/, '');
   }
@@ -3434,10 +3450,10 @@ function _kokUygula(y, onek){
       var ham=(yol==null?'':String(yol)).replace(/^\/+/,'');
       if(ham.indexOf('.info/')===0||ham==='.info')return orj(ham);
       if(ham.indexOf('skorbord/')===0)return orj(ham);   // (2026-11-16) Skorbord ayarları tek yerde: test ve canlı admin aynı düğümü yönetir
-      var onek=(admVeriKaynagi()==='saha') ? window.SAHA_KOK_ONEK : '';
+      var onek=_admKokOnek();
       var y=_kokUygula(ham, onek);
       _dalKaydet(y);
-      var r=orj(testMi ? ('test/'+y) : y);
+      var r=orj((testMi && y.indexOf('skorbord/')!==0) ? ('test/'+y) : y);
       return (ham==='') ? _kokRefSar(r, onek) : r;
     };
   }catch(e){self.__ds&&self.__ds(2674,e)}
@@ -3446,7 +3462,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-16-C';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-16-D';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true, dosya:'admin', kap:function(){ return document.getElementById('loginWrap'); }, giris:function(){ var e = document.getElementById('loginWrap'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // yönetici geçebilir
@@ -5131,8 +5147,6 @@ function closeSheet(){
 function loginKaynakCiz(){
   var k=qs('loginKaynakSec'); if(!k)return;
   var su=admSkorbordMod()?'skorbord':(admVeriKaynagi()||'klasik');
-  // Skorbord seçiliyken lig sorulmaz (Skorbord'un ligleri gerçek liglerdir, kendi panelinden yönetilir).
-  try{ var lf=qs('loginLeagueSel'); if(lf&&lf.parentNode) lf.parentNode.style.display=(su==='skorbord')?'none':''; }catch(e){}
   k.innerHTML=[['klasik',' SAHA dışı'],['saha',' SAHA'],['skorbord',' Skorbord']].map(function(o){
     var secili=(su===o[0]);
     return '<button type="button" onclick="loginKaynakSec(\''+o[0]+'\')" '
@@ -5143,8 +5157,6 @@ function loginKaynakCiz(){
   }).join('');
 }
 window.loginKaynakSec=function(k){
-  if(k==='skorbord'){ admSkorbordModYaz(true); loginKaynakCiz(); try{ qs('loginErr').textContent=''; }catch(e){} return; }
-  admSkorbordModYaz(false);
   admVeriKaynagiYaz(k);
   loginKaynakCiz();
   var sel=qs('loginLeagueSel');
@@ -5161,11 +5173,11 @@ function loadLoginLeagueList(){
     _loginLeagueRetryCount=0; // başarılı okuma - sayaç sıfırlanır
     var meta=snap.val()||{};
     var ids=Object.keys(meta);
-    if(!ids.length&&admSkorbordMod()){ sel.innerHTML='<option value="">—</option>'; return; }   // Skorbord girişinde lig gerekmez
+    if(!ids.length&&admSkorbordMod()){ sel.innerHTML='<option value="sb_tur_1">Süper Lig (Skorbord ligleri ilk girişte kurulur)</option>'; return; }
     if(!ids.length){
       // Hangi KÖKTE lig bulunamadığını söylemek şart: "Lig bulunamadı" tek başına,
       // yanlış tarafta olduğunu anlamayan bir yöneticiyi kilitliyordu.
-      var kk=admVeriKaynagi()==='saha'?'SAHA':'SAHA dışı';
+      var kk=admVeriKaynagi()==='saha'?'SAHA':(admVeriKaynagi()==='skorbord'?'Skorbord':'SAHA dışı');
       sel.innerHTML='<option value="">'+kk+' tarafında lig yok</option>';
       try{ qs('loginErr').innerHTML=' <b>'+kk+'</b> tarafında henüz sezon yok. '
         +'Üstteki düğmeden diğer tarafa geçebilir ya da giriş yapıp yeni sezon oluşturabilirsin.'; }catch(e){self.__ds&&self.__ds(4383,e)}
@@ -7718,7 +7730,7 @@ function sahteTaramaCiz(){
 function sahteTara(temizle, onaylandi){
   if(temizle && !onaylandi){ ptOnay('Bulunan uydurma kayıtlar silinsin mi? Geri alınamaz.',{baslik:'Uydurma Kayıtlar',ikon:'',tehlikeli:true,tamamYazi:'Sil'}).then(function(ok){ if(ok)sahteTara(true,true); }); return; }
   db.ref('leagues').once('value').then(function(sn){
-    var ligler=sn.val()||{}, g={}, r={takim:0,takimMacli:0,kadro:0,olay:0,mac:0,lig:0,kaynak:(admVeriKaynagi()==='saha'?'SAHA':'SAHA dışı')};
+    var ligler=sn.val()||{}, g={}, r={takim:0,takimMacli:0,kadro:0,olay:0,mac:0,lig:0,kaynak:(admVeriKaynagi()==='saha'?'SAHA':(admVeriKaynagi()==='skorbord'?'Skorbord':'SAHA dışı'))};
     Object.keys(ligler).forEach(function(lid){
       var L=ligler[lid]; if(!L||typeof L!=='object') return; r.lig++;
       var teams=L.teams||{}, matches=L.matches||{};
@@ -16233,8 +16245,8 @@ function previewAnnouncement(){
 var _zmVeri = {};
 function _zmTestMi(){ return location.pathname.indexOf('/test/') !== -1; }
 function _zmHamYol(y){ // admin sarmalayıcısıyla AYNI çeviri (SAHA kökü + test öneki), ham yol olarak saklanır
-  var onek = (typeof admVeriKaynagi === 'function' && admVeriKaynagi() === 'saha') ? window.SAHA_KOK_ONEK : '';
-  return (_zmTestMi() ? 'test/' : '') + _kokUygula(y, onek);
+  var y2 = _kokUygula(y, _admKokOnek());
+  return ((_zmTestMi() && y2.indexOf('skorbord/') !== 0) ? 'test/' : '') + y2;
 }
 function zmFormCiz(){
   var t = (qs('zmTur') || {}).value, k = qs('zmAlanlar'); if(!k) return;
@@ -19901,12 +19913,24 @@ function _sbK(slug){ return slug.replace(/\./g,'_'); }
    bütün değişiklikler, düzenlemeler, her şey oradan kontrol edilecek"). Kaynak seçicideki üçüncü seçenek. Skorbord'un verisi AYRI düğümde
    (skorbord/ayarlar, herkes okur, yalnızca yönetici yazar); SAHA / SAHA dışı köklerine hiç dokunulmaz. Seçim bu cihazda saklanır
    (adm_skorbordMod); seçiliyken girişte lig sorulmaz, giriş sonrası doğrudan bu panel açılır. */
-function admSkorbordMod(){ try{ return localStorage.getItem('adm_skorbordMod')==='1'; }catch(e){ return false; } }
-function admSkorbordModYaz(acik){ try{ if(acik) localStorage.setItem('adm_skorbordMod','1'); else localStorage.removeItem('adm_skorbordMod'); }catch(e){ DiagSil('admSkorbordModYaz',e); } }
+function admSkorbordMod(){ return admVeriKaynagi()==='skorbord'; }
+try{ if(localStorage.getItem('adm_skorbordMod')==='1'){ localStorage.removeItem('adm_skorbordMod'); localStorage.setItem('adm_veriKaynagi','skorbord'); } }catch(e){}   // C sürümündeki ayrı anahtar → veri kaynağı
+/* İlk girişte Skorbord kökünde lig yoksa Skorbord'un ligleri (kimlikler Skorbord'daki gercek.js ligKimlik ile aynı) sezon olarak kurulur. */
+function admSkorbordKur(){
+  if(!admSkorbordMod()) return Promise.resolve();
+  return db.ref('leaguesMeta').once('value').then(function(sn){
+    var m=sn.val()||{}, ek={}, i=0;
+    SB_LIGLER.forEach(function(l){ i++; var id='sb_'+l[0].replace(/[^a-z0-9]+/gi,'_'); if(m[id]) return;
+      ek['leaguesMeta/'+id]={name:l[1], status:'active', createdAt:1000000-i, sbSlug:l[0]};
+      ek['leagues/'+id+'/leagueName']=l[1]; ek['leagues/'+id+'/lgConfig']={winPts:3,drawPts:1}; });
+    if(!Object.keys(ek).length) return;
+    return db.ref().update(ek).then(function(){ try{ toast('Skorbord ligleri kuruldu ('+(Object.keys(ek).length/3)+')'); logAction('Skorbord ligleri kuruldu'); }catch(e){} });
+  }).catch(function(e){ DiagSil('admSkorbordKur',e); });
+}
 var SB={ A:null, ilk:'', sekme:'durum', durum:{} };
 var SB_SEKMELER=[['durum','Durum'],['genel','Duyuru ve bakım'],['ligler','Ligler'],['canli','Canlı veri'],['takim','Takım adları'],['surum','Güncelleme']];
 var SB_GH='https://api.github.com/repos/azataslan065-png/skorbord/releases/tags/apk';
-window.skorbordAyarAc=function(){ admSkorbordModYaz(true); SkorbordPanel.ac(); };
+window.skorbordAyarAc=function(){ SkorbordPanel.ac(); };
 window.SkorbordPanel={
   ac:function(){
     var ov=qs('sbPanel');
@@ -19921,9 +19945,7 @@ window.SkorbordPanel={
   },
   don:function(){
     if(SB.A&&JSON.stringify(SB.A)!==SB.ilk&&!confirm('Kaydedilmemiş Skorbord değişiklikleri var. Yine de çıkılsın mı?')) return;
-    admSkorbordModYaz(false); var ov=qs('sbPanel'); if(ov) ov.style.display='none';
-    try{ loginKaynakCiz(); }catch(e){}
-    try{ toast('Puan Tablosu / SAHA paneline dönüldü'); }catch(e){}
+    var ov=qs('sbPanel'); if(ov) ov.style.display='none';
   },
   sekme:function(s){ SB.sekme=s; SkorbordPanel.ciz(); },
   degisti:function(){ var b=qs('sbKayitBtn'), d=JSON.stringify(SB.A)!==SB.ilk; if(b){ b.disabled=!d; b.style.opacity=d?'1':'.5'; } var n=qs('sbKayitNot'); if(n) n.textContent=d?'Kaydedilmemiş değişiklik var':'Bütün değişiklikler kayıtlı'; },
@@ -19932,7 +19954,7 @@ window.SkorbordPanel={
     var ov=qs('sbPanel'); if(!ov||!SB.A) return;
     var ust='<div style="display:flex;align-items:center;gap:.6rem;padding:calc(env(safe-area-inset-top,0px) + .7rem) .9rem .6rem;border-bottom:1px solid var(--br);background:var(--s1,#12121a)">'
       +'<img src="https://azataslan065-png.github.io/skorbord/app-icon-192.png" alt="" style="width:34px;height:34px;border-radius:9px" onerror="this.style.display=\'none\'">'
-      +'<div style="flex:1;min-width:0"><div style="font-size:.92rem;font-weight:900">Skorbord yönetimi</div><div id="sbKayitNot" style="font-size:.6rem;color:var(--mu)"></div></div>'
+      +'<div style="flex:1;min-width:0"><div style="font-size:.92rem;font-weight:900">Skorbord\'a özel ayarlar</div><div id="sbKayitNot" style="font-size:.6rem;color:var(--mu)"></div></div>'
       +'<button class="btn bgh" style="font-size:.68rem;min-height:34px;padding:.4rem .65rem" onclick="SkorbordPanel.don()">← Panele dön</button></div>'
       +'<div style="display:flex;gap:.35rem;overflow-x:auto;padding:.55rem .9rem;border-bottom:1px solid var(--br);touch-action:pan-x">'
       +SB_SEKMELER.map(function(s){ var a=SB.sekme===s[0]; return '<button type="button" onclick="SkorbordPanel.sekme(\''+s[0]+'\')" style="flex:0 0 auto;padding:.42rem .75rem;border-radius:999px;font:inherit;font-size:.7rem;font-weight:700;cursor:pointer;border:1.5px solid '+(a?'var(--ac)':'var(--br)')+';background:'+(a?'var(--ac)':'var(--s2)')+';color:'+(a?'#fff':'var(--tx)')+'">'+s[1]+'</button>'; }).join('')+'</div>';
@@ -26785,6 +26807,7 @@ function admKaynakSayilari(){
 }
 function admKaynakAdi(k){
   return k === 'saha' ? 'SAHA uygulaması üzerinden'
+       : k === 'skorbord' ? 'Skorbord'
        : k === 'klasik' ? 'SAHA olmadan' : 'Seçilmedi';
 }
 
@@ -26934,8 +26957,9 @@ function admKaynakGovdeUygula(){
     var k = admVeriKaynagi();
     // Süzgeç boşa düşüp hepsi gösteriliyorsa SAHA kartları da görünür kalır -
     // yöneticiyi kendi ayarlarından kilitlememek için (bkz. yumuşak süzgeç).
-    var gizle = (k === 'klasik') && !window._admKaynakBosUyarildi;
+    var gizle = (k === 'klasik' || k === 'skorbord') && !window._admKaynakBosUyarildi;
     document.body.classList.toggle('kaynak-klasik', !!gizle);
+    document.body.classList.toggle('kaynak-skorbord', k === 'skorbord');
   }catch(e){ DiagSil('admKaynakGovdeUygula', e); }
 }
 function admKaynakKapat(){
@@ -26944,8 +26968,9 @@ function admKaynakKapat(){
   window._admKaynakDegistirme = false;
 }
 window.admKaynakSec = function(k){
-  if(k === 'skorbord'){ admKaynakKapat(); admSkorbordModYaz(true); SkorbordPanel.ac(); return; }
-  admSkorbordModYaz(false);
+  if((k === 'skorbord') !== (admVeriKaynagi() === 'skorbord') && admVeriKaynagi()){   // Skorbord'a giriş/çıkış: kök tamamen değişir
+    admVeriKaynagiYaz(k); admKaynakKapat(); try{ toast(' Veri kaynağı değişti, yeniden yükleniyor…'); }catch(e){} setTimeout(function(){ location.reload(); }, 600); return;
+  }
   var degisti = (admVeriKaynagi() !== k) && !!admVeriKaynagi();
   admVeriKaynagiYaz(k);
   admKaynakKapat();
@@ -27017,17 +27042,18 @@ function admSezonKaynakCiz(){
   var saha = (kk === 'saha');
   k.innerHTML = '<div style="display:flex;align-items:center;gap:.5rem;font-size:.7rem">'
     + '<span style="font-size:.95rem">' + (saha ? '' : '') + '</span>'
-    + '<div style="flex:1;line-height:1.5"><b>' + (saha ? 'SAHA verileri' : 'SAHA dışı veriler') + '</b>'
-    + '<div style="color:var(--mu);font-size:.64rem">Bu taraftaki lig, takım ve fikstür ayrı saklanır. '
-    + 'Sohbet, bakım modu ve TV listesi ortaktır.</div></div>'
+    + '<div style="flex:1;line-height:1.5"><b>' + (kk === 'skorbord' ? 'Skorbord verileri' : (saha ? 'SAHA verileri' : 'SAHA dışı veriler')) + '</b>'
+    + '<div style="color:var(--mu);font-size:.64rem">' + (kk === 'skorbord'
+        ? 'Skorbord\'un veritabanı tamamen ayrı: sohbet, bakım, TV ve görünüm dahil. Maç ve takım verisi gerçek liglerden gelir.'
+        : 'Bu taraftaki lig, takım ve fikstür ayrı saklanır. Sohbet, bakım modu ve TV listesi ortaktır.') + '</div></div>'
     + '<button class="btn bgh" style="font-size:.7rem;min-height:34px;padding:.45rem .7rem" '
     + 'onclick="admKaynakEkraniAc(true)">Değiştir</button></div>';
 }
 
 function init(){
   setSyncBadge('','s-wait');
-  // (2026-11-16-C) Kaynak olarak Skorbord seçiliyse giriş sonrası doğrudan Skorbord yönetimi açılır.
-  try{ if(admSkorbordMod()) setTimeout(function(){ SkorbordPanel.ac(); }, 30); }catch(e){ DiagSil('sbInit',e); }
+  // (2026-11-16-D) Skorbord kökünde ilk girişte Skorbord ligleri sezon olarak kurulur (bkz. admSkorbordKur).
+  try{ if(admSkorbordMod()) setTimeout(admSkorbordKur, 1500); }catch(e){ DiagSil('sbInit',e); }
   // KULLANICI TALEBİ: admin uygulamayı açar açmaz (herhangi bir ekranı ziyaret etmeden) yeni
   // hata kayıtlarını anlık takip etmeye başlar - bkz. startDiagGlobalErrorWatch.
   startDiagGlobalErrorWatch();
