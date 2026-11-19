@@ -37,9 +37,14 @@ jobs:
             val="$(printf '%s' "${!v}" | tr -d ' \r\n\t')"; echo "$v=$val" >> "$GITHUB_ENV"
             if [ -n "$val" ]; then echo "$v: var (...${val: -4})"; else echo "$v: YOK"; fi
           done
+          # Hesap kimligi: secret gecerli bicimdeyse o, degilse medya-kapi/wrangler.toml'daki account_id kullanilir.
           A="$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d ' \r\n\t')"
-          if [ -n "$A" ] && ! printf '%s' "$A" | grep -qE '^[0-9a-f]{32}$'; then echo "::error::CLOUDFLARE_ACCOUNT_ID bicimi yanlis (32 karakter, 0-9 ve a-f olmali; uzunluk ${#A}). API anahtari yanlislikla buraya yapistirilmis olabilir."; exit 1; fi
-          if [ -z "$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d ' \r\n\t')" ] || [ -z "$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d ' \r\n\t')" ]; then
+          if ! printf '%s' "$A" | grep -qE '^[0-9a-f]{32}$'; then
+            A="$(grep -oE '^account_id *= *"[0-9a-f]{32}"' medya-kapi/wrangler.toml | grep -oE '[0-9a-f]{32}')"
+            echo "Account ID secret'i gecersiz bicimde; wrangler.toml'daki kimlik kullaniliyor."
+          fi
+          echo "CLOUDFLARE_ACCOUNT_ID=$A" >> "$GITHUB_ENV"
+          if [ -z "$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d ' \r\n\t')" ] || [ -z "$A" ]; then
             echo "::warning::Cloudflare anahtarlari henuz eklenmemis; kapi kurulmadi (uygulamalar eski yoldan yuklemeye devam ediyor)."; echo "atla=1" >> "$GITHUB_OUTPUT"
           fi
       - name: Durum deposu (KV)
