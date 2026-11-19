@@ -1188,7 +1188,7 @@ var SahaDestek = (function(){
     k.insertAdjacentHTML('beforeend', '<div class="sd-ilerle" id="' + sid + '"><span>' + esc((f.name || (tur === 'foto' ? 'Fotoğraf' : 'Video')).slice(0, 34)) + '</span><i><b style="width:0%"></b></i><em>%0</em></div>');
     var cub = function(o){ var e = document.getElementById(sid); if(!e) return; var y = Math.round(o * 100); e.querySelector('b').style.width = y + '%'; e.querySelector('em').textContent = o >= 1 ? 'kaydediliyor…' : '%' + y; };
     GB.yuk++;
-    var is = tur === 'foto' ? SahaYukleme.resim(f, GB.o.klasor, { maxDim:900, quality:.78, maxMB:15, ilerleme:cub }) : SahaYukleme.video(f, GB.o.klasor, { maxMB:50, maxSn:180, ilerleme:cub });
+    var is = tur === 'foto' ? SahaYukleme.resim(f, GB.o.klasor, { maxDim:900, quality:.78, maxMB:(window.SahaMedya ? SahaMedya.limit('fotoMB') : 15), ilerleme:cub }) : SahaYukleme.video(f, GB.o.klasor, { maxMB:(window.SahaMedya ? SahaMedya.limit('videoMB') : 50), maxSn:180, ilerleme:cub });
     is.then(function(u){ GB[tur] = u; }).catch(function(e){ bildir((tur === 'foto' ? 'Fotoğraf' : 'Video') + ' yüklenemedi: ' + ((e && e.message) || 'hata')); })
       .then(function(){ GB.yuk--; var e = document.getElementById(sid); if(e) e.remove(); medyaCiz(); });
   }
@@ -1738,7 +1738,23 @@ var SahaMedya = (function(){
       else { var t = el.currentTime || 0; el.src = y; if(el.tagName !== 'IMG'){ try{ el.load(); if(t) el.currentTime = t; }catch(_e){} } }
     }, true);
   }catch(e){}
-  return { yukle:yukle, depo:depo, kapi:kapiAl, yedekAl:yedekAl, testMi:testMi };
+  /* (2026-11-19-D) PAYLAŞIM SINIRLARI: yöneticinin admin kartından ayarladığı fotoğraf/video boyutu (MB) ve günlük sayı.
+     medyaAyar/_sinir herkese açık okunur (Firebase REST; test sayfaları da GERÇEK ayarı okur - depolar ortak). */
+  var SINIR = { fotoMB:15, videoMB:50, gunlukFoto:1e10, gunlukVideo:1e10 }, _sinirBek = null;
+  try{ var _ls = JSON.parse(localStorage.getItem('sahaMedyaSinir') || 'null'); if(_ls) Object.assign(SINIR, _ls); }catch(e){}
+  function sinirAl(){
+    if(_sinirBek) return _sinirBek;
+    return (_sinirBek = fetch('https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app/medyaAyar/_sinir.json', { cache:'no-store' })
+      .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }).then(function(a){
+        a = a || {}; var s = function(v, alt, ust, d){ v = Math.floor(+v); return v >= alt && v <= ust ? v : d; };
+        SINIR = { fotoMB:s(a.fotoMB, 1, 100, 15), videoMB:s(a.videoMB, 1, 95, 50), gunlukFoto:s(a.gunlukFoto, 1, 1e10, 1e10), gunlukVideo:s(a.gunlukVideo, 1, 1e10, 1e10) };
+        try{ localStorage.setItem('sahaMedyaSinir', JSON.stringify(SINIR)); }catch(e){}
+        try{ document.dispatchEvent(new CustomEvent('sahaMedyaSinir', { detail:SINIR })); }catch(e){}
+        return SINIR;
+      }));
+  }
+  try{ sinirAl(); }catch(e){}
+  return { yukle:yukle, depo:depo, kapi:kapiAl, yedekAl:yedekAl, testMi:testMi, sinir:sinirAl, limit:function(t){ return SINIR[t]; } };
 })();
 
 /* ═══ YÜKLENEN MEDYA İNDİRİLEMEZ / PAYLAŞILAMAZ (2026-11-19-A, kullanıcı: "kullanıcı video ve fotoğraf indiremez ve paylaşamaz") ═══

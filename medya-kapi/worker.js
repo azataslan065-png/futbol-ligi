@@ -6,10 +6,10 @@
    OKUMA kapıdan geçmez: dönen adres doğrudan deponun adresidir; yedek adres "#yedek=" ekiyle gelir ve istemci
    (ortak/medya.js) ilk adres açılmazsa yedeğe geçer. Gizli anahtarlar yalnızca Cloudflare'in secret'larındadır. */
 
-const SURUM = '2026-11-19-C';
+const SURUM = '2026-11-19-D';
 let KAPI_ADRES = '';   // bu isteğin geldiği kapı adresi (B2 dosyaları kapı üzerinden sunulur)
 const RTDB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app';
-const MAX_BOYUT = 60 * 1024 * 1024;          // Worker belleği için güvenli üst sınır (uygulama sınırı 50 MB)
+const MAX_BOYUT = 95 * 1000 * 1000;          // Cloudflare ücretsiz planı istek gövdesi 100 MB; dosya bellekte tek kopya tutulur
 const TEST_GUNLUK = 40;                        // test/ klasörüne günlük en fazla yükleme
 const DURUM_ANAHTAR = 'durum';
 const UZUN_ONBELLEK = 'public, max-age=31536000, immutable';
@@ -106,10 +106,22 @@ export const DEPOLAR = {
     hazir: (e) => !!e.IMAGEKIT_PRIVATE_KEY,   // dosya adresi yükleme yanıtından gelir; URL-endpoint gerekmez
     async yukle(e, yol, govde, tur) {
       const i = yol.lastIndexOf('/'), klasor = '/' + (i > 0 ? yol.slice(0, i) : ''), ad = yol.slice(i + 1);
-      const fd = new FormData();
-      fd.append('file', new Blob([govde], { type: tur }), ad);
-      fd.append('fileName', ad); fd.append('folder', klasor); fd.append('useUniqueFileName', 'false');
-      const r = await fetch('https://upload.imagekit.io/api/v1/files/upload', { method: 'POST', headers: { Authorization: 'Basic ' + btoa(e.IMAGEKIT_PRIVATE_KEY + ':') }, body: fd });
+      const yetki = 'Basic ' + btoa(e.IMAGEKIT_PRIVATE_KEY + ':');
+      let r;
+      if (typeof FixedLengthStream === 'function') {
+        // (2026-11-19-D) Çok parçalı gövde elle kurulur: büyük video bellekte İKİNCİ kez kopyalanmaz (Worker belleği 128 MB).
+        const bd = 'sbk' + crypto.randomUUID().replace(/-/g, ''), alan = (k, v) => `--${bd}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`;
+        const bas = enc.encode(alan('fileName', ad) + alan('folder', klasor) + alan('useUniqueFileName', 'false')
+          + `--${bd}\r\nContent-Disposition: form-data; name="file"; filename="${ad}"\r\nContent-Type: ${tur}\r\n\r\n`), son = enc.encode(`\r\n--${bd}--\r\n`);
+        const parca = [bas, new Uint8Array(govde), son], { readable, writable } = new FixedLengthStream(parca.reduce((a, x) => a + x.byteLength, 0));
+        const w = writable.getWriter(); (async () => { for (const x of parca) await w.write(x); await w.close(); })().catch(() => {});
+        r = await fetch('https://upload.imagekit.io/api/v1/files/upload', { method: 'POST', headers: { Authorization: yetki, 'Content-Type': 'multipart/form-data; boundary=' + bd }, body: readable });
+      } else {
+        const fd = new FormData();
+        fd.append('file', new Blob([govde], { type: tur }), ad);
+        fd.append('fileName', ad); fd.append('folder', klasor); fd.append('useUniqueFileName', 'false');
+        r = await fetch('https://upload.imagekit.io/api/v1/files/upload', { method: 'POST', headers: { Authorization: yetki }, body: fd });
+      }
       const m = await r.text();
       if (!r.ok) return { hata: r.status, metin: m.slice(0, 300) };
       let u = ''; try { u = JSON.parse(m).url; } catch (_) {}
@@ -192,6 +204,20 @@ export function sira(e, d, simdi = Date.now(), ayarlar = {}) {
   const liste = String(e.DEPO_SIRASI || 'b2,imagekit,supabase').split(',').map((s) => s.trim()).filter((s) => DEPOLAR[s] && DEPOLAR[s].hazir(e));
   return liste.filter((id) => !doluMu(id, d, ayarlar, simdi) && !(ayarlar[id] && ayarlar[id].kapali));
 }
+
+/* ── PAYLAŞIM SINIRLARI (2026-11-19-D, kullanıcı: "yönetici, kullanıcının ne kadar boyutta video ve fotoğraf ekleyebileceğini
+   ayarlayabilsin; günlük kaç fotoğraf ve video paylaşılacağını 1 ile 10.000.000.000 (sonsuz) arasında belirleyebilsin").
+   Ayar: medyaAyar/_sinir {fotoMB, videoMB, gunlukFoto, gunlukVideo, muaf:{<uid özeti>:true}} - admin kartından yazılır.
+   Günlük sayı her kullanıcı (oturum) için Türkiye gününe göre tutulur; yöneticiler (muaf) sınırsızdır. Uygulamalar boyut
+   sınırını yüklemeden ÖNCE uygular (aşan dosyada düzenleme ekranı açılır); kapı aynı sınırı ayrıca denetler. */
+export const SINIR_VARSAYILAN = { fotoMB: 15, videoMB: 50, gunlukFoto: 1e10, gunlukVideo: 1e10 };
+export function paylasimSiniri(ayar) {
+  const a = (ayar && ayar._sinir) || {}, o = {}, s = (v, alt, ust, vars) => { v = Math.floor(+v); return v >= alt && v <= ust ? v : vars; };
+  o.fotoMB = s(a.fotoMB, 1, 100, SINIR_VARSAYILAN.fotoMB); o.videoMB = s(a.videoMB, 1, 95, SINIR_VARSAYILAN.videoMB);
+  o.gunlukFoto = s(a.gunlukFoto, 1, 1e10, SINIR_VARSAYILAN.gunlukFoto); o.gunlukVideo = s(a.gunlukVideo, 1, 1e10, SINIR_VARSAYILAN.gunlukVideo);
+  o.muaf = a.muaf || {}; return o;
+}
+const trGunu = (t = Date.now()) => new Date(t + 3 * 3600e3).toISOString().slice(0, 10);
 
 /* ── Yüklenen dosya sayacı (fotoğraf / video ayrı; depolama toplamı + bu dönem yüklenen) ───────────────── */
 export const turu = (tur) => /^image\//.test(tur) ? 'foto' : /^video\//.test(tur) ? 'video' : 'ses';
@@ -283,7 +309,8 @@ export default {
         }
         return o;
       }));
-      return json({ ok: true, surum: SURUM, depolar });
+      const ps = paylasimSiniri(ay); delete ps.muaf;
+      return json({ ok: true, surum: SURUM, depolar, paylasim: ps });
     }
 
     if (u.pathname === '/yukle' && req.method === 'POST') {
@@ -301,10 +328,17 @@ export default {
         if (n >= TEST_GUNLUK) return json({ ok: false, hata: 'test ortamının günlük yükleme sınırı doldu' }, 429);
         await e.MEDYA_DURUM.put(k, String(n + 1), { expirationTtl: 172800 });
       }
+      const ps = paylasimSiniri(await ayarOku(e)), tt = turu(tur), muaf = !!ps.muaf[await sha256Hex(uid)];
+      const mbSin = (tt === 'video' ? ps.videoMB : tt === 'foto' ? ps.fotoMB : ps.videoMB) * 1048576 * 1.05;
+      if (!muaf && uz > mbSin) return json({ ok: false, hata: (tt === 'foto' ? 'Fotoğraf' : 'Video') + ' en fazla ' + (tt === 'foto' ? ps.fotoMB : ps.videoMB) + ' MB olabilir' }, 413);
+      const gk = 'g:' + uid + ':' + trGunu(), gs = (!muaf && e.MEDYA_DURUM && tt !== 'ses') ? ((await e.MEDYA_DURUM.get(gk, { type: 'json' })) || {}) : null;
+      const gSin = tt === 'video' ? ps.gunlukVideo : ps.gunlukFoto;
+      if (gs && (gs[tt] || 0) >= gSin) return json({ ok: false, hata: 'Bugünkü ' + (tt === 'video' ? 'video' : 'fotoğraf') + ' paylaşım sınırına ulaştın (' + gSin + '). Yarın tekrar deneyebilirsin.', sinir: true }, 429);
       const govde = await req.arrayBuffer();
-      if (govde.byteLength > MAX_BOYUT) return json({ ok: false, hata: 'dosya çok büyük' }, 413);
+      if (govde.byteLength > MAX_BOYUT || (!muaf && govde.byteLength > mbSin)) return json({ ok: false, hata: 'dosya çok büyük' }, 413);
       const { basarili, hatalar } = await ikiyeYukle(e, yol, govde, tur);
       if (!basarili.length) return json({ ok: false, hata: 'bütün depolar dolu ya da ulaşılamıyor', ayrinti: hatalar }, 503);
+      if (gs) { gs[tt] = (gs[tt] || 0) + 1; try { await e.MEDYA_DURUM.put(gk, JSON.stringify(gs), { expirationTtl: 172800 }); } catch (_) {} }
       const url = basarili[0].url + (basarili[1] ? '#yedek=' + encodeURIComponent(basarili[1].url) : '');
       return json({ ok: true, url, depolar: basarili.map((b) => b.id) });
     }
