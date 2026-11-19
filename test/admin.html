@@ -153,7 +153,7 @@
 </script>
 <meta charset="UTF-8"/>
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=e86fc9cd"></script>
+<script src="ortak/ortak.js?v=f8326685"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -3509,7 +3509,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-19-A';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-19-B';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true, dosya:'admin', kap:function(){ return document.getElementById('loginWrap'); }, giris:function(){ var e = document.getElementById('loginWrap'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // yönetici geçebilir
@@ -20106,18 +20106,86 @@ window.sbGrSil=function(){
   db.ref('macBilgi/'+_sbGr.lig.replace(/\./g,'_')+'/'+_sbGr.mac).remove().then(function(){ var o=qs('sbGrMac'); if(o&&o.selectedOptions[0]) o.selectedOptions[0].textContent=o.selectedOptions[0].textContent.replace(/\s+✓$/,''); sbGrMacSec(); });
 };
 /* ═══ MEDYA DEPOLARI KARTI (2026-11-19-A) ═══ kapının /durum uç noktasını okur (gizli bilgi içermez). */
+/* (2026-11-19-B, kullanıcı: "ilgili karta tıklayınca aylık ne kadar kota kaldığını güncel olarak göstersin; fotoğraf ve video ayrı;
+   her kilitlendiğinde depodan gelen tarihi gösterecek"). Depo satırına dokununca ayrıntı açılır:
+   - İndirme (bu dönem): uygulamaların ölçtüğü fotoğraf / video baytları (Firebase medyaIndirme günlük sayaçları; cihazda
+     saklı kopyadan açılanlar kotayı harcamadığı için sayılmaz) + varsa deponun KENDİ ölçümü (ImageKit kullanım API'si).
+   - Depolama: kapıdan yüklenen fotoğraf / video (sayı ve boyut).
+   - Kilit: dolu deponun açılış tarihi ve nereden geldiği (depo bildirdi / dönem sonu / elle). Fatura günü ve kilit tarihi
+     buradan düzeltilebilir (medyaAyar/<depo>; kapı 1 dk içinde kullanır). */
+var _admMedya={acik:{},veri:null};
+function _admBayt(n){ n=+n||0; if(n<1000) return n+' B'; var u=['KB','MB','GB','TB'],i=-1; do{ n/=1000; i++; }while(n>=1000&&i<3);   /* depolar GB'ı 1000'lik sayar */ return (n<10?n.toFixed(2):n<100?n.toFixed(1):Math.round(n))+' '+u[i]; }
+function _admTarih(t,saat){ var d=new Date(t); return d.toLocaleDateString('tr-TR',{day:'numeric',month:'short',year:'numeric'})+(saat?' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'):''); }
+function _admIndirmeTopla(bas){
+  var g=new Date(bas).toISOString().slice(0,10), ref=window._ptGercekRef||function(y){ return firebase.database().ref(y); };
+  var oku=function(y){ return ref(y).orderByKey().startAt(g).once('value').then(function(sn){ return sn.val()||{}; }).catch(function(){ return {}; }); };
+  return Promise.all([oku('medyaIndirme'),oku('test/medyaIndirme')]).then(function(l){
+    var t={}; l.forEach(function(v){ Object.keys(v).forEach(function(gun){ var dd=v[gun]||{}; Object.keys(dd).forEach(function(dp){ var x=dd[dp]||{}; t[dp]=t[dp]||{}; Object.keys(x).forEach(function(tr){ t[dp][tr]=(t[dp][tr]||0)+(+x[tr]||0); }); }); }); });
+    return t;
+  });
+}
+function _admCubuk(kul,sin){ if(!sin) return ''; var y=Math.min(100,Math.round(kul/sin*100)), r=y>=90?'#f87171':y>=70?'#fbbf24':'#22c55e';
+  return '<div style="height:6px;border-radius:4px;background:var(--br);overflow:hidden;margin:.25rem 0 .15rem"><div style="height:100%;width:'+y+'%;background:'+r+'"></div></div>'; }
+function _admMedyaAyrinti(d,ind){
+  var sin=d.sinir||{}, ii=ind[d.id]||{}, fo=ii.foto||0, vi=ii.video||0, se=ii.ses||0, top=fo+vi+se;
+  var dp=d.depolanan||{}, yk=d.yuklenen||{}, fd=(dp.foto||{}), vd=(dp.video||{}), dTop=(fd.b||0)+(vd.b||0)+((dp.ses||{}).b||0);
+  var satir=function(a,b){ return '<div style="display:flex;justify-content:space-between;gap:.5rem;font-size:.66rem;padding:.12rem 0"><span style="color:var(--mu)">'+a+'</span><b>'+b+'</b></div>'; };
+  var h='<div style="padding:.45rem .2rem .6rem 1.2rem;border-top:1px dashed var(--br)">';
+  if(d.dolu){ var kay={depo:'depo bildirdi',donem:'dönem sonu',elle:'elle girildi'}[d.acilisKaynak]||'';
+    h+='<div style="font-size:.68rem;color:#f87171;font-weight:800;margin-bottom:.3rem">Kilitli · '+_admTarih(d.aciliyor,true)+' açılır <span style="font-weight:600;color:var(--mu)">('+kay+')</span></div>'; }
+  if(d.donem) h+='<div style="font-size:.62rem;color:var(--mu);margin-bottom:.35rem">Bu dönem: '+_admTarih(d.donem.bas)+' – '+_admTarih(d.donem.son)+(d.id==='b2'?' (günlük)':'')+'</div>';
+  h+='<div style="font-size:.68rem;font-weight:800;margin-top:.2rem">İndirme (bu dönem)</div>';
+  h+=satir('Fotoğraf',_admBayt(fo))+satir('Video',_admBayt(vi))+(se?satir('Ses',_admBayt(se)):'');
+  var olc=d.depoOlcumu, kul=olc?Math.max(olc.indirme,top):top;
+  // Kilitliyken kota fiilen dolmuştur: uygulamanın ölçümü (kapı kurulmadan önceki trafiği görmez) "kalan" diye gösterilmez.
+  if(sin.indirme&&d.dolu){ h+=_admCubuk(1,1)+satir('Kullanılan / sınır','doldu / '+_admBayt(sin.indirme))+satir('Kalan','0 · '+_admTarih(d.aciliyor)+' yenilenir'); }
+  else if(sin.indirme){ h+=_admCubuk(kul,sin.indirme)+satir('Kullanılan / sınır',_admBayt(kul)+' / '+_admBayt(sin.indirme))+satir('Kalan',_admBayt(Math.max(0,sin.indirme-kul))); }
+  else if(sin.not) h+='<div style="font-size:.6rem;color:var(--mu)">'+escHtml(sin.not)+'</div>';
+  if(olc) h+='<div style="font-size:.6rem;color:var(--mu)">'+escHtml(d.ad)+'\'in kendi ölçümü: '+_admBayt(olc.indirme)+' indirme, '+_admBayt(olc.depolama)+' depolama</div>';
+  h+='<div style="font-size:.68rem;font-weight:800;margin-top:.45rem">Depolama</div>';
+  h+=satir('Fotoğraf',(fd.n||0)+' dosya · '+_admBayt(fd.b))+satir('Video',(vd.n||0)+' dosya · '+_admBayt(vd.b));
+  var dKul=olc?Math.max(olc.depolama,dTop):dTop;
+  if(sin.depolama) h+=_admCubuk(dKul,sin.depolama)+satir('Kullanılan / sınır',_admBayt(dKul)+' / '+_admBayt(sin.depolama))+satir('Kalan',_admBayt(Math.max(0,sin.depolama-dKul)));
+  if(((yk.foto||{}).n||0)+((yk.video||{}).n||0)) h+=satir('Bu dönem yüklenen',((yk.foto||{}).n||0)+' fotoğraf, '+((yk.video||{}).n||0)+' video');
+  h+='<div style="font-size:.58rem;color:var(--mu);line-height:1.45;margin-top:.3rem">İndirme, uygulamaların ölçtüğü değerdir (cihazda saklı kopyadan açılanlar kotayı harcamaz, sayılmaz). Depolama, kapıdan yüklenen dosyalardır'+(d.id==='supabase'?'; kapıdan önce Supabase\'e yüklenenler buna dahil değil':'')+'.</div>';
+  if(d.id!=='b2') h+='<div style="display:flex;gap:.35rem;align-items:center;margin-top:.45rem;flex-wrap:wrap"><span style="font-size:.62rem;color:var(--mu)">Fatura günü</span><input id="admMG_'+d.id+'" type="number" min="1" max="28" value="'+(d.gun||1)+'" style="width:58px">'
+    +'<span style="font-size:.62rem;color:var(--mu)">Kilit bitişi</span><input id="admMK_'+d.id+'" type="date" value="'+(d.dolu&&d.acilisKaynak==='elle'?new Date(d.aciliyor).toISOString().slice(0,10):'')+'" style="flex:1;min-width:120px">'
+    +'<button class="btn bgh" style="min-height:30px;font-size:.64rem" onclick="admMedyaAyarKaydet(\''+d.id+'\')">Kaydet</button></div><div id="admMM_'+d.id+'" class="hint"></div>';
+  return h+'</div>';
+}
+function _admMedyaCiz(){
+  var k=qs('admMedyaListe'), j=_admMedya.veri; if(!k||!j) return;
+  k.innerHTML=(j.depolar||[]).map(function(d,i){
+    var dur=!d.kurulu?['#94a3b8','Kurulmadı']:d.kapali?['#94a3b8','Kapalı (elle)']:d.dolu?['#f87171','Dolu · '+_admTarih(d.aciliyor,true)+' açılır']:['#22c55e','Açık'];
+    var ac=!!_admMedya.acik[d.id];
+    return '<div style="border-top:'+(i?'1px solid var(--br)':'0')+'"><div onclick="admMedyaAc(\''+d.id+'\')" style="display:flex;align-items:center;gap:.45rem;padding:.45rem 0;cursor:pointer"><span style="width:9px;height:9px;border-radius:50%;background:'+dur[0]+';flex:none"></span><b style="flex:1;font-size:.72rem">'+(i+1)+'. '+escHtml(d.ad)+'</b><span style="font-size:.66rem;color:var(--mu)">'+escHtml(dur[1])+'</span><span style="font-size:.7rem;color:var(--mu);width:12px;text-align:center">'+(ac?'▴':'▾')+'</span></div>'
+      +(ac&&d.kurulu?_admMedyaAyrinti(d,_admMedya.ind||{}):'')+'</div>';
+  }).join('')||'Depo yok.';
+}
+window.admMedyaAc=function(id){ _admMedya.acik[id]=!_admMedya.acik[id]; _admMedyaCiz(); };
+window.admMedyaAyarKaydet=function(id){
+  var g=+((qs('admMG_'+id)||{}).value||0), kb=((qs('admMK_'+id)||{}).value||''), m=qs('admMM_'+id);
+  if(!(g>=1&&g<=28)){ if(m) m.textContent='Fatura günü 1–28 arası olmalı.'; return; }
+  var ref=window._ptGercekRef||function(y){ return firebase.database().ref(y); };
+  ref('medyaAyar/'+id).update({gun:g, kilitBitis:kb?Date.parse(kb+'T00:00:00Z'):null, ts:Date.now()}).then(function(){
+    if(m) m.innerHTML='<b style="color:#22c55e">Kaydedildi.</b> Kapı 1 dakika içinde kullanır.'; try{ logAction('Medya deposu ayarı: '+id); }catch(e){}
+    setTimeout(admMedyaDurum,65000);
+  },function(e){ if(m) m.innerHTML='<b style="color:#f87171">Kaydedilemedi:</b> '+escHtml((e&&e.message)||''); });
+};
 window.admMedyaDurum=function(){
   var k=qs('admMedyaListe'); if(!k) return;
   if(!window.SahaMedya){ k.textContent='Ortak dosya yüklenemedi.'; return; }
-  k.textContent='Okunuyor…';
+  if(!_admMedya.veri) k.textContent='Okunuyor…';
   SahaMedya.kapi().then(function(kapi){
-    if(!kapi){ k.innerHTML='<b>Kapı henüz kurulmadı.</b> Yüklemeler şimdilik eskisi gibi doğrudan Supabase\'e gidiyor. Anahtarlar GitHub\'a eklenince kurulum kendiliğinden yapılır.'; return; }
-    return fetch(kapi+'/durum',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){
-      var fmt=function(t){ var d=new Date(t); return d.toLocaleDateString('tr-TR',{day:'numeric',month:'short'})+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); };
-      k.innerHTML=(j.depolar||[]).map(function(d,i){
-        var dur=!d.kurulu?['#94a3b8','Kurulmadı']:d.dolu?['#f87171','Dolu · '+fmt(d.aciliyor)+' açılır']:['#22c55e','Açık'];
-        return '<div style="display:flex;align-items:center;gap:.45rem;padding:.35rem 0;border-top:'+(i?'1px solid var(--br)':'0')+'"><span style="width:9px;height:9px;border-radius:50%;background:'+dur[0]+';flex:none"></span><b style="flex:1;font-size:.72rem">'+(i+1)+'. '+escHtml(d.ad)+'</b><span style="font-size:.66rem;color:var(--mu)">'+escHtml(dur[1])+'</span></div>';
-      }).join('')||'Depo yok.';
+    if(!kapi){ k.innerHTML='<b>Kapı henüz kurulmadı.</b> Yüklemeler şimdilik eskisi gibi doğrudan Supabase\'e gidiyor.'; return; }
+    return fetch(kapi+'/durum?ayrinti=1',{cache:'no-store'}).then(function(r){ return r.json(); }).then(function(j){
+      _admMedya.veri=j;
+      _admMedyaCiz();
+      // Her depo KENDİ dönemine göre toplanır (B2 günlük, ImageKit/Supabase fatura gününden).
+      var L=(j.depolar||[]).filter(function(d){ return d.kurulu&&d.donem; });
+      return Promise.all(L.map(function(d){ return _admIndirmeTopla(d.donem.bas).then(function(t){ return [d.id,t[d.id]||{}]; }); })).then(function(r){
+        _admMedya.ind={}; r.forEach(function(x){ _admMedya.ind[x[0]]=x[1]; }); _admMedyaCiz();
+      });
     });
   }).catch(function(e){ k.textContent='Kapıya ulaşılamadı: '+((e&&e.message)||''); });
 };

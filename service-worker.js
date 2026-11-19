@@ -114,6 +114,7 @@ function indirSakla(u, yedek){
       return al(u).then(function(r){ return (!r.ok && yedek) ? al(yedek).catch(function(){ return r; }) : r; }, function(e){ if(yedek) return al(yedek); throw e; }).then(function(r){
         if(!r.ok || r.status !== 200) return null;
         return r.blob().then(function(b){
+          indirmeBildir(r.url || u, r.headers.get('content-type') || b.type, b.size);
           var bas = new Headers();
           bas.set('Content-Type', r.headers.get('content-type') || b.type || 'application/octet-stream');
           bas.set('Content-Length', String(b.size)); bas.set('Accept-Ranges', 'bytes');
@@ -134,11 +135,20 @@ function indirSakla(u, yedek){
 
 /* (2026-11-19-A) YEDEK ADRES: medya kapısı her dosyayı iki depoya yazar ve adrese "#yedek=<ikinci adres>" ekler. Ana depo
    cevap vermezse ya da kota/erişim hatası verirse (402/403/429/5xx) aynı dosya ikinci depodan getirilir. */
+/* (2026-11-19-B) İNDİRME ÖLÇÜMÜ: ağdan inen her depo dosyasının boyutu (fotoğraf / video ayrı) sayfaya bildirilir; sayfa
+   Firebase'deki günlük sayaca ekler (ortak/ortak.js). Cihazda saklanandan verilen dosya SAYILMAZ - kotayı harcamaz. */
+function depoAdi(u){ u = String(u); return /\.supabase\.co\//.test(u) ? 'supabase' : /\.backblazeb2\.com\//.test(u) ? 'b2' : /\/\/ik\.imagekit\.io\//.test(u) ? 'imagekit' : ''; }
+function indirmeBildir(u, tur, bayt){
+  var d = depoAdi(u); if(!d || !(bayt > 0)) return;
+  var t = /^video\//.test(tur || '') ? 'video' : /^image\//.test(tur || '') ? 'foto' : 'ses';
+  try{ self.clients.matchAll({ type:'window' }).then(function(l){ if(l && l[0]) l[0].postMessage({ tip:'medyaIndi', depo:d, tur:t, b:bayt }); }); }catch(e){}
+}
 function yedekAdres(u){ var i = String(u).indexOf('#yedek='); return i < 0 ? '' : decodeURIComponent(String(u).slice(i + 7)); }
 function dogrudanYedekli(istek){
   var y = yedekAdres(istek.url);
   return fetch(istek).then(function(r){
-    if(y && (r.status === 402 || r.status === 403 || r.status === 404 || r.status === 429 || r.status >= 500)) return fetch(y, { headers:istek.headers, mode:'cors', credentials:'omit' }).catch(function(){ return r; });
+    if(y && (r.status === 402 || r.status === 403 || r.status === 404 || r.status === 429 || r.status >= 500)) return fetch(y, { headers:istek.headers, mode:'cors', credentials:'omit' }).then(function(r2){ if(r2.ok) indirmeBildir(r2.url || y, r2.headers.get('content-type'), +(r2.headers.get('content-length') || 0)); return r2; }).catch(function(){ return r; });
+    if(r.ok) indirmeBildir(r.url || istek.url, r.headers.get('content-type'), +(r.headers.get('content-length') || 0));
     return r;
   }, function(e){ if(y) return fetch(y, { headers:istek.headers, mode:'cors', credentials:'omit' }); throw e; });
 }

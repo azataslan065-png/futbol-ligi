@@ -1770,3 +1770,26 @@ var SahaMedya = (function(){
     document.addEventListener('play', function(e){ isle(e.target); }, true);
   }catch(e){}
 })();
+
+/* ═══ İNDİRME ÖLÇÜMÜ (2026-11-19-B, kullanıcı: "aylık ne kadar kota kaldığını güncel olarak göstersin, fotoğraf ve video ayrı") ═══
+   Servis çalışanı depolardan ağ üzerinden inen her dosyanın boyutunu bildirir (cihazdaki kopyadan verilenler sayılmaz). Burada
+   biriktirilip 20 sn'de bir Firebase'deki günlük sayaca eklenir: medyaIndirme/<gün>/<depo>/<foto|video|ses> (bayt). Admin'deki
+   "Medya depoları" kartı bu sayaçları deponun dönemine göre toplar. Test sayfaları kendi test/ dalına yazar; kart ikisini de toplar. */
+(function(){
+  var bek = {}, z = null;
+  function yaz(){
+    z = null; var k = bek; bek = {};
+    try{
+      var g = new Date().toISOString().slice(0, 10), db = firebase.database(), inc = firebase.database.ServerValue.increment;
+      Object.keys(k).forEach(function(y){ db.ref('medyaIndirme/' + g + '/' + y).set(inc(k[y])).catch(function(){}); });
+    }catch(e){}
+  }
+  try{
+    if(navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', function(e){
+      var m = e.data; if(!m || m.tip !== 'medyaIndi' || !/^(b2|imagekit|supabase)$/.test(m.depo) || !/^(foto|video|ses)$/.test(m.tur)) return;
+      var y = m.depo + '/' + m.tur; bek[y] = (bek[y] || 0) + (+m.b || 0);
+      if(!z) z = setTimeout(yaz, 20000);
+    });
+    document.addEventListener('visibilitychange', function(){ if(document.visibilityState === 'hidden' && z){ clearTimeout(z); yaz(); } });
+  }catch(e){}
+})();

@@ -6,7 +6,8 @@
    OKUMA kapıdan geçmez: dönen adres doğrudan deponun adresidir; yedek adres "#yedek=" ekiyle gelir ve istemci
    (ortak/medya.js) ilk adres açılmazsa yedeğe geçer. Gizli anahtarlar yalnızca Cloudflare'in secret'larındadır. */
 
-const SURUM = '2026-11-19-A';
+const SURUM = '2026-11-19-B';
+const RTDB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app';
 const MAX_BOYUT = 60 * 1024 * 1024;          // Worker belleği için güvenli üst sınır (uygulama sınırı 50 MB)
 const TEST_GUNLUK = 40;                        // test/ klasörüne günlük en fazla yükleme
 const DURUM_ANAHTAR = 'durum';
@@ -82,15 +83,11 @@ export async function s3Imzala({ method, url, headers, keyId, secret, region, si
 }
 
 /* ── Depolar ─────────────────────────────────────────────────────────────────────────────── */
-// Kota dolunca ne zaman yeniden denenir:
-const ayBasi = (t) => { const d = new Date(t); return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1); };
-const b2Sifir = (t) => { const d = new Date(t); let s = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8); if (s <= t) s += 864e5; return s; }; // B2: gece yarısı (Pasifik) ≈ 08:00 UTC
 
 export const DEPOLAR = {
   b2: {
     ad: 'Backblaze B2',
     hazir: (e) => !!(e.B2_KEY_ID && e.B2_APP_KEY && e.B2_BUCKET && e.B2_ENDPOINT),
-    sifirlanma: b2Sifir,
     async yukle(e, yol, govde, tur) {
       const uc = e.B2_ENDPOINT.replace(/^https?:\/\//, '').replace(/\/+$/, ''), region = (/^s3\.([^.]+)\./.exec(uc) || [])[1] || 'us-west-004';
       const url = `https://${uc}/${e.B2_BUCKET}/${yol}`;
@@ -104,7 +101,6 @@ export const DEPOLAR = {
   imagekit: {
     ad: 'ImageKit',
     hazir: (e) => !!e.IMAGEKIT_PRIVATE_KEY,   // dosya adresi yükleme yanıtından gelir; URL-endpoint gerekmez
-    sifirlanma: ayBasi,
     async yukle(e, yol, govde, tur) {
       const i = yol.lastIndexOf('/'), klasor = '/' + (i > 0 ? yol.slice(0, i) : ''), ad = yol.slice(i + 1);
       const fd = new FormData();
@@ -121,7 +117,6 @@ export const DEPOLAR = {
   supabase: {
     ad: 'Supabase',
     hazir: (e) => !!(e.SUPABASE_URL && e.SUPABASE_KEY),
-    sifirlanma: (t) => t + 864e5,      // fatura dönemi bilinmiyor: günde bir yeniden denenir
     async yukle(e, yol, govde, tur) {
       const kova = e.SUPABASE_BUCKET || 'videos';
       const r = await fetch(`${e.SUPABASE_URL}/storage/v1/object/${kova}/${yol}`, {
@@ -135,6 +130,43 @@ export const DEPOLAR = {
   },
 };
 
+/* ── Dönem ve açılış tarihi (2026-11-19-B, kullanıcı: "her kilitlendiğinde Supabase'den gelen tarihi gösterecek, diğerleri de öyle") ──
+   Her deponun kotası bir dönemde sıfırlanır: B2 her gün (≈ 08:00 UTC), ImageKit ve Supabase ayda bir, kendi fatura gününde.
+   Fatura günü Firebase'deki medyaAyar/<depo>/gun alanından okunur (admin kartından değiştirilir); yoksa varsayılan kullanılır
+   (Supabase: 4 - kilit e-postasındaki "4 Aralık"). Depo kilitlenince açılış tarihi şu sırayla belirlenir:
+     1) admin kartından elle girilen tarih (medyaAyar/<depo>/kilitBitis), 2) deponun hata mesajındaki tarih, 3) dönem sonu. */
+const GUN_VARSAYILAN = { supabase: 4, imagekit: 1 };
+export const SINIR = {   // ücretsiz plan sınırları (bayt); indirme dönemliktir
+  b2: { depolama: 10e9, indirme: null, not: 'indirme: depolananın 3 katına kadar ücretsiz, günlük' },
+  imagekit: { depolama: 3e9, indirme: 20e9 },
+  supabase: { depolama: 1e9, indirme: 10e9, not: '5 GB önbellekli + 5 GB önbelleksiz indirme' },
+};
+let _ayar = null, _ayarZ = 0;
+async function ayarOku(e) {
+  if (_ayar && Date.now() - _ayarZ < 60000) return _ayar;
+  let a = {}; try { const r = await fetch((e.RTDB || RTDB) + '/medyaAyar.json'); if (r.ok) a = (await r.json()) || {}; } catch (_) {}
+  _ayar = a; _ayarZ = Date.now(); return a;
+}
+export function donem(id, ayar = {}, t = Date.now()) {
+  if (id === 'b2') { const d = new Date(t); let b = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8); if (b > t) b -= 864e5; return { bas: b, son: b + 864e5 }; }
+  const g = Math.min(28, Math.max(1, +ayar.gun || GUN_VARSAYILAN[id] || 1)), d = new Date(t);
+  let b = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), g); if (b > t) b = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, g);
+  const bd = new Date(b); return { bas: b, son: Date.UTC(bd.getUTCFullYear(), bd.getUTCMonth() + 1, g) };
+}
+const AYLAR = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+export function tarihAyikla(m) {
+  m = String(m || ''); let x;
+  if ((x = /(20\d\d)-(\d\d)-(\d\d)/.exec(m))) return Date.UTC(+x[1], +x[2] - 1, +x[3]);
+  if ((x = /\b([A-Z][a-z]{2})[a-z]*\.? (\d{1,2}),? (20\d\d)/.exec(m)) && AYLAR[x[1].toLowerCase()] != null) return Date.UTC(+x[3], AYLAR[x[1].toLowerCase()], +x[2]);
+  if ((x = /\b(\d{1,2}) ([A-Z][a-z]{2})[a-z]* (20\d\d)/.exec(m)) && AYLAR[x[2].toLowerCase()] != null) return Date.UTC(+x[3], AYLAR[x[2].toLowerCase()], +x[1]);
+  return 0;
+}
+export function acilis(id, kayit, ayar = {}) {
+  if (ayar.kilitBitis > kayit.zaman) return { t: +ayar.kilitBitis, kaynak: 'elle' };
+  if (kayit.mesajTarih > kayit.zaman) return { t: kayit.mesajTarih, kaynak: 'depo' };
+  return { t: donem(id, ayar, kayit.zaman).son, kaynak: 'donem' };
+}
+
 /* ── Kota durumu (KV; yalnız durum değişince yazılır) ─────────────────────────────────────── */
 let _durum = null, _durumZaman = 0;
 async function durumOku(e) {
@@ -144,25 +176,55 @@ async function durumOku(e) {
 }
 async function doluIsaretle(e, id, sebep) {
   const d = await durumOku(e), t = Date.now();
-  d[id] = { dolu: true, aciliyor: DEPOLAR[id].sifirlanma(t), sebep: String(sebep).slice(0, 160), zaman: t };
+  d[id] = { dolu: true, sebep: String(sebep).slice(0, 160), zaman: t, mesajTarih: tarihAyikla(sebep) };
+  d[id].aciliyor = acilis(id, d[id], (await ayarOku(e))[id] || {}).t;
   _durum = d; _durumZaman = t;
   try { e.MEDYA_DURUM && await e.MEDYA_DURUM.put(DURUM_ANAHTAR, JSON.stringify(d)); } catch (_) {}
 }
-export function sira(e, d, simdi = Date.now()) {
+export function doluMu(id, d, ayarlar = {}, simdi = Date.now()) {
+  const k = d[id]; if (!k || !k.dolu) return false;
+  return acilis(id, k, ayarlar[id] || {}).t > simdi;
+}
+export function sira(e, d, simdi = Date.now(), ayarlar = {}) {
   const liste = String(e.DEPO_SIRASI || 'b2,imagekit,supabase').split(',').map((s) => s.trim()).filter((s) => DEPOLAR[s] && DEPOLAR[s].hazir(e));
-  return liste.filter((id) => !(d[id] && d[id].dolu && d[id].aciliyor > simdi) && !(d[id] && d[id].kapali));
+  return liste.filter((id) => !doluMu(id, d, ayarlar, simdi) && !(ayarlar[id] && ayarlar[id].kapali));
+}
+
+/* ── Yüklenen dosya sayacı (fotoğraf / video ayrı; depolama toplamı + bu dönem yüklenen) ───────────────── */
+export const turu = (tur) => /^image\//.test(tur) ? 'foto' : /^video\//.test(tur) ? 'video' : 'ses';
+async function sayacEkle(e, id, tur, bayt) {
+  if (!e.MEDYA_DURUM) return;
+  try {
+    const k = 'kul:' + id, a = (await e.MEDYA_DURUM.get(k, { type: 'json' })) || {}, tt = turu(tur), dn = donem(id, (await ayarOku(e))[id] || {}).bas;
+    a.dep = a.dep || {}; a.dep[tt] = a.dep[tt] || { n: 0, b: 0 }; a.dep[tt].n++; a.dep[tt].b += bayt;
+    if (a.donem !== dn) { a.donem = dn; a.yuk = {}; }
+    a.yuk = a.yuk || {}; a.yuk[tt] = a.yuk[tt] || { n: 0, b: 0 }; a.yuk[tt].n++; a.yuk[tt].b += bayt;
+    await e.MEDYA_DURUM.put(k, JSON.stringify(a));
+  } catch (_) {}
+}
+/* Deponun KENDİ ölçümü (yalnız ImageKit'in kullanım API'si var; 10 dk önbellek). */
+let _ikKul = null, _ikKulZ = 0;
+async function imagekitKullanim(e, bas) {
+  if (!e.IMAGEKIT_PRIVATE_KEY) return null;
+  if (_ikKul && Date.now() - _ikKulZ < 600000) return _ikKul;
+  const g = (t) => new Date(t).toISOString().slice(0, 10);
+  try {
+    const r = await fetch(`https://api.imagekit.io/v1/accounts/usage?startDate=${g(bas)}&endDate=${g(Date.now())}`, { headers: { Authorization: 'Basic ' + btoa(e.IMAGEKIT_PRIVATE_KEY + ':') } });
+    if (r.ok) { const j = await r.json(); _ikKul = { indirme: j.bandwidthBytes || 0, depolama: j.mediaLibraryStorageBytes || 0 }; _ikKulZ = Date.now(); }
+  } catch (_) {}
+  return _ikKul;
 }
 
 /* ── Yükleme: iki farklı depoya ─────────────────────────────────────────────────────────── */
 export async function ikiyeYukle(e, yol, govde, tur, gunluk = () => {}) {
-  const d = await durumOku(e), aday = sira(e, d), basarili = [], hatalar = [];
+  const d = await durumOku(e), aday = sira(e, d, Date.now(), await ayarOku(e)), basarili = [], hatalar = [];
   let i = 0;
   async function birKopya() {
     while (i < aday.length) {
       const id = aday[i++];
       try {
         const s = await DEPOLAR[id].yukle(e, yol, govde, tur);
-        if (s.url) { basarili.push({ id, url: s.url }); return; }
+        if (s.url) { basarili.push({ id, url: s.url }); await sayacEkle(e, id, tur, govde.byteLength); return; }
         hatalar.push(id + ':' + s.hata + ' ' + String(s.metin || '').replace(/\s+/g, ' ').slice(0, 140));
         if (DEPOLAR[id].kotaMi(s.hata, s.metin || '')) { await doluIsaretle(e, id, s.hata + ' ' + (s.metin || '')); gunluk('dolu ' + id); }
       } catch (err) { hatalar.push(id + ':' + (err && err.message)); }
@@ -180,10 +242,18 @@ export default {
     if (u.pathname === '/' || u.pathname === '/saglik') return json({ ok: true, surum: SURUM });
 
     if (u.pathname === '/durum' && req.method === 'GET') {
-      const d = await durumOku(e), t = Date.now();
-      const depolar = String(e.DEPO_SIRASI || 'b2,imagekit,supabase').split(',').map((s) => s.trim()).filter((s) => DEPOLAR[s]).map((id) => ({
-        id, ad: DEPOLAR[id].ad, kurulu: DEPOLAR[id].hazir(e),
-        dolu: !!(d[id] && d[id].dolu && d[id].aciliyor > t), aciliyor: d[id] && d[id].aciliyor || null, sebep: d[id] && d[id].sebep || null,
+      const d = await durumOku(e), t = Date.now(), ay = await ayarOku(e), ayrinti = u.searchParams.has('ayrinti');
+      const depolar = await Promise.all(String(e.DEPO_SIRASI || 'b2,imagekit,supabase').split(',').map((s) => s.trim()).filter((s) => DEPOLAR[s]).map(async (id) => {
+        const dolu = doluMu(id, d, ay, t), ac = dolu ? acilis(id, d[id], ay[id] || {}) : null, dn = donem(id, ay[id] || {}, t);
+        const o = { id, ad: DEPOLAR[id].ad, kurulu: DEPOLAR[id].hazir(e), kapali: !!(ay[id] && ay[id].kapali), dolu, aciliyor: ac ? ac.t : null, acilisKaynak: ac ? ac.kaynak : null,
+          sebep: dolu ? d[id].sebep : null, kilitZaman: dolu ? d[id].zaman : null };
+        if (ayrinti) {
+          let k = null; try { k = e.MEDYA_DURUM && await e.MEDYA_DURUM.get('kul:' + id, { type: 'json' }); } catch (_) {}
+          o.donem = dn; o.gun = id === 'b2' ? null : (+(ay[id] && ay[id].gun) || GUN_VARSAYILAN[id] || 1); o.sinir = SINIR[id];
+          o.depolanan = (k && k.dep) || {}; o.yuklenen = (k && k.donem === dn.bas && k.yuk) || {};
+          if (id === 'imagekit' && o.kurulu) o.depoOlcumu = await imagekitKullanim(e, dn.bas);
+        }
+        return o;
       }));
       return json({ ok: true, surum: SURUM, depolar });
     }
