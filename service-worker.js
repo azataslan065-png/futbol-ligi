@@ -11,7 +11,8 @@
         kullanılmayanları siler. Toplam boyut TOPLAM_SINIR'ı aşarsa en eski kullanılan silinir.
       - <audio>/<video> parça (Range) isterse, saklanan dosyadan 206 yanıtı kesilerek verilir. */
 var MEDYA = 'saha-medya-v1', META_URL = '/__saha-medya-meta__';
-var BUYUK_SINIR = 25 * 1024 * 1024, TOPLAM_SINIR = 300 * 1024 * 1024;
+/* (2026-11-19-A) Sınır 25 MB → 60 MB: uygulamada yüklenebilen en büyük video (50 MB) artık cihazda saklanır, her izlemede yeniden inmez. */
+var BUYUK_SINIR = 60 * 1024 * 1024, TOPLAM_SINIR = 600 * 1024 * 1024;
 var DOGRULA_MS = 12 * 3600e3, TARAMA_MS = 24 * 3600e3, KULLANILMAYAN_MS = 30 * 24 * 3600e3;
 
 /* (2026-11-14-B) SAYFA AÇILIŞI SERVİS ÇALIŞANINI BEKLEMESİN: uygulamada (APK) her açılışta ilk sayfa isteği 3 sn içinde başlamıyor, yeniden
@@ -29,8 +30,10 @@ self.addEventListener('activate', function(e){
   }).then(function(){ return self.clients.claim(); }));
 });
 
+/* (2026-11-19-A) Medya kapısının depoları da (Backblaze B2, ImageKit) önbelleğe alınır. */
 function _medyaMi(u){
-  return /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/(object|render\/image)\/public\//i.test(u);
+  return /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/(object|render\/image)\/public\//i.test(u)
+    || /^https:\/\/[a-z0-9.-]+\.backblazeb2\.com\//i.test(u) || /^https:\/\/ik\.imagekit\.io\//i.test(u);
 }
 
 /* ---- meta: url -> {t: son kullanım, s: boyut, e: etag, k: son doğrulama, b: 1 = büyük, saklanmaz} ---- */
@@ -98,7 +101,7 @@ function boyutKontrol(){
 
 /* Tüm dosyayı bir kez indirip saklar. Aynı dosya için aynı anda tek indirme. */
 var _indiriliyor = {};
-function indirSakla(u){
+function indirSakla(u, yedek){
   if(_indiriliyor[u]) return _indiriliyor[u];
   var p = metaOku().then(function(m){
     var x = m.u[u];
@@ -106,7 +109,9 @@ function indirSakla(u){
     return fetch(u, { method:'HEAD', mode:'cors', cache:'no-store', credentials:'omit' }).catch(function(){ return null; }).then(function(h){
       var n = h ? +(h.headers.get('content-length') || 0) : 0;
       if(h && h.ok && n > BUYUK_SINIR){ m.u[u] = { b:1, s:n, t:Date.now() }; metaYaz(); return null; }
-      return fetch(u, { mode:'cors', cache:'no-store', credentials:'omit' }).then(function(r){
+      // (2026-11-19-A) ana depo açılmazsa yedek depodan indirilir; cihazda yine ANA adres anahtarıyla saklanır.
+      var al = function(adr){ return fetch(adr, { mode:'cors', cache:'no-store', credentials:'omit' }); };
+      return al(u).then(function(r){ return (!r.ok && yedek) ? al(yedek).catch(function(){ return r; }) : r; }, function(e){ if(yedek) return al(yedek); throw e; }).then(function(r){
         if(!r.ok || r.status !== 200) return null;
         return r.blob().then(function(b){
           var bas = new Headers();
@@ -127,6 +132,17 @@ function indirSakla(u){
   return p;
 }
 
+/* (2026-11-19-A) YEDEK ADRES: medya kapısı her dosyayı iki depoya yazar ve adrese "#yedek=<ikinci adres>" ekler. Ana depo
+   cevap vermezse ya da kota/erişim hatası verirse (402/403/429/5xx) aynı dosya ikinci depodan getirilir. */
+function yedekAdres(u){ var i = String(u).indexOf('#yedek='); return i < 0 ? '' : decodeURIComponent(String(u).slice(i + 7)); }
+function dogrudanYedekli(istek){
+  var y = yedekAdres(istek.url);
+  return fetch(istek).then(function(r){
+    if(y && (r.status === 402 || r.status === 403 || r.status === 404 || r.status === 429 || r.status >= 500)) return fetch(y, { headers:istek.headers, mode:'cors', credentials:'omit' }).catch(function(){ return r; });
+    return r;
+  }, function(e){ if(y) return fetch(y, { headers:istek.headers, mode:'cors', credentials:'omit' }); throw e; });
+}
+
 /* Range: "bytes=a-b", "bytes=a-", "bytes=-n" */
 function parcala(yanit, aralik){
   return yanit.blob().then(function(b){
@@ -142,7 +158,7 @@ function parcala(yanit, aralik){
 }
 
 function medyaVer(istek){
-  var u = istek.url, aralik = istek.headers.get('range');
+  var u = istek.url.split('#')[0], yedek = yedekAdres(istek.url), aralik = istek.headers.get('range');
   return caches.open(MEDYA).then(function(c){ return c.match(u); }).then(function(kayit){
     if(kayit){
       metaOku().then(function(m){
@@ -152,8 +168,8 @@ function medyaVer(istek){
       });
       return aralik ? parcala(kayit, aralik) : kayit;
     }
-    return indirSakla(u).then(function(yan){
-      if(!yan) return fetch(istek);                      // büyük dosya / hata: eskisi gibi doğrudan
+    return indirSakla(u, yedek).then(function(yan){
+      if(!yan) return dogrudanYedekli(istek);            // büyük dosya / hata: doğrudan (gerekirse yedek adresten)
       return aralik ? parcala(yan, aralik) : yan;
     });
   }).catch(function(){ return fetch(istek); });

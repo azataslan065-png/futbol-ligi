@@ -1,0 +1,82 @@
+# MEDYA KAPISI kurulumu: Cloudflare Worker'ı (medya-kapi/) yayınlar, depo anahtarlarını Worker'a aktarır ve kapının
+# adresini ortak/medya-ayar.json dosyasına (kök + test) yazar. Gerekli gizli anahtarlar (Settings > Secrets and variables > Actions):
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, B2_KEY_ID, B2_APP_KEY, B2_BUCKET, B2_ENDPOINT, IMAGEKIT_PRIVATE_KEY, IMAGEKIT_URL
+# Anahtarların hiçbiri kayda yazdırılmaz; yalnızca "var/yok" ve son 4 karakter gösterilir.
+name: Medya kapisi kur
+on:
+  push:
+    branches: [main]
+    paths: [medya-kapi/**, .github/workflows/medya-kapi.yml]
+  workflow_dispatch:
+concurrency: medya-kapi
+permissions:
+  contents: write
+jobs:
+  kur:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+      B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+      B2_BUCKET: ${{ secrets.B2_BUCKET }}
+      B2_ENDPOINT: ${{ secrets.B2_ENDPOINT }}
+      IMAGEKIT_PRIVATE_KEY: ${{ secrets.IMAGEKIT_PRIVATE_KEY }}
+      IMAGEKIT_URL: ${{ secrets.IMAGEKIT_URL }}
+      WR: npx --yes wrangler@3.114.0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Anahtarlari denetle
+        id: denetim
+        run: |
+          # Telefondan kopyalarken eklenen bosluk/satir sonlari temizlenir.
+          for v in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID B2_KEY_ID B2_APP_KEY B2_BUCKET B2_ENDPOINT IMAGEKIT_PRIVATE_KEY IMAGEKIT_URL; do
+            val="$(printf '%s' "${!v}" | tr -d ' \r\n\t')"; echo "$v=$val" >> "$GITHUB_ENV"
+            if [ -n "$val" ]; then echo "$v: var (...${val: -4})"; else echo "$v: YOK"; fi
+          done
+          if [ -z "$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d ' \r\n\t')" ] || [ -z "$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d ' \r\n\t')" ]; then
+            echo "::warning::Cloudflare anahtarlari henuz eklenmemis; kapi kurulmadi (uygulamalar eski yoldan yuklemeye devam ediyor)."; echo "atla=1" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Durum deposu (KV)
+        if: steps.denetim.outputs.atla != '1'
+        working-directory: medya-kapi
+        run: |
+          bul(){ $WR kv namespace list 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const j=JSON.parse(s.slice(s.indexOf("[")));const n=j.find(x=>/MEDYA_DURUM/.test(x.title));console.log(n?n.id:"")}catch(e){console.log("")}})'; }
+          ID="$(bul)"
+          if [ -z "$ID" ]; then $WR kv namespace create MEDYA_DURUM >/dev/null; ID="$(bul)"; fi
+          if [ -z "$ID" ]; then echo "::error::KV olusturulamadi (API anahtarinda 'Workers KV Storage: Edit' izni olmali)"; exit 1; fi
+          sed -i "s/__KV_ID__/$ID/" wrangler.toml; echo "KV hazir"
+      - name: Yayinla
+        if: steps.denetim.outputs.atla != '1'
+        working-directory: medya-kapi
+        run: |
+          $WR deploy 2>&1 | tee "$RUNNER_TEMP/deploy.txt" | grep -v -i token || true
+          URL="$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/deploy.txt" | head -1)"
+          if [ -z "$URL" ]; then echo "::error::Yayin adresi alinamadi. Cloudflare panelinde Workers & Pages sayfasini bir kez acip workers.dev alt alan adini sec."; exit 1; fi
+          echo "KAPI_URL=$URL" >> "$GITHUB_ENV"; echo "Kapi: $URL"
+      - name: Anahtarlari Worker'a aktar
+        if: steps.denetim.outputs.atla != '1'
+        working-directory: medya-kapi
+        run: |
+          node -e '
+            const k=["B2_KEY_ID","B2_APP_KEY","B2_BUCKET","B2_ENDPOINT","IMAGEKIT_PRIVATE_KEY","IMAGEKIT_URL"], o={};
+            for(const a of k) if(process.env[a]) o[a]=process.env[a];
+            require("fs").writeFileSync(process.env.RUNNER_TEMP+"/sec.json", JSON.stringify(o)); console.log("aktarilacak: "+Object.keys(o).join(", "));'
+          $WR secret bulk "$RUNNER_TEMP/sec.json" 2>&1 | grep -v -i -E 'token|key' || true
+          rm -f "$RUNNER_TEMP/sec.json"
+      - name: Kapi saglik ve durum denetimi
+        if: steps.denetim.outputs.atla != '1'
+        run: |
+          sleep 5; curl -sS "$KAPI_URL/saglik"; echo; curl -sS "$KAPI_URL/durum"; echo
+      - name: Adresi uygulamalara yaz
+        if: steps.denetim.outputs.atla != '1'
+        run: |
+          # Uygulamalar (ortak/ortak.js SahaMedya) bu dosyayi okur. Otomatik yazilir, elle degistirme.
+          for d in ortak test/ortak; do printf '{"kapi":"%s"}\n' "$KAPI_URL" > "$d/medya-ayar.json"; done
+          git config user.name "github-actions"; git config user.email "github-actions@users.noreply.github.com"
+          git add ortak/medya-ayar.json test/ortak/medya-ayar.json
+          git diff --cached --quiet && { echo "adres degismedi"; exit 0; }
+          git commit -m "Medya kapisi adresi" && for i in 1 2 3; do git pull --rebase -X theirs -q && git push -q && break || { git rebase --abort 2>/dev/null; sleep 5; }; done

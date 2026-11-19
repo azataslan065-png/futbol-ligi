@@ -169,7 +169,7 @@
 </script>
 <meta charset="UTF-8"/>
 <link rel="preload" href="ortak/saha-ikon.ttf?v=48919b70" as="font" type="font/ttf" crossorigin>
-<script src="ortak/ortak.js?v=2d808306"></script>
+<script src="ortak/ortak.js?v=e86fc9cd"></script>
 <style id="sahaIkonStil">@font-face{font-family:"SahaIkon";src:url("ortak/saha-ikon.ttf?v=48919b70") format("truetype");font-display:block}saha-ik{font-family:"SahaIkon"!important;font-style:normal!important;font-weight:400!important;font-variant:normal;text-transform:none;letter-spacing:0;line-height:1;display:inline-block;vertical-align:-.1em;text-decoration:none;text-shadow:none;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}</style>
 <script id="sahaIkonBetik">/* SAHA İKONLARI (2026-10-20-B, kullanıcı: "üç dosyadaki emoji ile sunulan ikonların hepsini kaldırın, yerine kendi
    tasarladığınız ikonları koyun"). Emojiler kaynakta özel kullanım alanı karakterlerine (U+E900-E9FF) çevrildi; her biri
@@ -3395,7 +3395,7 @@ const db=firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-18-D';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-19-A';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* CİHAZ SESİ (2026-11-08, kullanıcı: "TV izlerken ekran kapatıldığında arka planda oynatmaya devam edecek APK için ses kontrolünün cihazın kendi sesiyle
    entegre edilmesi gerekiyor"). Uygulamada TV oynatıcısının ses çubuğu ve kumandanın ses düğmeleri artık oynatıcının iç sesini değil CİHAZIN MEDYA
    SESİNİ ayarlar (oynatıcı tam seste kalır); telefonun ses tuşlarıyla ses değişince çubuk da kendiliğinden güncellenir. Böylece ekran kapalıyken
@@ -3693,7 +3693,17 @@ try{
 // XMLHttpRequest ile doğrudan Supabase Storage REST uç noktasına yükleme yapılır - bu
 // SAYEDE xhr.upload.onprogress ile GERÇEK bayt bazlı ilerleme (ve buradan hesaplanan
 // tahmini kalan süre) okunabilir. callback(err, publicUrl) şeklinde çağrılır.
+/* (2026-11-19-A) MEDYA KAPISI: yükleme önce kapıya gider (ortak/ortak.js SahaMedya; iki depoya yazar, kotası dolanı atlar).
+   Kapı kurulmamışsa ya da kapıya ulaşılamazsa aşağıdaki eski yol (doğrudan Supabase) kullanılır. */
 function _supabaseXhrUpload(blob,path,contentType,onProgress,callback){
+  if(!window.SahaMedya){_supabaseXhrUploadEski(blob,path,contentType,onProgress,callback);return;}
+  SahaMedya.yukle(blob,path,contentType,onProgress?function(l,t,srv){try{onProgress(l,t,srv);}catch(e){}}:null).then(function(u){callback(null,u);},function(e){
+    if(e&&e.kapiYok){_supabaseXhrUploadEski(blob,path,contentType,onProgress,callback);return;}
+    if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Medya kapısı yüklemeyi reddetti',{yol:path,tur:contentType,mesaj:e&&e.message,durum:e&&e.durum},3000);
+    callback(e);
+  });
+}
+function _supabaseXhrUploadEski(blob,path,contentType,onProgress,callback){
   if(!SUPABASE_URL||!SUPABASE_ANON_KEY){
     if(window.PTChatDoctor)PTChatDoctor.kaydet('dosya','Yükleme servisi yapılandırılmamış',{yol:path,tur:contentType});
     callback(new Error('Yükleme servisi yapılandırılmamış'));return;
@@ -3705,6 +3715,7 @@ function _supabaseXhrUpload(blob,path,contentType,onProgress,callback){
   xhr.setRequestHeader('apikey',SUPABASE_ANON_KEY);
   xhr.setRequestHeader('Content-Type',contentType);
   xhr.setRequestHeader('x-upsert','false');
+  xhr.setRequestHeader('cache-control','max-age=31536000');   // (2026-11-19-A) dosya adı benzersiz: cihaz 1 yıl saklar, tekrar indirilmez
   // KULLANICI TALEBİ: "Fotoğraf/video yüklerken bir sorun olduğunda Sohbet Teşhis
   // Paneli'nde 'Dosya yükleme' kategorisinde göstersin." - Mevcut [MEDYA] kategorisi
   // sadece GÖRÜNTÜLEME aşamasındaki kırık linkleri yakalıyordu (bkz. aşağıdaki 8. bölüm),
@@ -27709,7 +27720,7 @@ function buildVideoEmbedHtml(url,basSn,bitSn){
       // ptAttachStreamPlayer devreye girip akışı çözer. Her iki durumda da ekranda SADECE
       // oynatıcı vardır, hiçbir site içeriği yoktur.
       if(ptIsStreamUrl(url))window._ptPendingStreamUrl=url;
-      return `<video id="ptVideoEl" data-bildirimli="1" src="${ptIsStreamUrl(url)?'':url}" controls autoplay playsinline style="width:100%;border-radius:14px;background:#000"></video>`;
+      return `<video id="ptVideoEl" data-bildirimli="1" src="${ptIsStreamUrl(url)?'':url}" controls controlslist="nodownload noremoteplayback" oncontextmenu="return false" autoplay playsinline style="width:100%;border-radius:14px;background:#000"></video>`;
     }
     return '';
   }catch(e){
@@ -30857,6 +30868,10 @@ function ptpUstBarParcalari(){
       // BİLEREK sadece dosya-tabanlı (mp4/webm/ogg/m4v/mov) adresler ısıtılır - m3u8/mpd
       // (canlı/parçalı akış) burada KASITLI olarak dışarıda bırakılır (bkz. yukarıdaki not).
       if(!url||!/\.(mp4|webm|ogg|ogv|m4v|mov)(\?|#|$)/i.test(url))return;
+      // (2026-11-19-A, Supabase kotası doldu - kök sebeplerden biri): KENDİ depolarımızdaki dosya ısıtılmaz. Isıtma dosyanın
+      // TAMAMINI indiriyordu (servis çalışanı da tamamını saklar); izlenmeyen sıradaki video da kota harcıyordu. İzlenen video
+      // zaten cihazda saklandığı için ikinci izleme ağa gitmez.
+      if(/\.supabase\.co\/storage\/|\.backblazeb2\.com\/|\/\/ik\.imagekit\.io\//i.test(url))return;
       if(S._prefetchUrl===url)return; // zaten ısıtılıyor/ısıtıldı, tekrar tetiklemeye gerek yok
       var y=S._prefetchEl;
       if(!y){

@@ -988,14 +988,20 @@ var SahaGuncelleme = (function(){
 var SahaYukleme = (function(){
   var URLK = 'https://oasyhelzshbehnpyrssw.supabase.co', ANAHTAR = 'sb_publishable_DxSYVhhxvfVw_yAA7xkS6A_s1Usv41C', KOVA = 'videos';
   function yolAdi(klasor, uzanti){ return (klasor || 'genel') + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + uzanti; }
+  /* (2026-11-19-A) Önce medya kapısı (bkz. SahaMedya); kapı kurulmamışsa ya da ulaşılamazsa eski yol (doğrudan Supabase). */
   function gonder(blob, yol, tur, ilerleme){
+    if(!window.SahaMedya) return gonderEski(blob, yol, tur, ilerleme);
+    return SahaMedya.yukle(blob, yol, tur, ilerleme ? function(l, t){ ilerleme(t ? l / t : 1); } : null)
+      .catch(function(e){ if(e && e.kapiYok) return gonderEski(blob, yol, tur, ilerleme); throw e; });
+  }
+  function gonderEski(blob, yol, tur, ilerleme){
     return new Promise(function(coz, red){
       var x = new XMLHttpRequest(), acik = URLK + '/storage/v1/object/public/' + KOVA + '/' + yol, bitti = false;
       var son = function(e, u){ if(bitti) return; bitti = true; clearTimeout(z); e ? red(e) : coz(u); };
       var z = setTimeout(function(){ try{ x.abort(); }catch(e){} son(new Error('sunucu yanıt vermedi, tekrar dene')); }, 240000);
       x.open('POST', URLK + '/storage/v1/object/' + KOVA + '/' + yol, true);
       x.setRequestHeader('Authorization', 'Bearer ' + ANAHTAR); x.setRequestHeader('apikey', ANAHTAR);
-      x.setRequestHeader('Content-Type', tur); x.setRequestHeader('x-upsert', 'false');
+      x.setRequestHeader('Content-Type', tur); x.setRequestHeader('x-upsert', 'false'); x.setRequestHeader('cache-control', 'max-age=31536000');
       if(x.upload && ilerleme){
         x.upload.onprogress = function(e){ if(e.lengthComputable) try{ ilerleme(e.loaded / e.total); }catch(_e){} };
         x.upload.onloadend = function(){ try{ ilerleme(1); }catch(_e){}
@@ -1636,3 +1642,131 @@ var SahaSes = (function(){
   }catch(e){ setTimeout(_fbYazmaIzle, 3000); }
 })();
 
+
+/* ═══ MEDYA KAPISI İSTEMCİSİ (2026-11-19-A, kullanıcı: "kotası dolan otomatik olarak sonraki sunucuya geçecek") ═══════════════
+   Bütün yüklemeler (Puan Tablosu, Admin, SAHA) Cloudflare'deki medya kapısına gider; kapı dosyayı iki farklı depoya yazar
+   (Backblaze B2, ImageKit, Supabase - dolan atlanır) ve "ana-adres#yedek=yedek-adres" biçiminde tek bir adres döndürür.
+   - Kapı adresi ortak/medya-ayar.json'dan okunur (kurulum işi yazar). Adres yoksa ya da kapıya hiç ulaşılamazsa yükleme
+     ESKİ YOLDAN (doğrudan Supabase) yapılır - kurulum tamamlanana kadar hiçbir şey değişmez.
+   - YEDEĞE GEÇİŞ: sayfadaki herhangi bir <img>/<video>/<audio>/<source> ana adresten açılamazsa (depo kotası doldu, depo
+     kapandı) aynı dosya "#yedek=" adresinden yüklenir. Tek bir yerde, bütün ekranlar için.
+   - Test sayfaları (…/test/…) dosyaları "test/" klasörüne yükler (kapının günlük test sınırı var). */
+var SahaMedya = (function(){
+  var _kapi = null, _bekle = null;
+  function testMi(){ try{ return /\/test\//.test(location.pathname); }catch(e){ return false; } }
+  function kapiAl(){
+    if(_kapi !== null) return Promise.resolve(_kapi);
+    if(_bekle) return _bekle;
+    try{ var k = localStorage.getItem('sahaMedyaKapi'); if(k) _kapi = k; }catch(e){}
+    _bekle = fetch('ortak/medya-ayar.json?t=' + Math.floor(Date.now() / 600000), { cache:'no-store' })
+      .then(function(r){ return r.ok ? r.json() : {}; }).catch(function(){ return {}; })
+      .then(function(j){
+        var u = (j && typeof j.kapi === 'string' && /^https:\/\//.test(j.kapi)) ? j.kapi.replace(/\/+$/, '') : '';
+        _kapi = u; try{ u ? localStorage.setItem('sahaMedyaKapi', u) : localStorage.removeItem('sahaMedyaKapi'); }catch(e){}
+        _bekle = null; return _kapi;
+      });
+    return _kapi ? Promise.resolve(_kapi) : _bekle;
+  }
+  try{ kapiAl(); }catch(e){}
+  function token(){
+    try{
+      var a = window.firebase && firebase.auth && firebase.auth(), u = a && a.currentUser;
+      if(u) return u.getIdToken();
+      if(a && a.signInAnonymously) return a.signInAnonymously().then(function(c){ return c.user.getIdToken(); });
+    }catch(e){}
+    return Promise.reject(new Error('oturum yok'));
+  }
+  // KAPI_YOK hatası: çağıran eski yoldan yükler. Diğer hatalar kullanıcıya gösterilir.
+  function yukle(blob, yol, tur, ilerleme){
+    return kapiAl().then(function(kapi){
+      if(!kapi){ var e0 = new Error('kapı kurulmadı'); e0.kapiYok = true; throw e0; }
+      return token().then(function(tk){
+        return new Promise(function(coz, red){
+          var x = new XMLHttpRequest(), bitti = false;
+          var son = function(e, u){ if(bitti) return; bitti = true; clearTimeout(z); e ? red(e) : coz(u); };
+          var z = setTimeout(function(){ try{ x.abort(); }catch(e){} son(new Error('sunucu yanıt vermedi, tekrar dene')); }, 300000);
+          x.open('POST', kapi + '/yukle', true);
+          x.setRequestHeader('Authorization', 'Bearer ' + tk);
+          x.setRequestHeader('Content-Type', tur || blob.type || 'application/octet-stream');
+          x.setRequestHeader('X-Yol', (testMi() ? 'test/' : '') + String(yol).replace(/^\/+/, ''));
+          if(x.upload && ilerleme){
+            x.upload.onprogress = function(e){ if(e.lengthComputable) try{ ilerleme(e.loaded, e.total, false); }catch(_e){} };
+            x.upload.onloadend = function(){ try{ ilerleme(blob.size || 0, blob.size || 0, true); }catch(_e){} };
+          }
+          x.onload = function(){
+            var j = null; try{ j = JSON.parse(x.responseText); }catch(e){}
+            if(x.status >= 200 && x.status < 300 && j && j.ok && j.url) return son(null, j.url);
+            var m = (j && j.hata) || ('Yükleme başarısız (HTTP ' + x.status + ')'), er = new Error(m); er.durum = x.status; son(er);
+          };
+          // Kapıya hiç ulaşılamadı (ağ engeli, kapı kapalı): eski yola düşülür.
+          x.onerror = function(){ var e1 = new Error('kapıya ulaşılamadı'); e1.kapiYok = true; son(e1); };
+          x.onabort = function(){ son(new Error('yükleme iptal edildi')); };
+          x.send(blob);
+        });
+      });
+    });
+  }
+  /* supabase-js ile AYNI biçimde çalışan depo nesnesi (admin'deki .storage.from(kova).upload/getPublicUrl/remove çağrıları için).
+     Kapı varsa kapıya, yoksa ya da ulaşılamazsa gerçek Supabase'e gider; getPublicUrl, yükleme hangi yoldan yapıldıysa onun adresini verir. */
+  var _depolar = {};
+  function depo(sb, kova){
+    if(_depolar[kova]) return _depolar[kova];
+    var adres = {};
+    var gercek = function(){ return sb && sb.storage && sb.storage.from(kova); };
+    return (_depolar[kova] = {
+      upload: function(yol, blob, o){
+        return yukle(blob, yol, (o && o.contentType) || blob.type).then(function(u){ adres[yol] = u; return { data:{ path:yol }, error:null }; },
+          function(e){
+            if(!e || !e.kapiYok) return { data:null, error:e };
+            var g = gercek(); if(!g) return { data:null, error:new Error('Yükleme servisi şu an kullanılamıyor') };
+            return g.upload(yol, blob, Object.assign({}, o, { cacheControl:'31536000' }));
+          });
+      },
+      getPublicUrl: function(yol){ if(adres[yol]) return { data:{ publicUrl:adres[yol] } }; var g = gercek(); return g ? g.getPublicUrl(yol) : { data:{ publicUrl:'' } }; },
+      remove: function(yollar){ var g = gercek(); return g ? g.remove(yollar) : Promise.resolve({ data:[], error:null }); }
+    });
+  }
+  /* Yedek adrese geçiş: hata olayı kabarcıklanmaz, bu yüzden yakalama (capture) aşamasında dinlenir. */
+  function yedekAl(u){ var i = String(u || '').indexOf('#yedek='); return i < 0 ? '' : decodeURIComponent(u.slice(i + 7)); }
+  try{
+    document.addEventListener('error', function(e){
+      var el = e.target; if(!el || !el.tagName || !/^(IMG|VIDEO|AUDIO|SOURCE)$/.test(el.tagName)) return;
+      var src = el.getAttribute('src') || el.currentSrc || '', y = yedekAl(src);
+      if(!y || el.dataset.medyaYedek === '1') return;
+      el.dataset.medyaYedek = '1';
+      if(el.tagName === 'SOURCE'){ el.src = y; var p = el.parentNode; if(p && p.load) p.load(); }
+      else { var t = el.currentTime || 0; el.src = y; if(el.tagName !== 'IMG'){ try{ el.load(); if(t) el.currentTime = t; }catch(_e){} } }
+    }, true);
+  }catch(e){}
+  return { yukle:yukle, depo:depo, kapi:kapiAl, yedekAl:yedekAl, testMi:testMi };
+})();
+
+/* ═══ YÜKLENEN MEDYA İNDİRİLEMEZ / PAYLAŞILAMAZ (2026-11-19-A, kullanıcı: "kullanıcı video ve fotoğraf indiremez ve paylaşamaz") ═══
+   Kullanıcıların YÜKLEDİĞİ fotoğraf ve videolar (depo adresleri: Supabase, Backblaze B2, ImageKit) için bütün ekranlarda:
+   uzun basma menüsü ("resmi indir / paylaş"), sürükleyip bırakma ve tarayıcı oynatıcısının "İndir" düğmesi kapalıdır.
+   Uygulamanın KENDİ ürettiği görseller (maç kartı, sezon özeti, profil kartı, gol klibi - data:/blob: adresleri) BİLEREK
+   serbesttir (kullanıcı: "onlar kalsın"). Tek yerde: Puan Tablosu, Admin ve SAHA bu dosyayı yükler. */
+(function(){
+  var DEPO = /^https:\/\/([a-z0-9-]+\.supabase\.co\/storage\/|[a-z0-9.-]+\.backblazeb2\.com\/|ik\.imagekit\.io\/)/i;
+  function korunanMi(el){
+    if(!el || !el.tagName) return false;
+    var t = el.tagName;
+    if(t === 'SOURCE' && el.parentNode) el = el.parentNode, t = el.tagName;
+    if(!/^(IMG|VIDEO|AUDIO)$/.test(t)) return false;
+    var u = el.currentSrc || el.getAttribute('src') || '';
+    if(!u && t !== 'IMG'){ var s = el.querySelector && el.querySelector('source'); u = s ? (s.getAttribute('src') || '') : ''; }
+    return DEPO.test(u);
+  }
+  function engelle(e){ if(korunanMi(e.target)){ e.preventDefault(); e.stopPropagation(); return false; } }
+  try{
+    document.addEventListener('contextmenu', engelle, true);
+    document.addEventListener('dragstart', engelle, true);
+    var st = document.createElement('style');
+    st.textContent = 'img[src*="supabase.co/storage/"],img[src*="backblazeb2.com/"],img[src*="ik.imagekit.io/"],video{-webkit-touch-callout:none;-webkit-user-drag:none}';
+    (document.head || document.documentElement).appendChild(st);
+    // Tarayıcının kendi oynatıcısında "İndir" düğmesi: depo videolarına controlslist=nodownload eklenir.
+    var isle = function(v){ try{ if(v.tagName === 'VIDEO' && korunanMi(v) && v.controlsList && !v.controlsList.contains('nodownload')) v.controlsList.add('nodownload'); }catch(e){} };
+    document.addEventListener('loadstart', function(e){ isle(e.target); }, true);   // medya olayları kabarcıklanmaz: yakalama aşaması
+    document.addEventListener('play', function(e){ isle(e.target); }, true);
+  }catch(e){}
+})();
