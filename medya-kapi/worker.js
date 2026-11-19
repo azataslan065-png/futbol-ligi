@@ -140,7 +140,7 @@ export const DEPOLAR = {
      1) admin kartından elle girilen tarih (medyaAyar/<depo>/kilitBitis), 2) deponun hata mesajındaki tarih, 3) dönem sonu. */
 const GUN_VARSAYILAN = { supabase: 4, imagekit: 1 };
 export const SINIR = {   // ücretsiz plan sınırları (bayt); indirme dönemliktir
-  b2: { depolama: 10e9, indirme: null, not: 'indirme: depolananın 3 katına kadar ücretsiz, günlük' },
+  b2: { depolama: 10e9, indirme: 1e9, not: 'günlük sınır; ayrıca günde 2.500 okuma ve 2.500 listeleme işlemi (Backblaze paneli, kart yokken $0)' },
   imagekit: { depolama: 3e9, indirme: 20e9 },
   supabase: { depolama: 1e9, indirme: 10e9, not: '5 GB önbellekli + 5 GB önbelleksiz indirme' },
 };
