@@ -6,7 +6,7 @@
    OKUMA kapıdan geçmez: dönen adres doğrudan deponun adresidir; yedek adres "#yedek=" ekiyle gelir ve istemci
    (ortak/medya.js) ilk adres açılmazsa yedeğe geçer. Gizli anahtarlar yalnızca Cloudflare'in secret'larındadır. */
 
-const SURUM = '2026-11-19-D';
+const SURUM = '2026-11-19-E';
 let KAPI_ADRES = '';   // bu isteğin geldiği kapı adresi (B2 dosyaları kapı üzerinden sunulur)
 const RTDB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app';
 const MAX_BOYUT = 95 * 1000 * 1000;          // Cloudflare ücretsiz planı istek gövdesi 100 MB; dosya bellekte tek kopya tutulur
@@ -333,7 +333,8 @@ export default {
       if (!muaf && uz > mbSin) return json({ ok: false, hata: (tt === 'foto' ? 'Fotoğraf' : 'Video') + ' en fazla ' + (tt === 'foto' ? ps.fotoMB : ps.videoMB) + ' MB olabilir' }, 413);
       const gk = 'g:' + uid + ':' + trGunu(), gs = (!muaf && e.MEDYA_DURUM && tt !== 'ses') ? ((await e.MEDYA_DURUM.get(gk, { type: 'json' })) || {}) : null;
       const gSin = tt === 'video' ? ps.gunlukVideo : ps.gunlukFoto;
-      if (gs && (gs[tt] || 0) >= gSin) return json({ ok: false, hata: 'Bugünkü ' + (tt === 'video' ? 'video' : 'fotoğraf') + ' paylaşım sınırına ulaştın (' + gSin + '). Yarın tekrar deneyebilirsin.', sinir: true }, 429);
+      if (gs && (gs[tt] || 0) >= gSin) { const g = trGunu().split('-').map(Number), yen = Date.UTC(g[0], g[1] - 1, g[2] + 1) - 3 * 3600e3;   // Türkiye gece yarısı
+        return json({ ok: false, hata: 'Bugünkü ' + (tt === 'video' ? 'video' : 'fotoğraf') + ' paylaşım sınırına ulaştın (' + gSin + ').', sinir: true, tur: tt, adet: gSin, yenilenme: yen }, 429); }
       const govde = await req.arrayBuffer();
       if (govde.byteLength > MAX_BOYUT || (!muaf && govde.byteLength > mbSin)) return json({ ok: false, hata: 'dosya çok büyük' }, 413);
       const { basarili, hatalar } = await ikiyeYukle(e, yol, govde, tur);

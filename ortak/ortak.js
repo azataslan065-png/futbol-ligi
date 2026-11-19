@@ -1696,7 +1696,8 @@ var SahaMedya = (function(){
           x.onload = function(){
             var j = null; try{ j = JSON.parse(x.responseText); }catch(e){}
             if(x.status >= 200 && x.status < 300 && j && j.ok && j.url) return son(null, j.url);
-            var m = (j && j.hata) || ('Yükleme başarısız (HTTP ' + x.status + ')'), er = new Error(m); er.durum = x.status; son(er);
+            if(x.status === 429 && j && j.sinir){ try{ sinirUyari(j); }catch(_e){} }
+            var m = (j && j.hata) || ('Yükleme başarısız (HTTP ' + x.status + ')'), er = new Error(m); er.durum = x.status; er.sinir = !!(j && j.sinir); son(er);
           };
           // Kapıya hiç ulaşılamadı (ağ engeli, kapı kapalı): eski yola düşülür.
           x.onerror = function(){ var e1 = new Error('kapıya ulaşılamadı'); e1.kapiYok = true; son(e1); };
@@ -1705,6 +1706,33 @@ var SahaMedya = (function(){
         });
       });
     });
+  }
+  /* GÜNLÜK SINIR UYARISI (2026-11-19-E, kullanıcı: "sınır dolunca çıkan uyarı popup bilgi mesajını yeniden oluştur; kullanıcı Tamam
+     butonuna dokunmadan kaybolmasın, kalan süreyi gün, saat, dakika ve saniye olarak geri sayım şeklinde göstersin"). Kapı günlük
+     paylaşım sınırı dolunca yenilenme zamanını (Türkiye gece yarısı) bildirir; pencere yalnızca Tamam ile kapanır. */
+  function sinirUyari(j){
+    var es = document.getElementById('sahaSinirUyari'); if(es) es.remove();
+    var bitis = +j.yenilenme || 0, tur = j.tur === 'video' ? 'video' : 'fotoğraf';
+    var ov = document.createElement('div'); ov.id = 'sahaSinirUyari';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.62);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit';
+    ov.innerHTML = '<div role="alertdialog" aria-modal="true" aria-labelledby="ssuB" style="width:100%;max-width:360px;background:var(--s1,#1e1b2e);color:var(--tx,#f1f5f9);border:1px solid var(--br,rgba(255,255,255,.12));border-radius:18px;padding:20px 18px 16px;box-shadow:0 20px 50px rgba(0,0,0,.5);text-align:center">'
+      + '<div style="font-size:34px;line-height:1;margin-bottom:8px">⏳</div>'
+      + '<div id="ssuB" style="font-size:16px;font-weight:800;margin-bottom:6px">Günlük ' + tur + ' sınırı doldu</div>'
+      + '<div style="font-size:13px;line-height:1.5;opacity:.85;margin-bottom:14px">Bugün en fazla <b>' + (+j.adet || 0).toLocaleString('tr-TR') + '</b> ' + tur + ' paylaşabilirsin. Yeni paylaşım hakkın:</div>'
+      + '<div id="ssuSay" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:16px"></div>'
+      + '<button type="button" id="ssuTamam" style="width:100%;min-height:46px;border:0;border-radius:12px;background:var(--ac,#7c3aed);color:#fff;font-size:15px;font-weight:800;cursor:pointer">Tamam</button></div>';
+    (document.body || document.documentElement).appendChild(ov);
+    var kutu = function(n, ad){ return '<div style="background:rgba(127,127,127,.16);border-radius:10px;padding:8px 2px"><div style="font-size:20px;font-weight:800;font-variant-numeric:tabular-nums">' + String(n).padStart(2, '0') + '</div><div style="font-size:11px;opacity:.75">' + ad + '</div></div>'; };
+    var say = ov.querySelector('#ssuSay'), z = null;
+    var ciz = function(){
+      var k = Math.max(0, Math.floor((bitis - Date.now()) / 1000));
+      say.innerHTML = kutu(Math.floor(k / 86400), 'gün') + kutu(Math.floor(k % 86400 / 3600), 'saat') + kutu(Math.floor(k % 3600 / 60), 'dakika') + kutu(k % 60, 'saniye');
+      if(!k && z){ clearInterval(z); z = null; }
+    };
+    ciz(); z = setInterval(ciz, 1000);
+    ov.querySelector('#ssuTamam').onclick = function(){ if(z) clearInterval(z); ov.remove(); };
+    // Arka plana dokunmak ya da geri tuşu pencereyi KAPATMAZ (yalnızca Tamam).
+    ov.addEventListener('click', function(e){ if(e.target === ov) e.stopPropagation(); });
   }
   /* supabase-js ile AYNI biçimde çalışan depo nesnesi (admin'deki .storage.from(kova).upload/getPublicUrl/remove çağrıları için).
      Kapı varsa kapıya, yoksa ya da ulaşılamazsa gerçek Supabase'e gider; getPublicUrl, yükleme hangi yoldan yapıldıysa onun adresini verir. */
@@ -1754,7 +1782,7 @@ var SahaMedya = (function(){
       }));
   }
   try{ sinirAl(); }catch(e){}
-  return { yukle:yukle, depo:depo, kapi:kapiAl, yedekAl:yedekAl, testMi:testMi, sinir:sinirAl, limit:function(t){ return SINIR[t]; } };
+  return { yukle:yukle, depo:depo, kapi:kapiAl, yedekAl:yedekAl, testMi:testMi, sinir:sinirAl, limit:function(t){ return SINIR[t]; }, sinirUyari:sinirUyari };
 })();
 
 /* ═══ YÜKLENEN MEDYA İNDİRİLEMEZ / PAYLAŞILAMAZ (2026-11-19-A, kullanıcı: "kullanıcı video ve fotoğraf indiremez ve paylaşamaz") ═══
