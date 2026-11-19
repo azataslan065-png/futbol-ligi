@@ -1,0 +1,23 @@
+# MEDYA KAPISI uçtan uca deneme: anonim Firebase oturumu açar, kapıya 1x1 piksellik bir PNG yükler (test/deneme/ klasörü),
+# dönen adres(ler)in açıldığını denetler. Elle çalıştırılır. Gizli bilgi yazdırmaz (Firebase web anahtarı zaten sayfalarda açıktır).
+name: Medya kapisi deneme
+on:
+  workflow_dispatch:
+jobs:
+  dene:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Yukle ve denetle
+        run: |
+          KAPI="https://lig-medya.azataslan065.workers.dev"
+          TOK=$(curl -sS -X POST "https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=AIzaSyDzWf2yD0rlOUJCSHkHJg-JLvBssX1dNUY" -H 'Content-Type: application/json' -d '{"returnSecureToken":true}' | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).idToken||""))')
+          [ -n "$TOK" ] || { echo "::error::anonim oturum acilamadi"; exit 1; }
+          printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\xdac\xf8\xcf\xc0\xf0\x1f\x00\x05\x00\x01\xff\x89\x99=\x1d\x00\x00\x00\x00IEND\xaeB`\x82' > p.png
+          YOL="test/deneme/$(date +%s).png"
+          echo "--- oturumsuz yukleme (reddedilmeli):"; curl -sS -X POST "$KAPI/yukle" -H "X-Yol: $YOL" -H 'Content-Type: image/png' --data-binary @p.png; echo
+          echo "--- oturumlu yukleme:"; R=$(curl -sS -X POST "$KAPI/yukle" -H "Authorization: Bearer $TOK" -H "X-Yol: $YOL" -H 'Content-Type: image/png' --data-binary @p.png); echo "$R"
+          U=$(printf '%s' "$R" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).url||"")}catch(e){console.log("")}})')
+          [ -n "$U" ] || { echo "::error::yukleme basarisiz"; exit 1; }
+          ANA="${U%%#*}"; echo "ana adres: $(curl -s -o /dev/null -w '%{http_code} %{content_type} cache:%header{cache-control}' "$ANA")"
+          if printf '%s' "$U" | grep -q '#yedek='; then Y=$(node -e 'console.log(decodeURIComponent(process.argv[1].split("#yedek=")[1]))' "$U"); echo "yedek adres: $(curl -s -o /dev/null -w '%{http_code} %{content_type}' "$Y")"; else echo "yedek kopya yok (tek depo acik)"; fi
+          echo "--- durum:"; curl -sS "$KAPI/durum"; echo
