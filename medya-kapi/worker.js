@@ -341,7 +341,7 @@ export default {
       if (!basarili.length) return json({ ok: false, hata: 'bütün depolar dolu ya da ulaşılamıyor', ayrinti: hatalar }, 503);
       if (gs) { gs[tt] = (gs[tt] || 0) + 1; try { await e.MEDYA_DURUM.put(gk, JSON.stringify(gs), { expirationTtl: 172800 }); } catch (_) {} }
       const url = basarili[0].url + (basarili[1] ? '#yedek=' + encodeURIComponent(basarili[1].url) : '');
-      return json({ ok: true, url, depolar: basarili.map((b) => b.id) });
+      return json({ ok: true, url, depolar: basarili.map((b) => b.id), uyari: hatalar.length ? hatalar : undefined });   // tek kopya kaldıysa sebebi (gizli bilgi içermez)
     }
     return json({ ok: false, hata: 'bulunamadı' }, 404);
   },
