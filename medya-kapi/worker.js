@@ -86,13 +86,16 @@ export async function s3Imzala({ method, url, headers, keyId, secret, region, si
 
 /* ── Depolar ─────────────────────────────────────────────────────────────────────────────── */
 
+/* B2 kova adı ve uç noktası: secret doğru biçimdeyse o, değilse wrangler.toml'daki B2_KOVA / B2_UC (gizli değiller). */
+const b2Uc = (e) => { const x = String(e.B2_ENDPOINT || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, ''); return /^s3\.[a-z0-9-]+\.backblazeb2\.com$/.test(x) ? x : (e.B2_UC || ''); };
+const b2Kova = (e) => { const x = String(e.B2_BUCKET || '').trim(); return /^[a-z0-9][a-z0-9-]{4,48}[a-z0-9]$/.test(x) ? x : (e.B2_KOVA || ''); };
 export const DEPOLAR = {
   b2: {
     ad: 'Backblaze B2',
-    hazir: (e) => !!(e.B2_KEY_ID && e.B2_APP_KEY && e.B2_BUCKET && e.B2_ENDPOINT),
+    hazir: (e) => !!(e.B2_KEY_ID && e.B2_APP_KEY && b2Kova(e) && b2Uc(e)),
     async yukle(e, yol, govde, tur) {
-      const uc = e.B2_ENDPOINT.replace(/^https?:\/\//, '').replace(/\/+$/, ''), region = (/^s3\.([^.]+)\./.exec(uc) || [])[1] || 'us-west-004';
-      const url = `https://${uc}/${e.B2_BUCKET}/${yol}`;
+      const uc = b2Uc(e), region = (/^s3\.([^.]+)\./.exec(uc) || [])[1] || 'us-west-004';
+      const url = `https://${uc}/${b2Kova(e)}/${yol}`;
       const h = await s3Imzala({ method: 'PUT', url, headers: { 'content-type': tur, 'cache-control': UZUN_ONBELLEK }, keyId: e.B2_KEY_ID, secret: e.B2_APP_KEY, region });
       const r = await fetch(url, { method: 'PUT', headers: h, body: govde });
       if (!r.ok) return { hata: r.status, metin: (await r.text()).slice(0, 300) };
@@ -268,8 +271,8 @@ export async function ikiyeYukle(e, yol, govde, tur, gunluk = () => {}) {
    trafiği iki şirketin anlaşması gereği ücretsizdir. Kota hatası (403 cap exceeded vb.) aynen döner: istemci yedek adrese geçer. */
 async function b2Sun(req, e, yol) {
   if (!DEPOLAR.b2.hazir(e)) return new Response('yok', { status: 404, headers: cors() });
-  const uc = e.B2_ENDPOINT.replace(/^https?:\/\//, '').replace(/\/+$/, ''), region = (/^s3\.([^.]+)\./.exec(uc) || [])[1] || 'us-west-004';
-  const url = `https://${uc}/${e.B2_BUCKET}/${yol}`, ek = {}, rg = req.headers.get('Range');
+  const uc = b2Uc(e), region = (/^s3\.([^.]+)\./.exec(uc) || [])[1] || 'us-west-004';
+  const url = `https://${uc}/${b2Kova(e)}/${yol}`, ek = {}, rg = req.headers.get('Range');
   if (rg) ek.range = rg;
   const h = await s3Imzala({ method: req.method === 'HEAD' ? 'HEAD' : 'GET', url, headers: ek, keyId: e.B2_KEY_ID, secret: e.B2_APP_KEY, region });
   const r = await fetch(url, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers: h });
