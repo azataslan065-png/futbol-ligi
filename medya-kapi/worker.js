@@ -163,7 +163,7 @@ export async function ikiyeYukle(e, yol, govde, tur, gunluk = () => {}) {
       try {
         const s = await DEPOLAR[id].yukle(e, yol, govde, tur);
         if (s.url) { basarili.push({ id, url: s.url }); return; }
-        hatalar.push(id + ':' + s.hata);
+        hatalar.push(id + ':' + s.hata + ' ' + String(s.metin || '').replace(/\s+/g, ' ').slice(0, 140));
         if (DEPOLAR[id].kotaMi(s.hata, s.metin || '')) { await doluIsaretle(e, id, s.hata + ' ' + (s.metin || '')); gunluk('dolu ' + id); }
       } catch (err) { hatalar.push(id + ':' + (err && err.message)); }
     }
