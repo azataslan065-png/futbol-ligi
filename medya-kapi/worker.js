@@ -103,7 +103,7 @@ export const DEPOLAR = {
   },
   imagekit: {
     ad: 'ImageKit',
-    hazir: (e) => !!(e.IMAGEKIT_PRIVATE_KEY && e.IMAGEKIT_URL),
+    hazir: (e) => !!e.IMAGEKIT_PRIVATE_KEY,   // dosya adresi yükleme yanıtından gelir; URL-endpoint gerekmez
     sifirlanma: ayBasi,
     async yukle(e, yol, govde, tur) {
       const i = yol.lastIndexOf('/'), klasor = '/' + (i > 0 ? yol.slice(0, i) : ''), ad = yol.slice(i + 1);
