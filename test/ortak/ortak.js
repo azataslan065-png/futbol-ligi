@@ -1747,7 +1747,7 @@ var SahaMedya = (function(){
    Uygulamanın KENDİ ürettiği görseller (maç kartı, sezon özeti, profil kartı, gol klibi - data:/blob: adresleri) BİLEREK
    serbesttir (kullanıcı: "onlar kalsın"). Tek yerde: Puan Tablosu, Admin ve SAHA bu dosyayı yükler. */
 (function(){
-  var DEPO = /^https:\/\/([a-z0-9-]+\.supabase\.co\/storage\/|[a-z0-9.-]+\.backblazeb2\.com\/|ik\.imagekit\.io\/)/i;
+  var DEPO = /^https:\/\/([a-z0-9-]+\.supabase\.co\/storage\/|[a-z0-9.-]+\.backblazeb2\.com\/|ik\.imagekit\.io\/|[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev\/b2\/)/i;
   function korunanMi(el){
     if(!el || !el.tagName) return false;
     var t = el.tagName;
@@ -1762,7 +1762,7 @@ var SahaMedya = (function(){
     document.addEventListener('contextmenu', engelle, true);
     document.addEventListener('dragstart', engelle, true);
     var st = document.createElement('style');
-    st.textContent = 'img[src*="supabase.co/storage/"],img[src*="backblazeb2.com/"],img[src*="ik.imagekit.io/"],video{-webkit-touch-callout:none;-webkit-user-drag:none}';
+    st.textContent = 'img[src*="supabase.co/storage/"],img[src*="backblazeb2.com/"],img[src*="ik.imagekit.io/"],img[src*=".workers.dev/b2/"],video{-webkit-touch-callout:none;-webkit-user-drag:none}';
     (document.head || document.documentElement).appendChild(st);
     // Tarayıcının kendi oynatıcısında "İndir" düğmesi: depo videolarına controlslist=nodownload eklenir.
     var isle = function(v){ try{ if(v.tagName === 'VIDEO' && korunanMi(v) && v.controlsList && !v.controlsList.contains('nodownload')) v.controlsList.add('nodownload'); }catch(e){} };

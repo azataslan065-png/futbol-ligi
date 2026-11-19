@@ -6,7 +6,8 @@
    OKUMA kapıdan geçmez: dönen adres doğrudan deponun adresidir; yedek adres "#yedek=" ekiyle gelir ve istemci
    (ortak/medya.js) ilk adres açılmazsa yedeğe geçer. Gizli anahtarlar yalnızca Cloudflare'in secret'larındadır. */
 
-const SURUM = '2026-11-19-B';
+const SURUM = '2026-11-19-C';
+let KAPI_ADRES = '';   // bu isteğin geldiği kapı adresi (B2 dosyaları kapı üzerinden sunulur)
 const RTDB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app';
 const MAX_BOYUT = 60 * 1024 * 1024;          // Worker belleği için güvenli üst sınır (uygulama sınırı 50 MB)
 const TEST_GUNLUK = 40;                        // test/ klasörüne günlük en fazla yükleme
@@ -25,8 +26,9 @@ function b64url(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.lengt
 function cors(h = {}) {
   return Object.assign({
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization,Content-Type,X-Yol',
+    'Access-Control-Allow-Methods': 'GET,HEAD,POST,OPTIONS',
+    'Access-Control-Expose-Headers': 'Content-Length,Content-Range,Accept-Ranges',
+    'Access-Control-Allow-Headers': 'Authorization,Content-Type,X-Yol,Range',
     'Access-Control-Max-Age': '86400',
   }, h);
 }
@@ -94,7 +96,8 @@ export const DEPOLAR = {
       const h = await s3Imzala({ method: 'PUT', url, headers: { 'content-type': tur, 'cache-control': UZUN_ONBELLEK }, keyId: e.B2_KEY_ID, secret: e.B2_APP_KEY, region });
       const r = await fetch(url, { method: 'PUT', headers: h, body: govde });
       if (!r.ok) return { hata: r.status, metin: (await r.text()).slice(0, 300) };
-      return { url: `https://${e.B2_BUCKET}.${uc}/${yol}` };
+      // (2026-11-19-C) Kova GİZLİ (herkese açık kova Backblaze'de kart istiyor): dosya kapının /b2/ yolundan sunulur.
+      return { url: (KAPI_ADRES || '') + '/b2/' + yol };
     },
     kotaMi: (st, m) => st === 402 || st === 429 || (st === 403 && /cap|exceed|limit|quota/i.test(m)),
   },
@@ -234,10 +237,35 @@ export async function ikiyeYukle(e, yol, govde, tur, gunluk = () => {}) {
   return { basarili, hatalar };
 }
 
+/* ── B2 dosyası sunma (gizli kova; imzalı GET, Range aktarılır) ──────────────────────────────────────────
+   Okuma oturum istemez (<img>/<video> başlık gönderemez); dosya adları tahmin edilemez. Backblaze'den Cloudflare'e çıkış
+   trafiği iki şirketin anlaşması gereği ücretsizdir. Kota hatası (403 cap exceeded vb.) aynen döner: istemci yedek adrese geçer. */
+async function b2Sun(req, e, yol) {
+  if (!DEPOLAR.b2.hazir(e)) return new Response('yok', { status: 404, headers: cors() });
+  const uc = e.B2_ENDPOINT.replace(/^https?:\/\//, '').replace(/\/+$/, ''), region = (/^s3\.([^.]+)\./.exec(uc) || [])[1] || 'us-west-004';
+  const url = `https://${uc}/${e.B2_BUCKET}/${yol}`, ek = {}, rg = req.headers.get('Range');
+  if (rg) ek.range = rg;
+  const h = await s3Imzala({ method: req.method === 'HEAD' ? 'HEAD' : 'GET', url, headers: ek, keyId: e.B2_KEY_ID, secret: e.B2_APP_KEY, region });
+  const r = await fetch(url, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers: h });
+  const c = cors({ 'Cache-Control': r.ok ? UZUN_ONBELLEK : 'no-store', 'Accept-Ranges': 'bytes' });
+  for (const k of ['content-type', 'content-length', 'content-range', 'etag', 'last-modified']) { const v = r.headers.get(k); if (v) c[k] = v; }
+  if (!r.ok && r.status !== 206) {
+    const m = (await r.text()).slice(0, 200);
+    if (DEPOLAR.b2.kotaMi(r.status, m)) await doluIsaretle(e, 'b2', r.status + ' ' + m);
+    return new Response('B2 ' + r.status, { status: r.status === 404 ? 404 : (r.status === 403 ? 403 : 502), headers: c });
+  }
+  return new Response(r.body, { status: r.status, headers: c });
+}
+
 /* ── Giriş noktası ───────────────────────────────────────────────────────────────────────── */
 export default {
   async fetch(req, e) {
     const u = new URL(req.url);
+    KAPI_ADRES = u.origin;
+    if ((req.method === 'GET' || req.method === 'HEAD') && u.pathname.startsWith('/b2/')) {
+      const yol = yolTemiz(decodeURIComponent(u.pathname.slice(4)));
+      return yol ? b2Sun(req, e, yol) : json({ ok: false, hata: 'geçersiz yol' }, 400);
+    }
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors() });
     if (u.pathname === '/' || u.pathname === '/saglik') return json({ ok: true, surum: SURUM });
 

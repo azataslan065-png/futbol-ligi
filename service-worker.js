@@ -33,7 +33,8 @@ self.addEventListener('activate', function(e){
 /* (2026-11-19-A) Medya kapısının depoları da (Backblaze B2, ImageKit) önbelleğe alınır. */
 function _medyaMi(u){
   return /^https:\/\/[a-z0-9-]+\.supabase\.co\/storage\/v1\/(object|render\/image)\/public\//i.test(u)
-    || /^https:\/\/[a-z0-9.-]+\.backblazeb2\.com\//i.test(u) || /^https:\/\/ik\.imagekit\.io\//i.test(u);
+    || /^https:\/\/[a-z0-9.-]+\.backblazeb2\.com\//i.test(u) || /^https:\/\/ik\.imagekit\.io\//i.test(u)
+    || /^https:\/\/[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev\/b2\//i.test(u);   // (2026-11-19-C) gizli B2 kovası kapıdan sunulur
 }
 
 /* ---- meta: url -> {t: son kullanım, s: boyut, e: etag, k: son doğrulama, b: 1 = büyük, saklanmaz} ---- */
@@ -137,7 +138,7 @@ function indirSakla(u, yedek){
    cevap vermezse ya da kota/erişim hatası verirse (402/403/429/5xx) aynı dosya ikinci depodan getirilir. */
 /* (2026-11-19-B) İNDİRME ÖLÇÜMÜ: ağdan inen her depo dosyasının boyutu (fotoğraf / video ayrı) sayfaya bildirilir; sayfa
    Firebase'deki günlük sayaca ekler (ortak/ortak.js). Cihazda saklanandan verilen dosya SAYILMAZ - kotayı harcamaz. */
-function depoAdi(u){ u = String(u); return /\.supabase\.co\//.test(u) ? 'supabase' : /\.backblazeb2\.com\//.test(u) ? 'b2' : /\/\/ik\.imagekit\.io\//.test(u) ? 'imagekit' : ''; }
+function depoAdi(u){ u = String(u); return /\.supabase\.co\//.test(u) ? 'supabase' : /\.backblazeb2\.com\/|\.workers\.dev\/b2\//.test(u) ? 'b2' : /\/\/ik\.imagekit\.io\//.test(u) ? 'imagekit' : ''; }
 function indirmeBildir(u, tur, bayt){
   var d = depoAdi(u); if(!d || !(bayt > 0)) return;
   var t = /^video\//.test(tur || '') ? 'video' : /^image\//.test(tur || '') ? 'foto' : 'ses';
