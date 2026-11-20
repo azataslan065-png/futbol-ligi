@@ -324,7 +324,7 @@ export default {
       }));
       const ba = b2Anahtar(e);   // teşhis: yalnız var/yok ve biçim; değer ASLA gösterilmez
       const b2Tani = { kimlik: !!ba.id, kimlikKaynak: /^[0-9a-f]{12,40}$/.test(String(e.B2_KEY_ID || '').trim()) ? 'secret' : (ba.id ? 'dosya' : 'yok'), gizli: !!ba.gizli, kova: !!b2Kova(e), uc: !!b2Uc(e),
-        secretKeyIlk: String(e.B2_KEY_ID || '').trim().slice(0, 1), secretAppIlk: String(e.B2_APP_KEY || '').trim().slice(0, 1), secretKeyUz: String(e.B2_KEY_ID || '').trim().length };
+        secretKeyIlk: String(e.B2_KEY_ID || '').trim().slice(0, 1), secretAppIlk: String(e.B2_APP_KEY || '').trim().slice(0, 1), secretKeyUz: String(e.B2_KEY_ID || '').trim().length, dosyaKimlikUz: String(e.B2_ANAHTAR_ID || '').length, kovaKaynak: e.B2_KOVA ? 'var' : 'yok', idUz: String(ba.id || '').length };
       const ps = paylasimSiniri(ay); delete ps.muaf;
       return json({ ok: true, surum: SURUM, depolar, paylasim: ps, b2Tani });
     }
