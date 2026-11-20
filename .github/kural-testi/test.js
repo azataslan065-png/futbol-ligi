@@ -126,6 +126,45 @@ const { ref, set, update, get, remove, runTransaction } = require('firebase/data
   await bek('Kök: yönetici SAHA sürüm notlarını yazar', true, () => set(ref(admin, 'sahaSurumNotlari'), { versions: [], seeded: true }));
   await bek('Kök: kullanıcı SAHA sürüm notlarını yazamaz', false, () => set(ref(anon, 'sahaSurumNotlari'), { versions: [] }));
   await bek('Fotoğraflı geri bildirim yazılır', true, () => set(ref(ali, T + 'sahaVeri/leagues/L1/feedback/fb2'), { user: 'Ali', uid: 'v_ali', text: 'x', photo: 'https://x/y.jpg', ts: 1, status: 'pending' }));
+  // 10) Uygulama Merkezi (um/) — davetle girilen özel mağaza (2026-11-21)
+  await env.withSecurityRulesDisabled(async (c) => {
+    const db = c.database();
+    await set(ref(db, 'admins/KISITLI'), true);
+    await set(ref(db, 'adminPerms/KISITLI'), { role: 'custom' });
+    await set(ref(db, 'um/invites'), { kodaktif1: { name: 'Ali', active: true, beta: false }, kodbeta01: { name: 'Veli', active: true, beta: true }, kodkapali: { name: 'Eski', active: false } });
+    await set(ref(db, 'um/catalog'), { store: { name: 'UM' }, apps: [{ id: 'a1', name: 'A1' }] });
+    await set(ref(db, 'um/beta/a1'), { version: '2.0-test' });
+  });
+  const umA = k('UM_A'), umB = k('UM_B'), umX = k('UM_X'), kisitli = k('KISITLI', 'k@ornek.com');
+  await bek('UM: kısıtlı yönetici sahipliği alamaz', false, () => set(ref(kisitli, 'um/owner'), 'KISITLI'));
+  await bek('UM: anonim sahipliği alamaz', false, () => set(ref(anon, 'um/owner'), 'ANON1'));
+  await bek('UM: tam yönetici sahipliği alır', true, () => set(ref(admin, 'um/owner'), 'ADMIN'));
+  await bek('UM: sahiplik sonradan değiştirilemez', false, () => set(ref(admin, 'um/owner'), 'BASKA'));
+  await bek('UM: davetsiz katalog okuyamaz', false, () => get(ref(umX, 'um/catalog')));
+  await bek('UM: davetsiz davet listesini okuyamaz', false, () => get(ref(umX, 'um/invites')));
+  await bek('UM: geçersiz kodla giriş yapılamaz', false, () => set(ref(umX, 'um/claims/UM_X'), 'uydurmakod'));
+  await bek('UM: iptal edilmiş kodla giriş yapılamaz', false, () => set(ref(umX, 'um/claims/UM_X'), 'kodkapali'));
+  await bek('UM: geçerli kodla giriş yapılır', true, () => set(ref(umA, 'um/claims/UM_A'), 'kodaktif1'));
+  await bek('UM: başkası adına giriş yazılamaz', false, () => set(ref(umA, 'um/claims/UM_X'), 'kodaktif1'));
+  await bek('UM: davetli katalog okur', true, () => get(ref(umA, 'um/catalog')));
+  await bek('UM: davetli kendi davetini okur', true, () => get(ref(umA, 'um/invites/kodaktif1')));
+  await bek('UM: davetli başkasının davetini okuyamaz', false, () => get(ref(umA, 'um/invites/kodbeta01')));
+  await bek('UM: davetli kataloğu değiştiremez', false, () => set(ref(umA, 'um/catalog/store/name'), 'X'));
+  await bek('UM: testçi olmayan test sürümünü okuyamaz', false, () => get(ref(umA, 'um/beta')));
+  await bek('UM: testçi test sürümünü okur', true, async () => { await set(ref(umB, 'um/claims/UM_B'), 'kodbeta01'); return get(ref(umB, 'um/beta')); });
+  await bek('UM: davetli indirme kaydı yazar', true, () => set(ref(umA, 'um/events/dl/e1'), { uid: 'UM_A', app: 'a1', v: '1', t: 1 }));
+  await bek('UM: başkası adına indirme yazılamaz', false, () => set(ref(umA, 'um/events/dl/e2'), { uid: 'UM_B', app: 'a1', v: '1', t: 1 }));
+  await bek('UM: davetli indirme kayıtlarını okuyamaz', false, () => get(ref(umA, 'um/events')));
+  await bek('UM: davetli puan verir', true, () => set(ref(umA, 'um/reviews/a1/UM_A'), { stars: 5, text: 'Güzel', name: 'Ali', t: 1 }));
+  await bek('UM: 6 yıldız verilemez', false, () => set(ref(umA, 'um/reviews/a1/UM_A'), { stars: 6, t: 1 }));
+  await bek('UM: başkasının yorumunu değiştiremez', false, () => set(ref(umA, 'um/reviews/a1/UM_B'), { stars: 1, t: 1 }));
+  await bek('UM: davetli hata bildirir', true, () => set(ref(umA, 'um/reports/r1'), { uid: 'UM_A', app: 'a1', text: 'Çöküyor', t: 1 }));
+  await bek('UM: davetli hata bildirimlerini okuyamaz', false, () => get(ref(umA, 'um/reports')));
+  await bek('UM: davetli bildirim jetonunu kaydeder', true, () => set(ref(umA, 'um/push/UM_A'), { token: 'tok', t: 1 }));
+  await bek('UM: davetsiz hata bildiremez', false, () => set(ref(umX, 'um/reports/r2'), { uid: 'UM_X', app: 'a1', text: 'x', t: 1 }));
+  await bek('UM: sahip davet oluşturur', true, () => set(ref(admin, 'um/invites/yenikod01'), { name: 'Yeni', active: true }));
+  await bek('UM: sahip bildirimleri ve istatistikleri okur', true, async () => { await get(ref(admin, 'um/reports')); await get(ref(admin, 'um/members')); return get(ref(admin, 'um/events')); });
+  await bek('UM: davet iptal edilince katalog kapanır', false, async () => { await set(ref(admin, 'um/invites/kodaktif1/active'), false); return get(ref(umA, 'um/catalog')); });
   // 9) Kök (yayındaki eski sürüm) değişmedi
   await bek('Kök: eski kural aynen (anonim kendi alanına yazar)', true, () => set(ref(anon, 'kullanicilar/v_kok/para'), 6));
   const satir = sonuc.join('\n');
