@@ -89,14 +89,24 @@ export async function s3Imzala({ method, url, headers, keyId, secret, region, si
 /* B2 kova adı ve uç noktası: secret doğru biçimdeyse o, değilse wrangler.toml'daki B2_KOVA / B2_UC (gizli değiller). */
 const b2Uc = (e) => { const x = String(e.B2_ENDPOINT || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, ''); return /^s3\.[a-z0-9-]+\.backblazeb2\.com$/.test(x) ? x : (e.B2_UC || ''); };
 const b2Kova = (e) => { const x = String(e.B2_BUCKET || '').trim(); return /^[a-z0-9][a-z0-9-]{4,48}[a-z0-9]$/.test(x) ? x : (e.B2_KOVA || ''); };
+/* B2 anahtar çifti (2026-11-20): anahtar KİMLİĞİ gizli değildir (kullanıcı adı gibi; tek başına erişim vermez), uygulama anahtarı
+   gizlidir. Telefonda kopyalarken değerler yer değiştirebiliyor: kimlik yanlışsa wrangler.toml'daki B2_ANAHTAR_ID kullanılır;
+   uygulama anahtarı (K ile başlar) yanlışlıkla B2_KEY_ID'ye girildiyse oradan alınır. */
+export function b2Anahtar(e) {
+  const t = (v) => String(v || '').trim(), kimlikMi = (v) => /^[0-9a-f]{12,40}$/.test(v), gizliMi = (v) => /^K[0-9A-Za-z+\/]{20,}$/.test(v);
+  const a = t(e.B2_KEY_ID), b = t(e.B2_APP_KEY);
+  const id = kimlikMi(a) ? a : kimlikMi(b) ? b : t(e.B2_ANAHTAR_ID);
+  const gizli = gizliMi(b) ? b : gizliMi(a) ? a : '';
+  return { id, gizli };
+}
 export const DEPOLAR = {
   b2: {
     ad: 'Backblaze B2',
-    hazir: (e) => !!(e.B2_KEY_ID && e.B2_APP_KEY && b2Kova(e) && b2Uc(e)),
+    hazir: (e) => !!(b2Anahtar(e).id && b2Anahtar(e).gizli && b2Kova(e) && b2Uc(e)),
     async yukle(e, yol, govde, tur) {
       const uc = b2Uc(e), region = (/^s3\.([^.]+)\./.exec(uc) || [])[1] || 'us-west-004';
       const url = `https://${uc}/${b2Kova(e)}/${yol}`;
-      const h = await s3Imzala({ method: 'PUT', url, headers: { 'content-type': tur, 'cache-control': UZUN_ONBELLEK }, keyId: e.B2_KEY_ID, secret: e.B2_APP_KEY, region });
+      const h = await s3Imzala({ method: 'PUT', url, headers: { 'content-type': tur, 'cache-control': UZUN_ONBELLEK }, keyId: b2Anahtar(e).id, secret: b2Anahtar(e).gizli, region });
       const r = await fetch(url, { method: 'PUT', headers: h, body: govde });
       if (!r.ok) return { hata: r.status, metin: (await r.text()).slice(0, 300) };
       // (2026-11-19-C) Kova GİZLİ (herkese açık kova Backblaze'de kart istiyor): dosya kapının /b2/ yolundan sunulur.
@@ -274,7 +284,7 @@ async function b2Sun(req, e, yol) {
   const uc = b2Uc(e), region = (/^s3\.([^.]+)\./.exec(uc) || [])[1] || 'us-west-004';
   const url = `https://${uc}/${b2Kova(e)}/${yol}`, ek = {}, rg = req.headers.get('Range');
   if (rg) ek.range = rg;
-  const h = await s3Imzala({ method: req.method === 'HEAD' ? 'HEAD' : 'GET', url, headers: ek, keyId: e.B2_KEY_ID, secret: e.B2_APP_KEY, region });
+  const h = await s3Imzala({ method: req.method === 'HEAD' ? 'HEAD' : 'GET', url, headers: ek, keyId: b2Anahtar(e).id, secret: b2Anahtar(e).gizli, region });
   const r = await fetch(url, { method: req.method === 'HEAD' ? 'HEAD' : 'GET', headers: h });
   const c = cors({ 'Cache-Control': r.ok ? UZUN_ONBELLEK : 'no-store', 'Accept-Ranges': 'bytes' });
   for (const k of ['content-type', 'content-length', 'content-range', 'etag', 'last-modified']) { const v = r.headers.get(k); if (v) c[k] = v; }
