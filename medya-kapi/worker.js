@@ -95,7 +95,8 @@ const b2Kova = (e) => { const x = String(e.B2_BUCKET || '').trim(); return /^[a-
 export function b2Anahtar(e) {
   const t = (v) => String(v || '').trim(), kimlikMi = (v) => /^[0-9a-f]{12,40}$/.test(v), gizliMi = (v) => /^K\S{20,60}$/.test(v) && !/^cfu/.test(v);
   const a = t(e.B2_KEY_ID), b = t(e.B2_APP_KEY);
-  const id = kimlikMi(a) ? a : kimlikMi(b) ? b : t(e.B2_ANAHTAR_ID);
+  // (2026-11-20) wrangler.toml değişkeni bazı yayınlarda Worker'a ulaşmadı; kimlik gizli olmadığından burada da yazılı.
+  const id = kimlikMi(a) ? a : kimlikMi(b) ? b : (t(e.B2_ANAHTAR_ID) || '003f177ece1d52d0000000001');
   const gizli = gizliMi(b) ? b : gizliMi(a) ? a : '';
   return { id, gizli };
 }
