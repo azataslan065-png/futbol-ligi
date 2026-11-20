@@ -345,7 +345,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-20-E</title>
+<title>SAHA — 3D Futbol v2026-11-20-F</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -21949,7 +21949,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-20-E';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-20-F';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -27077,6 +27077,45 @@ function mudahale(o){
    hedef yumuşatılır, yaklaşırken yavaşlar, gövdesi hep topa dönüktür (yana adım atar). Kaleye
    gelen şutun kalecinin hizasındaki noktası hesaplanır; oraya hızlanır, yetişemeyecekse o tarafa
    plonjon yapar (dalışta erişim artar). Ceza sahasında rakipten önce ulaşabileceği yavaş topa çıkar. */
+/* YENİ MOTOR YAPAY ZEKÂSI - 4. AŞAMA (2026-11-20-F): TOP YOLU ÖNGÖRÜSÜ.
+   ÖNCEDEN topu kovalayan oyuncu topun ŞU ANKİ yerine koşuyordu (top kaçarken arkasından gidiyor, pası kesemiyordu); pas alıcısı ve kaleci
+   topun yolunu DÜZ ÇİZGİ sayıyordu (yavaşlama, yerçekimi ve falso yok) - kavisli şutta kaleci yanlış yere uzanıyordu.
+   ŞİMDİ topun önümüzdeki 3,6 sn'lik yolu oyunun kendi top fiziğiyle (yeni motor: hava direnci, falso, sekme, yuvarlanma) her karede bir kez
+   hesaplanır; kovalayan ve pas alıcısı topa EN ERKEN yetişebileceği noktaya koşar, kaleci şutun kendi hizasından ve kale çizgisinden geçeceği
+   noktayı falso dahil öngörür. */
+var _tyol = { k: -1, n: 0, x: new Float32Array(37), y: new Float32Array(37), z: new Float32Array(37) };
+function topYolu(){
+  var k = window._sonUpdateTs || 0; if (_tyol.k === k) return _tyol; _tyol.k = k;
+  var x = ball.position.x, y = ball.position.y, z = ball.position.z, vx = bVel.x, vy = bVel.y, vz = bVel.z, sp = bSpin, hf = havaFizik(), h = 1/60;
+  _tyol.x[0] = x; _tyol.y[0] = y; _tyol.z[0] = z;
+  for (var i = 1; i <= 36 * 6; i++){
+    vy -= TOP_G * h; var va = Math.hypot(vx, vy, vz);
+    if (y > R_BALL + 0.03){ var kd = Math.max(0, 1 - HAVA_SURT * va * h); vx *= kd; vy *= kd; vz *= kd; }
+    var s2 = Math.hypot(vx, vz);
+    if (y > R_BALL + 0.06 && Math.abs(sp) > 0.02 && s2 > 0.5){ var mg = Math.min(1.5, s2 / 26), ox = vx; vx += (-vz / s2) * sp * h * 9 * mg; vz += (ox / s2) * sp * h * 9 * mg; sp *= Math.pow(0.5, h); }
+    x += vx * h; y += vy * h; z += vz * h;
+    if (y < R_BALL){ y = R_BALL; if (vy < -0.6){ vy = -vy * 0.5 * hf.sekme; vx *= hf.yatay; vz *= hf.yatay; } else vy = 0; }
+    if (y <= R_BALL + 0.03){ var hv = Math.hypot(vx, vz); if (hv > 0){ var yn = Math.max(0, hv - _yerYavas(hv, hf.surt) * h); vx *= yn / hv; vz *= yn / hv; } }
+    if (i % 6 === 0){ var j = i / 6; _tyol.x[j] = x; _tyol.y[j] = y; _tyol.z[j] = z; }
+  }
+  _tyol.n = 36; return _tyol;
+}
+// Oyuncunun topa en erken yetişebileceği nokta (top boyu ~1,6 m altındayken). Yetişemiyorsa topun 3,6 sn sonraki yeri.
+function topYetismeNoktasi(p, vmax){
+  var Y = topYolu(), px = p.obj.position.x, pz = p.obj.position.z, v = vmax || 8.2, pv = p.vel ? Math.hypot(p.vel.x, p.vel.z) : 0;
+  for (var j = 1; j <= Y.n; j++){
+    if (Y.y[j] > 1.6) continue;
+    var d = Math.max(0, Math.hypot(Y.x[j] - px, Y.z[j] - pz) - 0.8), t = 0.15 + d / v + (pv < 2 ? 0.25 : 0);
+    if (t <= j * 0.1) return new THREE.Vector3(Y.x[j], 0, Y.z[j]);
+  }
+  return new THREE.Vector3(Y.x[Y.n], 0, Y.z[Y.n]);
+}
+// Top x = hedefX düzleminden geçerken (z, y, t) - falso dahil; geçmezse null.
+function topXGecis(hedefX){
+  var Y = topYolu(), yon = Math.sign(hedefX - Y.x[0]) || 1;
+  for (var j = 1; j <= Y.n; j++){ if ((Y.x[j] - hedefX) * yon >= 0){ var a = (hedefX - Y.x[j-1]) / ((Y.x[j] - Y.x[j-1]) || 1e-6); return { z: Y.z[j-1] + (Y.z[j] - Y.z[j-1]) * a, y: Y.y[j-1] + (Y.y[j] - Y.y[j-1]) * a, t: (j - 1 + a) * 0.1 }; } }
+  return null;
+}
 function _gkSutTahmin(p){
   try{
     var kaleX = -p.dir*HLX, vx = bVel.x, vz = bVel.z;
@@ -27084,9 +27123,11 @@ function _gkSutTahmin(p){
     if (sonDokunan === p.team && sonDokunanOyuncu && sonDokunanOyuncu !== p && sonVurusTuru !== 'sekme') return null;   // kendi takımı
     var tKale = (kaleX - ball.position.x) / vx; if (tKale <= 0 || tKale > 2.2) return null;
     var zKale = ball.position.z + vz * tKale;
-    if (Math.abs(zKale) > GOAL_HW + 1.2) return null;                    // kaleyi tutmuyor
     var tGk = (p.obj.position.x - ball.position.x) / vx; if (tGk < 0) tGk = 0;
     var zGk = ball.position.z + vz * tGk;
+    // (2026-11-20-F) Fizikle öngörü: yavaşlama ve falso dahil (bkz. TOP YOLU ÖNGÖRÜSÜ). Hesaplanamazsa düz çizgi.
+    try{ var gK = topXGecis(kaleX); if (gK){ zKale = gK.z; tKale = gK.t; } var gG = topXGecis(p.obj.position.x); if (gG){ zGk = gG.z; tGk = gG.t; } }catch(e){}
+    if (Math.abs(zKale) > GOAL_HW + 1.2) return null;                    // kaleyi tutmuyor
     return { z: Math.max(-GOAL_HW - 0.6, Math.min(GOAL_HW + 0.6, zGk)), t: tGk, zKale: zKale };
   }catch(e){ return null; }
 }
@@ -27385,6 +27426,7 @@ function aiHedef(p, kovalayan){
   if (_pa && _pa.p === p && !p.gk && sonDokunanOyuncu === _pa.pasor){
     if (ball.position.y > 0.7 && _pa.hedef){ const _in = _topInisNoktasi(); return _in || _pa.hedef.clone(); }
     const _bh = Math.hypot(bVel.x, bVel.z), _dd = p.obj.position.distanceTo(ball.position);
+    if (_bh > 2) return topYetismeNoktasi(p, 8.0);                         // (2026-11-20-F) topla buluşacağı nokta (top yolu öngörüsü)
     const _tt = Math.min(1.2, _dd / Math.max(4, _bh + 6));
     return new THREE.Vector3(ball.position.x + bVel.x*_tt, 0, ball.position.z + bVel.z*_tt);
   }
@@ -27406,6 +27448,8 @@ function aiHedef(p, kovalayan){
       const hedefZ = Math.max(-HWZ+4, Math.min(HWZ-4, ball.position.z + zSap));
       return new THREE.Vector3(hedefX, 0, hedefZ);
     }
+    // (2026-11-20-F) Kaçan/gelen topun şu anki yerine değil, ona EN ERKEN yetişebileceği noktaya koşar.
+    if (Math.hypot(bVel.x, bVel.z) > 2 && !(dSahip < 1.6 && sonDokunanOyuncu === p)) return topYetismeNoktasi(p, 8.6);
     return ball.position.clone().setY(0);
   }
   const tk = p.team === 0 ? TAKTIK.a : TAKTIK.b;
