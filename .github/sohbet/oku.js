@@ -18,12 +18,13 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
     const l = Object.entries(v).filter(([, m]) => m && typeof m === 'object').sort((a, b) => zamanAl(a[1]) - zamanAl(b[1]));
     const ad = l.filter(([, m]) => adminler[uidAl(m)]).length;
     console.log('mesaj: ' + l.length + ' (admin yazdığı: ' + ad + ')');
-    for (const [k, m] of l.slice(-12)) console.log(tarih(zamanAl(m)) + ' | ' + (adminler[uidAl(m)] ? 'ADMIN' : 'kullanıcı') + ' | uid …' + String(uidAl(m)).slice(-4) + ' | anahtar …' + k.slice(-4) + ' | alanlar: ' + Object.keys(m).sort().join(','));
+    for (const [k, m] of l.slice(-12)) console.log(tarih(zamanAl(m)) + ' | ' + (adminler[uidAl(m)] ? 'ADMIN' : 'kullanıcı') + ' | uid …' + String(uidAl(m)).slice(-4) + ' | anahtar …' + k.slice(-4) + ' | isDev:' + m.isDev + ' source:' + String(m.source).slice(0, 12) + ' video:' + (m.videos ? (Array.isArray(m.videos) ? m.videos.length : Object.keys(m.videos).length) : 0) + ' foto:' + (m.photos || m.images || m.foto ? 1 : 0) + ' | alanlar: ' + Object.keys(m).sort().join(','));
   }
   // Lig belgesinde kalmış eski sohbet kopyaları (yönlendirme öncesi) — sadece sayı
   for (const kok of ['leagues', 'test/leagues', 'sahaVeri/leagues', 'test/sahaVeri/leagues']) {
     const ligler = await al(kok, '?shallow=true'); if (!ligler || ligler.HATA || typeof ligler !== 'object') continue;
-    for (const lig of Object.keys(ligler).slice(0, 15)) { const g = await al(kok + '/' + lig + '/generalChat', '?shallow=true'); if (g && typeof g === 'object' && !g.HATA) console.log(kok + '/' + lig.slice(-4) + '/generalChat: ' + Object.keys(g).length + ' mesaj (eski yol)'); }
+    for (const lig of Object.keys(ligler).slice(0, 15)) { const g = await al(kok + '/' + lig + '/generalChat'); if (g && typeof g === 'object' && !g.HATA) { const l = Object.values(g).filter(m => m && typeof m === 'object').sort((a, b) => zamanAl(a) - zamanAl(b)); console.log(kok + '/' + lig.slice(-4) + '/generalChat: ' + l.length + ' mesaj (eski yol)'); l.slice(-6).forEach(m => console.log('   ' + tarih(zamanAl(m)) + ' isDev:' + m.isDev + ' source:' + String(m.source).slice(0, 12) + ' alanlar:' + Object.keys(m).sort().join(','))); }
+      const mc = await al(kok + '/' + lig + '/matches', '?shallow=true'); if (mc && typeof mc === 'object' && !mc.HATA) { let n = 0, son = 0; for (const mid of Object.keys(mc)) { const c = await al(kok + '/' + lig + '/matches/' + mid + '/comments'); if (c && typeof c === 'object' && !c.HATA) for (const m of Object.values(c)) { if (m && typeof m === 'object') { n++; son = Math.max(son, +zamanAl(m) || 0); } } } if (n) console.log('   maç yorumları: ' + n + ', son: ' + tarih(son)); } }
   }
   const sh = await al('test/paylasilan/sohbetHesaplari', '?shallow=true'), sh2 = await al('paylasilan/sohbetHesaplari', '?shallow=true');
   console.log('\nsohbetHesaplari anahtarları test:', sh && Object.keys(sh).join(','), '| kök:', sh2 && Object.keys(sh2).join(','));
