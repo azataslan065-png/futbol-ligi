@@ -6,7 +6,7 @@
    OKUMA kapıdan geçmez: dönen adres doğrudan deponun adresidir; yedek adres "#yedek=" ekiyle gelir ve istemci
    (ortak/medya.js) ilk adres açılmazsa yedeğe geçer. Gizli anahtarlar yalnızca Cloudflare'in secret'larındadır. */
 
-const SURUM = '2026-11-19-E';
+const SURUM = '2026-11-20-A';
 let KAPI_ADRES = '';   // bu isteğin geldiği kapı adresi (B2 dosyaları kapı üzerinden sunulur)
 const RTDB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.app';
 const MAX_BOYUT = 95 * 1000 * 1000;          // Cloudflare ücretsiz planı istek gövdesi 100 MB; dosya bellekte tek kopya tutulur
@@ -322,8 +322,11 @@ export default {
         }
         return o;
       }));
+      const ba = b2Anahtar(e);   // teşhis: yalnız var/yok ve biçim; değer ASLA gösterilmez
+      const b2Tani = { kimlik: !!ba.id, kimlikKaynak: /^[0-9a-f]{12,40}$/.test(String(e.B2_KEY_ID || '').trim()) ? 'secret' : (ba.id ? 'dosya' : 'yok'), gizli: !!ba.gizli, kova: !!b2Kova(e), uc: !!b2Uc(e),
+        secretKeyIlk: String(e.B2_KEY_ID || '').trim().slice(0, 1), secretAppIlk: String(e.B2_APP_KEY || '').trim().slice(0, 1), secretKeyUz: String(e.B2_KEY_ID || '').trim().length };
       const ps = paylasimSiniri(ay); delete ps.muaf;
-      return json({ ok: true, surum: SURUM, depolar, paylasim: ps });
+      return json({ ok: true, surum: SURUM, depolar, paylasim: ps, b2Tani });
     }
 
     if (u.pathname === '/yukle' && req.method === 'POST') {
