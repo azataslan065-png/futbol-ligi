@@ -345,7 +345,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SAHA — 3D Futbol v2026-11-20-A</title>
+<title>SAHA — 3D Futbol v2026-11-20-B</title>
 <!-- ANA EKRANA TAM EKRAN UYGULAMA (2026-10-09-F, kullanıcı: "ana ekrana tam ekran uygulama olarak eklenmesini sağlayan
      dosyayı ekle"): saha-manifest.json (display: fullscreen, yatay) + simgeler + servis çalışanı. Ana ekrandan açılan SAHA
      baştan tam ekrandır; tarayıcının "tam ekrandan çıkmak için…" uyarısı hiç çıkmaz (bkz. _uygulamaPenceresi). -->
@@ -10342,6 +10342,90 @@ function insanModelKopyala(m, M, renk){
 // atlar ve bu goze carpar.
 // Hangi klip: 0-0.4 m/s durus, 0.4-3.2 yuruyus, ustu kosu. Esikler insanAdim'daki
 // kutu-model esikleriyle ayni tutuldu ki iki model ayni hizda ayni sey yapsin.
+/* ═══ YENİ HAREKETLER (2026-11-20-B) ════════════════════════════════════════════════════════════════════════════
+   Kullanıcı (motor değerlendirmesi): "yeni oyuncu hareketleri test ortamı için onaylandı, diğer oyuncu modelleri üzerinden test edilecek".
+   Yeni motorun kodla üretilen hareketleri (kayarak müdahale, kafa, taç, düşme, kaleci tutma, ilk kontrol) her modele UYARLANIR:
+   hareketler sade iskelette (dinlenme duruşu birim dönüş, model uzayı eksenleri) tanımlı; Mixamo iskeletinde (detaylı / özel model)
+   her kemiğin dinlenme yönü farklı olduğundan dönüş, kemiğin ebeveyninin dinlenme yönüne çevrilir:  L' = Wp⁻¹ · D · Wp · L_dinlenme.
+   Böylece aynı hareket tanımı üç modelde de aynı duruşu verir. Ayarlar > Görüntü > "Yeni hareketler" ile kapatılabilir (Mixamo klipleri). */
+var YH_KEMIK = { Hips:['Hips'], Spine:['Spine','Spine1'], Chest:['Chest','Spine2'], Neck:['Neck'], Head:['Head'],
+  L_UpperArm:['L_UpperArm','LeftArm'], L_LowerArm:['L_LowerArm','LeftForeArm'], R_UpperArm:['R_UpperArm','RightArm'], R_LowerArm:['R_LowerArm','RightForeArm'],
+  L_UpperLeg:['L_UpperLeg','LeftUpLeg'], L_LowerLeg:['L_LowerLeg','LeftLeg'], L_Foot:['L_Foot','LeftFoot'],
+  R_UpperLeg:['R_UpperLeg','RightUpLeg'], R_LowerLeg:['R_LowerLeg','RightLeg'], R_Foot:['R_Foot','RightFoot'] };
+function yeniHareketAcik(){ try{ return AYAR.yeniHareket !== false; }catch(e){ return true; } }
+var _yhOnbellek = {};
+function yeniHareketKlipleri(grup){
+  try{
+    if(!grup || !THREE.QuaternionKeyframeTrack) return null;
+    var hepsi = {}; grup.traverse(function(b){ if(b.isBone && !hepsi[b.name]) hepsi[b.name] = b; });
+    var K = {}, ad; for(ad in YH_KEMIK){ var a = YH_KEMIK[ad]; for(var i = 0; i < a.length; i++) if(hepsi[a[i]]){ K[ad] = hepsi[a[i]]; break; } }
+    if(!K.Hips || !K.L_UpperLeg || !K.R_UpperLeg) return null;
+    var anahtar = Object.keys(K).map(function(k){ return K[k].name; }).join(',') + '|' + K.Hips.position.y.toFixed(3);
+    if(_yhOnbellek[anahtar]) return _yhOnbellek[anahtar];
+    grup.updateMatrixWorld(true);
+    var gq = new THREE.Quaternion(); grup.getWorldQuaternion(gq); var gqi = gq.clone().invert();
+    var R = {};                                            // kemik → { rest: yerel dinlenme, wp: ebeveynin dinlenme yönü (model uzayı) }
+    Object.keys(K).forEach(function(k){ var b = K[k], wp = new THREE.Quaternion(); if(b.parent) b.parent.getWorldQuaternion(wp); wp.premultiply(gqi); R[k] = { rest: b.quaternion.clone(), wp: wp, wpi: wp.clone().invert() }; });
+    var hipsY = K.Hips.position.y, hipsX = K.Hips.position.x, hipsZ = K.Hips.position.z, olcek = hipsY / 0.97;
+    var e = new THREE.Euler(), d = new THREE.Quaternion(), q = new THREE.Quaternion();
+    var yap = function(ad, kareler){
+      var zamanlar = kareler.map(function(x){ return x.t; }), izler = [];
+      Object.keys(K).forEach(function(kb){
+        if(kb !== 'Hips' && !kareler.some(function(x){ return x.b[kb]; })) return;
+        var v = [], r = R[kb];
+        kareler.forEach(function(x){ var a = x.b[kb] || [0, 0, 0]; e.set(a[0], a[1], a[2]); d.setFromEuler(e);
+          q.copy(r.wpi).multiply(d).multiply(r.wp).multiply(r.rest); v.push(q.x, q.y, q.z, q.w); });
+        izler.push(new THREE.QuaternionKeyframeTrack(K[kb].name + '.quaternion', zamanlar, v));
+      });
+      var hv = []; kareler.forEach(function(x){ hv.push(hipsX, (x.h != null ? x.h : 0.96) * olcek, hipsZ + (x.hz || 0) * olcek); });
+      izler.push(new THREE.VectorKeyframeTrack(K.Hips.name + '.position', zamanlar, hv));
+      return new THREE.AnimationClip('YH_' + ad, kareler[kareler.length - 1].t, izler);
+    };
+    var kolAcik = (a, ileri = 0) => ({ L_UpperArm: [ileri, 0, a], R_UpperArm: [ileri, 0, -a] });
+    var L = [
+    yap('Kayma', [
+      { t: 0, h: 0.82, b: { Spine: [0.25, 0, 0], R_UpperLeg: [-0.7, 0, 0], R_LowerLeg: [0.7, 0, 0], L_UpperLeg: [-0.2, 0, 0], L_LowerLeg: [0.9, 0, 0], ...kolAcik(0.6) } },
+      { t: 0.16, h: 0.3, hz: -0.15, b: { Spine: [-0.55, 0, 0], Chest: [-0.2, 0, 0], R_UpperLeg: [-1.45, 0, 0.05], R_LowerLeg: [0.05, 0, 0], R_Foot: [-0.3, 0, 0], L_UpperLeg: [-0.55, 0, 0.15], L_LowerLeg: [1.95, 0, 0], ...kolAcik(1.05, 0.4) } },
+      { t: 0.6, h: 0.3, hz: -0.15, b: { Spine: [-0.5, 0, 0], Chest: [-0.2, 0, 0], R_UpperLeg: [-1.4, 0, 0.05], R_LowerLeg: [0.1, 0, 0], L_UpperLeg: [-0.55, 0, 0.15], L_LowerLeg: [1.95, 0, 0], ...kolAcik(1.0, 0.5) } },
+      { t: 0.9, h: 0.62, b: { Spine: [0.35, 0, 0], R_UpperLeg: [-0.9, 0, 0], R_LowerLeg: [1.4, 0, 0], L_UpperLeg: [-0.6, 0, 0], L_LowerLeg: [1.5, 0, 0], ...kolAcik(0.4, -0.3) } }]),
+    yap('Ucus', [
+      { t: 0, h: 0.8, b: { Spine: [0.3, 0, 0], L_UpperLeg: [-0.5, 0, 0.1], R_UpperLeg: [-0.5, 0, -0.1], L_LowerLeg: [0.9, 0, 0], R_LowerLeg: [0.9, 0, 0], ...kolAcik(0.4, -0.9) } },
+      { t: 0.15, h: 0.96, b: { Spine: [-0.05, 0, 0], L_UpperArm: [-2.85, 0, 0.25], R_UpperArm: [-2.85, 0, -0.25], L_UpperLeg: [-0.15, 0, 0.05], R_UpperLeg: [0.1, 0, -0.05], L_LowerLeg: [0.3, 0, 0], R_LowerLeg: [0.25, 0, 0] } },
+      { t: 0.7, h: 0.96, b: { Spine: [-0.05, 0, 0], L_UpperArm: [-2.9, 0, 0.2], R_UpperArm: [-2.9, 0, -0.2], L_UpperLeg: [-0.2, 0, 0.05], R_UpperLeg: [0.1, 0, -0.05], L_LowerLeg: [0.4, 0, 0], R_LowerLeg: [0.3, 0, 0] } },
+      { t: 0.95, h: 0.9, b: { Spine: [0.2, 0, 0], L_UpperArm: [-1.6, 0, 0.3], R_UpperArm: [-1.6, 0, -0.3], L_UpperLeg: [-0.6, 0, 0], R_UpperLeg: [-0.3, 0, 0], L_LowerLeg: [1.0, 0, 0], R_LowerLeg: [0.8, 0, 0] } }]),
+    yap('Tutma', [
+      { t: 0, h: 0.9, b: { Spine: [0.3, 0, 0], ...kolAcik(0.25, -1.0), L_UpperLeg: [-0.3, 0, 0], R_UpperLeg: [-0.3, 0, 0], L_LowerLeg: [0.5, 0, 0], R_LowerLeg: [0.5, 0, 0] } },
+      { t: 0.15, h: 0.88, b: { Spine: [0.35, 0, 0], Chest: [0.1, 0, 0], L_UpperArm: [-1.35, 0, -0.15], R_UpperArm: [-1.35, 0, 0.15], L_LowerArm: [-0.7, 0, 0], R_LowerArm: [-0.7, 0, 0], L_UpperLeg: [-0.35, 0, 0], R_UpperLeg: [-0.35, 0, 0], L_LowerLeg: [0.6, 0, 0], R_LowerLeg: [0.6, 0, 0] } },
+      { t: 0.7, h: 0.95, b: { Spine: [0.15, 0, 0], L_UpperArm: [-0.9, 0, -0.2], R_UpperArm: [-0.9, 0, 0.2], L_LowerArm: [-1.3, 0, 0], R_LowerArm: [-1.3, 0, 0] } }]),
+    yap('Kafa', [
+      { t: 0, h: 0.86, b: { Spine: [0.3, 0, 0], L_UpperLeg: [-0.45, 0, 0], R_UpperLeg: [-0.45, 0, 0], L_LowerLeg: [0.9, 0, 0], R_LowerLeg: [0.9, 0, 0], ...kolAcik(0.3, 0.4) } },
+      { t: 0.2, h: 1.32, b: { Spine: [-0.35, 0, 0], Neck: [-0.25, 0, 0], L_UpperLeg: [-0.1, 0, 0], R_UpperLeg: [0.2, 0, 0], L_LowerLeg: [0.6, 0, 0], R_LowerLeg: [0.9, 0, 0], ...kolAcik(1.25, -0.3) } },
+      { t: 0.32, h: 1.34, b: { Spine: [0.4, 0, 0], Neck: [0.45, 0, 0], L_UpperLeg: [-0.3, 0, 0], R_UpperLeg: [0.1, 0, 0], L_LowerLeg: [0.5, 0, 0], R_LowerLeg: [0.7, 0, 0], ...kolAcik(0.9, 0.2) } },
+      { t: 0.55, h: 0.9, b: { Spine: [0.2, 0, 0], L_UpperLeg: [-0.4, 0, 0], R_UpperLeg: [-0.4, 0, 0], L_LowerLeg: [0.8, 0, 0], R_LowerLeg: [0.8, 0, 0], ...kolAcik(0.4) } },
+      { t: 0.7, h: 0.96, b: { Spine: [0.05, 0, 0] } }]),
+    yap('Tac', [
+      { t: 0, h: 0.95, b: { Spine: [-0.3, 0, 0], L_UpperArm: [-3.2, 0, 0.15], R_UpperArm: [-3.2, 0, -0.15], L_LowerArm: [-1.3, 0, 0], R_LowerArm: [-1.3, 0, 0], R_UpperLeg: [-0.35, 0, 0], R_LowerLeg: [0.3, 0, 0], L_UpperLeg: [0.25, 0, 0] } },
+      { t: 0.25, h: 0.94, b: { Spine: [-0.4, 0, 0], L_UpperArm: [-3.3, 0, 0.1], R_UpperArm: [-3.3, 0, -0.1], L_LowerArm: [-1.6, 0, 0], R_LowerArm: [-1.6, 0, 0], R_UpperLeg: [-0.35, 0, 0], R_LowerLeg: [0.3, 0, 0], L_UpperLeg: [0.25, 0, 0] } },
+      { t: 0.45, h: 0.95, b: { Spine: [0.3, 0, 0], L_UpperArm: [-2.0, 0, 0.1], R_UpperArm: [-2.0, 0, -0.1], L_LowerArm: [-0.1, 0, 0], R_LowerArm: [-0.1, 0, 0], R_UpperLeg: [-0.35, 0, 0], R_LowerLeg: [0.3, 0, 0], L_UpperLeg: [0.25, 0, 0] } },
+      { t: 0.9, h: 0.96, b: { Spine: [0.1, 0, 0], L_UpperArm: [-0.6, 0, 0.1], R_UpperArm: [-0.6, 0, -0.1] } }]),
+    yap('Dusme', [
+      { t: 0, h: 0.9, b: { Spine: [0.5, 0, 0], ...kolAcik(0.5, -1.1), L_UpperLeg: [0.3, 0, 0], R_UpperLeg: [-0.4, 0, 0], R_LowerLeg: [0.6, 0, 0] } },
+      { t: 0.28, h: 0.46, b: { Spine: [0.6, 0, 0], Chest: [0.2, 0, 0], ...kolAcik(0.35, -1.3), L_LowerArm: [-0.3, 0, 0], R_LowerArm: [-0.3, 0, 0], L_UpperLeg: [-1.25, 0, 0.05], R_UpperLeg: [-1.25, 0, -0.05], L_LowerLeg: [2.05, 0, 0], R_LowerLeg: [2.05, 0, 0], L_Foot: [0.6, 0, 0], R_Foot: [0.6, 0, 0] } },
+      { t: 0.75, h: 0.46, b: { Spine: [0.55, 0, 0], Chest: [0.2, 0, 0], ...kolAcik(0.35, -1.1), L_UpperLeg: [-1.25, 0, 0.05], R_UpperLeg: [-1.25, 0, -0.05], L_LowerLeg: [2.05, 0, 0], R_LowerLeg: [2.05, 0, 0], L_Foot: [0.6, 0, 0], R_Foot: [0.6, 0, 0] } },
+      { t: 1.0, h: 0.78, b: { Spine: [0.45, 0, 0], ...kolAcik(0.3, -0.3), L_UpperLeg: [-0.9, 0, 0], R_UpperLeg: [-0.3, 0, 0], L_LowerLeg: [1.3, 0, 0], R_LowerLeg: [0.7, 0, 0] } }]),
+    yap('Jokey', [
+      { t: 0, h: 0.85, b: { Spine: [0.32, 0, 0], Head: [-0.25, 0, 0], L_UpperLeg: [-0.4, 0, 0.12], R_UpperLeg: [-0.3, 0, -0.12], L_LowerLeg: [0.75, 0, 0], R_LowerLeg: [0.65, 0, 0], ...kolAcik(0.38, -0.25) } },
+      { t: 0.3, h: 0.83, b: { Spine: [0.34, 0, 0], Head: [-0.27, 0, 0], L_UpperLeg: [-0.3, 0, 0.18], R_UpperLeg: [-0.42, 0, -0.18], L_LowerLeg: [0.65, 0, 0], R_LowerLeg: [0.8, 0, 0], ...kolAcik(0.42, -0.25) } },
+      { t: 0.6, h: 0.85, b: { Spine: [0.32, 0, 0], Head: [-0.25, 0, 0], L_UpperLeg: [-0.4, 0, 0.12], R_UpperLeg: [-0.3, 0, -0.12], L_LowerLeg: [0.75, 0, 0], R_LowerLeg: [0.65, 0, 0], ...kolAcik(0.38, -0.25) } }]),
+    yap('Kontrol', [
+      { t: 0, h: 0.94, b: { Spine: [0.15, 0, 0] } },
+      { t: 0.12, h: 0.9, b: { Spine: [0.25, 0, 0], R_UpperLeg: [-0.55, 0.25, 0], R_LowerLeg: [0.55, 0, 0], L_LowerLeg: [0.35, 0, 0], L_UpperLeg: [-0.1, 0, 0], ...kolAcik(0.45) } },
+      { t: 0.35, h: 0.95, b: { Spine: [0.1, 0, 0] } }]),
+  ];    var S = {}; L.forEach(function(c){ S[c.name.slice(3)] = c; });
+    var sonuc = { kayma: S.Kayma, kafa: S.Kafa, tac: S.Tac, dusme: S.Dusme, tutma: S.Tutma, kontrol: S.Kontrol, jokey: S.Jokey, ucus: S.Ucus };
+    _yhOnbellek[anahtar] = sonuc; return sonuc;
+  }catch(err){ try{ _sessiz(err, 'yeniHareketKlipleri', 'saha_oyun'); }catch(_e){} return null; }
+}
 function modelAnimKur(grup, M, kaleci){
   try{
     var klipler = (M && M.klipler) || [];
@@ -10374,6 +10458,10 @@ function modelAnimKur(grup, M, kaleci){
                 pas:bul('Pas'), sevinc:bul('Sevinc'), kafa:bul('Kafa_1'), tac:bul('Tac_Atisi'),
                 kayma:bul('Kayarak_Mudahale_1'), dusme:bul('Faul_Dusme'), tutma:bul('Kaleci_Tutma_1'),
                 elleAtis:bul('Kaleci_Elle_Atis') };
+    // (2026-11-20-B) Yeni motorun hareketleri bu modele uyarlanıp Mixamo/hafif kliplerinin yerine geçer (ayardan kapatılabilir).
+    var yeni = {};
+    if(yeniHareketAcik()){ var YK = yeniHareketKlipleri(grup);
+      if(YK) ['kayma','kafa','tac','dusme','tutma','kontrol'].forEach(function(ad){ if(YK[ad]){ tek[ad] = YK[ad]; yeni[ad] = 1; } }); }
     var tekEylem = {};
     Object.keys(tek).forEach(function(ad){
       if(!tek[ad]) return;
@@ -10390,7 +10478,7 @@ function modelAnimKur(grup, M, kaleci){
         eylem[ad].setEffectiveWeight(ad === 'idle' ? 1 : 0);
       }
     });
-    return { mixer: mixer, eylem: eylem, suanki: 'idle', tek: tekEylem, tekBitis: 0, walkKosudan: walkKosudan };
+    return { mixer: mixer, eylem: eylem, suanki: 'idle', tek: tekEylem, tekBitis: 0, walkKosudan: walkKosudan, yeni: yeni };
   }catch(e){ return null; }
 }
 function _yurumeKlibiUret(run, idle){
@@ -10426,6 +10514,7 @@ function modelTekSefer(ud, ad, hiz, bas){
     if(!a.tek[ad] && ad === 'gucluSut') ad = 'sutSag';
     if(!a.tek[ad] && (ad === 'plonjonSol' || ad === 'plonjonSag')) ad = 'plonjon';
     if(!a.tek[ad]) return;
+    if(a.yeni && a.yeni[ad] && ad === 'kayma'){ hiz = 1.0; bas = 0; }   // (2026-11-20-B) yeni kayma klibinde hazırlık bölümü yok, atlanmaz
     var e = a.tek[ad];
     e.reset();
     e.setEffectiveTimeScale(hiz || 1.4);   // futbolda vurus hizli - klip biraz hizlandirildi
@@ -19078,6 +19167,8 @@ function sayAyarCiz(){
       + '<button type="button" onclick="ayarYaziDongu()">' + ((YAZI_OLCEK.find(function(x){ return x.k === (AYAR.yaziOlcek || 1); }) || YAZI_OLCEK[1]).ad) + '</button></div>'
     + '<div class="sh-ayar"><div class="et">Radar<small>Alt ortadaki mini saha</small></div>'
       + '<button type="button" class="' + (AYAR.radar ? '' : 'off') + '" onclick="ayarRadarAcKapa()">' + (AYAR.radar ? 'Açık' : 'Kapalı') + '</button></div>'
+    + '<div class="sh-ayar"><div class="et">Yeni hareketler<small>Kayarak müdahale, kafa, taç, düşme, kaleci tutma ve ilk kontrol (yeni motor, deneme) - sonraki maçta uygulanır</small></div>'
+      + '<button type="button" class="' + (yeniHareketAcik() ? '' : 'off') + '" onclick="ayarYeniHareketAcKapa()">' + (yeniHareketAcik() ? 'Açık' : 'Kapalı') + '</button></div>'
     + '</div>';
 
   h += '</div>';
@@ -19208,6 +19299,7 @@ function ayarMacDongu(k){
 }
 function ayarSesAcKapa(){ AYAR.ses = !AYAR.ses; if(AYAR.ses) sesBaslat(); ayarKaydet(); ayarUygula(); sayAyarCiz();
   try{ if(SAHA_SES.gain) SAHA_SES.gain.gain.value = _sahaMuzikDuzey(); }catch(e){self.__ds&&self.__ds(15750,e)} }
+function ayarYeniHareketAcKapa(){ AYAR.yeniHareket = !yeniHareketAcik(); ayarKaydet(); sayAyarCiz(); }
 function ayarRadarAcKapa(){ AYAR.radar = !AYAR.radar; ayarKaydet(); ayarUygula(); if(AYAR.radar) radar(); sayAyarCiz(); }
 function ayarSesKanal(k, v){
   AYAR[k] = Math.max(0, Math.min(100, parseInt(v, 10) || 0)); ayarKaydet();
@@ -21853,7 +21945,7 @@ function otoKaliteUygula(sv){
 /* ---------- surum ---------- */
 // Puan Tablosu (index.html) ve Admin Paneli (admin.html) ile AYNI deger. Ucu birlikte
 // dagitildigi icin tek surum numarasi kullanilir; guncellerken ucunu de degistirin.
-window.APP_BUILD='2026-11-20-A';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-20-B';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 window.sahaSurumYazi = function(){ return (window.APP_SURUM ? 'V' + window.APP_SURUM + ' (' + window.APP_BUILD + ')' : window.APP_BUILD); };
@@ -27731,6 +27823,7 @@ function topKontrol(dt){
     bVel.x = bVel.x * _ilk + _gx * 0.6 + _f.x * 1.2; bVel.z = bVel.z * _ilk + _gz * 0.6 + _f.z * 1.2; bSpin = 0;
     p._alT = 0.3;
     topaDokundu(p);
+    try{ if(oyuncuHiz < 3.5 && p.obj.userData.hazirModel) modelTekSefer(p.obj.userData, 'kontrol', 1.0); }catch(e){}   // (2026-11-20-B) ilk kontrol hareketi (yalnız yavaşken - koşuyu kesmez)
     p.tcd = 0.16; sonDokunan = p.team; sonDokunanOyuncu = p; sonVurusTuru = 'sekme';
     gurultu(0.05, 0.07, 600);
     return;
