@@ -93,7 +93,7 @@ const b2Kova = (e) => { const x = String(e.B2_BUCKET || '').trim(); return /^[a-
    gizlidir. Telefonda kopyalarken değerler yer değiştirebiliyor: kimlik yanlışsa wrangler.toml'daki B2_ANAHTAR_ID kullanılır;
    uygulama anahtarı (K ile başlar) yanlışlıkla B2_KEY_ID'ye girildiyse oradan alınır. */
 export function b2Anahtar(e) {
-  const t = (v) => String(v || '').trim(), kimlikMi = (v) => /^[0-9a-f]{12,40}$/.test(v), gizliMi = (v) => /^K[0-9A-Za-z+\/]{20,}$/.test(v);
+  const t = (v) => String(v || '').trim(), kimlikMi = (v) => /^[0-9a-f]{12,40}$/.test(v), gizliMi = (v) => /^K\S{20,60}$/.test(v) && !/^cfu/.test(v);
   const a = t(e.B2_KEY_ID), b = t(e.B2_APP_KEY);
   const id = kimlikMi(a) ? a : kimlikMi(b) ? b : t(e.B2_ANAHTAR_ID);
   const gizli = gizliMi(b) ? b : gizliMi(a) ? a : '';
