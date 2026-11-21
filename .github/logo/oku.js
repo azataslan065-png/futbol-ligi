@@ -7,11 +7,12 @@ const DB = 'https://superlig-208e3-default-rtdb.europe-west1.firebasedatabase.ap
   const auth = new GoogleAuth({ credentials: SAJ, scopes: ['https://www.googleapis.com/auth/firebase.database', 'https://www.googleapis.com/auth/userinfo.email'] });
   const tok = (await (await auth.getClient()).getAccessToken()).token;
   const al = async (y, q) => { const r = await fetch(DB + y + '.json' + (q || ''), { headers: { Authorization: 'Bearer ' + tok } }); return r.ok ? r.json() : { HATA: r.status }; };
-  for (const kok of ['test/', '']) {
+  for (const kok of ['test/sahaVeri/', 'test/', 'sahaVeri/']) {
     const ligler = await al(kok + 'leagues', '?shallow=true') || {};
     console.log('\n===== ' + (kok || 'kök/') + 'leagues: ' + Object.keys(ligler).length + ' lig');
-    for (const lig of Object.keys(ligler).slice(-4)) {
+    for (const lig of Object.keys(ligler)) {
       const tk = await al(kok + 'leagues/' + lig + '/teams') || {};
+      if (!Object.keys(tk).length) continue;
       console.log('-- lig ' + lig + ': ' + Object.keys(tk).length + ' takım');
       for (const [id, x] of Object.entries(tk).slice(0, 12)) {
         const l = String((x && x.logo) || '');
