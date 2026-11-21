@@ -203,7 +203,7 @@ final class Guncelle {
         kart.addView(ayrac, ap);
         LinearLayout bilgiS = new LinearLayout(a); bilgiS.setGravity(Gravity.CENTER_VERTICAL);
         bilgiS.addView(iDaire(a, 34, 18), new LinearLayout.LayoutParams(dp(a, 34), dp(a, 34)));
-        TextView bilgi = yazi(a, "Uygulamayı kullanmaya devam etmek için güncellemenizi gerçekleştirmeniz önerilir.", 13.5f, Color.parseColor("#A9A6C9"), false);
+        TextView bilgi = yazi(a, "Güncelleme Uygulama Merkezi'nden yapılır. Uygulamayı kullanmaya devam etmek için güncellemeyi orada kur.", 13.5f, Color.parseColor("#A9A6C9"), false);
         bilgi.setPadding(dp(a, 14), 0, 0, 0); bilgi.setLineSpacing(0, 1.2f); bilgiS.addView(bilgi, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
         LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT); bp.bottomMargin = dp(a, 16); kart.addView(bilgiS, bp);
 
@@ -242,7 +242,9 @@ final class Guncelle {
             dugmeler.addView(sonra, p);
         }
         Button g = dugme(a, anaYazi, true);
-        g.setOnClickListener(v -> indir(a, ad, url, boyut));
+        // (2026-11-21) Güncelleme yalnızca Uygulama Merkezi'nden yapılır: düğme mağazadaki sayfayı açar (bkz. Magaza).
+        if (anaYazi.equals("Güncelle")) { g.setText("Mağazada güncelle"); g.setOnClickListener(v -> Magaza.ac(a)); }
+        else g.setOnClickListener(v -> indir(a, ad, url, boyut));
         dugmeler.addView(g, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
     }
 
