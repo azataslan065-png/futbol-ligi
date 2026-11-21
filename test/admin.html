@@ -3526,7 +3526,7 @@ var db = firebase.database();
 /* SÜRÜM DAMGASI: Aynı sorunu üç kez yaşadık - dosyanın güncellenip güncellenmediği
    ekrandan anlaşılamıyordu. Bu damga admin panelindeki teşhis ekranında görünür;
    yeni dosyayı yükleyip yüklemediğinizi tek bakışta doğrulayabilirsiniz. */
-window.APP_BUILD='2026-11-20-G';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
+window.APP_BUILD='2026-11-21-A';try{ /* (2026-11-07-K) ESKİ UYGULAMA KABUĞU: zorunlu güncellemeden önceki APK'lar güncellemeyi günde bir kez denetliyordu. Sayfa eski kabuğu tanır (SahaApp.kabuk yok) ve denetimi hemen başlatır; yeni sürüm zorunlu olarak gösterilir. */ if(window.SahaApp&&typeof SahaApp.kabuk!=='function'&&typeof SahaApp.guncellemeDenetle==='function'){ var _ek=0; try{ _ek=+sessionStorage.getItem('_eskiKabuk')||0; }catch(e){} if(Date.now()-_ek>600000){ try{ sessionStorage.setItem('_eskiKabuk',String(Date.now())); }catch(e){} setTimeout(function(){ try{ SahaApp.guncellemeDenetle(); }catch(e){} },1500); } } }catch(e){}
 /* (2026-10-31-B, kullanıcı: "V1.4.0 gibi kendin eklediğin etiketleri kaldır, admin zaten giriyor") kendi eklediğim APP_SURUM etiketi kaldırıldı;
    sürüm adlarını yalnızca yöneticinin girdiği sürüm notları gösterir, uygulama yalnızca derleme damgasını (APP_BUILD) yazar. */
 try{ SahaGuncelleme.baslat(function(y){ return db.ref(y); }, { gecilebilir:true, dosya:'admin', kap:function(){ return document.getElementById('loginWrap'); }, giris:function(){ var e = document.getElementById('loginWrap'); return !!(e && getComputedStyle(e).display !== 'none'); } }); }catch(e){}   // yönetici geçebilir
@@ -11398,7 +11398,12 @@ function _havuzSatirHtml(id, o){
   var bilgi = escHtml(o.mevki||'') + ' · güç <b>' + (o.guc||0) + '</b>' + (sahipAd ? ' · ' + escHtml(sahipAd) + (o.baslangic ? ' (başlangıç)' : '') : '') + (artAktif && o.artirma.eskiSahip ? ' · sahibi: ' + escHtml((_kullanicilar[o.artirma.eskiSahip]||{}).ad || '?') : '');
   var mevkiSec = '<select onchange="havuzMevkiGuncelle(\''+id+'\', this.value)" title="Mevki">'
     + ['KL','STP','SĞB','SLB','GÖ','DOS','MOS','OOS','SĞO','SLO','SĞK','SLK','SLA','SĞA','SF','GF'].map(function(m){ return '<option'+(String(o.mevki||'').replace(/[0-9]/g,'')===m?' selected':'')+'>'+m+'</option>'; }).join('') + '</select>';
-  var alt = mevkiSec;
+  /* (2026-11-21-A) Haftalık form: otomatik (SAHA ile aynı hesap) ya da bu hafta için elle. */
+  var _fh = _admIsoHafta(), _fe = (o.formElle != null && o.formHafta === _fh) ? Math.round(Number(o.formElle)||0) : null;
+  var formSec = '<select onchange="havuzFormGuncelle(\''+id+'\', this.value)" title="Bu haftanın formu">'
+    + '<option value="oto"'+(_fe===null?' selected':'')+'>Form: oto ('+_admFormOk(_admFormOto(id))+')</option>'
+    + [[2,'↑ Çok iyi'],[1,'↗ İyi'],[0,'→ Normal'],[-1,'↘ Düşük'],[-2,'↓ Kötü']].map(function(f){ return '<option value="'+f[0]+'"'+(_fe===f[0]?' selected':'')+'>'+f[1]+'</option>'; }).join('') + '</select>';
+  var alt = mevkiSec + formSec;
   if(!o.sahip){
     alt += '<label class="hv-fiyat" title="Doğrudan satış fiyatı"><input type="number" value="'+(o.fiyat||0)+'" min="0" onchange="havuzFiyatGuncelle(\''+id+'\', this.value)"><b>SL</b></label>'
       + '<button class="hv-dug '+(o.satista?'satista':'pasif')+'" onclick="havuzSatisAcKapa(\''+id+'\')">'+(o.satista?'● Satışta':'○ Satışta değil')+'</button>';
@@ -11424,6 +11429,18 @@ function havuzYetimleriTemizle(){
   });
 }
 
+function _admIsoHafta(ts){ var d = new Date(ts || Date.now()); d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  var y = d.getUTCFullYear(), w = Math.ceil(((d - Date.UTC(y, 0, 1)) / 864e5 + 1) / 7); return y + '-W' + (w < 10 ? '0' : '') + w; }
+function _admFormOto(id){ var x = 2166136261, str = String(id || '') + '|' + _admIsoHafta(); for (var i = 0; i < str.length; i++){ x ^= str.charCodeAt(i); x = Math.imul(x, 16777619); }
+  var r = ((x >>> 0) % 1000) / 1000; return r < 0.10 ? 2 : (r < 0.35 ? 1 : (r < 0.70 ? 0 : (r < 0.90 ? -1 : -2))); }
+function _admFormOk(k){ return ['↓','↘','→','↗','↑'][k + 2] || '→'; }
+function havuzFormGuncelle(id, v){
+  if(!_havuz[id]) return;
+  var g = v === 'oto' ? { formElle:null, formHafta:null } : { formElle:Math.max(-2, Math.min(2, parseInt(v, 10) || 0)), formHafta:_admIsoHafta() };
+  firebase.database().ref('oyuncuHavuzu/'+id).update(g)
+    .then(function(){ toast(' '+(_havuz[id].ad||'')+' formu: '+(v === 'oto' ? 'otomatik' : _admFormOk(g.formElle))); })
+    .catch(function(e){ toast(' Güncellenemedi: '+((e&&e.message)||''),'er'); });
+}
 function havuzMevkiGuncelle(id, m){
   if(!_havuz[id]) return;
   firebase.database().ref('oyuncuHavuzu/'+id+'/mevki').set(m)
