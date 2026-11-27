@@ -164,6 +164,23 @@ const { ref, set, update, get, remove, runTransaction } = require('firebase/data
   await bek('UM: davetsiz hata bildiremez', false, () => set(ref(umX, 'um/reports/r2'), { uid: 'UM_X', app: 'a1', text: 'x', t: 1 }));
   await bek('UM: sahip davet oluşturur', true, () => set(ref(admin, 'um/invites/yenikod01'), { name: 'Yeni', active: true }));
   await bek('UM: sahip bildirimleri ve istatistikleri okur', true, async () => { await get(ref(admin, 'um/reports')); await get(ref(admin, 'um/members')); return get(ref(admin, 'um/events')); });
+  // (2026-11-27) uygulama bazında test erişimi, yalnızca yönetici uygulamaları, geliştirici başvuruları
+  await bek('UM: sahip bir kişiye tek uygulamanın testini açar', true, () => set(ref(admin, 'um/invites/kodaktif1/test/a1'), true));
+  await bek('UM: testi açılan kişi o uygulamanın testini okur', true, () => get(ref(umA, 'um/beta/a1')));
+  await bek('UM: testi açılmayan uygulamanın testini okuyamaz', false, () => get(ref(umA, 'um/beta/a2')));
+  await bek('UM: tek test açılan kişi tüm test listesini okuyamaz', false, () => get(ref(umA, 'um/beta')));
+  await bek('UM: sahip yönetici uygulamalarını yazar', true, () => set(ref(admin, 'um/ozel'), [{ id: 'yon', name: 'Yönetici' }]));
+  await bek('UM: davetli yönetici uygulamalarını okuyamaz', false, () => get(ref(umA, 'um/ozel')));
+  await bek('UM: sahip geliştirici kodu oluşturur', true, () => set(ref(admin, 'um/gelistirici/gelkod01'), { name: 'Dev', active: true }));
+  await bek('UM: geçersiz geliştirici koduyla bağlanılamaz', false, () => set(ref(umX, 'um/gclaims/UM_X'), 'uydurma'));
+  await bek('UM: geliştirici koduyla bağlanılır', true, () => set(ref(umX, 'um/gclaims/UM_X'), 'gelkod01'));
+  await bek('UM: geliştirici kendi uygulamasını yükler', true, () => set(ref(umX, 'um/gapps/gelkod01/oyunum'), { name: 'Oyunum', durum: 'bekliyor' }));
+  await bek('UM: geliştirici kendi başvurusunu onaylayamaz', false, () => set(ref(umX, 'um/gapps/gelkod01/oyunum'), { name: 'Oyunum', durum: 'yayinda' }));
+  await bek('UM: geliştirici başkasının alanına yazamaz', false, () => set(ref(umX, 'um/gapps/baskakod/x1'), { name: 'X', durum: 'bekliyor' }));
+  await bek('UM: geliştirici kataloğa yazamaz', false, () => set(ref(umX, 'um/catalog/store/name'), 'X'));
+  await bek('UM: davetli geliştirici alanına yazamaz', false, () => set(ref(umA, 'um/gapps/gelkod01/y1'), { name: 'Y', durum: 'bekliyor' }));
+  await bek('UM: sahip başvuruyu onaylar', true, () => set(ref(admin, 'um/gapps/gelkod01/oyunum/durum'), 'yayinda'));
+  await bek('UM: kapatılan geliştirici artık yazamaz', false, async () => { await set(ref(admin, 'um/gelistirici/gelkod01/active'), false); return set(ref(umX, 'um/gapps/gelkod01/oyunum'), { name: 'Oyunum', durum: 'bekliyor' }); });
   await bek('UM: davet iptal edilince katalog kapanır', false, async () => { await set(ref(admin, 'um/invites/kodaktif1/active'), false); return get(ref(umA, 'um/catalog')); });
   // 9) Kök (yayındaki eski sürüm) değişmedi
   await bek('Kök: eski kural aynen (anonim kendi alanına yazar)', true, () => set(ref(anon, 'kullanicilar/v_kok/para'), 6));
