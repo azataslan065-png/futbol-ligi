@@ -69,6 +69,8 @@ async function surumAl(){
 }
 async function apkYukle(ad, buf){
   const r = await surumAl();
+  // yarıda kalmış önceki bir denemeden aynı adlı dosya kalmışsa önce silinir (yoksa GitHub 422 verir)
+  try{ for(const a of (await gh(`/releases/${r.id}/assets?per_page=100`)) || []) if(a.name === ad) await gh(`/releases/assets/${a.id}`, { method: 'DELETE' }); }catch(e){}
   return gh(`https://uploads.github.com/repos/${REPO}/releases/${r.id}/assets?name=${encodeURIComponent(ad)}`, { method: 'POST', headers: { 'Content-Type': 'application/vnd.android.package-archive' }, body: buf });
 }
 // Tek işlemde birden fazla dosya ekle / sil (Git veri API'si)
@@ -119,6 +121,8 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
       if(!m) continue;
       // yarıda kalmış yüklemeler (6 saat) temizlenir
       if(m.durum !== 'hazir' && m.durum !== 'isleniyor' && Date.now() - (m.t || 0) > 6 * 3600e3){ await db.ref(`um/parca/${kod}/${f}`).remove(); await db.ref(`um/yukleme/${kod}/${f}`).remove(); continue; }
+      // işlenirken görev çökmüşse (15 dk) yeniden sıraya alınır
+      if(m.durum === 'isleniyor' && Date.now() - (m.t || 0) > 15 * 60e3){ await db.ref(`um/yukleme/${kod}/${f}/durum`).set('hazir'); m.durum = 'hazir'; }
       if(m.durum === 'hazir') isler.push({ kod, f, m });
     }
     if(!isler.length){ if(SINAMA && tur > 1) break; if(tur === 1) console.log('Bekleyen dosya yok'); await bekle(SINAMA ? 1000 : 15000); continue; }
