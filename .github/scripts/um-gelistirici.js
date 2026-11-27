@@ -155,7 +155,7 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
       await ref.transaction((x) => {
         if(!x) return x;
         const yer = PH + s.f, degis = (u) => (u === yer ? (s.hata ? '' : s.url) : u);
-        x.icon = degis(x.icon); x.video = degis(x.video); x.apkUrl = degis(x.apkUrl);
+        for(const k of ['icon', 'video', 'apkUrl']) if(x[k] != null) x[k] = degis(x[k]);
         if(Array.isArray(x.screenshots)) x.screenshots = x.screenshots.map(degis).filter(Boolean);
         if(s.hata) x.hata = s.hata; else if(x.hata && !yerTutucuVar(x)) delete x.hata;
         if(s.apk && !s.hata){ x.paket = s.apk.paket; if(!x.version) x.version = s.apk.surum; x.size = mb(s.boyut); x.apkMs = Date.now(); if(!x.minAndroid && SDK_ANDROID[s.apk.minSdk]) x.minAndroid = SDK_ANDROID[s.apk.minSdk]; }
