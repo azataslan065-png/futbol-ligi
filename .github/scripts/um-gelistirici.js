@@ -124,8 +124,9 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
     if(!isler.length){ if(SINAMA && tur > 1) break; if(tur === 1) console.log('Bekleyen dosya yok'); await bekle(SINAMA ? 1000 : 15000); continue; }
     const ekle = [], sonuc = [];
     for(const j of isler){
-      const al = await db.ref(`um/yukleme/${j.kod}/${j.f}/durum`).transaction((d) => d === 'hazir' ? 'isleniyor' : undefined);
-      if(!al.committed) continue;
+      // Not: işlem ilk kez yerel önbellekle (null) çağrılabilir; null döndürülünce sunucu gerçek değerle yeniden çağırır
+      const al = await db.ref(`um/yukleme/${j.kod}/${j.f}/durum`).transaction((d) => d === 'hazir' ? 'isleniyor' : d === null ? null : undefined);
+      if(!al.committed || al.snapshot.val() !== 'isleniyor') continue;
       try{
         const parcalar = (await db.ref(`um/parca/${j.kod}/${j.f}`).once('value')).val() || {};
         const bufs = []; for(let i = 0; i < j.m.parca; i++){ if(typeof parcalar[i] !== 'string') throw new Error('Dosya eksik geldi, yeniden yükle.'); bufs.push(Buffer.from(parcalar[i], 'base64')); }
