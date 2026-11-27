@@ -185,7 +185,9 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
     if(sil.length) await isle([], sil, `Uygulama Merkezi: eski geliştirici dosyaları kaldırıldı (${sil.length})`);
   }
   if(SINAMA){
-    const x = (await db.ref(`um/gapps/${SK}/${SA_}`).once('value')).val() || {};
+    // aynı anda çalışan zamanlanmış görev dosyaları almış olabilir: yer tutucular kalkana kadar (en çok 5 dk) bekle
+    let x = {};
+    for(const son = Date.now() + 300e3; Date.now() < son; await bekle(10000)){ x = (await db.ref(`um/gapps/${SK}/${SA_}`).once('value')).val() || {}; if(!yerTutucuVar(x)) break; }
     console.log('SONUÇ', JSON.stringify(x));
     const ok = x.icon && x.icon.startsWith(PAGES) && x.apkUrl && x.apkUrl.includes('/releases/download/') && x.paket && (x.screenshots || []).length === 1 && !yerTutucuVar(x);
     const img = ok && (await fetch(x.icon)).status, apk = ok && (await fetch(x.apkUrl, { method: 'HEAD' })).status;
