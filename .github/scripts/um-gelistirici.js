@@ -118,7 +118,7 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
     const tum = (await db.ref('um/yukleme').once('value')).val() || {};
     const isler = [];
     for(const [kod, l] of Object.entries(tum)) for(const [f, m] of Object.entries(l || {})){
-      if(!m) continue;
+      if(!m || (kod === 'sinama0') !== SINAMA) continue;   // deneme kayıtlarına yalnızca deneme görevi dokunur
       // yarıda kalmış yüklemeler (6 saat) temizlenir
       if(m.durum !== 'hazir' && m.durum !== 'isleniyor' && Date.now() - (m.t || 0) > 6 * 3600e3){ await db.ref(`um/parca/${kod}/${f}`).remove(); await db.ref(`um/yukleme/${kod}/${f}`).remove(); continue; }
       // işlenirken görev çökmüşse (15 dk) yeniden sıraya alınır
@@ -194,15 +194,15 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
     for(const son = Date.now() + 300e3; Date.now() < son; await bekle(10000)){ x = (await db.ref(`um/gapps/${SK}/${SA_}`).once('value')).val() || {}; if(!yerTutucuVar(x)) break; }
     console.log('SONUÇ', JSON.stringify(x));
     const ok = x.icon && x.icon.startsWith(PAGES) && x.apkUrl && x.apkUrl.includes('/releases/download/') && x.paket && (x.screenshots || []).length === 1 && !yerTutucuVar(x);
-    const img = ok && (await fetch(x.icon)).status, apk = ok && (await fetch(x.apkUrl, { method: 'HEAD' })).status;
-    console.log(ok && img === 200 && apk === 200 ? 'SINAMA BAŞARILI' : 'SINAMA BAŞARISIZ', img, apk);
+    const img = ok && (await fetch(x.icon)).status, apk = ok && (await fetch(x.apkUrl, { headers: { Range: 'bytes=0-15' } })).status;
+    console.log(ok && img === 200 && (apk === 200 || apk === 206) ? 'SINAMA BAŞARILI' : 'SINAMA BAŞARISIZ', img, apk);
     // temizlik
     await db.ref(`um/gapps/${SK}/${SA_}`).set({ name: 'Deneme', engel: true });
     const sil = []; try{ for(const d of await gh(`/contents/${DIR}/${SK}/${SA_}?ref=main`)) sil.push(d.path); }catch(e){}
     if(sil.length) await isle([], sil, 'Uygulama Merkezi: deneme dosyaları kaldırıldı');
     try{ const r = await surumAl(); for(const a of await gh(`/releases/${r.id}/assets?per_page=100`)) if(a.name.startsWith(SK + '-')) await gh(`/releases/assets/${a.id}`, { method: 'DELETE' }); }catch(e){ console.log(e.message); }
     await db.ref(`um/gapps/${SK}`).remove(); await db.ref(`um/parca/${SK}`).remove(); await db.ref(`um/yukleme/${SK}`).remove();
-    process.exit(ok && img === 200 && apk === 200 ? 0 : 1);
+    process.exit(ok && img === 200 && (apk === 200 || apk === 206) ? 0 : 1);
   }
   process.exit(0);
 })().catch((e) => { console.error(e); process.exit(1); });
