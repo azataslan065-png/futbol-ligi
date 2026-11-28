@@ -26,6 +26,7 @@ const [OWNER, NAME] = REPO.split('/');
 const PAGES = `https://${OWNER}.github.io/${NAME}/`, DIR = 'um-gelistirici', TAG = 'um-gelistirici';
 const SURE = +(process.env.SURE || 270) * 1000, BASLA = Date.now();
 const PH = 'yukleniyor:';
+const SINAMA_ = process.env.SINAMA === '1';
 const bekle = (ms) => new Promise((r) => setTimeout(r, ms));
 async function gh(p, opt = {}){
   const r = await fetch(p.startsWith('http') ? p : `https://api.github.com/repos/${REPO}${p}`, Object.assign({}, opt, { headers: Object.assign({ Authorization: 'Bearer ' + TOKEN, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }, opt.headers || {}) }));
@@ -95,6 +96,49 @@ async function yayindaMi(url, sn = 240){
   }
   return false;
 }
+/* ---------- SÜRÜM SABİTLEME (2026-11-28) ----------
+   Kullanıcılara GitHub'daki "son" APK değil, yönetici ya da geliştiricinin "Güncelle" ile onayladığı kopya gider.
+   İstek: um/sabitle/<kod>/<uygulama> = { kaynak, t, durum: 'bekliyor' }   (<kod> = 'y' yönetici uygulamaları, değilse geliştirici kodu)
+   Kaynak APK indirilir, "um-gelistirici" sürümüne s-<kod>-<uygulama>-<zaman>.apk adıyla kopyalanır; sonuç aynı kayda yazılır.
+   Geliştirici uygulamasında kayıt (um/gapps) da hemen güncellenir; yönetici uygulamasında panel sonucu alıp kataloğa yazar. */
+async function sabitleIsle(db){
+  const tum = (await db.ref('um/sabitle').once('value')).val() || {};
+  let n = 0;
+  for(const [kod, l] of Object.entries(tum)) for(const [app, x] of Object.entries(l || {})){
+    if(!x || x.durum !== 'bekliyor' || (kod === 'sinama0') !== SINAMA_) continue;
+    const ref = db.ref(`um/sabitle/${kod}/${app}`);
+    const al = await ref.child('durum').transaction((d) => d === 'bekliyor' ? 'isleniyor' : d === null ? null : undefined);
+    if(!al.committed || al.snapshot.val() !== 'isleniyor') continue;
+    n++;
+    try{
+      if(!/^https:\/\/\S+$/i.test(x.kaynak || '')) throw new Error('Kaynak bağlantısı geçersiz.');
+      const r = await fetch(x.kaynak, { redirect: 'follow' });
+      if(!r.ok) throw new Error('Kaynak APK indirilemedi (' + r.status + ').');
+      const buf = Buffer.from(await r.arrayBuffer());
+      if(buf.length > 150 * 1048576) throw new Error('APK 150 MB\'tan büyük.');
+      const b = apkBilgi(buf); if(!b.paket) throw new Error('Kaynak dosya geçerli bir APK değil.');
+      const ms = Date.now(), on = `s-${guvenli(kod)}-${guvenli(app)}-`;
+      const a = await apkYukle(on + ms + '.apk', buf);
+      const sonuc = { durum: 'tamam', url: a.browser_download_url, ms, boyut: buf.length, size: mb(buf.length), surum: b.surum, paket: b.paket, minAndroid: SDK_ANDROID[b.minSdk] || '', t: ms };
+      await ref.update(sonuc);
+      if(kod !== 'y') await db.ref(`um/gapps/${kod}/${app}`).transaction((g) => {
+        if(!g) return g;
+        g.apkUrl = sonuc.url; g.apkMs = ms; g.size = sonuc.size; g.paket = b.paket; if(b.surum) g.version = b.surum;
+        if(!g.minAndroid && sonuc.minAndroid) g.minAndroid = sonuc.minAndroid; delete g.hata; return g;
+      });
+      // eski sabit kopyalar: son 5 tanesi kalır (eski sürümü indirme için)
+      try{
+        const r2 = await surumAl(), l2 = ((await gh(`/releases/${r2.id}/assets?per_page=100`)) || []).filter((z) => z.name.startsWith(on)).sort((p, q) => q.name.localeCompare(p.name));
+        for(const z of l2.slice(5)) await gh(`/releases/assets/${z.id}`, { method: 'DELETE' });
+      }catch(e){ console.log('Eski kopya silinemedi', e.message); }
+      console.log('Sabitlendi', kod, app, b.paket, b.surum, sonuc.url);
+    }catch(e){
+      console.log('Sabitleme HATA', kod, app, e.message);
+      await ref.update({ durum: 'hata', mesaj: e.message, t: Date.now() });
+    }
+  }
+  return n;
+}
 const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])].some((u) => typeof u === 'string' && u.startsWith(PH));
 
 (async () => {
@@ -109,12 +153,14 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
       for(let i = 0; i < n; i++) await db.ref(`um/parca/${SK}/${f}/${i}`).set(buf.subarray(i * P, (i + 1) * P).toString('base64'));
       await db.ref(`um/yukleme/${SK}/${f}`).set({ app: SA_, alan, ad, tur: '', boyut: buf.length, parca: n, t: Date.now(), durum: 'hazir' }); };
     await db.ref(`um/gapps/${SK}/${SA_}`).set({ name: 'Deneme', kind: 'apk', icon: PH + 'aaaaaaaaaaaaaaaa', apkUrl: PH + 'bbbbbbbbbbbbbbbb', screenshots: [PH + 'cccccccccccccccc'], engel: true });
+    await db.ref(`um/sabitle/${SK}/${SA_}`).set({ kaynak: 'https://github.com/azataslan065-png/uygulama-merkezi/releases/download/apk/Uygulama-Merkezi.apk', t: Date.now(), durum: 'bekliyor' });
     await parcala('aaaaaaaaaaaaaaaa', png, 'icon', 'icon.png'); await parcala('bbbbbbbbbbbbbbbb', apk, 'apk', 'x.apk'); await parcala('cccccccccccccccc', png, 'shot0', 's.jpg');
     console.log('Deneme yüklemesi hazır, APK', apk.length, 'bayt');
   }
   let tur = 0;
   while(Date.now() - BASLA < SURE){
     tur++;
+    const sabitlenen = await sabitleIsle(db);
     const tum = (await db.ref('um/yukleme').once('value')).val() || {};
     const isler = [];
     for(const [kod, l] of Object.entries(tum)) for(const [f, m] of Object.entries(l || {})){
@@ -125,6 +171,7 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
       if(m.durum === 'isleniyor' && Date.now() - (m.t || 0) > 15 * 60e3){ await db.ref(`um/yukleme/${kod}/${f}/durum`).set('hazir'); m.durum = 'hazir'; }
       if(m.durum === 'hazir') isler.push({ kod, f, m });
     }
+    if(!isler.length && sabitlenen) continue;
     if(!isler.length){ if(SINAMA && tur > 1) break; if(tur === 1) console.log('Bekleyen dosya yok'); await bekle(SINAMA ? 1000 : 15000); continue; }
     const ekle = [], sonuc = [];
     for(const j of isler){
@@ -193,6 +240,9 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
     let x = {};
     for(const son = Date.now() + 300e3; Date.now() < son; await bekle(10000)){ x = (await db.ref(`um/gapps/${SK}/${SA_}`).once('value')).val() || {}; if(!yerTutucuVar(x)) break; }
     console.log('SONUÇ', JSON.stringify(x));
+    const sb = (await db.ref(`um/sabitle/${SK}/${SA_}`).once('value')).val() || {};
+    console.log('SABİTLEME', JSON.stringify(sb), sb.durum === 'tamam' && /\/s-sinama0-deneme-\d+\.apk$/.test(sb.url || '') ? 'BAŞARILI' : 'BAŞARISIZ');
+    await db.ref(`um/sabitle/${SK}`).remove();
     const ok = x.icon && x.icon.startsWith(PAGES) && x.apkUrl && x.apkUrl.includes('/releases/download/') && x.paket && (x.screenshots || []).length === 1 && !yerTutucuVar(x);
     const img = ok && (await fetch(x.icon)).status, apk = ok && (await fetch(x.apkUrl, { headers: { Range: 'bytes=0-15' } })).status;
     console.log(ok && img === 200 && (apk === 200 || apk === 206) ? 'SINAMA BAŞARILI' : 'SINAMA BAŞARISIZ', img, apk);
@@ -200,7 +250,7 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
     await db.ref(`um/gapps/${SK}/${SA_}`).set({ name: 'Deneme', engel: true });
     const sil = []; try{ for(const d of await gh(`/contents/${DIR}/${SK}/${SA_}?ref=main`)) sil.push(d.path); }catch(e){}
     if(sil.length) await isle([], sil, 'Uygulama Merkezi: deneme dosyaları kaldırıldı');
-    try{ const r = await surumAl(); for(const a of await gh(`/releases/${r.id}/assets?per_page=100`)) if(a.name.startsWith(SK + '-')) await gh(`/releases/assets/${a.id}`, { method: 'DELETE' }); }catch(e){ console.log(e.message); }
+    try{ const r = await surumAl(); for(const a of await gh(`/releases/${r.id}/assets?per_page=100`)) if(a.name.startsWith(SK + '-') || a.name.startsWith('s-' + SK + '-')) await gh(`/releases/assets/${a.id}`, { method: 'DELETE' }); }catch(e){ console.log(e.message); }
     await db.ref(`um/gapps/${SK}`).remove(); await db.ref(`um/parca/${SK}`).remove(); await db.ref(`um/yukleme/${SK}`).remove();
     process.exit(ok && img === 200 && (apk === 200 || apk === 206) ? 0 : 1);
   }
