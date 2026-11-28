@@ -132,6 +132,8 @@ final class Guncelle {
                 final String ad = j.optString("ad", ""), url = j.optString("url", "");
                 // Test: her yeni derleme (sayfa APK'ya gömülü, bkz. Sayfa). Kök: sürüm adı (kok-surum.txt) değişince.
                 boolean yeni = j.optLong("kod", 0) > yerelKod && ad.length() > 0 && url.startsWith("https://") && (BuildConfig.GOMULU || !ad.equals(yerelAd));
+                // (2026-11-28) Mağazadaki uygulamada güncelleme yalnızca yöneticinin onayladığı sürümle gelir (bkz. Magaza.onayliSurum)
+                if (yeni) { Long onay = Magaza.onayliSurum(a); if (onay != null && pi.lastUpdateTime >= onay - 120000) yeni = false; }
                 sp.edit().putLong("son", System.currentTimeMillis()).apply(); tekrarDenendi = false;
                 Teshis.olay("guncelle", (yeni ? "yeni " : "güncel ") + ad, yerelAd + " / " + yerelKod);
                 if (!yeni) { H.post(Guncelle::bekleKapat); if (elle) mesaj(a, "Uygulama güncel (" + yerelAd + "). Yeni sürüm hazırlanıyorsa birkaç dakika sonra yeniden dene."); return; }

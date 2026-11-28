@@ -127,6 +127,19 @@ final class Magaza {
         catch (Exception e) { return 0; }
     }
 
+    /* ONAYLI SÜRÜM (2026-11-28, kullanıcı: "kök sürüme sadece admin onayı ile yüklenebilir"). Uygulama Uygulama Merkezi'ndeyse, güncelleme
+       ancak yönetici o sürümü mağazada onayladığında ("Güncelle" ile sabitlediğinde) vardır. GitHub'a yeni APK yüklenmesi tek başına
+       güncelleme sayılmaz. Dönüş: mağazadaki onaylı sürümün zamanı (ms); uygulama mağazada değilse ya da dosya okunamazsa null. */
+    static Long onayliSurum(android.content.Context c) {
+        try {
+            JSONObject apps = new JSONObject(oku(SITE + "guncelleme/surumler.json?t=" + System.currentTimeMillis())).optJSONObject("apps");
+            if (apps == null) return null;
+            Iterator<String> it = apps.keys();
+            while (it.hasNext()) { JSONObject x = apps.optJSONObject(it.next()); if (x != null && c.getPackageName().equals(x.optString("paket"))) return x.optLong("apkMs", 0); }
+        } catch (Exception ignored) { }
+        return null;
+    }
+
     private static String oku(String adres) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(adres).openConnection();
         c.setConnectTimeout(8000); c.setReadTimeout(10000); c.setRequestProperty("Cache-Control", "no-cache"); c.setRequestProperty("Accept", "application/vnd.github+json");
