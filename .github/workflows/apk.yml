@@ -55,5 +55,21 @@ jobs:
           node -e 'JSON.parse(require("fs").readFileSync("out/surum.json","utf8"))' && cat out/surum.json
           ls -la out
           gh release delete apk -y --cleanup-tag 2>/dev/null || true
+          sleep 5
           gh release create apk out/*.apk out/surum.json --title "APK (derleme $GITHUB_RUN_NUMBER)" --notes "Test: SAHA, Puan Tablosu Test, SAHA Admin Test. Kök (canlı): Puan Tablosu, Admin Paneli. Telefona indirip kur; yeni sürüm eskisinin üstüne kurulur." --latest
           rm -f "$KS_YOL"
+      # (2026-11-28) KÖK SEBEP ("Kaynak APK indirilemedi (404)"): sürüm silinip hemen aynı etiketle yeniden oluşturulunca, etiket silme işi
+      # bitmeden oluşturma yapıldığında GitHub sürümü "taslak" (draft) bırakıyordu; taslaktaki APK herkese 404 veriyordu.
+      # Bu adım her derlemeden sonra taslakları düzeltir: aynı etiketle yayında sürüm varsa fazla taslak silinir, yoksa taslak yayımlanır.
+      - name: Taslak surumleri duzelt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          R="$GITHUB_REPOSITORY"
+          sleep 5
+          gh api "repos/$R/releases?per_page=100" --jq '.[] | select(.draft) | [(.id|tostring), .tag_name] | @tsv' | while IFS=$'\t' read -r id tag; do
+            if gh api "repos/$R/releases/tags/$tag" >/dev/null 2>&1; then gh api -X DELETE "repos/$R/releases/$id" && echo "fazla taslak silindi: $tag"
+            else son=false; [ "$tag" = "apk" ] && son=true
+              gh api -X PATCH "repos/$R/releases/$id" -F draft=false -f tag_name="$tag" -f target_commitish="$GITHUB_SHA" -f make_latest="$son" >/dev/null && echo "taslak yayımlandı: $tag"; fi
+          done
