@@ -118,7 +118,7 @@ async function sabitleIsle(db){
     try{
       if(!/^https:\/\/\S+$/i.test(x.kaynak || '')) throw new Error('Kaynak bağlantısı geçersiz.');
       const r = await fetch(x.kaynak, { redirect: 'follow' });
-      if(!r.ok) throw new Error('Kaynak APK indirilemedi (' + r.status + ').');
+      if(!r.ok) throw new Error('Kaynak APK indirilemedi (' + r.status + '): ' + x.kaynak);
       const buf = Buffer.from(await r.arrayBuffer());
       if(buf.length > 150 * 1048576) throw new Error('APK 150 MB\'tan büyük.');
       const b = apkBilgi(buf); if(!b.paket) throw new Error('Kaynak dosya geçerli bir APK değil.');
@@ -138,7 +138,7 @@ async function sabitleIsle(db){
       }catch(e){ console.log('Eski kopya silinemedi', e.message); }
       console.log('Sabitlendi', kod, app, b.paket, b.surum, sonuc.url);
     }catch(e){
-      console.log('Sabitleme HATA', kod, app, e.message);
+      console.log('Sabitleme HATA', K, kod, app, e.message);
       await ref.update({ durum: 'hata', mesaj: e.message, t: Date.now() });
     }
   }
