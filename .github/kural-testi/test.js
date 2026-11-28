@@ -171,6 +171,13 @@ const { ref, set, update, get, remove, runTransaction } = require('firebase/data
   await bek('UM: tek test açılan kişi tüm test listesini okuyamaz', false, () => get(ref(umA, 'um/beta')));
   await bek('UM: sahip yönetici uygulamalarını yazar', true, () => set(ref(admin, 'um/ozel'), [{ id: 'yon', name: 'Yönetici' }]));
   await bek('UM: davetli yönetici uygulamalarını okuyamaz', false, () => get(ref(umA, 'um/ozel')));
+  // (2026-11-28) yönetici uygulamaları yalnızca sahibin belirlediği mağaza (davet) kodunda görünür
+  await bek('UM: davetli yönetici kodunu yazamaz', false, () => set(ref(umA, 'um/ozelKod'), 'kodaktif1'));
+  await bek('UM: davetli yönetici kodunu okuyamaz', false, () => get(ref(umA, 'um/ozelKod')));
+  await bek('UM: sahip yönetici kodunu belirler', true, () => set(ref(admin, 'um/ozelKod'), 'kodbeta01'));
+  await bek('UM: yönetici kodundaki kişi yönetici uygulamalarını okur', true, () => get(ref(umB, 'um/ozel')));
+  await bek('UM: başka koddaki davetli yine okuyamaz', false, () => get(ref(umA, 'um/ozel')));
+  await bek('UM: davetsiz yönetici uygulamalarını okuyamaz', false, () => get(ref(umX, 'um/ozel')));
   await bek('UM: sahip geliştirici kodu oluşturur', true, () => set(ref(admin, 'um/gelistirici/gelkod01'), { name: 'Dev', active: true }));
   await bek('UM: geçersiz geliştirici koduyla bağlanılamaz', false, () => set(ref(umX, 'um/gclaims/UM_X'), 'uydurma'));
   await bek('UM: geliştirici koduyla bağlanılır', true, () => set(ref(umX, 'um/gclaims/UM_X'), 'gelkod01'));
