@@ -23,9 +23,11 @@ const db = admin.database();
     await db.ref('umtest').update(kopya);
     console.log('umtest kopyalandı:', Object.keys(kopya).join(', '));
   } else console.log('umtest zaten var, dokunulmadı');
-  if (!(await hedefVar('test/skorbord'))) {
-    const sk = (await db.ref('skorbord').once('value')).val();
-    if (sk) { await db.ref('test/skorbord').set(sk); console.log('test/skorbord kopyalandı'); }
-  } else console.log('test/skorbord zaten var, dokunulmadı');
+  // test/skorbord'da 2026-11-16'daki hatadan kalan eksik veri vardı: kopya işareti (_ayrildi) yoksa güncel kök ayarlarıyla yenilenir
+  if (!(await hedefVar('test/skorbord/_ayrildi'))) {
+    const sk = (await db.ref('skorbord').once('value')).val() || {};
+    sk._ayrildi = Date.now();
+    await db.ref('test/skorbord').set(sk); console.log('test/skorbord kökten yenilendi');
+  } else console.log('test/skorbord zaten ayrılmış, dokunulmadı');
   process.exit(0);
 })().catch((e) => { console.error(e.message); process.exit(1); });
