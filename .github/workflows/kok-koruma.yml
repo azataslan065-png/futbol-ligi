@@ -1,0 +1,57 @@
+# KÖK KORUMASI (2026-11-28, kullanıcı: "kök sürümüne sadece admin onayı ile yüklenebilir").
+# Claude oturumlarından gelen bir commit (mesajında "Claude-Session:" olan) onay işareti "[kök-onay]" taşımadan kök dosyalarına
+# dokunursa, bu dosyalar push'tan önceki hâline otomatik geri alınır. Test klasörüne giden değişikliklere dokunulmaz.
+# Kök dosyası: test/ klasöründe ikizi olan kök dosyalar (index.html ↔ test/index.html …) ve android/ (kök APK'ları da derler).
+# ortak/ (kullanıcı kuralı: test ve köke birlikte gider), .github/, veritabanı kuralları ve diğer dosyalar korunmaz.
+# Elle (GitHub sitesinden) yapılan yüklemeler ve yönetim panelinin yaptığı commitler bu korumaya takılmaz.
+name: Kok koruma
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: kok-koruma
+  cancel-in-progress: false
+jobs:
+  denetle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
+      - name: Onaysiz kok degisikligini geri al
+        env:
+          BEFORE: ${{ github.event.before }}
+          COMMITS: ${{ toJson(github.event.commits) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess
+          sh = lambda *a: subprocess.run(a, capture_output=True, text=True)
+          before = os.environ.get('BEFORE', '')
+          commits = json.loads(os.environ.get('COMMITS') or '[]')
+          bad = [c for c in commits if 'Claude-Session:' in c.get('message', '') and '[kök-onay]' not in c['message'] and '[kok-onay]' not in c['message']]
+          if not bad or not before or set(before) == {'0'}:
+              print('Onaysız kök değişikliği yok'); raise SystemExit(0)
+          def ikizVar(p):
+              return os.path.exists('test/' + p) or sh('git', 'cat-file', '-e', before + ':test/' + p).returncode == 0
+          def korunur(p):
+              if p.startswith(('test/', '.github/', 'ortak/')): return False
+              if p.startswith('android/'): return True
+              return ikizVar(p)
+          dosyalar = sorted({p for c in bad for p in c.get('added', []) + c.get('modified', []) + c.get('removed', []) if korunur(p)})
+          if not dosyalar:
+              print('Claude commitleri yalnızca test / serbest dosyalara dokunmuş'); raise SystemExit(0)
+          for p in dosyalar:
+              if sh('git', 'cat-file', '-e', before + ':' + p).returncode == 0: sh('git', 'checkout', before, '--', p)
+              else: sh('git', 'rm', '-q', '--ignore-unmatch', p)
+          sh('git', 'config', 'user.name', 'kok-koruma'); sh('git', 'config', 'user.email', 'kok-koruma@users.noreply.github.com')
+          if not sh('git', 'status', '--porcelain').stdout.strip():
+              print('Geri alınacak fark kalmamış'); raise SystemExit(0)
+          sh('git', 'commit', '-qm', 'Kök koruması: onaysız kök değişikliği geri alındı\n\n' + '\n'.join(dosyalar) + '\n\nKöke yüklemek için yöneticinin onayı gerekir (commit mesajında [kök-onay]).')
+          for _ in range(3):
+              if sh('git', 'push', 'origin', 'HEAD:main').returncode == 0: break
+              sh('git', 'pull', '--rebase', 'origin', 'main')
+          print('::warning::Onaysız kök değişikliği geri alındı: ' + ', '.join(dosyalar))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f: f.write('### Kök koruması\nGeri alınan dosyalar:\n' + '\n'.join('- ' + p for p in dosyalar) + '\n')
+          PY
