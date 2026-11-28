@@ -1,33 +1,55 @@
-# Uygulama Merkezi: geliştiricilerin telefondan yüklediği dosyaları (APK, ikon, ekran görüntüsü, video) GitHub'a aktarır.
-# 5 dakikada bir başlar ve yaklaşık 4,5 dakika boyunca 15 saniyede bir bakar; böylece yükleme genelde 1-2 dakikada yayına girer.
+# Uygulama Merkezi: geliştirici dosyalarını GitHub'a aktarır ve "Güncelle" ile istenen sürümleri sabitler (bkz. .github/scripts/um-gelistirici.js).
+# (2026-11-28) KÖK SEBEP ("Sürüm hazırlanamadı · sunucu yanıt vermedi"): görev yalnızca 5 dakikalık zamanlayıcıyla başlıyordu; GitHub bu
+# zamanlayıcıyı bu depoda günde birkaç kez çalıştırıyor (15 saatte 1 kez çalıştığı görüldü). İstekler saatlerce bekliyordu.
+# ŞİMDİ görev sürekli açık: ~5 saat 50 dk boyunca 10 sn'de bir bakar, bitince kendini yeniden başlatır (workflow_dispatch; GITHUB_TOKEN ile
+# başlatılan workflow_dispatch yeni çalışma oluşturur). Zamanlayıcı ve push yalnızca durmuşsa yeniden başlatmak için yedek.
 name: Uygulama Merkezi gelistirici dosyalari
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '17 * * * *'
   workflow_dispatch:
   push:
     branches: [main]
     paths: [.github/workflows/um-gelistirici.yml, .github/scripts/um-gelistirici.js]
-concurrency:
-  group: um-gelistirici
-  cancel-in-progress: false
 permissions:
   contents: write
+  actions: write
 jobs:
   aktar:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 358
     steps:
+      - name: Tek kopya
+        id: tek
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Zaten çalışan bir kopya varsa: kod değiştiyse (push) eskisi durdurulur, değilse bu kopya çıkar
+          diger=$(gh run list -R "$GITHUB_REPOSITORY" -w um-gelistirici.yml -s in_progress --json databaseId -q '.[].databaseId' | grep -v "^${{ github.run_id }}$" || true)
+          if [ -n "$diger" ]; then
+            if [ "${{ github.event_name }}" = "push" ]; then for r in $diger; do gh run cancel "$r" -R "$GITHUB_REPOSITORY" || true; done
+            else echo "Zaten çalışıyor: $diger"; echo "atla=1" >> "$GITHUB_OUTPUT"; fi
+          fi
       - uses: actions/checkout@v4
+        if: steps.tek.outputs.atla != '1'
         with:
           sparse-checkout: .github/scripts
       - uses: actions/setup-node@v4
+        if: steps.tek.outputs.atla != '1'
         with:
           node-version: 20
       - name: Dosyalari aktar
+        if: steps.tek.outputs.atla != '1'
         env:
           SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           GH_TOKEN: ${{ github.token }}
+          SURE: '21000'
+          BEKLE: '10000'
         run: |
           cd "$RUNNER_TEMP" && npm i --silent firebase-admin@12 >/dev/null 2>&1
           NODE_PATH="$RUNNER_TEMP/node_modules" node "$GITHUB_WORKSPACE/.github/scripts/um-gelistirici.js"
+      - name: Kendini yeniden baslat
+        if: ${{ !cancelled() && steps.tek.outputs.atla != '1' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run um-gelistirici.yml --ref main -R "$GITHUB_REPOSITORY"

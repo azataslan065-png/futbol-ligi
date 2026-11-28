@@ -246,7 +246,7 @@ const yerTutucuVar = (x) => [x.icon, x.video, x.apkUrl, ...(x.screenshots || [])
     if(sil.length) await isle([], sil, `Uygulama Merkezi: eski geliştirici dosyaları kaldırıldı (${sil.length})`);
     }   // kökler
     kokSec('um');
-    if(!islendi){ if(SINAMA && tur > 1) break; if(tur === 1) console.log('Bekleyen dosya yok'); await bekle(SINAMA ? 1000 : 15000); }
+    if(!islendi){ if(SINAMA && tur > 1) break; if(tur === 1) console.log('Bekleyen dosya yok'); await bekle(SINAMA ? 1000 : +(process.env.BEKLE || 15000)); }
   }
   if(SINAMA){
     // aynı anda çalışan zamanlanmış görev dosyaları almış olabilir: yer tutucular kalkana kadar (en çok 5 dk) bekle
