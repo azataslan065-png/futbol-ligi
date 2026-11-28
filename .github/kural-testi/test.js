@@ -197,6 +197,14 @@ const { ref, set, update, get, remove, runTransaction } = require('firebase/data
   await bek('UM: geliştirici yöneticinin kaldırmasını geri alamaz', false, () => set(ref(umX, 'um/gapps/gelkod01/oyunum'), { name: 'Oyunum' }));
   await bek('UM: kapatılan geliştirici artık yazamaz', false, async () => { await set(ref(admin, 'um/gelistirici/gelkod01/active'), false); return set(ref(umX, 'um/gapps/gelkod01/oyunum'), { name: 'Oyunum', engel: true }); });
   await bek('UM: davet iptal edilince katalog kapanır', false, async () => { await set(ref(admin, 'um/invites/kodaktif1/active'), false); return get(ref(umA, 'um/catalog')); });
+  // (2026-11-28) Skorbord Test'in ayrı düğümü
+  await bek('Test Skorbord düğümünü herkes okur', true, () => get(ref(k('HERHANGI'), 'test/skorbord')));
+  await bek('Test Skorbord düğümüne yönetici yazar', true, () => set(ref(admin, 'test/skorbord/ayar'), 1));
+  await bek('Test Skorbord düğümüne kullanıcı yazamaz', false, () => set(ref(anon, 'test/skorbord/ayar'), 2));
+  // (2026-11-28) Uygulama Merkezi test mağazasının ayrı kökü (umtest): kökteki davet testte geçmez
+  await bek('UM test: kök mağaza davetiyle test kataloğu okunamaz', false, () => get(ref(umB, 'umtest/catalog')));
+  await bek('UM test: tam yönetici test mağazasının sahipliğini alır', true, () => set(ref(admin, 'umtest/owner'), 'ADMIN'));
+  await bek('UM test: sahip test kataloğunu yazar', true, () => set(ref(admin, 'umtest/catalog'), { store: { name: 'UM test' }, apps: [] }));
   // 9) Kök (yayındaki eski sürüm) değişmedi
   await bek('Kök: eski kural aynen (anonim kendi alanına yazar)', true, () => set(ref(anon, 'kullanicilar/v_kok/para'), 6));
   const satir = sonuc.join('\n');
